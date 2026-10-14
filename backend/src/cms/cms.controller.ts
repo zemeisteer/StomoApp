@@ -114,7 +114,7 @@ export class CmsController {
   // PUBLIC ENDPOINTS
   // ============================================================
 
-  @Get('articles')
+  @Get(['articles', 'cms/articles'])
   @Public()
   async getPublicArticles(@Query('page') page?: number, @Query('limit') limit?: number) {
     return this.cmsService.findPublishedArticles({
@@ -123,25 +123,25 @@ export class CmsController {
     });
   }
 
-  @Get('articles/:slug')
+  @Get(['articles/:slug', 'cms/articles/:slug', 'public/articles/:slug'])
   @Public()
   async getPublicArticleBySlug(@Param('slug') slug: string) {
     return this.cmsService.findPublishedArticleBySlug(slug);
   }
 
-  @Get('faqs')
+  @Get(['faqs', 'cms/faqs'])
   @Public()
   async getPublicFaqs() {
     return this.cmsService.findActiveFaqs();
   }
 
-  @Get('homepage-sections')
+  @Get(['homepage-sections', 'cms/sections', 'cms/homepage-sections'])
   @Public()
   async getPublicHomepageSections() {
     return this.cmsService.findActiveHomepageSections();
   }
 
-  @Get('policies')
+  @Get(['policies', 'cms/policies'])
   @Public()
   async getPolicies() {
     return this.cmsService.getPolicies();

@@ -462,13 +462,15 @@ enum LeadStatus {
 }
 
 model Lead {
-  id        String     @id @default(cuid())
-  fullName  String     @map("full_name")
-  phone     String
-  email     String?
-  message   String?    @db.Text
-  source    String     @default("website") // website, callback, phone
-  status    LeadStatus @default(NEW)
+  id              String     @id @default(cuid())
+  fullName        String     @map("full_name")
+  phone           String
+  email           String?
+  message         String?    @db.Text
+  source          String     @default("website") // website, callback, phone
+  status          LeadStatus @default(NEW)
+  preferredBranch String?    @map("preferred_branch")
+  preferredTime   String?    @map("preferred_time")
   
   assignedToId String?   @map("assigned_to_id")
   assignedTo   StaffUser? @relation("AssignedStaff", fields: [assignedToId], references: [id])
@@ -662,7 +664,9 @@ enum NotificationChannel {
 
 enum NotificationStatus {
   PENDING
+  PROCESSING
   SENT
+  SIMULATED
   FAILED
   CANCELLED
 
@@ -682,8 +686,9 @@ model NotificationJob {
   appointmentId String?            @map("appointment_id")
   appointment   Appointment?       @relation(fields: [appointmentId], references: [id])
   
-  // Scheduling
+  // Scheduling and Lease Lock
   scheduledFor  DateTime?          @map("scheduled_for")
+  lockedAt      DateTime?          @map("locked_at")
   
   // Delivery tracking
   attempts      Int                @default(0)

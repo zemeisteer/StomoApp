@@ -125,7 +125,11 @@ export default function ServicesPage() {
                     </span>
                   </div>
 
-                  <h3 className="text-lg font-bold text-slate-900 mb-2">{name}</h3>
+                  <Link href={`/services/${service.slug}`}>
+                    <h3 className="text-lg font-bold text-slate-900 hover:text-teal-700 transition-colors mb-2">
+                      {name}
+                    </h3>
+                  </Link>
                   <p className="text-sm text-slate-500 line-clamp-3 mb-6 leading-relaxed">
                     {desc}
                   </p>
@@ -139,13 +143,21 @@ export default function ServicesPage() {
                     </span>
                   </div>
 
-                  <Link
-                    href={`/booking?serviceId=${service.id}`}
-                    className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>{t.common.bookAppointment}</span>
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/services/${service.slug}`}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all"
+                    >
+                      {language === 'uz' ? 'Batafsil' : 'Подробнее'}
+                    </Link>
+                    <Link
+                      href={`/booking?serviceId=${service.id}`}
+                      className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>{t.common.bookAppointment}</span>
+                    </Link>
+                  </div>
                 </div>
               </div>
             );

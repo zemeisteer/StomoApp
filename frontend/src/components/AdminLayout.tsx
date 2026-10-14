@@ -18,6 +18,8 @@ import {
   Menu,
   X,
   ExternalLink,
+  UserCog,
+  Settings,
 } from 'lucide-react';
 import { useAuth, StaffRole } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
@@ -141,6 +143,18 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       label: t.admin.audit,
       icon: ShieldCheck,
       roles: ['OWNER', 'ADMIN'],
+    },
+    {
+      href: '/admin/staff',
+      label: 'Xodimlar',
+      icon: UserCog,
+      roles: ['OWNER'],
+    },
+    {
+      href: '/admin/settings',
+      label: 'Sozlamalar',
+      icon: Settings,
+      roles: ['OWNER'],
     },
   ];
 

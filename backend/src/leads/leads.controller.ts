@@ -48,6 +48,18 @@ export class CreatePublicLeadDto {
 
   @IsOptional()
   @IsString()
+  preferredBranch?: string;
+
+  @IsOptional()
+  @IsString()
+  preferredTime?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
   source?: string;
 }
 
@@ -63,6 +75,10 @@ export class UpdateLeadDto {
   @IsOptional()
   @IsString()
   internalNotes?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 
   @IsOptional()
   @IsDateString()
@@ -102,12 +118,16 @@ export class LeadsController {
       fullName: dto.fullName,
       phone: dto.phone,
       email: dto.email,
-      message: dto.message,
+      message: dto.message || dto.notes,
+      preferredBranch: dto.preferredBranch,
+      preferredTime: dto.preferredTime,
+      internalNotes: dto.notes,
       source: dto.source || 'callback_form',
     });
     return {
       message: 'So\'rovingiz qabul qilindi. Tez orada siz bilan bog\'lanamiz.',
       id: lead.id,
+      leadId: lead.id,
     };
   }
 

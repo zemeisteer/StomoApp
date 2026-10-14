@@ -9,6 +9,8 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { CsrfGuard } from './csrf.guard';
 
+import { APP_GUARD } from '@nestjs/core';
+
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
@@ -24,7 +26,17 @@ import { CsrfGuard } from './csrf.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, CsrfGuard],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    JwtAuthGuard,
+    RolesGuard,
+    CsrfGuard,
+    {
+      provide: APP_GUARD,
+      useClass: CsrfGuard,
+    },
+  ],
   exports: [AuthService, JwtAuthGuard, RolesGuard, CsrfGuard],
 })
 export class AuthModule {}

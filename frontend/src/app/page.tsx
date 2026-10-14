@@ -203,9 +203,11 @@ export default function HomePage() {
                     </span>
                   </div>
 
-                  <h3 className="text-lg font-bold text-slate-900 group-hover:text-teal-700 transition-colors mb-2">
-                    {name}
-                  </h3>
+                  <Link href={`/services/${service.slug}`}>
+                    <h3 className="text-lg font-bold text-slate-900 group-hover:text-teal-700 transition-colors mb-2">
+                      {name}
+                    </h3>
+                  </Link>
 
                   <p className="text-sm text-slate-500 line-clamp-3 mb-6 leading-relaxed">
                     {desc || 'Klinikamizning ilg\'or mutaxassislari tomonidan xavfsiz va og\'riqsiz muolaja.'}
@@ -268,13 +270,18 @@ export default function HomePage() {
                 className="bg-slate-800/80 rounded-2xl p-6 border border-slate-700 hover:border-teal-500 transition-all flex flex-col justify-between"
               >
                 <div>
-                  <div className="w-20 h-20 bg-teal-950 rounded-2xl flex items-center justify-center text-teal-400 mx-auto mb-4 border border-teal-800">
+                  <Link
+                    href={`/doctors/${doc.slug}`}
+                    className="w-20 h-20 bg-teal-950 rounded-2xl flex items-center justify-center text-teal-400 mx-auto mb-4 border border-teal-800 hover:border-teal-400 transition-colors"
+                  >
                     <UserCheck className="w-10 h-10" />
-                  </div>
+                  </Link>
 
-                  <h3 className="text-lg font-bold text-white text-center">
-                    Dr. {firstName} {lastName}
-                  </h3>
+                  <Link href={`/doctors/${doc.slug}`}>
+                    <h3 className="text-lg font-bold text-white text-center hover:text-teal-300 transition-colors">
+                      Dr. {firstName} {lastName}
+                    </h3>
+                  </Link>
 
                   <p className="text-xs text-teal-300 text-center font-medium mt-1 mb-3">
                     {title}

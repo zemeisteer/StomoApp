@@ -53,9 +53,10 @@ export default function ArticlesPage() {
             const excerpt = language === 'ru' && article.excerptRu ? article.excerptRu : article.excerptUz;
 
             return (
-              <article
+              <Link
                 key={article.id}
-                className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 hover:border-teal-200 hover:shadow-xl transition-all flex flex-col justify-between group"
+                href={`/articles/${article.slug}`}
+                className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 hover:border-teal-200 hover:shadow-xl transition-all flex flex-col justify-between group block"
               >
                 <div>
                   <div className="flex items-center gap-2 text-[11px] text-slate-400 font-semibold mb-3">
@@ -84,7 +85,7 @@ export default function ArticlesPage() {
                     {t.common.readMore} <ArrowRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
-              </article>
+              </Link>
             );
           })}
         </div>

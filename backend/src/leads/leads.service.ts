@@ -6,13 +6,26 @@ import { LeadStatus, Prisma } from '@prisma/client';
 export class LeadsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(data: { fullName: string; phone: string; email?: string; message?: string; source?: string }) {
+  async create(data: {
+    fullName: string;
+    phone: string;
+    email?: string;
+    message?: string;
+    preferredBranch?: string;
+    preferredTime?: string;
+    internalNotes?: string;
+    notes?: string;
+    source?: string;
+  }) {
     return this.prisma.lead.create({
       data: {
         fullName: data.fullName,
         phone: data.phone,
         email: data.email,
         message: data.message,
+        preferredBranch: data.preferredBranch,
+        preferredTime: data.preferredTime,
+        internalNotes: data.internalNotes || data.notes || null,
         source: data.source || 'website',
       },
     });
@@ -50,11 +63,19 @@ export class LeadsService {
     status?: LeadStatus;
     assignedToId?: string;
     internalNotes?: string;
+    notes?: string;
     followUpDate?: string;
     appointmentId?: string;
   }) {
-    const updateData: any = { ...data };
+    const updateData: any = {};
+    if (data.status) updateData.status = data.status;
+    if (data.assignedToId !== undefined) updateData.assignedToId = data.assignedToId;
+    if (data.internalNotes !== undefined || data.notes !== undefined) {
+      updateData.internalNotes = data.internalNotes !== undefined ? data.internalNotes : data.notes;
+    }
     if (data.followUpDate) updateData.followUpDate = new Date(data.followUpDate);
+    if (data.appointmentId !== undefined) updateData.appointmentId = data.appointmentId;
+
     return this.prisma.lead.update({ where: { id }, data: updateData });
   }
 

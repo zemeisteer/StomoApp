@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { StaffRole } from '@prisma/client';
@@ -87,6 +87,16 @@ export class StaffService {
   }) {
     const user = await this.prisma.staffUser.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+    // Prevent removing or disabling the last active owner
+    if (user.role === StaffRole.OWNER && (data.isActive === false || (data.role && data.role !== StaffRole.OWNER))) {
+      const activeOwners = await this.prisma.staffUser.count({
+        where: { role: StaffRole.OWNER, isActive: true },
+      });
+      if (activeOwners <= 1) {
+        throw new BadRequestException('Klinikada kamida bitta faol Egasi (OWNER) qolishi shart. Oxirgi egasini o\'chirib yoki rolini o\'zgartirib bo\'lmaydi');
+      }
+    }
 
     // Invalidate sessions immediately if role changed or staff disabled
     const roleChanged = data.role !== undefined && data.role !== user.role;

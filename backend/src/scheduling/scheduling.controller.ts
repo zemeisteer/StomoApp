@@ -82,21 +82,21 @@ export class SchedulingController {
   }
 
   // Admin endpoints
-  @Get('doctor/:doctorId')
+  @Get(['doctor/:doctorId', 'schedules/:doctorId'])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async getDoctorSchedules(@Param('doctorId') doctorId: string) {
     return this.service.getDoctorSchedules(doctorId);
   }
 
-  @Post('schedule')
+  @Post(['schedule', 'schedules'])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
   async setSchedule(@Body() dto: SetScheduleDto) {
     return this.service.setDoctorSchedule(dto);
   }
 
-  @Post('exception')
+  @Post(['exception', 'exceptions'])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
   async addException(@Body() dto: AddExceptionDto) {
@@ -114,7 +114,7 @@ export class SchedulingController {
     return this.service.getExceptions(doctorId, dateFrom, dateTo);
   }
 
-  @Delete('exception/:id')
+  @Delete(['exception/:id', 'exceptions/:id'])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
   async deleteException(@Param('id') id: string) {

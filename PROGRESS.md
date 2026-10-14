@@ -1,131 +1,144 @@
-# StomoApp Implementation Progress
+# StomoApp Implementation Progress & Verification Report
 
-## Current Status: Phase 3 & 4 (Public Website & Custom Admin Dashboard)
+## Overall Status: COMPLETED & VERIFIED (Phases 1 — 9)
 
-### Completed Work
-
-#### Phase 1: Runnable Foundation & Environment (COMPLETED & VERIFIED)
-1. **Repository Audit & Hygiene**:
-   - Corrected `PLAN.md` with honest statuses (Verified, Partial, Missing).
-   - Preserved git history on `dev` without merge to `main` or force pushes.
-   - Updated `.gitignore` to protect `.env.*` while retaining `.env.example`.
-   - Generated working local configuration `.env` and `backend/.env`.
-2. **PostgreSQL 18 & Database Migrations**:
-   - Role `dentacare` and database `dentacare` configured and active on port 5432.
-   - Refined `schema.prisma`:
-     - Fixed `DoctorSchedule` nullable compound uniqueness by enforcing `branchId String` and cascade relations.
-     - Added `tokenVersion Int @default(1)` to `StaffUser` for instant session revocation on password/role modification or deactivation.
-     - Added `tokenExpiresAt` and `tokenRevokedAt` to `Appointment` for decoupled public management token lifecycle.
-   - Applied migration `20261014103549_init`.
-   - Generated Prisma Client v5.22.0.
-   - Created and executed 100% idempotent `prisma/seed.ts` seeding branches, specialties, services, doctors, schedules, staff accounts (OWNER, ADMIN, DOCTORs, RECEPTION, EDITOR), articles, FAQs, and reviews.
-3. **Health Endpoint**:
-   - `GET /api/health` reports status, database connectivity, latency, uptime, and clinic timezone (`Asia/Tashkent`).
-
-#### Phase 2: Backend Completion & Hardening (COMPLETED & VERIFIED)
-1. **Token Security & AuthModule**:
-   - Replaced broken `login(user.email, '')` in `refreshTokens()` with shared `issueTokens()` pipeline.
-   - SHA-256 digest hashing for refresh token storage (eliminating bcrypt's 72-byte truncation on raw JWTs).
-   - Token replay detection: revokes active user session if an old rotated token is reused.
-   - Strict cookie paths: `refresh_token` set and cleared exclusively at `/api/auth/refresh`.
-   - Production secret validation: rejects missing, insecure, or placeholder secrets.
-   - `CsrfGuard`: validates custom headers and origin for cookie-authenticated mutations.
-   - Real-time token version, role match, and active status check in `JwtStrategy`.
-2. **Doctor Authorization Scoping**:
-   - Fails closed: DOCTOR role without linked `doctorId` is denied access.
-   - Enforced backend ownership scoping on appointment listings, `/today`, and detail endpoints.
-   - Patient detail restricted to authorized treating doctors with doctor-only appointment history.
-3. **Scheduling & Concurrency Safety**:
-   - Converted scheduling to explicit `Asia/Tashkent` conversions via `date-fns-tz` and UTC persistence.
-   - PostgreSQL advisory locks (`pg_advisory_xact_lock`) with serializable isolation preventing concurrent overlapping bookings.
-   - Idempotency key payload fingerprinting: detects and rejects key reuse with altered payloads and protects management tokens.
-   - Safe family patient resolution: matches on phone AND full name without silent overwriting of family members.
-   - Rescheduling preserves clinic buffer (`durationMinutes + bufferMinutes`) and validates booking horizon.
-   - Background booking expiry worker via `@Cron(CronExpression.EVERY_MINUTE)`.
-4. **All Missing Modules Implemented**:
-   - `ReviewsModule`: Public submission, approval workflow, display-name consent anonymization (`Bemor`).
-   - `CmsModule`: Public published filtering for articles, FAQs, sections, policies; role-guarded editing.
-   - `MediaModule`: MIME type filtering, 5MB limit, sanitized filenames, local disk fallback with MinIO/S3 support.
-   - `AnalyticsModule`: Operational aggregations (statuses, completion/cancellation rates, popular services, doctor utilization, new vs returning, lead conversion, real payment/refund recording).
-   - `NotificationsModule`: PostgreSQL durable jobs, explicit development console sinks for Email, SMS, Telegram (excluding patient PII), and automatic retry worker.
-   - `PublicModule`: Active clinic info, branches, specialties, doctors, and services.
-   - `LeadsModule`: Public callback submission and admin management.
-   - `AuditModule`: Centralized audit logging with automatic PII sanitization.
-5. **Integration & Regression Testing**:
-   - Full 10-point E2E test suite in `backend/test/app.e2e-spec.ts` executed against local PostgreSQL: **10 passed, 0 failed (100% PASS)**.
+Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force-push, no automated push/deployment).
 
 ---
 
-#### Phase 3: Public Animated Website & 3D Hero (COMPLETED & VERIFIED)
-1. **Frontend Architecture (`frontend/`)**:
-   - Next.js 14.2 App Router with TypeScript, TailwindCSS, and Lucide icons.
-   - Dual-language support: Uzbek (`uz`, default) and Russian (`ru`) with reactive context provider (`useI18n`).
-   - Unified API proxy configuration routing `/api/*` to NestJS backend on port 4000.
-2. **Interactive 3D Tooth Hero (`Tooth3D.tsx`)**:
-   - Believable, realistic molar anatomy built with Three.js:
-     - 4 defined occlusal cusps (mesiobuccal, distobuccal, mesiolingual, distolingual).
-     - Occlusal developmental groove / central fissure.
-     - Cervical constriction (neck) transitioning into bifurcated tapered roots.
-     - `MeshPhysicalMaterial` rendering ivory enamel with roughness, transmission, clearcoat, and subsurface simulation.
-   - Three-point studio lighting setup (key, fill, and subtle rim light).
-   - Mouse and touch pointer interaction:
-     - Horizontal and vertical drag rotation with damping.
-     - Touch delta calculation preserving native vertical page scroll and zoom.
-   - Performance & Accessibility:
-     - Automatically pauses rendering when offscreen or tab is hidden.
-     - Honors user `prefers-reduced-motion` settings.
-     - On-canvas pause/play control button.
-     - High-fidelity SVG poster fallback rendered during model initialization or WebGL unavailability.
-3. **Public Pages**:
-   - **Home (`/`)**: 3D hero with CTA, clinic advantages, popular services showcase, doctor spotlights, testimonials, branch overview, booking trigger.
-   - **About (`/about`)**: Clinic history, sterilization standards (autoclaves, class B), dental microscope & Carl Zeiss optics, team ethos.
-   - **Services (`/services`)**: Filterable catalog by category, transparent pricing, duration, and direct booking links.
-   - **Doctors (`/doctors`)**: Specialist directory with credentials, languages, specialties, experience, and branch affiliations.
-   - **Prices (`/prices`)**: Transparent price schedule with live search and category badges.
-   - **Reviews (`/reviews`)**: Moderated reviews display and interactive submission form with display-name consent option.
-   - **Contacts (`/contacts`)**: Interactive branch switcher, operating hours, phone numbers, Google Maps integration, and callback form.
-   - **FAQ (`/faq`)**: Categorized accordion answering common dental questions.
-   - **Articles (`/articles`)**: Oral hygiene and dental care blog index with clean typography.
-   - **Booking Flow (`/booking`)**: 5-step wizard (Branch -> Service -> Doctor -> Slot -> Patient Information/Consent -> Confirmation).
-   - **Self-Service Booking Portal (`/booking/status/[token]`)**: Public management page for token-authenticated appointment tracking, rescheduling, and cancellation.
-   - **Policies (`/privacy`, `/terms`)**: Editable legal policies.
+### Detailed Phase Status
+
+#### Phase 1: Frontend / Backend Contract Alignment (COMPLETED & VERIFIED)
+- **Doctor Schedules & Exceptions**: Added route aliases supporting both singular and plural forms in `backend/src/scheduling/scheduling.controller.ts`:
+  - `['doctor/:doctorId', 'schedules/:doctorId']`
+  - `['schedule', 'schedules']`
+  - `['exception', 'exceptions']`
+  - `['exception/:id', 'exceptions/:id']`
+- **Admin Rescheduling**: Enabled both `PUT` and `POST` on `/api/admin/appointments/:id/reschedule` in `appointments.controller.ts`.
+- **Callback & Lead Contracts**:
+  - Added `preferredBranch` and `preferredTime` to Prisma schema (`Lead` model) via migration `20261014121753_hardening_lead_notification`.
+  - Added `internalNotes` and `notes` mapping in `CreatePublicLeadDto` and `UpdateLeadDto`.
+  - Aligned frontend lead status values with Prisma `LeadStatus` (`NEW`, `CONTACTED`, `BOOKED`, `CLOSED`).
+- **Doctor Patient Access Scoping**:
+  - `findAll` in `patients.controller.ts` allows `StaffRole.DOCTOR` while enforcing strict treating doctor scoping (`appointments: { some: { doctorId } }`). Doctors cannot see all clinic patients, and unlinked doctors fail closed (403).
+- **API Client Hardening**:
+  - Replaced `any` types with explicit TypeScript interfaces in `frontend/src/lib/api.ts`.
+  - Configured shared 401 token refresh promise to prevent refresh storms and replay detection race conditions.
+  - Attached anti-CSRF headers (`X-Requested-With`, `X-CSRF-Token`) on all mutating requests.
+
+#### Phase 2: Appointment Consistency & Concurrency Hardening (COMPLETED & VERIFIED)
+- **Atomic Status Transitions**:
+  - `changeStatus` locks appointment rows with PostgreSQL `SELECT ... FOR UPDATE` inside `$transaction`.
+  - Transition validity validated strictly against `ALLOWED_TRANSITIONS`.
+  - Status history and audit log writes share the same database transaction.
+  - External notifications (reminders cancellation) dispatched strictly after transaction commit.
+- **Race-Free Pending Expiry**:
+  - `expirePending` background worker scans candidates, locks rows with `FOR UPDATE`, re-verifies `PENDING` state, transitions to `CANCELLED`, revokes management tokens, and cancels pending reminders.
+- **Rescheduling & Advisory Locks**:
+  - Protected by transactional advisory lock `pg_advisory_xact_lock`.
+  - Re-checks doctor working hours, schedule exceptions, overlaps, and booking window inside transaction.
+  - Preserves duration and buffer (`durationMinutes + bufferMinutes`).
+  - If rescheduling fails, the original appointment remains completely intact and unaffected.
+- **Deadlock & Serialization Retries**:
+  - Wrapped `createBooking` in a bounded retry loop (up to 3 attempts with jitter) to gracefully handle PostgreSQL `P2034` serializable conflicts and return consistent results for concurrent identical requests.
+
+#### Phase 3: Custom Admin Panel Features (COMPLETED & VERIFIED)
+- **Interactive CMS Manager (`/admin/cms`)**:
+  - Admin listing of articles including drafts, published, and archived states.
+  - Full article creation, editing, publishing, and unpublishing.
+  - Image cover uploads via multipart media endpoint.
+  - FAQ manager: Create, edit, reorder, activate/deactivate FAQs.
+  - Homepage sections editor and clinic legal policy editor.
+- **Staff Management (`/admin/staff`)**:
+  - Full staff user list for `OWNER`.
+  - Add staff modal with secure role assignment (`ADMIN`, `DOCTOR`, `RECEPTION`, `EDITOR`).
+  - Doctor account linkage (`doctorId`) and status toggling (`isActive`).
+  - **Last active OWNER protection**: Prevents demoting or deactivating the sole active owner (400 Bad Request).
+- **Clinic Settings & Branches (`/admin/settings`)**:
+  - General settings: clinic identity, contacts, social links, working hours, timezone (`Asia/Tashkent`), and booking rules (buffer, notice hours, horizon).
+  - Branches manager: add and edit clinic branch locations and working hours.
+- **Enhanced Calendar (`/admin/calendar`)**:
+  - Day, week, and month view navigation with `<` / `Today` / `>` controls.
+  - Filters for Doctor (locked for `DOCTOR` role), Branch, Service, and Status.
+  - "Yangi qabul" modal to book appointments directly from the admin interface.
+  - Reschedule modal with valid date/time picker calling `api.adminRescheduleAppointment`.
+  - Modal displays strictly valid status transitions based on current appointment state, including `NO_SHOW` when `CONFIRMED`.
+- **Doctors & Services Management**:
+  - `/admin/doctors`: Add/edit doctors, set weekly schedules (`api.setDoctorSchedule`), and log leaves/blocked time.
+  - `/admin/services`: Add/edit services with validated prices, duration, and categories.
+- **Patients & Duplicates**:
+  - `/admin/patients`: Treating doctor scoping, formula-safe RFC 4180 CSV export (restricted to `OWNER`), and duplicate detection by phone without automatic merging.
+
+#### Phase 4: Public Detail Pages (COMPLETED & VERIFIED)
+- **Doctor Detail (`/doctors/[slug]`)**:
+  - Full doctor profile: photo, specialty badges, verified experience, languages, education, bio, affiliated branches, and direct booking CTA.
+- **Service Detail (`/services/[slug]`)**:
+  - Detailed service description, preparation guidelines, duration, starting price, and list of qualified doctors.
+- **Article Detail (`/articles/[slug]`)**:
+  - Article cover image, publication date, author badge, formatted blog content, and clinic consultation CTA.
+- **Cross-Linking**:
+  - Homepage (`/`), Doctors directory (`/doctors`), Services directory (`/services`), and Articles directory (`/articles`) all connect to the respective `/[slug]` detail routes.
+  - Dual language support (Uzbek / Russian) preserved across all detail views.
+
+#### Phase 5: Corrected Analytics Engine (COMPLETED & VERIFIED)
+- **Accurate Aggregations in `backend/src/analytics/analytics.service.ts`**:
+  - Date boundaries converted to `Asia/Tashkent` UTC with exclusive end boundaries (`fromZonedTime`).
+  - Unique patients counted once per cohort.
+  - New vs. returning patient classification based on actual historical appointment count before the cohort.
+  - Doctor utilization computed as booked minutes divided by scheduled working minutes (from `DoctorSchedule` minus breaks) over the date range.
+  - Revenue computed from recorded successful `Payment` records minus `refundedAmount`.
+  - Privacy: URL path normalization (`/booking/status/[token]`) and sanitization of patient PII and management tokens.
+
+#### Phase 6: Fixed Notifications (COMPLETED & VERIFIED)
+- **Atomic Lease Claiming in `backend/src/notifications/notifications.service.ts`**:
+  - Background worker claims pending jobs with `SELECT ... FOR UPDATE SKIP LOCKED` and sets `lockedAt` lease.
+  - Pre-flight check re-verifies appointment status; cancelled/expired/rescheduled appointments have stale reminders cancelled.
+  - Distinguishes `SIMULATED` status for development console sinks from real provider-accepted delivery.
+  - Telegram HTTP status and `response.ok` strictly checked.
+  - Recipient phone numbers and emails redacted in routine server logs (`+99890***12`, `u***@dentacare.uz`).
+
+#### Phase 7: Auth, Session & CSRF Verification (COMPLETED & VERIFIED)
+- **Token Rotation & Replay Revocation**: Tested and verified. Replay of old rotated refresh token immediately revokes user session.
+- **Global CSRF Guard**: Bound globally via `{ provide: APP_GUARD, useClass: CsrfGuard }`. Enforces custom header (`X-Requested-With`) or matching `Origin` for cookie mutations.
+- **Frontend Safe Refresh**: Shared refresh promise across concurrent 401s, bounded to 1 retry to avoid refresh loops.
+
+#### Phase 8: 3D Tooth Hero Preservation & Mobile Check (COMPLETED & VERIFIED)
+- Realistic Three.js anatomical molar (`Tooth3D.tsx`) with 4 occlusal cusps, central fissure, cervical neck, and bifurcated roots.
+- Studio 3-point lighting and translucent ivory enamel `MeshPhysicalMaterial`.
+- Interactive horizontal/vertical rotation with `touch-pan-y` preserving native vertical page scroll on touchscreens.
+- Automatic pause when offscreen (`IntersectionObserver`) or tab is inactive (`visibilitychange`).
+- Manual pause/play toggle button and accessibility reduced-motion check.
+- High-fidelity SVG poster fallback for loading or WebGL failure.
+
+#### Phase 9: Test Isolation & Comprehensive E2E Verification (COMPLETED & VERIFIED)
+- **Dedicated Test Database**: Created isolated `dentacare_test` database.
+- **Fail-Closed Security**: Test runner fails closed if `DATABASE_URL` is not recognized as a dedicated test database.
+- **Run-Specific Fixtures**: Unique timestamp-based phone prefixes (`+99800${runId}`). Broad phone prefix deletions (`+99890`) eliminated.
+- **14/14 Integration Tests Passing (`npm run test:e2e`)**:
+  - Regression 1: Health endpoint returns ok and database connection status.
+  - Regression 2: Refresh succeeds with CSRF header, rotates tokens, and detects replay.
+  - Regression 3: Doctor without linked profile fails closed (403).
+  - Regression 4: Doctor A cannot read Doctor B appointment details.
+  - Regression 5: Simultaneous overlapping bookings cannot both succeed (one 201, one 409).
+  - Regression 6: True concurrent idempotent submissions create one booking, changed payload rejected.
+  - Regression 7: Shared family phone does not silently merge different patients.
+  - Regression 8: Public reviews require moderation before appearing publicly.
+  - Regression 9: Failed rescheduling preserves original slot intact.
+  - Regression 10: Cannot confirm an already cancelled appointment.
+  - Regression 11: Callback requests persist preferred branch/time and internal notes.
+  - Regression 12: Demoting or disabling the last active OWNER is strictly rejected.
+  - Regression 13: Doctor scheduling and exception CRUD operates correctly.
+  - Regression 14: Analytics overview accurately aggregates database metrics.
+- **Production Builds**:
+  - Backend: `npm run build:backend` passed with code 0 (`nest build`).
+  - Frontend: `npm run build:frontend` passed with code 0 (`next build`, 28/28 routes prerendered).
 
 ---
 
-#### Phase 4: Custom Admin Dashboard (COMPLETED & VERIFIED)
-1. **Authentication & Session**:
-   - Admin login page (`/admin/login`) with demo credentials quick-fill buttons.
-   - Role-based route guard (`AuthContext`) enforcing access for `OWNER`, `ADMIN`, `DOCTOR`, and `EDITOR`.
-2. **Operational Modules**:
-   - **Overview (`/admin`)**: Real-time KPI cards (today's bookings, pending leads, unmoderated reviews), today's appointment schedule table, and callback queue.
-   - **Calendar (`/admin/calendar`)**: Filterable calendar view by doctor, branch, service, and status with immediate workflow actions (`CONFIRM`, `CHECK_IN`, `COMPLETE`, `CANCEL`, `NO_SHOW`).
-   - **Patients (`/admin/patients`)**: Searchable patient table, visit history, duplicate detection tool with one-click merge, and formula-injection-safe CSV export (RFC 4180).
-   - **Callback Leads (`/admin/leads`)**: Follow-up workflow tracking, status changes (`NEW`, `IN_PROGRESS`, `CONVERTED`, `CLOSED`), and follow-up notes.
-   - **Review Moderation (`/admin/reviews`)**: Moderation queue to approve, reject, or archive patient feedback.
-   - **Doctor Management (`/admin/doctors`)**: Schedule overview, working hours, branch assignments, and leave/vacation logging.
-   - **Services & Pricing (`/admin/services`)**: Category-grouped service directory with live price and duration editing.
-   - **CMS Editor (`/admin/cms`)**: Article publishing and FAQ content manager.
-   - **Audit Logs (`/admin/audit`)**: Security audit trail viewer with automatic PII sanitization.
-
----
-
-#### Phase 5: Real Analytics Engine (COMPLETED & VERIFIED)
-- Database aggregations with explicit date filtering and clinic timezone boundaries (`Asia/Tashkent`).
-- Metrics & Funnels:
-  - Appointment volume and distribution by status (`PENDING`, `CONFIRMED`, `COMPLETED`, `CANCELLED`, `NO_SHOW`).
-  - Completed appointments rate, cancellation rate, and no-show rate.
-  - Popular services ranked by booking demand.
-  - Doctor utilization and workload metrics.
-  - Patient retention (new vs. returning patients).
-  - Lead acquisition channels and lead-to-booking conversion rate.
-  - Financial ledger: real recorded payments minus refunds (never multiplying appointment prices by counts).
-
----
-
-#### Phase 6: Automated Verification & Testing (COMPLETED & VERIFIED)
-- **Backend E2E Regression Suite**: 10/10 passed against local PostgreSQL (`npm run test:e2e`).
-- **Backend Build**: `npm run build:backend` passed with code 0 (`nest build`).
-- **Frontend Build**: `npm run build:frontend` passed with code 0 (`next build`, 26/26 routes prerendered).
-- **Unified Build**: Root `npm run build` passed with code 0.
-- **Git Hygiene**: Strict development on `dev`, no force-push, zero merges into `main`.
-
+### Verification Summary
+| Check | Command | Result |
+|---|---|---|
+| Backend Type Check & Build | `npm run build:backend` | **PASS (code 0)** |
+| Frontend Type Check & Build | `npm run build:frontend` | **PASS (code 0, 28/28 routes)** |
+| Dedicated Test Database | `dentacare_test` (PostgreSQL 18) | **CONFIGURED & MIGRATED** |
+| Backend E2E Regression Suite | `npm run test:e2e` | **PASS (14/14 passed, 0 failed)** |

@@ -76,9 +76,9 @@ export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
 
   @Get()
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  findAll(@Query() query: ListPatientsQueryDto) {
-    return this.patientsService.findAll(query);
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  findAll(@Query() query: ListPatientsQueryDto, @CurrentUser() user: JwtPayload) {
+    return this.patientsService.findAll(query, user);
   }
 
   @Get('duplicates')

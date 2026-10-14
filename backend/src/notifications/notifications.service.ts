@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AppointmentStatus,
   NotificationChannel,
   NotificationStatus,
   Prisma,
@@ -46,6 +47,18 @@ export class NotificationsService {
       });
       this.logger.log('SMTP mail transporter initialized');
     }
+  }
+
+  private redactRecipient(recipient: string): string {
+    if (!recipient) return '***';
+    if (recipient.includes('@')) {
+      const [local, domain] = recipient.split('@');
+      return `${local.charAt(0)}***@${domain}`;
+    }
+    if (recipient.length > 5) {
+      return `${recipient.slice(0, 5)}***${recipient.slice(-2)}`;
+    }
+    return '***';
   }
 
   /**
@@ -119,7 +132,7 @@ export class NotificationsService {
       });
     }
 
-    // 2. Staff Telegram alert (no patient details, link to admin only)
+    // 2. Staff Telegram alert (no patient details, link to authenticated admin only)
     const telegramChatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
     if (telegramChatId) {
       const frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
@@ -132,7 +145,7 @@ export class NotificationsService {
         payload: {
           serviceName: appointment.serviceName,
           startTime: appointment.startTime.toISOString(),
-          adminUrl: `${frontendUrl}/admin/appointments/${appointment.id}`,
+          adminUrl: `${frontendUrl}/admin/calendar?appointmentId=${appointment.id}`,
         },
       });
     }
@@ -163,7 +176,7 @@ export class NotificationsService {
     await this.prisma.notificationJob.updateMany({
       where: {
         appointmentId,
-        status: NotificationStatus.PENDING,
+        status: { in: [NotificationStatus.PENDING, NotificationStatus.PROCESSING] },
       },
       data: {
         status: NotificationStatus.CANCELLED,
@@ -173,39 +186,82 @@ export class NotificationsService {
 
   /**
    * Cron runner: Process pending notification jobs every minute
+   * Uses PostgreSQL FOR UPDATE SKIP LOCKED to ensure multiple workers never deliver the same job.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async processPendingJobs() {
-    const now = new Date();
-    const pendingJobs = await this.prisma.notificationJob.findMany({
-      where: {
-        status: NotificationStatus.PENDING,
-        scheduledFor: { lte: now },
-      },
-      take: 20,
-    });
+    try {
+      const claimedRows = await this.prisma.$queryRaw<{ id: string }[]>`
+        UPDATE "notification_jobs"
+        SET status = 'PROCESSING'::"notification_status", "locked_at" = NOW()
+        WHERE id IN (
+          SELECT id FROM "notification_jobs"
+          WHERE (
+            status = 'PENDING'::"notification_status"
+            OR (status = 'PROCESSING'::"notification_status" AND "locked_at" < NOW() - INTERVAL '5 minutes')
+          )
+          AND ("scheduled_for" IS NULL OR "scheduled_for" <= NOW())
+          ORDER BY "scheduled_for" ASC NULLS FIRST
+          LIMIT 20
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id;
+      `;
 
-    for (const job of pendingJobs) {
-      await this.deliverJob(job);
+      if (!claimedRows || claimedRows.length === 0) {
+        return;
+      }
+
+      const claimedIds = claimedRows.map(r => r.id);
+      const jobs = await this.prisma.notificationJob.findMany({
+        where: { id: { in: claimedIds } },
+      });
+
+      for (const job of jobs) {
+        await this.deliverJob(job);
+      }
+    } catch (err: any) {
+      this.logger.error(`Error in processPendingJobs: ${err?.message}`);
     }
   }
 
   private async deliverJob(job: any) {
+    // Pre-flight check: if reminder for an appointment that is no longer active, cancel without delivery
+    if (job.appointmentId) {
+      const appt = await this.prisma.appointment.findUnique({
+        where: { id: job.appointmentId },
+        select: { status: true },
+      });
+
+      if (!appt || ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(appt.status)) {
+        await this.prisma.notificationJob.update({
+          where: { id: job.id },
+          data: {
+            status: NotificationStatus.CANCELLED,
+            lastError: `Qabul holati (${appt?.status || 'topilmadi'}) tufayli bildirishnoma bekor qilindi`,
+          },
+        });
+        return;
+      }
+    }
+
     try {
+      let isRealDelivery = false;
       if (job.channel === NotificationChannel.EMAIL) {
-        await this.deliverEmail(job);
+        isRealDelivery = await this.deliverEmail(job);
       } else if (job.channel === NotificationChannel.SMS) {
-        await this.deliverSms(job);
+        isRealDelivery = await this.deliverSms(job);
       } else if (job.channel === NotificationChannel.TELEGRAM) {
-        await this.deliverTelegram(job);
+        isRealDelivery = await this.deliverTelegram(job);
       }
 
       await this.prisma.notificationJob.update({
         where: { id: job.id },
         data: {
-          status: NotificationStatus.SENT,
+          status: isRealDelivery ? NotificationStatus.SENT : NotificationStatus.SIMULATED,
           sentAt: new Date(),
           attempts: job.attempts + 1,
+          lastError: isRealDelivery ? null : 'Development sink (simulated delivery)',
         },
       });
     } catch (err: any) {
@@ -218,12 +274,13 @@ export class NotificationsService {
           attempts: nextAttempts,
           status: willFail ? NotificationStatus.FAILED : NotificationStatus.PENDING,
           lastError: err?.message || String(err),
+          lockedAt: null,
         },
       });
     }
   }
 
-  private async deliverEmail(job: any) {
+  private async deliverEmail(job: any): Promise<boolean> {
     const smtpFrom = this.configService.get<string>('SMTP_FROM', 'DentaCare <info@dentacare.uz>');
     const payload = job.payload || {};
 
@@ -234,30 +291,53 @@ export class NotificationsService {
         subject: `DentaCare: Qabul tafsilotlari - ${payload.serviceName || ''}`,
         text: `Hurmatli bemor! Sizning ${payload.serviceName} bo'yicha qabulingiz qayd etildi. Vaqti: ${payload.startTime}.`,
       });
+      return true;
     } else {
       // Explicit development sink
       this.logger.log(
-        `[DEV SINK: EMAIL] To: ${job.recipient} | Template: ${job.templateKey} | Payload: ${JSON.stringify(payload)}`,
+        `[DEV SINK: EMAIL] To: ${this.redactRecipient(job.recipient)} | Template: ${job.templateKey}`,
       );
+      return false;
     }
   }
 
-  private async deliverSms(job: any) {
+  private async deliverSms(job: any): Promise<boolean> {
     const smsApiKey = this.configService.get<string>('SMS_API_KEY');
+    const smsApiUrl = this.configService.get<string>('SMS_API_URL');
     const payload = job.payload || {};
 
-    if (smsApiKey) {
-      // Real SMS provider dispatch would go here
-      this.logger.log(`Dispatched real SMS to ${job.recipient}`);
+    if (smsApiKey && smsApiUrl) {
+      // Real SMS provider dispatch
+      try {
+        const res = await fetch(smsApiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${smsApiKey}`,
+          },
+          body: JSON.stringify({
+            recipient: job.recipient,
+            message: `DentaCare: ${payload.serviceName} - ${payload.startTime}`,
+          }),
+        });
+        if (!res.ok) {
+          throw new Error(`SMS Provider error ${res.status}: ${await res.text()}`);
+        }
+        return true;
+      } catch (e: any) {
+        this.logger.warn(`SMS dispatch failed: ${e?.message}`);
+        throw e;
+      }
     } else {
       // Explicit development sink
       this.logger.log(
-        `[DEV SINK: SMS] To: ${job.recipient} | Template: ${job.templateKey} | Payload: ${JSON.stringify(payload)}`,
+        `[DEV SINK: SMS] To: ${this.redactRecipient(job.recipient)} | Template: ${job.templateKey}`,
       );
+      return false;
     }
   }
 
-  private async deliverTelegram(job: any) {
+  private async deliverTelegram(job: any): Promise<boolean> {
     const botToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     const payload = job.payload || {};
 
@@ -265,9 +345,8 @@ export class NotificationsService {
     const text = `🔔 *Yangi qabul so'rovi!*\n\nXizmat: ${payload.serviceName}\nVaqti: ${payload.startTime}\n\n👉 Boshqaruv paneli: ${payload.adminUrl}`;
 
     if (botToken) {
-      // Real Telegram bot API call via fetch
       try {
-        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -276,6 +355,11 @@ export class NotificationsService {
             parse_mode: 'Markdown',
           }),
         });
+
+        if (!res.ok) {
+          throw new Error(`Telegram API responded with ${res.status}: ${await res.text()}`);
+        }
+        return true;
       } catch (e: any) {
         this.logger.warn(`Telegram API call failed: ${e?.message}`);
         throw e;
@@ -283,8 +367,9 @@ export class NotificationsService {
     } else {
       // Explicit development sink
       this.logger.log(
-        `[DEV SINK: TELEGRAM] Chat: ${job.recipient} | Message: ${text.replace(/\n/g, ' ')}`,
+        `[DEV SINK: TELEGRAM] Chat: ${this.redactRecipient(job.recipient)} | Message: ${text.replace(/\n/g, ' ')}`,
       );
+      return false;
     }
   }
 

@@ -9,14 +9,42 @@ export interface ApiResponse<T = any> {
   message?: string;
 }
 
-const getBaseUrl = () => {
-  return ''; // Next.js rewrite proxies /api to backend
-};
+let refreshPromise: Promise<boolean> | null = null;
 
-async function fetcher<T>(url: string, options: RequestInit = {}): Promise<T> {
+async function attemptTokenRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRF-Token': '1',
+        },
+        credentials: 'include',
+      });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
+}
+
+async function fetcher<T>(url: string, options: RequestInit = {}, isRetry = false): Promise<T> {
   const headers = new Headers(options.headers || {});
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
+  }
+
+  // Attach CSRF protection headers for state-changing requests
+  const method = (options.method || 'GET').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    headers.set('X-Requested-With', 'XMLHttpRequest');
+    headers.set('X-CSRF-Token', '1');
   }
 
   // Include credentials for cookies (access_token, refresh_token)
@@ -25,6 +53,19 @@ async function fetcher<T>(url: string, options: RequestInit = {}): Promise<T> {
     headers,
     credentials: 'include',
   });
+
+  // Handle 401 with bounded single retry and shared in-flight refresh promise
+  if (
+    res.status === 401 &&
+    !url.includes('/api/auth/login') &&
+    !url.includes('/api/auth/refresh') &&
+    !isRetry
+  ) {
+    const refreshed = await attemptTokenRefresh();
+    if (refreshed) {
+      return fetcher<T>(url, options, true);
+    }
+  }
 
   if (!res.ok) {
     let errorMsg = 'Xatolik yuz berdi';
@@ -54,14 +95,14 @@ async function fetcher<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  // Public
+  // Public Information
   getClinicInfo: () => fetcher<any>('/api/public/clinic'),
   getBranches: () => fetcher<any[]>('/api/public/branches'),
   getSpecialties: () => fetcher<any[]>('/api/public/specialties'),
-  getDoctors: (branchId?: string, specialtyId?: string) => {
+  getDoctors: (branchId?: string, specialty?: string) => {
     const q = new URLSearchParams();
     if (branchId) q.set('branchId', branchId);
-    if (specialtyId) q.set('specialtyId', specialtyId);
+    if (specialty) q.set('specialty', specialty);
     return fetcher<any[]>(`/api/public/doctors?${q.toString()}`);
   },
   getDoctorBySlug: (slug: string) => fetcher<any>(`/api/public/doctors/${slug}`),
@@ -75,6 +116,8 @@ export const api = {
     if (branchId) q.set('branchId', branchId);
     return fetcher<any[]>(`/api/scheduling/slots?${q.toString()}`);
   },
+
+  // Online Appointment Booking
   createBooking: (payload: {
     serviceId: string;
     doctorId: string;
@@ -86,20 +129,18 @@ export const api = {
     note?: string;
     consentGiven: boolean;
     idempotencyKey?: string;
-  }) => fetcher<{
-    message: string;
-    appointmentId: string;
-    publicToken: string;
-    status: string;
-    startTime: string;
-    endTime: string;
-    doctorName: string;
-    serviceName: string;
-    branchName: string;
-  }>('/api/booking', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }),
+  }) =>
+    fetcher<{
+      message: string;
+      appointmentId: string;
+      publicToken: string;
+      status: string;
+      startTime: string;
+      endTime: string;
+    }>('/api/booking', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getBookingByToken: (token: string) => fetcher<any>(`/api/booking/status/${token}`),
   rescheduleBooking: (token: string, startTime: string) =>
     fetcher<any>(`/api/booking/reschedule/${token}`, {
@@ -111,23 +152,47 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason }),
     }),
-  submitLead: (payload: { fullName: string; phone: string; preferredBranch?: string; preferredTime?: string; notes?: string }) =>
+
+  // Leads & Callbacks
+  submitLead: (payload: {
+    fullName: string;
+    phone: string;
+    email?: string;
+    preferredBranch?: string;
+    preferredTime?: string;
+    notes?: string;
+    message?: string;
+  }) =>
     fetcher<any>('/api/leads', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  getPublicReviews: (page = 1, limit = 20) => fetcher<any>(`/api/reviews?page=${page}&limit=${limit}`),
-  submitReview: (payload: { authorName: string; rating: number; text: string; consentDisplayName: boolean; doctorId?: string; serviceId?: string }) =>
+
+  // Reviews
+  getPublicReviews: (page = 1, limit = 20) =>
+    fetcher<any>(`/api/reviews?page=${page}&limit=${limit}`),
+  submitReview: (payload: {
+    authorName: string;
+    rating: number;
+    text: string;
+    consentDisplayName: boolean;
+    doctorId?: string;
+    serviceId?: string;
+  }) =>
     fetcher<any>('/api/reviews', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  getArticles: (page = 1, limit = 10) => fetcher<any>(`/api/cms/articles?page=${page}&limit=${limit}`),
-  getArticleBySlug: (slug: string) => fetcher<any>(`/api/cms/articles/${slug}`),
-  getFaqs: (category?: string) => fetcher<any[]>(`/api/cms/faqs${category ? `?category=${category}` : ''}`),
-  getSections: () => fetcher<any[]>('/api/cms/sections'),
 
-  // Admin Auth
+  // Public CMS
+  getArticles: (page = 1, limit = 10) =>
+    fetcher<any>(`/api/articles?page=${page}&limit=${limit}`),
+  getArticleBySlug: (slug: string) => fetcher<any>(`/api/articles/${slug}`),
+  getFaqs: () => fetcher<any[]>('/api/faqs'),
+  getSections: () => fetcher<any[]>('/api/homepage-sections'),
+  getPolicies: () => fetcher<any>('/api/policies'),
+
+  // Staff Authentication
   login: (email: string, password: string) =>
     fetcher<any>('/api/auth/login', {
       method: 'POST',
@@ -136,7 +201,7 @@ export const api = {
   logout: () => fetcher<any>('/api/auth/logout', { method: 'POST' }),
   getProfile: () => fetcher<any>('/api/auth/me'),
 
-  // Admin Operations
+  // Admin Appointment Management
   getAdminAppointments: (params: Record<string, any> = {}) => {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
@@ -146,6 +211,11 @@ export const api = {
   },
   getTodayAppointments: () => fetcher<any[]>('/api/admin/appointments/today'),
   getAppointmentDetail: (id: string) => fetcher<any>(`/api/admin/appointments/${id}`),
+  createAppointmentAdmin: (payload: any) =>
+    fetcher<any>('/api/admin/appointments', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   updateAppointmentStatus: (id: string, status: string, reason?: string) =>
     fetcher<any>(`/api/admin/appointments/${id}/status`, {
       method: 'PATCH',
@@ -153,9 +223,11 @@ export const api = {
     }),
   adminRescheduleAppointment: (id: string, startTime: string) =>
     fetcher<any>(`/api/admin/appointments/${id}/reschedule`, {
-      method: 'POST',
+      method: 'PUT',
       body: JSON.stringify({ startTime }),
     }),
+
+  // Admin Patient Management
   getAdminPatients: (search?: string, page = 1, limit = 20) => {
     const q = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (search) q.set('search', search);
@@ -172,16 +244,20 @@ export const api = {
     const q = search ? `?search=${encodeURIComponent(search)}` : '';
     return fetcher<string>(`/api/admin/patients/export${q}`);
   },
+
+  // Admin Lead Management
   getAdminLeads: (status?: string, page = 1, limit = 30) => {
     const q = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) q.set('status', status);
     return fetcher<any>(`/api/admin/leads?${q.toString()}`);
   },
-  updateLeadStatus: (id: string, status: string, notes?: string) =>
+  updateLeadStatus: (id: string, status: string, internalNotes?: string) =>
     fetcher<any>(`/api/admin/leads/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status, notes }),
+      body: JSON.stringify({ status, internalNotes, notes: internalNotes }),
     }),
+
+  // Admin Review Moderation
   getAdminReviews: (status?: string, page = 1, limit = 50) => {
     const q = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) q.set('status', status);
@@ -192,13 +268,17 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
-  getDoctorSchedules: (doctorId: string) => fetcher<any[]>(`/api/scheduling/schedules/${doctorId}`),
+
+  // Scheduling & Exceptions
+  getDoctorSchedules: (doctorId: string) =>
+    fetcher<any[]>(`/api/scheduling/schedules/${doctorId}`),
   setDoctorSchedule: (payload: any) =>
     fetcher<any>('/api/scheduling/schedules', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  getDoctorExceptions: (doctorId: string) => fetcher<any[]>(`/api/scheduling/exceptions/${doctorId}`),
+  getDoctorExceptions: (doctorId: string) =>
+    fetcher<any[]>(`/api/scheduling/exceptions/${doctorId}`),
   addDoctorException: (payload: any) =>
     fetcher<any>('/api/scheduling/exceptions', {
       method: 'POST',
@@ -206,6 +286,124 @@ export const api = {
     }),
   deleteDoctorException: (id: string) =>
     fetcher<any>(`/api/scheduling/exceptions/${id}`, { method: 'DELETE' }),
+
+  // Doctor & Service Management (OWNER / ADMIN)
+  getAllDoctorsAdmin: () => fetcher<any[]>('/api/doctors/admin/all'),
+  createDoctorAdmin: (payload: any) =>
+    fetcher<any>('/api/doctors/admin', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateDoctorAdmin: (id: string, payload: any) =>
+    fetcher<any>(`/api/doctors/admin/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  archiveDoctorAdmin: (id: string) =>
+    fetcher<any>(`/api/doctors/admin/${id}/archive`, { method: 'PUT' }),
+
+  getAllServicesAdmin: () => fetcher<any[]>('/api/services/admin/all'),
+  createServiceAdmin: (payload: any) =>
+    fetcher<any>('/api/services/admin', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateServiceAdmin: (id: string, payload: any) =>
+    fetcher<any>(`/api/services/admin/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  // Admin CMS & Content Management
+  getAdminArticles: (status?: string, search?: string, page = 1, limit = 50) => {
+    const q = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (status) q.set('status', status);
+    if (search) q.set('search', search);
+    return fetcher<any>(`/api/admin/articles?${q.toString()}`);
+  },
+  getAdminArticleById: (id: string) => fetcher<any>(`/api/admin/articles/${id}`),
+  createArticle: (payload: any) =>
+    fetcher<any>('/api/admin/articles', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateArticle: (id: string, payload: any) =>
+    fetcher<any>(`/api/admin/articles/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteArticle: (id: string) =>
+    fetcher<any>(`/api/admin/articles/${id}`, { method: 'DELETE' }),
+
+  getAdminFaqs: () => fetcher<any[]>('/api/admin/faqs'),
+  createFaq: (payload: any) =>
+    fetcher<any>('/api/admin/faqs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateFaq: (id: string, payload: any) =>
+    fetcher<any>(`/api/admin/faqs/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteFaq: (id: string) =>
+    fetcher<any>(`/api/admin/faqs/${id}`, { method: 'DELETE' }),
+
+  updateHomepageSection: (key: string, body: any) =>
+    fetcher<any>(`/api/admin/homepage-sections/${key}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  updatePolicies: (body: any) =>
+    fetcher<any>('/api/admin/policies', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  // Staff Management (OWNER)
+  getStaffList: () => fetcher<any[]>('/api/admin/staff'),
+  createStaff: (payload: any) =>
+    fetcher<any>('/api/admin/staff', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateStaff: (id: string, payload: any) =>
+    fetcher<any>(`/api/admin/staff/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  // Clinic Settings & Branches (OWNER / ADMIN)
+  getClinicSettingsAdmin: () => fetcher<any>('/api/clinic/settings'),
+  updateClinicSettingsAdmin: (payload: any) =>
+    fetcher<any>('/api/clinic/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  getBranchesAdmin: () => fetcher<any[]>('/api/clinic/branches/all'),
+  createBranchAdmin: (payload: any) =>
+    fetcher<any>('/api/clinic/branches', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateBranchAdmin: (id: string, payload: any) =>
+    fetcher<any>(`/api/clinic/branches/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  // Media Management
+  uploadMedia: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetcher<any>('/api/media/upload', {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  getMediaList: () => fetcher<any[]>('/api/media'),
+
+  // Analytics & Audit
   getAnalyticsOverview: (startDate?: string, endDate?: string) => {
     const q = new URLSearchParams();
     if (startDate) q.set('startDate', startDate);

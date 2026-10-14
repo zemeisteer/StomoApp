@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Put, Patch, Body, Param, Query,
-  UseGuards, HttpCode, HttpStatus,
+  UseGuards, HttpCode, HttpStatus, ForbiddenException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AppointmentsService } from './appointments.service';
@@ -187,8 +187,12 @@ export class AppointmentsController {
   }
 
   @Post()
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Post()
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async createFromAdmin(@Body() dto: PublicBookingDto, @CurrentUser() user: JwtPayload) {
+    if (user.role === StaffRole.DOCTOR && dto.doctorId !== user.doctorId) {
+      throw new ForbiddenException('Shifokor faqat o\'ziga qabul yarata oladi');
+    }
     return this.service.createBooking({
       ...dto,
       source: 'admin',
@@ -196,22 +200,32 @@ export class AppointmentsController {
   }
 
   @Patch(':id/status')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async changeStatus(
     @Param('id') id: string,
     @Body() dto: StatusChangeDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.changeStatus(id, dto.status, user.sub, dto.reason);
+    return this.service.changeStatus(id, dto.status, user.sub, dto.reason, user);
   }
 
   @Put(':id/reschedule')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async reschedule(
     @Param('id') id: string,
     @Body() dto: RescheduleDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.reschedule(id, dto.startTime, user.sub);
+    return this.service.reschedule(id, dto.startTime, user.sub, user);
+  }
+
+  @Post(':id/reschedule')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  async reschedulePost(
+    @Param('id') id: string,
+    @Body() dto: RescheduleDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.reschedule(id, dto.startTime, user.sub, user);
   }
 }

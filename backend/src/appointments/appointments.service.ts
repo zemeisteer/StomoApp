@@ -206,105 +206,154 @@ export class AppointmentsService {
     const normalizedPhone = this.normalizePhone(dto.patientPhone);
     const cleanName = dto.patientName.trim();
 
-    // 7. Atomic Concurrency Lock and DB Transaction
+    // 7. Atomic Concurrency Lock and DB Transaction with Bounded Retries for Serialization Conflicts
     // Compute advisory lock key integer based on doctor ID
     const lockKey = this.hashStringToInt(`doc_${dto.doctorId}`);
 
-    const createdAppointment = await this.prisma.$transaction(async (tx) => {
-      // Acquire PostgreSQL transactional advisory lock
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+    let createdAppointment: any;
+    const maxRetries = 3;
 
-      // Double check overlap within lock
-      const conflicting = await tx.appointment.findFirst({
-        where: {
-          doctorId: dto.doctorId,
-          status: { in: TIME_RESERVING_STATUSES },
-          startTime: { lt: endTimeUtc },
-          endTime: { gt: startTimeUtc },
-        },
-      });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // If idempotencyKey was already committed by a concurrent racing transaction
+        if (dto.idempotencyKey) {
+          const existing = await this.prisma.appointment.findUnique({
+            where: { idempotencyKey: dto.idempotencyKey },
+            include: { doctor: true, service: true, branch: true },
+          });
 
-      if (conflicting) {
-        throw new ConflictException('Bu vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
-      }
+          if (existing) {
+            return {
+              id: existing.id,
+              publicToken: existing.publicToken,
+              status: existing.status,
+              startTime: existing.startTime,
+              endTime: existing.endTime,
+              serviceName: existing.serviceName,
+              doctor: {
+                id: existing.doctor.id,
+                firstNameUz: existing.doctor.firstNameUz,
+                lastNameUz: existing.doctor.lastNameUz,
+                firstNameRu: existing.doctor.firstNameRu,
+                lastNameRu: existing.doctor.lastNameRu,
+              },
+            };
+          }
+        }
 
-      // Safe Patient Identification (do not overwrite family members sharing a phone)
-      let patient = await tx.patient.findFirst({
-        where: {
-          phone: normalizedPhone,
-          fullName: { equals: cleanName, mode: 'insensitive' },
-        },
-      });
+        createdAppointment = await this.prisma.$transaction(async (tx) => {
+          // Acquire PostgreSQL transactional advisory lock
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-      if (!patient) {
-        // Create distinct patient record for this name
-        patient = await tx.patient.create({
-          data: {
-            fullName: cleanName,
-            phone: normalizedPhone,
-            email: dto.patientEmail?.trim() || null,
-          },
+          // Double check overlap within lock
+          const conflicting = await tx.appointment.findFirst({
+            where: {
+              doctorId: dto.doctorId,
+              status: { in: TIME_RESERVING_STATUSES },
+              startTime: { lt: endTimeUtc },
+              endTime: { gt: startTimeUtc },
+            },
+          });
+
+          if (conflicting) {
+            throw new ConflictException('Bu vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
+          }
+
+          // Safe Patient Identification (do not overwrite family members sharing a phone)
+          let patient = await tx.patient.findFirst({
+            where: {
+              phone: normalizedPhone,
+              fullName: { equals: cleanName, mode: 'insensitive' },
+            },
+          });
+
+          if (!patient) {
+            // Create distinct patient record for this name
+            patient = await tx.patient.create({
+              data: {
+                fullName: cleanName,
+                phone: normalizedPhone,
+                email: dto.patientEmail?.trim() || null,
+              },
+            });
+          }
+
+          const publicToken = nanoid(32);
+          const expiresAt = new Date(nowUtc.getTime() + pendingExpiryMinutes * 60 * 1000);
+          const tokenExpiresAt = new Date(endTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+          const appointment = await tx.appointment.create({
+            data: {
+              publicToken,
+              patientId: patient.id,
+              doctorId: dto.doctorId,
+              serviceId: dto.serviceId,
+              branchId: resolvedBranchId || null,
+              status: AppointmentStatus.PENDING,
+              startTime: startTimeUtc,
+              endTime: endTimeUtc,
+              serviceName: service.nameUz,
+              servicePriceFrom: service.priceFrom,
+              durationMinutes,
+              note: dto.note?.trim() || null,
+              source: dto.source || 'website',
+              idempotencyKey: dto.idempotencyKey || null,
+              consentGiven: dto.consentGiven,
+              expiresAt,
+              tokenExpiresAt,
+            },
+            include: {
+              doctor: true,
+              service: true,
+              branch: true,
+              patient: true,
+            },
+          });
+
+          // Status history
+          await tx.appointmentStatusHistory.create({
+            data: {
+              appointmentId: appointment.id,
+              fromStatus: null,
+              toStatus: AppointmentStatus.PENDING,
+              changedBy: dto.source === 'admin' ? 'admin' : 'website',
+              reason: 'Boshlang\'ich buyurtma',
+            },
+          });
+
+          // Consent record
+          await tx.consentRecord.create({
+            data: {
+              type: 'booking',
+              givenBy: cleanName,
+              phone: normalizedPhone,
+              consentText: 'Shaxsiy ma\'lumotlarimni qayta ishlashga rozilik beraman',
+            },
+          });
+
+          return appointment;
+        }, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 10000,
         });
+
+        break; // Successfully committed
+      } catch (err: any) {
+        const isConflict =
+          err?.code === 'P2034' ||
+          err?.code === 'P2002' ||
+          err?.message?.includes('write conflict') ||
+          err?.message?.includes('deadlock') ||
+          err?.message?.includes('could not serialize');
+
+        if (isConflict && attempt < maxRetries) {
+          // Bounded jitter backoff
+          await new Promise((res) => setTimeout(res, 50 * attempt + Math.floor(Math.random() * 30)));
+          continue;
+        }
+        throw err;
       }
-
-      const publicToken = nanoid(32);
-      const expiresAt = new Date(nowUtc.getTime() + pendingExpiryMinutes * 60 * 1000);
-      const tokenExpiresAt = new Date(endTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-      const appointment = await tx.appointment.create({
-        data: {
-          publicToken,
-          patientId: patient.id,
-          doctorId: dto.doctorId,
-          serviceId: dto.serviceId,
-          branchId: resolvedBranchId || null,
-          status: AppointmentStatus.PENDING,
-          startTime: startTimeUtc,
-          endTime: endTimeUtc,
-          serviceName: service.nameUz,
-          servicePriceFrom: service.priceFrom,
-          durationMinutes,
-          note: dto.note?.trim() || null,
-          source: dto.source || 'website',
-          idempotencyKey: dto.idempotencyKey || null,
-          consentGiven: dto.consentGiven,
-          expiresAt,
-          tokenExpiresAt,
-        },
-        include: {
-          doctor: true,
-          service: true,
-          branch: true,
-          patient: true,
-        },
-      });
-
-      // Status history
-      await tx.appointmentStatusHistory.create({
-        data: {
-          appointmentId: appointment.id,
-          fromStatus: null,
-          toStatus: AppointmentStatus.PENDING,
-          changedBy: dto.source === 'admin' ? 'admin' : 'website',
-          reason: 'Boshlang\'ich buyurtma',
-        },
-      });
-
-      // Consent record
-      await tx.consentRecord.create({
-        data: {
-          type: 'booking',
-          givenBy: cleanName,
-          phone: normalizedPhone,
-          consentText: 'Shaxsiy ma\'lumotlarimni qayta ishlashga rozilik beraman',
-        },
-      });
-
-      return appointment;
-    }, {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      timeout: 10000,
-    });
+    }
 
     // Queue notifications after transaction is successfully committed
     try {
@@ -323,32 +372,46 @@ export class AppointmentsService {
   }
 
   /**
-   * Atomic status change with transition validation
+   * Atomic status change with transition validation and row-level locking
    */
   async changeStatus(
     appointmentId: string,
     newStatus: AppointmentStatus,
     changedBy: string,
     reason?: string,
+    user?: { role: StaffRole; doctorId?: string | null },
   ) {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { id: appointmentId },
-    });
+    let didCancel = false;
 
-    if (!appointment) {
-      throw new NotFoundException('Qabul topilmadi');
-    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Row lock to ensure atomic status check and update
+      const [locked] = await tx.$queryRaw<any[]>`
+        SELECT id, status, "doctor_id" as "doctorId", "service_id" as "serviceId", "service_name" as "serviceName"
+        FROM "appointments"
+        WHERE id = ${appointmentId}
+        FOR UPDATE
+      `;
 
-    const allowed = ALLOWED_TRANSITIONS[appointment.status];
-    if (!allowed.includes(newStatus)) {
-      throw new BadRequestException(
-        `${appointment.status} statusidan ${newStatus} statusiga o'tish taqiqlangan`,
-      );
-    }
+      if (!locked) {
+        throw new NotFoundException('Qabul topilmadi');
+      }
 
-    return this.prisma.$transaction(async (tx) => {
+      if (user && user.role === StaffRole.DOCTOR) {
+        if (!user.doctorId || locked.doctorId !== user.doctorId) {
+          throw new ForbiddenException('Faqat o\'zingizning qabullaringiz holatini o\'zgartira olasiz');
+        }
+      }
+
+      const currentStatus = locked.status as AppointmentStatus;
+      const allowed = ALLOWED_TRANSITIONS[currentStatus];
+      if (!allowed || !allowed.includes(newStatus)) {
+        throw new BadRequestException(
+          `${currentStatus} statusidan ${newStatus} statusiga o'tish taqiqlangan`,
+        );
+      }
+
       // Atomic update
-      const updated = await tx.appointment.update({
+      const appt = await tx.appointment.update({
         where: { id: appointmentId },
         data: {
           status: newStatus,
@@ -367,31 +430,45 @@ export class AppointmentsService {
         },
       });
 
+      // Record status history inside tx
       await tx.appointmentStatusHistory.create({
         data: {
           appointmentId,
-          fromStatus: appointment.status,
+          fromStatus: currentStatus,
           toStatus: newStatus,
           reason,
-          changedBy,
+          changedBy: changedBy || 'system',
         },
       });
 
-      await this.auditService.log({
-        userId: changedBy.startsWith('staff_') ? changedBy : null,
-        action: `appointment.status_${newStatus.toLowerCase()}`,
-        entity: 'Appointment',
-        entityId: appointmentId,
-        details: { fromStatus: appointment.status, toStatus: newStatus, reason },
+      // Record audit log inside tx using actual staff ID if not system/patient
+      await tx.auditLog.create({
+        data: {
+          userId: (changedBy && changedBy !== 'system' && changedBy !== 'patient') ? changedBy : null,
+          action: `appointment.status_${newStatus.toLowerCase()}`,
+          entity: 'Appointment',
+          entityId: appointmentId,
+          details: { fromStatus: currentStatus, toStatus: newStatus, reason } as Prisma.InputJsonValue,
+        },
       });
 
-      // If cancelled, cancel pending reminders
       if (newStatus === AppointmentStatus.CANCELLED) {
-        await this.notificationsService.cancelAppointmentReminders(appointmentId);
+        didCancel = true;
       }
 
-      return updated;
+      return appt;
     });
+
+    // Cancel pending reminders AFTER transaction commits
+    if (didCancel) {
+      try {
+        await this.notificationsService.cancelAppointmentReminders(appointmentId);
+      } catch (err: any) {
+        this.logger.warn(`Failed to cancel reminders for ${appointmentId}: ${err?.message}`);
+      }
+    }
+
+    return updated;
   }
 
   /**
@@ -402,6 +479,7 @@ export class AppointmentsService {
     appointmentId: string,
     newStartTimeStr: string,
     changedBy: string,
+    user?: { role: StaffRole; doctorId?: string | null },
   ) {
     const appointment = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
@@ -410,6 +488,12 @@ export class AppointmentsService {
 
     if (!appointment) {
       throw new NotFoundException('Qabul topilmadi');
+    }
+
+    if (user && user.role === StaffRole.DOCTOR) {
+      if (!user.doctorId || appointment.doctorId !== user.doctorId) {
+        throw new ForbiddenException('Faqat o\'zingizning qabullaringizni qayta rejalashtira olasiz');
+      }
     }
 
     if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(appointment.status)) {
@@ -471,8 +555,16 @@ export class AppointmentsService {
 
     const lockKey = this.hashStringToInt(`doc_${appointment.doctorId}`);
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+      // Revalidate current appointment state inside transaction
+      const [current] = await tx.$queryRaw<any[]>`
+        SELECT id, status FROM "appointments" WHERE id = ${appointmentId} FOR UPDATE
+      `;
+      if (!current || ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(current.status)) {
+        throw new BadRequestException('Qabul holati o\'zgarganligi sababli qayta rejalashtirib bo\'lmaydi');
+      }
 
       // Double-check conflicting slots (excluding current appointment)
       const conflicting = await tx.appointment.findFirst({
@@ -489,7 +581,7 @@ export class AppointmentsService {
         throw new ConflictException('Yangi tanlangan vaqt boshqa bemor tomonidan band qilindi');
       }
 
-      const updated = await tx.appointment.update({
+      const appt = await tx.appointment.update({
         where: { id: appointmentId },
         data: {
           startTime: newStartTime,
@@ -501,14 +593,31 @@ export class AppointmentsService {
       await tx.appointmentStatusHistory.create({
         data: {
           appointmentId,
-          fromStatus: appointment.status,
-          toStatus: appointment.status,
+          fromStatus: current.status as AppointmentStatus,
+          toStatus: current.status as AppointmentStatus,
           reason: `Qayta rejalashtirildi: ${appointment.startTime.toISOString()} -> ${newStartTime.toISOString()}`,
-          changedBy,
+          changedBy: changedBy || 'patient',
         },
       });
 
-      // Update reminders: cancel old and schedule new
+      await tx.auditLog.create({
+        data: {
+          userId: (changedBy && changedBy !== 'system' && changedBy !== 'patient') ? changedBy : null,
+          action: 'appointment.rescheduled',
+          entity: 'Appointment',
+          entityId: appointmentId,
+          details: { oldStartTime: appointment.startTime, newStartTime } as Prisma.InputJsonValue,
+        },
+      });
+
+      return appt;
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: 10000,
+    });
+
+    // Update reminders after transaction commits: cancel old and schedule new
+    try {
       await this.notificationsService.cancelAppointmentReminders(appointmentId);
       const reminderTime = new Date(newStartTime.getTime() - 2 * 60 * 60 * 1000);
       if (reminderTime > new Date()) {
@@ -526,12 +635,11 @@ export class AppointmentsService {
           },
         });
       }
+    } catch (e: any) {
+      this.logger.warn(`Failed to update reminder for ${appointmentId}: ${e?.message}`);
+    }
 
-      return updated;
-    }, {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      timeout: 10000,
-    });
+    return updated;
   }
 
   /**
@@ -758,23 +866,72 @@ export class AppointmentsService {
   @Cron(CronExpression.EVERY_MINUTE)
   async expirePending() {
     const now = new Date();
-
-    // Atomic cancel: update status to CANCELLED only if still PENDING
-    const result = await this.prisma.appointment.updateMany({
+    const candidates = await this.prisma.appointment.findMany({
       where: {
         status: AppointmentStatus.PENDING,
         expiresAt: { lte: now },
       },
-      data: {
-        status: AppointmentStatus.CANCELLED,
-      },
+      select: { id: true },
+      take: 50,
     });
 
-    if (result.count > 0) {
-      this.logger.log(`Expired ${result.count} abandoned pending appointments`);
+    let expiredCount = 0;
+    for (const cand of candidates) {
+      try {
+        let didExpire = false;
+        await this.prisma.$transaction(async (tx) => {
+          const [locked] = await tx.$queryRaw<any[]>`
+            SELECT id, status FROM "appointments" WHERE id = ${cand.id} FOR UPDATE
+          `;
+          if (!locked || locked.status !== AppointmentStatus.PENDING) {
+            return; // Concurrently confirmed or updated!
+          }
+
+          await tx.appointment.update({
+            where: { id: cand.id },
+            data: {
+              status: AppointmentStatus.CANCELLED,
+              tokenRevokedAt: new Date(),
+            },
+          });
+
+          await tx.appointmentStatusHistory.create({
+            data: {
+              appointmentId: cand.id,
+              fromStatus: AppointmentStatus.PENDING,
+              toStatus: AppointmentStatus.CANCELLED,
+              reason: 'Muddati o\'tgani sababli avtomatik bekor qilindi (avto-eskirish)',
+              changedBy: 'system',
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              userId: null,
+              action: 'appointment.status_expired',
+              entity: 'Appointment',
+              entityId: cand.id,
+              details: { reason: 'auto_expired' } as Prisma.InputJsonValue,
+            },
+          });
+
+          didExpire = true;
+        });
+
+        if (didExpire) {
+          expiredCount++;
+          await this.notificationsService.cancelAppointmentReminders(cand.id);
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to process expiry for ${cand.id}: ${err?.message}`);
+      }
     }
 
-    return result.count;
+    if (expiredCount > 0) {
+      this.logger.log(`Expired ${expiredCount} abandoned pending appointments with status history and reminder cancellation`);
+    }
+
+    return expiredCount;
   }
 
   private normalizePhone(phone: string): string {

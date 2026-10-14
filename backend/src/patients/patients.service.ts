@@ -14,23 +14,50 @@ export interface UpdatePatientInput {
 export class PatientsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(params: { search?: string; page?: number; limit?: number }) {
+  async findAll(
+    params: { search?: string; page?: number; limit?: number },
+    user?: JwtPayload,
+  ) {
     const { search, page = 1, limit = 20 } = params;
     const where: Prisma.PatientWhereInput = {};
 
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profili biriktirilmagan');
+      }
+      where.appointments = {
+        some: { doctorId: user.doctorId },
+      };
+    }
+
     if (search) {
-      where.OR = [
+      const searchConditions: Prisma.PatientWhereInput[] = [
         { fullName: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
+      if (where.appointments) {
+        where.AND = [
+          { appointments: where.appointments },
+          { OR: searchConditions },
+        ];
+        delete where.appointments;
+      } else {
+        where.OR = searchConditions;
+      }
     }
 
     const [items, total] = await Promise.all([
       this.prisma.patient.findMany({
         where,
         include: {
-          _count: { select: { appointments: true } },
+          _count: {
+            select: {
+              appointments: user?.role === StaffRole.DOCTOR
+                ? { where: { doctorId: user.doctorId! } }
+                : true,
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,

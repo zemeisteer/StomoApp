@@ -58,13 +58,18 @@ export default function DoctorsPage() {
               >
                 <div>
                   <div className="flex items-start gap-4 mb-4">
-                    <div className="w-16 h-16 rounded-2xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-700 shrink-0">
+                    <Link
+                      href={`/doctors/${doc.slug}`}
+                      className="w-16 h-16 rounded-2xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-700 shrink-0 hover:border-teal-300 transition-colors"
+                    >
                       <User className="w-8 h-8" />
-                    </div>
+                    </Link>
                     <div>
-                      <h2 className="text-xl font-bold text-slate-900">
-                        Dr. {firstName} {lastName}
-                      </h2>
+                      <Link href={`/doctors/${doc.slug}`}>
+                        <h2 className="text-xl font-bold text-slate-900 hover:text-teal-700 transition-colors">
+                          Dr. {firstName} {lastName}
+                        </h2>
+                      </Link>
                       <p className="text-xs text-teal-700 font-semibold mt-0.5">{title}</p>
                       <div className="flex items-center gap-3 text-xs text-slate-400 mt-2">
                         <span className="flex items-center gap-1">
@@ -105,10 +110,18 @@ export default function DoctorsPage() {
                   )}
                 </div>
 
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+                  <Link
+                    href={`/doctors/${doc.slug}`}
+                    className="text-xs font-bold text-teal-700 hover:text-teal-800 flex items-center gap-1 group"
+                  >
+                    <span>{language === 'uz' ? 'Batafsil ma\'lumot' : 'Подробнее'}</span>
+                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                  </Link>
+
                   <Link
                     href={`/booking?doctorId=${doc.id}`}
-                    className="w-full sm:w-auto px-6 py-2.5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+                    className="px-5 py-2.5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
                   >
                     <Calendar className="w-4 h-4" />
                     <span>{t.common.bookAppointment}</span>
