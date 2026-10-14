@@ -1,0 +1,760 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// CLINIC & SETTINGS
+// ============================================================
+
+model ClinicSettings {
+  id        String   @id @default("default")
+  name      String   @default("DentaCare")
+  nameRu    String   @default("DentaCare") @map("name_ru")
+  logo      String?
+  phone     String   @default("+998 71 123 45 67")
+  email     String   @default("info@dentacare.uz")
+  website   String?
+  
+  // Branding colors
+  primaryColor   String @default("#0D7377") @map("primary_color")
+  secondaryColor String @default("#14BDAC") @map("secondary_color")
+  accentColor    String @default("#A8E6CF") @map("accent_color")
+
+  // Booking rules
+  timezone             String @default("Asia/Tashkent")
+  minBookingNoticeHours Int    @default(2) @map("min_booking_notice_hours")
+  maxBookingHorizonDays Int    @default(60) @map("max_booking_horizon_days")
+  pendingExpiryMinutes  Int    @default(30) @map("pending_expiry_minutes")
+  slotIntervalMinutes   Int    @default(15) @map("slot_interval_minutes")
+  bufferMinutes         Int    @default(5) @map("buffer_minutes")
+
+  // Social & messaging
+  telegramLink   String? @map("telegram_link")
+  instagramLink  String? @map("instagram_link")
+  facebookLink   String? @map("facebook_link")
+
+  // Policy pages content (JSON with uz/ru)
+  privacyPolicy  Json?   @map("privacy_policy")
+  bookingPolicy  Json?   @map("booking_policy")
+
+  // SEO
+  metaTitleUz       String? @map("meta_title_uz")
+  metaTitleRu       String? @map("meta_title_ru")
+  metaDescriptionUz String? @map("meta_description_uz")
+  metaDescriptionRu String? @map("meta_description_ru")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("clinic_settings")
+}
+
+model Branch {
+  id        String  @id @default(cuid())
+  nameUz    String  @map("name_uz")
+  nameRu    String  @map("name_ru")
+  addressUz String  @map("address_uz")
+  addressRu String  @map("address_ru")
+  phone     String?
+  email     String?
+  mapUrl    String? @map("map_url")
+  latitude  Float?
+  longitude Float?
+  photoUrl  String? @map("photo_url")
+
+  // Working hours stored as JSON: { mon: { open: "09:00", close: "18:00" }, ... }
+  workingHours Json @default("{}") @map("working_hours")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  doctors      DoctorBranch[]
+  appointments Appointment[]
+
+  @@map("branches")
+}
+
+// ============================================================
+// STAFF & AUTH
+// ============================================================
+
+enum StaffRole {
+  OWNER
+  ADMIN
+  DOCTOR
+  EDITOR
+
+  @@map("staff_role")
+}
+
+model StaffUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  fullName     String    @map("full_name")
+  role         StaffRole @default(ADMIN)
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  
+  // Link to doctor profile if role is DOCTOR
+  doctorId String? @unique @map("doctor_id")
+  doctor   Doctor? @relation(fields: [doctorId], references: [id])
+
+  refreshTokenHash String? @map("refresh_token_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  auditLogs AuditLog[]
+  assignedLeads Lead[] @relation("AssignedStaff")
+
+  @@map("staff_users")
+}
+
+// ============================================================
+// DOCTORS & SPECIALTIES
+// ============================================================
+
+model Specialty {
+  id     String @id @default(cuid())
+  nameUz String @map("name_uz")
+  nameRu String @map("name_ru")
+  slug   String @unique
+
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  doctors DoctorSpecialty[]
+
+  @@map("specialties")
+}
+
+model Doctor {
+  id          String  @id @default(cuid())
+  firstNameUz String  @map("first_name_uz")
+  firstNameRu String  @map("first_name_ru")
+  lastNameUz  String  @map("last_name_uz")
+  lastNameRu  String  @map("last_name_ru")
+  slug        String  @unique
+  photoUrl    String? @map("photo_url")
+
+  // Professional info
+  titleUz     String? @map("title_uz")
+  titleRu     String? @map("title_ru")
+  bioUz       String? @map("bio_uz") @db.Text
+  bioRu       String? @map("bio_ru") @db.Text
+  educationUz String? @map("education_uz") @db.Text
+  educationRu String? @map("education_ru") @db.Text
+  experienceYears Int @default(0) @map("experience_years")
+  languages   String[] @default(["uz", "ru"])
+
+  isActive  Boolean  @default(true) @map("is_active")
+  isArchived Boolean @default(false) @map("is_archived")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  staffUser    StaffUser?
+  specialties  DoctorSpecialty[]
+  branches     DoctorBranch[]
+  services     DoctorService[]
+  schedules    DoctorSchedule[]
+  exceptions   ScheduleException[]
+  appointments Appointment[]
+
+  @@map("doctors")
+}
+
+model DoctorSpecialty {
+  doctorId    String   @map("doctor_id")
+  specialtyId String   @map("specialty_id")
+  doctor      Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, specialtyId])
+  @@map("doctor_specialties")
+}
+
+model DoctorBranch {
+  doctorId String @map("doctor_id")
+  branchId String @map("branch_id")
+  doctor   Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, branchId])
+  @@map("doctor_branches")
+}
+
+// ============================================================
+// SERVICES & PRICING
+// ============================================================
+
+enum ServiceCategory {
+  PREVENTIVE
+  THERAPY
+  ORTHODONTICS
+  IMPLANTS
+  PROSTHETICS
+  PEDIATRIC
+  WHITENING
+  SURGERY
+  DIAGNOSTICS
+  OTHER
+
+  @@map("service_category")
+}
+
+model Service {
+  id          String          @id @default(cuid())
+  nameUz      String          @map("name_uz")
+  nameRu      String          @map("name_ru")
+  slug        String          @unique
+  category    ServiceCategory @default(OTHER)
+  
+  descriptionUz String?       @map("description_uz") @db.Text
+  descriptionRu String?       @map("description_ru") @db.Text
+  
+  // Preparation info for patients
+  preparationUz String?       @map("preparation_uz") @db.Text
+  preparationRu String?       @map("preparation_ru") @db.Text
+  
+  // Pricing
+  priceFrom     Int?          @map("price_from") // In minor units (tiyin)
+  priceTo       Int?          @map("price_to")
+  currency      String        @default("UZS")
+  requiresConsultation Boolean @default(false) @map("requires_consultation")
+
+  // Duration in minutes
+  durationMinutes Int         @default(30) @map("duration_minutes")
+  
+  photoUrl    String?         @map("photo_url")
+  iconName    String?         @map("icon_name")
+  
+  isActive    Boolean         @default(true) @map("is_active")
+  isArchived  Boolean         @default(false) @map("is_archived")
+  sortOrder   Int             @default(0) @map("sort_order")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  doctors      DoctorService[]
+  appointments Appointment[]
+
+  @@map("services")
+}
+
+model DoctorService {
+  doctorId  String @map("doctor_id")
+  serviceId String @map("service_id")
+  doctor    Doctor  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  // Override duration per doctor-service pair
+  customDurationMinutes Int? @map("custom_duration_minutes")
+
+  @@id([doctorId, serviceId])
+  @@map("doctor_services")
+}
+
+// ============================================================
+// SCHEDULING
+// ============================================================
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+
+  @@map("day_of_week")
+}
+
+model DoctorSchedule {
+  id       String    @id @default(cuid())
+  doctorId String    @map("doctor_id")
+  doctor   Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  
+  dayOfWeek   DayOfWeek @map("day_of_week")
+  startTime   String    @map("start_time") // "09:00" format
+  endTime     String    @map("end_time")   // "18:00" format
+  
+  // Break time
+  breakStart  String?   @map("break_start")
+  breakEnd    String?   @map("break_end")
+  
+  branchId    String?   @map("branch_id")
+  
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([doctorId, dayOfWeek, branchId])
+  @@map("doctor_schedules")
+}
+
+enum ExceptionType {
+  LEAVE      // Vacation, sick leave
+  HOLIDAY    // Public holiday
+  BLOCKED    // Manual block
+  OVERTIME   // Extra working hours
+
+  @@map("exception_type")
+}
+
+model ScheduleException {
+  id        String        @id @default(cuid())
+  doctorId  String        @map("doctor_id")
+  doctor    Doctor        @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  
+  type      ExceptionType
+  date      DateTime      @db.Date
+  startTime String?       @map("start_time") // Null = whole day
+  endTime   String?       @map("end_time")
+  reason    String?
+  
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  @@map("schedule_exceptions")
+}
+
+// ============================================================
+// PATIENTS
+// ============================================================
+
+model Patient {
+  id        String   @id @default(cuid())
+  fullName  String   @map("full_name")
+  phone     String
+  email     String?
+  notes     String?  @db.Text
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  appointments Appointment[]
+  reviews      Review[]
+
+  @@index([phone])
+  @@map("patients")
+}
+
+// ============================================================
+// APPOINTMENTS
+// ============================================================
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+
+  @@map("appointment_status")
+}
+
+model Appointment {
+  id        String            @id @default(cuid())
+  
+  // Public token for self-service (cancel/reschedule)
+  publicToken String          @unique @map("public_token")
+  
+  patientId String            @map("patient_id")
+  patient   Patient           @relation(fields: [patientId], references: [id])
+  
+  doctorId  String            @map("doctor_id")
+  doctor    Doctor            @relation(fields: [doctorId], references: [id])
+  
+  serviceId String            @map("service_id")
+  service   Service           @relation(fields: [serviceId], references: [id])
+  
+  branchId  String?           @map("branch_id")
+  branch    Branch?           @relation(fields: [branchId], references: [id])
+  
+  status    AppointmentStatus @default(PENDING)
+  
+  // Time (stored in UTC)
+  startTime DateTime          @map("start_time")
+  endTime   DateTime          @map("end_time")
+  
+  // Snapshot of service at booking time
+  serviceName     String      @map("service_name")
+  servicePriceFrom Int?       @map("service_price_from")
+  durationMinutes  Int        @map("duration_minutes")
+  
+  // Patient note
+  note      String?           @db.Text
+  
+  // Tracking
+  source    String            @default("website") // website, phone, admin
+  
+  // Idempotency key to prevent duplicate submissions
+  idempotencyKey String?      @unique @map("idempotency_key")
+  
+  // Consent
+  consentGiven Boolean        @default(false) @map("consent_given")
+  
+  // Expiry for pending appointments
+  expiresAt DateTime?         @map("expires_at")
+  
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+  
+  statusHistory AppointmentStatusHistory[]
+  notifications NotificationJob[]
+  payments      Payment[]
+
+  // Prevent overlapping appointments for the same doctor
+  // Concurrency safety is enforced via DB transaction + advisory lock
+  @@index([doctorId, startTime, endTime])
+  @@index([patientId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("appointments")
+}
+
+model AppointmentStatusHistory {
+  id            String            @id @default(cuid())
+  appointmentId String            @map("appointment_id")
+  appointment   Appointment       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  
+  fromStatus    AppointmentStatus? @map("from_status")
+  toStatus      AppointmentStatus  @map("to_status")
+  reason        String?
+  changedBy     String?            @map("changed_by") // Staff user ID or "system" or "patient"
+  
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  @@map("appointment_status_history")
+}
+
+// ============================================================
+// LEADS & CALLBACKS
+// ============================================================
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  BOOKED
+  CLOSED
+
+  @@map("lead_status")
+}
+
+model Lead {
+  id        String     @id @default(cuid())
+  fullName  String     @map("full_name")
+  phone     String
+  email     String?
+  message   String?    @db.Text
+  source    String     @default("website") // website, callback, phone
+  status    LeadStatus @default(NEW)
+  
+  assignedToId String?   @map("assigned_to_id")
+  assignedTo   StaffUser? @relation("AssignedStaff", fields: [assignedToId], references: [id])
+  
+  internalNotes String?  @map("internal_notes") @db.Text
+  followUpDate  DateTime? @map("follow_up_date")
+  
+  // Link to appointment if converted
+  appointmentId String?  @map("appointment_id")
+  
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("leads")
+}
+
+// ============================================================
+// REVIEWS
+// ============================================================
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("review_status")
+}
+
+model Review {
+  id         String       @id @default(cuid())
+  patientId  String?      @map("patient_id")
+  patient    Patient?     @relation(fields: [patientId], references: [id])
+  
+  authorName String       @map("author_name")
+  rating     Int          // 1-5
+  text       String       @db.Text
+  
+  status     ReviewStatus @default(PENDING)
+  
+  // Display consent
+  consentDisplayName Boolean @default(false) @map("consent_display_name")
+  
+  // Admin note (never shown publicly)
+  adminNote  String?      @map("admin_note") @db.Text
+  
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  @@map("reviews")
+}
+
+// ============================================================
+// CMS CONTENT
+// ============================================================
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+
+  @@map("content_status")
+}
+
+model Article {
+  id            String        @id @default(cuid())
+  slug          String        @unique
+  titleUz       String        @map("title_uz")
+  titleRu       String        @map("title_ru")
+  contentUz     String        @map("content_uz") @db.Text
+  contentRu     String        @map("content_ru") @db.Text
+  excerptUz     String?       @map("excerpt_uz")
+  excerptRu     String?       @map("excerpt_ru")
+  
+  authorName    String        @map("author_name")
+  coverImageUrl String?       @map("cover_image_url")
+  
+  status        ContentStatus @default(DRAFT)
+  publishedAt   DateTime?     @map("published_at")
+  
+  // SEO
+  metaTitleUz       String?   @map("meta_title_uz")
+  metaTitleRu       String?   @map("meta_title_ru")
+  metaDescriptionUz String?   @map("meta_description_uz")
+  metaDescriptionRu String?   @map("meta_description_ru")
+  
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@map("articles")
+}
+
+model FAQ {
+  id         String @id @default(cuid())
+  questionUz String @map("question_uz")
+  questionRu String @map("question_ru")
+  answerUz   String @map("answer_uz") @db.Text
+  answerRu   String @map("answer_ru") @db.Text
+  
+  category   String?
+  sortOrder  Int    @default(0) @map("sort_order")
+  isActive   Boolean @default(true) @map("is_active")
+  
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("faqs")
+}
+
+model HomepageSection {
+  id        String @id @default(cuid())
+  sectionKey String @unique @map("section_key") // hero, advantages, testimonials, etc.
+  titleUz   String? @map("title_uz")
+  titleRu   String? @map("title_ru")
+  contentUz String? @map("content_uz") @db.Text
+  contentRu String? @map("content_ru") @db.Text
+  
+  // JSON content for flexible sections
+  data      Json?
+  
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("homepage_sections")
+}
+
+// ============================================================
+// MEDIA
+// ============================================================
+
+model MediaAsset {
+  id          String   @id @default(cuid())
+  fileName    String   @map("file_name")
+  originalName String  @map("original_name")
+  mimeType    String   @map("mime_type")
+  size        Int
+  url         String
+  altTextUz   String?  @map("alt_text_uz")
+  altTextRu   String?  @map("alt_text_ru")
+  category    String?  // gallery, doctor, service, article, etc.
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("media_assets")
+}
+
+// ============================================================
+// PAYMENTS (minimal operational ledger)
+// ============================================================
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  OTHER
+
+  @@map("payment_method")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  appointmentId String        @map("appointment_id")
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id])
+  
+  amount        Int           // Minor units (tiyin)
+  currency      String        @default("UZS")
+  method        PaymentMethod @default(CASH)
+  
+  isRefund      Boolean       @default(false) @map("is_refund")
+  note          String?
+  
+  recordedAt    DateTime      @default(now()) @map("recorded_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@map("payments")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  TELEGRAM
+
+  @@map("notification_channel")
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+
+  @@map("notification_status")
+}
+
+model NotificationJob {
+  id            String             @id @default(cuid())
+  channel       NotificationChannel
+  status        NotificationStatus @default(PENDING)
+  
+  // Template and data
+  templateKey   String             @map("template_key")
+  recipient     String             // Email, phone, or chat ID
+  payload       Json               // Template variables
+  
+  appointmentId String?            @map("appointment_id")
+  appointment   Appointment?       @relation(fields: [appointmentId], references: [id])
+  
+  // Scheduling
+  scheduledFor  DateTime?          @map("scheduled_for")
+  
+  // Delivery tracking
+  attempts      Int                @default(0)
+  maxAttempts   Int                @default(3) @map("max_attempts")
+  lastError     String?            @map("last_error")
+  sentAt        DateTime?          @map("sent_at")
+  
+  // Deduplication
+  deduplicationKey String?         @unique @map("deduplication_key")
+  
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  @@index([status, scheduledFor])
+  @@map("notification_jobs")
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id        String    @id @default(cuid())
+  userId    String?   @map("user_id")
+  user      StaffUser? @relation(fields: [userId], references: [id])
+  
+  action    String    // e.g., "appointment.confirm", "staff.create"
+  entity    String?   // e.g., "appointment"
+  entityId  String?   @map("entity_id")
+  
+  // Changes (sanitized - no patient PII in detail)
+  details   Json?
+  
+  ipAddress String?   @map("ip_address")
+  
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// ANALYTICS EVENTS (minimal first-party)
+// ============================================================
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  eventType String   @map("event_type") // booking_started, booking_submitted, page_view
+  
+  // No PII - just operational data
+  sessionId String?  @map("session_id")
+  page      String?
+  referrer  String?
+  
+  // Metadata
+  metadata  Json?
+  
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([eventType, createdAt])
+  @@map("analytics_events")
+}
+
+// ============================================================
+// CONSENT RECORDS
+// ============================================================
+
+model ConsentRecord {
+  id            String   @id @default(cuid())
+  type          String   // booking, review, marketing
+  givenBy       String   @map("given_by") // Patient name or "anonymous"
+  phone         String?
+  ipAddress     String?  @map("ip_address")
+  consentText   String   @map("consent_text") @db.Text
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("consent_records")
+}
