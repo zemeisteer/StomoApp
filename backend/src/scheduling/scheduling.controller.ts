@@ -1,5 +1,11 @@
 import {
-  Controller, Get, Post, Delete, Body, Param, Query,
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { SchedulingService } from './scheduling.service';
@@ -70,14 +76,15 @@ export class SchedulingController {
     @Query('doctorId') doctorId: string,
     @Query('date') date: string,
     @Query('serviceId') serviceId: string,
+    @Query('branchId') branchId?: string,
   ) {
-    return this.service.getAvailableSlots(doctorId, date, serviceId);
+    return this.service.getAvailableSlots(doctorId, date, serviceId, branchId);
   }
 
   // Admin endpoints
   @Get('doctor/:doctorId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async getDoctorSchedules(@Param('doctorId') doctorId: string) {
     return this.service.getDoctorSchedules(doctorId);
   }
@@ -98,7 +105,7 @@ export class SchedulingController {
 
   @Get('exceptions/:doctorId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async getExceptions(
     @Param('doctorId') doctorId: string,
     @Query('dateFrom') dateFrom?: string,

@@ -85,9 +85,21 @@ export class StaffService {
     isActive?: boolean;
     doctorId?: string | null;
   }) {
+    const user = await this.prisma.staffUser.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+    // Invalidate sessions immediately if role changed or staff disabled
+    const roleChanged = data.role !== undefined && data.role !== user.role;
+    const deactivated = data.isActive === false && user.isActive === true;
+    const shouldInvalidate = roleChanged || deactivated;
+
     return this.prisma.staffUser.update({
       where: { id },
-      data,
+      data: {
+        ...data,
+        tokenVersion: shouldInvalidate ? { increment: 1 } : undefined,
+        refreshTokenHash: shouldInvalidate ? null : undefined,
+      },
       select: {
         id: true,
         email: true,
@@ -103,7 +115,11 @@ export class StaffService {
     const passwordHash = await this.authService.hashPassword(newPassword);
     await this.prisma.staffUser.update({
       where: { id },
-      data: { passwordHash, refreshTokenHash: null },
+      data: {
+        passwordHash,
+        refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
+      },
     });
   }
 }

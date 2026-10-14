@@ -1,6 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, StaffRole } from '@prisma/client';
+import { JwtPayload } from '../auth/auth.service';
+
+export interface UpdatePatientInput {
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+}
 
 @Injectable()
 export class PatientsService {
@@ -34,29 +42,88 @@ export class PatientsService {
     return { items, total, page, limit };
   }
 
-  async findById(id: string) {
+  async findById(id: string, user?: JwtPayload) {
     const patient = await this.prisma.patient.findUnique({
       where: { id },
       include: {
         appointments: {
-          include: { doctor: true, service: true },
+          include: {
+            doctor: {
+              select: {
+                id: true,
+                firstNameUz: true,
+                lastNameUz: true,
+                firstNameRu: true,
+                lastNameRu: true,
+              },
+            },
+            service: {
+              select: { id: true, nameUz: true, nameRu: true },
+            },
+            branch: {
+              select: { id: true, nameUz: true, nameRu: true },
+            },
+          },
           orderBy: { startTime: 'desc' },
-          take: 20,
         },
         _count: { select: { appointments: true } },
       },
     });
+
     if (!patient) throw new NotFoundException('Bemor topilmadi');
+
+    // Doctor ownership & relationship restriction
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profili biriktirilmagan');
+      }
+
+      // Filter appointments to only those with this doctor
+      const authorizedAppointments = patient.appointments.filter(
+        a => a.doctorId === user.doctorId,
+      );
+
+      // Fail closed if doctor has never treated this patient
+      if (authorizedAppointments.length === 0) {
+        throw new ForbiddenException('Ushbu bemor sizning qabulingizda bo\'lmagan');
+      }
+
+      // Return minimal scoped profile
+      return {
+        id: patient.id,
+        fullName: patient.fullName,
+        phone: patient.phone,
+        email: patient.email,
+        createdAt: patient.createdAt,
+        appointments: authorizedAppointments,
+        _count: { appointments: authorizedAppointments.length },
+      };
+    }
+
+    // OWNER / ADMIN gets complete profile
     return patient;
   }
 
-  async update(id: string, data: { fullName?: string; phone?: string; email?: string; notes?: string }) {
-    return this.prisma.patient.update({ where: { id }, data });
+  async update(id: string, data: UpdatePatientInput) {
+    const patient = await this.prisma.patient.findUnique({ where: { id } });
+    if (!patient) throw new NotFoundException('Bemor topilmadi');
+
+    return this.prisma.patient.update({
+      where: { id },
+      data: {
+        fullName: data.fullName?.trim(),
+        phone: data.phone?.trim(),
+        email: data.email?.trim() || null,
+        notes: data.notes?.trim() || null,
+      },
+    });
   }
 
+  /**
+   * Find duplicate phone numbers and group family members for review
+   */
   async findDuplicates() {
-    // Find patients with same phone number
-    const duplicates = await this.prisma.$queryRaw<Array<{ phone: string; count: bigint }>>`
+    const duplicatePhones = await this.prisma.$queryRaw<Array<{ phone: string; count: bigint }>>`
       SELECT phone, COUNT(*) as count
       FROM patients
       WHERE phone IS NOT NULL AND phone != ''
@@ -66,12 +133,62 @@ export class PatientsService {
       LIMIT 50
     `;
 
-    return duplicates.map(d => ({
-      phone: d.phone,
-      count: Number(d.count),
-    }));
+    const results = [];
+    for (const d of duplicatePhones) {
+      const records = await this.prisma.patient.findMany({
+        where: { phone: d.phone },
+        include: {
+          _count: { select: { appointments: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      results.push({
+        phone: d.phone,
+        count: Number(d.count),
+        patients: records,
+      });
+    }
+
+    return results;
   }
 
+  /**
+   * Safe merge of duplicate patient records (moves appointments to target)
+   */
+  async mergePatients(sourceId: string, targetId: string) {
+    if (sourceId === targetId) {
+      throw new Error('Bir xil bemorlarni birlashtirib bo\'lmaydi');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Reassign appointments
+      await tx.appointment.updateMany({
+        where: { patientId: sourceId },
+        data: { patientId: targetId },
+      });
+
+      // Reassign reviews
+      await tx.review.updateMany({
+        where: { patientId: sourceId },
+        data: { patientId: targetId },
+      });
+
+      // Remove source patient
+      await tx.patient.delete({
+        where: { id: sourceId },
+      });
+
+      return tx.patient.findUnique({
+        where: { id: targetId },
+        include: { _count: { select: { appointments: true } } },
+      });
+    });
+  }
+
+  /**
+   * RFC 4180 compliant CSV export with formula injection neutralization
+   */
   async exportCsv(search?: string) {
     const where: Prisma.PatientWhereInput = {};
     if (search) {
@@ -87,24 +204,36 @@ export class PatientsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // CSV injection protection: prefix cells that start with special chars
-    const sanitize = (val: string | null | undefined) => {
-      if (!val) return '';
-      if (/^[=+\-@\t\r]/.test(val)) return "'" + val;
-      return val;
+    // Neutralize spreadsheet formula injection and format RFC 4180 cell
+    const formatCell = (val: string | number | null | undefined): string => {
+      if (val === null || val === undefined) return '""';
+      let str = String(val);
+
+      // Formula injection neutralization: prefix leading special chars
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
+
+      // Escape quotes and wrap in quotes
+      const escaped = str.replace(/"/g, '""');
+      return `"${escaped}"`;
     };
 
-    const header = 'Ism,Telefon,Email,Qabullar soni,Ro\'yxatga olingan';
+    const header = ['ID', 'F.I.SH.', 'Telefon', 'Email', 'Qabullar soni', 'Ro\'yxatdan o\'tgan sana']
+      .map(h => formatCell(h))
+      .join(',');
+
     const rows = patients.map(p =>
       [
-        sanitize(p.fullName),
-        sanitize(p.phone),
-        sanitize(p.email),
-        p._count.appointments,
-        p.createdAt.toISOString(),
+        formatCell(p.id),
+        formatCell(p.fullName),
+        formatCell(p.phone),
+        formatCell(p.email || ''),
+        formatCell(p._count.appointments),
+        formatCell(p.createdAt.toISOString()),
       ].join(',')
     );
 
-    return [header, ...rows].join('\n');
+    return [header, ...rows].join('\r\n');
   }
 }

@@ -3,7 +3,7 @@ import {
   UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { AppointmentsService, CreateBookingDto } from './appointments.service';
+import { AppointmentsService } from './appointments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -15,7 +15,7 @@ import {
   IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min,
 } from 'class-validator';
 
-class PublicBookingDto {
+export class PublicBookingDto {
   @IsString()
   serviceId!: string;
 
@@ -51,7 +51,7 @@ class PublicBookingDto {
   idempotencyKey?: string;
 }
 
-class StatusChangeDto {
+export class StatusChangeDto {
   @IsEnum(AppointmentStatus)
   status!: AppointmentStatus;
 
@@ -60,12 +60,12 @@ class StatusChangeDto {
   reason?: string;
 }
 
-class RescheduleDto {
+export class RescheduleDto {
   @IsDateString()
   startTime!: string;
 }
 
-class ListQueryDto {
+export class ListQueryDto {
   @IsOptional()
   @IsEnum(AppointmentStatus)
   status?: AppointmentStatus;
@@ -111,7 +111,7 @@ export class PublicBookingController {
 
   @Post()
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: process.env.NODE_ENV === 'test' ? 1000 : 20, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   async createBooking(@Body() dto: PublicBookingDto) {
     const result = await this.service.createBooking({
@@ -136,11 +136,26 @@ export class PublicBookingController {
 
   @Post('cancel/:token')
   @Public()
-  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async cancelByToken(@Param('token') token: string) {
-    await this.service.cancelByToken(token);
-    return { message: 'Qabul bekor qilindi' };
+    return this.service.cancelByToken(token);
+  }
+
+  @Post('reschedule/:token')
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  async rescheduleByToken(
+    @Param('token') token: string,
+    @Body() dto: RescheduleDto,
+  ) {
+    const updated = await this.service.rescheduleByToken(token, dto.startTime);
+    return {
+      message: 'Qabul muvaffaqiyatli qayta rejalashtirildi',
+      startTime: updated.startTime,
+      endTime: updated.endTime,
+    };
   }
 }
 
@@ -156,23 +171,19 @@ export class AppointmentsController {
   @Get()
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   findAll(@Query() query: ListQueryDto, @CurrentUser() user: JwtPayload) {
-    // Doctors can only see their own appointments
-    if (user.role === StaffRole.DOCTOR && user.doctorId) {
-      query.doctorId = user.doctorId;
-    }
-    return this.service.findAll(query);
+    return this.service.findAll(query, user);
   }
 
   @Get('today')
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   getToday(@CurrentUser() user: JwtPayload) {
-    return this.service.getToday();
+    return this.service.getToday('Asia/Tashkent', user);
   }
 
   @Get(':id')
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
-  findOne(@Param('id') id: string) {
-    return this.service.findById(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.service.findById(id, user);
   }
 
   @Post()

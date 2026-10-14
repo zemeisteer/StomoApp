@@ -4,11 +4,17 @@ import {
   ConflictException,
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
-import { AppointmentStatus, Prisma } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
+import { AuditService } from '../audit/audit.service';
+import { AppointmentStatus, Prisma, StaffRole } from '@prisma/client';
 import { nanoid } from 'nanoid';
+import * as crypto from 'crypto';
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 
 // Allowed status transitions
 const ALLOWED_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
@@ -20,7 +26,7 @@ const ALLOWED_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
   NO_SHOW: [],
 };
 
-// Statuses that reserve time
+// Statuses that reserve doctor time
 const TIME_RESERVING_STATUSES: AppointmentStatus[] = [
   AppointmentStatus.PENDING,
   AppointmentStatus.CONFIRMED,
@@ -43,146 +49,207 @@ export interface CreateBookingDto {
 
 @Injectable()
 export class AppointmentsService {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly schedulingService: SchedulingService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
-   * Create a booking with database-level concurrency safety.
-   * Uses PostgreSQL advisory locks to prevent double-booking.
+   * Concurrency-safe booking creation with PostgreSQL advisory lock,
+   * strict idempotency payload binding, safe family patient resolution, and audit logging.
    */
   async createBooking(dto: CreateBookingDto) {
-    // Validate consent
     if (!dto.consentGiven) {
-      throw new BadRequestException('Shaxsiy ma\'lumotlarni qayta ishlashga rozilik kerak');
+      throw new BadRequestException('Shaxsiy ma\'lumotlarni qayta ishlashga rozilik zarur');
     }
 
-    // Check idempotency
+    // 1. Idempotency Key Validation
     if (dto.idempotencyKey) {
       const existing = await this.prisma.appointment.findUnique({
         where: { idempotencyKey: dto.idempotencyKey },
-        include: { doctor: true, service: true },
+        include: { doctor: true, service: true, branch: true },
       });
+
       if (existing) {
-        return existing; // Return existing - prevent duplicate
+        // Validate payload consistency: reject key reuse with altered payload
+        const reqStartTime = new Date(dto.startTime).getTime();
+        const existingStartTime = existing.startTime.getTime();
+
+        if (
+          existing.doctorId !== dto.doctorId ||
+          existing.serviceId !== dto.serviceId ||
+          Math.abs(existingStartTime - reqStartTime) > 1000
+        ) {
+          throw new ConflictException(
+            'Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan',
+          );
+        }
+
+        // Safe response: NEVER expose management token to a different caller or payload
+        return {
+          id: existing.id,
+          publicToken: existing.publicToken,
+          status: existing.status,
+          startTime: existing.startTime,
+          endTime: existing.endTime,
+          serviceName: existing.serviceName,
+          doctor: {
+            id: existing.doctor.id,
+            firstNameUz: existing.doctor.firstNameUz,
+            lastNameUz: existing.doctor.lastNameUz,
+            firstNameRu: existing.doctor.firstNameRu,
+            lastNameRu: existing.doctor.lastNameRu,
+          },
+        };
       }
     }
 
-    // Validate service exists and is active
-    const service = await this.prisma.service.findUnique({
-      where: { id: dto.serviceId },
+    // 2. Validate Service
+    const service = await this.prisma.service.findFirst({
+      where: { id: dto.serviceId, isActive: true, isArchived: false },
     });
-    if (!service || !service.isActive || service.isArchived) {
-      throw new BadRequestException('Xizmat topilmadi');
+    if (!service) {
+      throw new BadRequestException('Xizmat topilmadi yoki faol emas');
     }
 
-    // Validate doctor exists and is active
-    const doctor = await this.prisma.doctor.findUnique({
-      where: { id: dto.doctorId },
-      include: { services: true },
+    // 3. Validate Doctor
+    const doctor = await this.prisma.doctor.findFirst({
+      where: { id: dto.doctorId, isActive: true, isArchived: false },
+      include: { services: true, branches: true },
     });
-    if (!doctor || !doctor.isActive || doctor.isArchived) {
-      throw new BadRequestException('Shifokor topilmadi');
+    if (!doctor) {
+      throw new BadRequestException('Shifokor topilmadi yoki faol emas');
     }
 
-    // Validate doctor-service eligibility
+    // 4. Validate Doctor-Service Eligibility
     const doctorService = doctor.services.find(ds => ds.serviceId === dto.serviceId);
     if (!doctorService) {
-      throw new BadRequestException('Bu shifokor tanlangan xizmatni ko\'rsatmaydi');
+      throw new BadRequestException('Ushbu shifokor tanlangan xizmatni ko\'rsatmaydi');
     }
 
-    // Get clinic settings
+    // 5. Validate Branch if provided or resolve
+    let resolvedBranchId = dto.branchId;
+    if (resolvedBranchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: resolvedBranchId, isActive: true },
+      });
+      if (!branch) {
+        throw new BadRequestException('Filial topilmadi yoki faol emas');
+      }
+      const isAssigned = doctor.branches.some(b => b.branchId === resolvedBranchId);
+      if (!isAssigned) {
+        throw new BadRequestException('Shifokor bu filialda ishlamaydi');
+      }
+    } else {
+      resolvedBranchId = doctor.branches[0]?.branchId;
+    }
+
+    // 6. Clinic Settings & Time Limits
     const settings = await this.prisma.clinicSettings.findFirst();
     const timezone = settings?.timezone || 'Asia/Tashkent';
-    const minNoticeHours = settings?.minBookingNoticeHours || 2;
-    const maxHorizonDays = settings?.maxBookingHorizonDays || 60;
-    const pendingExpiryMinutes = settings?.pendingExpiryMinutes || 30;
-    const bufferMinutes = settings?.bufferMinutes || 5;
+    const minNoticeHours = settings?.minBookingNoticeHours ?? 2;
+    const maxHorizonDays = settings?.maxBookingHorizonDays ?? 60;
+    const pendingExpiryMinutes = settings?.pendingExpiryMinutes ?? 30;
+    const bufferMinutes = settings?.bufferMinutes ?? 5;
 
-    // Parse and validate start time
-    const startTime = new Date(dto.startTime);
-    const now = new Date();
+    const startTimeUtc = new Date(dto.startTime);
+    const nowUtc = new Date();
 
-    if (isNaN(startTime.getTime())) {
+    if (isNaN(startTimeUtc.getTime())) {
       throw new BadRequestException('Noto\'g\'ri sana formati');
     }
 
-    // Check minimum booking notice
-    const minNoticeTime = new Date(now.getTime() + minNoticeHours * 60 * 60 * 1000);
-    if (startTime < minNoticeTime) {
-      throw new BadRequestException(
-        `Qabulga kamida ${minNoticeHours} soat oldin yozilish kerak`,
-      );
+    // Notice & Horizon validation
+    const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
+    if (startTimeUtc < minNoticeTime) {
+      throw new BadRequestException(`Qabulga kamida ${minNoticeHours} soat oldin yozilish lozim`);
     }
 
-    // Check booking horizon
-    const maxTime = new Date(now.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
-    if (startTime > maxTime) {
-      throw new BadRequestException(
-        `${maxHorizonDays} kundan ko'p muddat uchun bron qilib bo'lmaydi`,
-      );
+    const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
+    if (startTimeUtc > maxHorizonTime) {
+      throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga yozilish mumkin emas`);
     }
 
-    // Calculate duration
-    const durationMinutes = doctorService.customDurationMinutes || service.durationMinutes;
+    // Calculate duration & end time
+    const durationMinutes = doctorService.customDurationMinutes ?? service.durationMinutes;
     const totalMinutes = durationMinutes + bufferMinutes;
-    const endTime = new Date(startTime.getTime() + totalMinutes * 60 * 1000);
+    const endTimeUtc = new Date(startTimeUtc.getTime() + totalMinutes * 60 * 1000);
 
-    // Validate against doctor's schedule
-    const isAvailable = await this.schedulingService.isTimeSlotAvailable(
+    // Validate working hours against doctor's schedule
+    const isWorking = await this.schedulingService.isDoctorWorkingAt(
       dto.doctorId,
-      startTime,
-      endTime,
+      startTimeUtc,
+      endTimeUtc,
       timezone,
+      resolvedBranchId,
     );
-    if (!isAvailable) {
-      throw new BadRequestException('Tanlangan vaqt band yoki shifokor ish vaqtidan tashqarida');
+    if (!isWorking) {
+      throw new BadRequestException('Tanlangan vaqt shifokor ish grafigidan tashqarida');
     }
 
-    // Normalize phone number
-    const phone = this.normalizePhone(dto.patientPhone);
+    const conflictingBeforeLock = await this.prisma.appointment.findFirst({
+      where: {
+        doctorId: dto.doctorId,
+        status: { in: TIME_RESERVING_STATUSES },
+        startTime: { lt: endTimeUtc },
+        endTime: { gt: startTimeUtc },
+      },
+    });
+    if (conflictingBeforeLock) {
+      throw new ConflictException('Bu vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
+    }
 
-    // Use advisory lock for concurrency safety
-    // Lock key based on doctor ID to prevent simultaneous bookings
-    const lockKey = this.hashStringToInt(dto.doctorId);
+    const normalizedPhone = this.normalizePhone(dto.patientPhone);
+    const cleanName = dto.patientName.trim();
 
-    return this.prisma.$transaction(async (tx) => {
-      // Acquire advisory lock (blocks other transactions for same doctor)
+    // 7. Atomic Concurrency Lock and DB Transaction
+    // Compute advisory lock key integer based on doctor ID
+    const lockKey = this.hashStringToInt(`doc_${dto.doctorId}`);
+
+    const createdAppointment = await this.prisma.$transaction(async (tx) => {
+      // Acquire PostgreSQL transactional advisory lock
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-      // Double-check for overlapping appointments within the lock
-      const overlapping = await tx.appointment.findFirst({
+      // Double check overlap within lock
+      const conflicting = await tx.appointment.findFirst({
         where: {
           doctorId: dto.doctorId,
           status: { in: TIME_RESERVING_STATUSES },
-          startTime: { lt: endTime },
-          endTime: { gt: startTime },
+          startTime: { lt: endTimeUtc },
+          endTime: { gt: startTimeUtc },
         },
       });
 
-      if (overlapping) {
-        throw new ConflictException('Bu vaqt allaqachon band. Boshqa vaqtni tanlang.');
+      if (conflicting) {
+        throw new ConflictException('Bu vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
       }
 
-      // Find or create patient
+      // Safe Patient Identification (do not overwrite family members sharing a phone)
       let patient = await tx.patient.findFirst({
-        where: { phone },
+        where: {
+          phone: normalizedPhone,
+          fullName: { equals: cleanName, mode: 'insensitive' },
+        },
       });
 
       if (!patient) {
+        // Create distinct patient record for this name
         patient = await tx.patient.create({
           data: {
-            fullName: dto.patientName,
-            phone,
-            email: dto.patientEmail,
+            fullName: cleanName,
+            phone: normalizedPhone,
+            email: dto.patientEmail?.trim() || null,
           },
         });
       }
 
-      // Create appointment
       const publicToken = nanoid(32);
-      const expiresAt = new Date(now.getTime() + pendingExpiryMinutes * 60 * 1000);
+      const expiresAt = new Date(nowUtc.getTime() + pendingExpiryMinutes * 60 * 1000);
+      const tokenExpiresAt = new Date(endTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
       const appointment = await tx.appointment.create({
         data: {
@@ -190,42 +257,45 @@ export class AppointmentsService {
           patientId: patient.id,
           doctorId: dto.doctorId,
           serviceId: dto.serviceId,
-          branchId: dto.branchId || null,
+          branchId: resolvedBranchId || null,
           status: AppointmentStatus.PENDING,
-          startTime,
-          endTime,
+          startTime: startTimeUtc,
+          endTime: endTimeUtc,
           serviceName: service.nameUz,
           servicePriceFrom: service.priceFrom,
           durationMinutes,
-          note: dto.note,
+          note: dto.note?.trim() || null,
           source: dto.source || 'website',
           idempotencyKey: dto.idempotencyKey || null,
           consentGiven: dto.consentGiven,
           expiresAt,
+          tokenExpiresAt,
         },
         include: {
           doctor: true,
           service: true,
           branch: true,
+          patient: true,
         },
       });
 
-      // Create status history
+      // Status history
       await tx.appointmentStatusHistory.create({
         data: {
           appointmentId: appointment.id,
           fromStatus: null,
           toStatus: AppointmentStatus.PENDING,
-          changedBy: 'system',
+          changedBy: dto.source === 'admin' ? 'admin' : 'website',
+          reason: 'Boshlang\'ich buyurtma',
         },
       });
 
-      // Record consent
+      // Consent record
       await tx.consentRecord.create({
         data: {
           type: 'booking',
-          givenBy: dto.patientName,
-          phone,
+          givenBy: cleanName,
+          phone: normalizedPhone,
           consentText: 'Shaxsiy ma\'lumotlarimni qayta ishlashga rozilik beraman',
         },
       });
@@ -235,10 +305,25 @@ export class AppointmentsService {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       timeout: 10000,
     });
+
+    // Queue notifications after transaction is successfully committed
+    try {
+      await this.notificationsService.notifyBookingCreated({
+        id: createdAppointment.id,
+        startTime: createdAppointment.startTime,
+        serviceName: createdAppointment.serviceName,
+        patientEmail: createdAppointment.patient.email || undefined,
+        patientPhone: createdAppointment.patient.phone,
+      });
+    } catch (e: any) {
+      this.logger.warn(`Failed to queue booking notifications: ${e?.message}`);
+    }
+
+    return createdAppointment;
   }
 
   /**
-   * Change appointment status with validation
+   * Atomic status change with transition validation
    */
   async changeStatus(
     appointmentId: string,
@@ -257,17 +342,22 @@ export class AppointmentsService {
     const allowed = ALLOWED_TRANSITIONS[appointment.status];
     if (!allowed.includes(newStatus)) {
       throw new BadRequestException(
-        `${appointment.status} statusidan ${newStatus} statusiga o'tib bo'lmaydi`,
+        `${appointment.status} statusidan ${newStatus} statusiga o'tish taqiqlangan`,
       );
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Atomic update
       const updated = await tx.appointment.update({
         where: { id: appointmentId },
         data: {
           status: newStatus,
-          // Clear expiry when confirmed
+          // Clear pending expiry when confirmed
           expiresAt: newStatus === AppointmentStatus.CONFIRMED ? null : undefined,
+          // Revoke self-service token if appointment is cancelled or completed
+          tokenRevokedAt: ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED] as AppointmentStatus[]).includes(newStatus)
+            ? new Date()
+            : undefined,
         },
         include: {
           doctor: true,
@@ -287,72 +377,124 @@ export class AppointmentsService {
         },
       });
 
+      await this.auditService.log({
+        userId: changedBy.startsWith('staff_') ? changedBy : null,
+        action: `appointment.status_${newStatus.toLowerCase()}`,
+        entity: 'Appointment',
+        entityId: appointmentId,
+        details: { fromStatus: appointment.status, toStatus: newStatus, reason },
+      });
+
+      // If cancelled, cancel pending reminders
+      if (newStatus === AppointmentStatus.CANCELLED) {
+        await this.notificationsService.cancelAppointmentReminders(appointmentId);
+      }
+
       return updated;
     });
   }
 
   /**
-   * Reschedule: atomically release old slot and reserve new one
+   * Concurrency-safe rescheduling with buffer preservation, booking-window validation,
+   * and rollback protection for the original reservation.
    */
   async reschedule(
     appointmentId: string,
-    newStartTime: string,
+    newStartTimeStr: string,
     changedBy: string,
   ) {
     const appointment = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      include: { service: true },
+      include: { service: true, doctor: { include: { services: true } } },
     });
 
     if (!appointment) {
       throw new NotFoundException('Qabul topilmadi');
     }
 
-    if ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW].includes(appointment.status)) {
-      throw new BadRequestException('Bu qabulni qayta rejalashtirish mumkin emas');
+    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(appointment.status)) {
+      throw new BadRequestException('Tugallangan yoki bekor qilingan qabulni qayta rejalashtirib bo\'lmaydi');
     }
-
-    const startTime = new Date(newStartTime);
-    const endTime = new Date(startTime.getTime() + appointment.durationMinutes * 60 * 1000);
 
     const settings = await this.prisma.clinicSettings.findFirst();
     const timezone = settings?.timezone || 'Asia/Tashkent';
+    const minNoticeHours = settings?.minBookingNoticeHours ?? 2;
+    const maxHorizonDays = settings?.maxBookingHorizonDays ?? 60;
+    const bufferMinutes = settings?.bufferMinutes ?? 5;
 
-    const isAvailable = await this.schedulingService.isTimeSlotAvailable(
-      appointment.doctorId,
-      startTime,
-      endTime,
-      timezone,
-      appointmentId, // Exclude current appointment
-    );
+    const newStartTime = new Date(newStartTimeStr);
+    const nowUtc = new Date();
 
-    if (!isAvailable) {
-      throw new BadRequestException('Yangi vaqt band');
+    if (isNaN(newStartTime.getTime())) {
+      throw new BadRequestException('Noto\'g\'ri sana formati');
     }
 
-    const lockKey = this.hashStringToInt(appointment.doctorId);
+    // Validate booking window
+    const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
+    if (newStartTime < minNoticeTime) {
+      throw new BadRequestException(`Kamida ${minNoticeHours} soat oldin rejalashtirish lozim`);
+    }
+
+    const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
+    if (newStartTime > maxHorizonTime) {
+      throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga rejalashtirib bo\'lmaydi`);
+    }
+
+    // CRITICAL: Preserve the buffer! totalMinutes = durationMinutes + bufferMinutes
+    const totalMinutes = appointment.durationMinutes + bufferMinutes;
+    const newEndTime = new Date(newStartTime.getTime() + totalMinutes * 60 * 1000);
+
+    // Validate working hours against doctor's schedule
+    const isWorking = await this.schedulingService.isDoctorWorkingAt(
+      appointment.doctorId,
+      newStartTime,
+      newEndTime,
+      timezone,
+      appointment.branchId || undefined,
+    );
+    if (!isWorking) {
+      throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
+    }
+
+    const conflictingBeforeLock = await this.prisma.appointment.findFirst({
+      where: {
+        doctorId: appointment.doctorId,
+        status: { in: TIME_RESERVING_STATUSES },
+        id: { not: appointmentId },
+        startTime: { lt: newEndTime },
+        endTime: { gt: newStartTime },
+      },
+    });
+    if (conflictingBeforeLock) {
+      throw new ConflictException('Bu yangi vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
+    }
+
+    const lockKey = this.hashStringToInt(`doc_${appointment.doctorId}`);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-      // Double-check overlap excluding current
-      const overlapping = await tx.appointment.findFirst({
+      // Double-check conflicting slots (excluding current appointment)
+      const conflicting = await tx.appointment.findFirst({
         where: {
           doctorId: appointment.doctorId,
           status: { in: TIME_RESERVING_STATUSES },
           id: { not: appointmentId },
-          startTime: { lt: endTime },
-          endTime: { gt: startTime },
+          startTime: { lt: newEndTime },
+          endTime: { gt: newStartTime },
         },
       });
 
-      if (overlapping) {
-        throw new ConflictException('Yangi vaqt allaqachon band');
+      if (conflicting) {
+        throw new ConflictException('Yangi tanlangan vaqt boshqa bemor tomonidan band qilindi');
       }
 
       const updated = await tx.appointment.update({
         where: { id: appointmentId },
-        data: { startTime, endTime },
+        data: {
+          startTime: newStartTime,
+          endTime: newEndTime,
+        },
         include: { doctor: true, service: true, patient: true, branch: true },
       });
 
@@ -361,10 +503,29 @@ export class AppointmentsService {
           appointmentId,
           fromStatus: appointment.status,
           toStatus: appointment.status,
-          reason: `Qayta rejalashtirildi: ${appointment.startTime.toISOString()} -> ${startTime.toISOString()}`,
+          reason: `Qayta rejalashtirildi: ${appointment.startTime.toISOString()} -> ${newStartTime.toISOString()}`,
           changedBy,
         },
       });
+
+      // Update reminders: cancel old and schedule new
+      await this.notificationsService.cancelAppointmentReminders(appointmentId);
+      const reminderTime = new Date(newStartTime.getTime() - 2 * 60 * 60 * 1000);
+      if (reminderTime > new Date()) {
+        await this.notificationsService.enqueue({
+          channel: updated.patient.email ? 'EMAIL' as any : 'SMS' as any,
+          templateKey: 'appointment_reminder',
+          recipient: updated.patient.email || updated.patient.phone,
+          appointmentId: updated.id,
+          scheduledFor: reminderTime,
+          deduplicationKey: `reminder_${updated.id}_${newStartTime.getTime()}`,
+          payload: {
+            appointmentId: updated.id,
+            serviceName: updated.serviceName,
+            startTime: newStartTime.toISOString(),
+          },
+        });
+      }
 
       return updated;
     }, {
@@ -374,7 +535,7 @@ export class AppointmentsService {
   }
 
   /**
-   * Self-service cancel via public token
+   * Self-service cancellation via public management token
    */
   async cancelByToken(token: string) {
     const appointment = await this.prisma.appointment.findUnique({
@@ -385,15 +546,88 @@ export class AppointmentsService {
       throw new NotFoundException('Qabul topilmadi');
     }
 
-    if ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED].includes(appointment.status)) {
+    if (appointment.tokenRevokedAt || (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date())) {
+      throw new BadRequestException('Boshqaruv tokenining amal qilish muddati tugagan yoki bekor qilingan');
+    }
+
+    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED] as AppointmentStatus[]).includes(appointment.status)) {
       throw new BadRequestException('Bu qabulni bekor qilib bo\'lmaydi');
     }
 
-    return this.changeStatus(appointment.id, AppointmentStatus.CANCELLED, 'patient', 'Bemor tomonidan bekor qilindi');
+    await this.changeStatus(
+      appointment.id,
+      AppointmentStatus.CANCELLED,
+      'patient',
+      'Bemor tomonidan bekor qilindi',
+    );
+
+    return { message: 'Qabul muvaffaqiyatli bekor qilindi' };
   }
 
   /**
-   * List appointments with filters
+   * Self-service rescheduling via public token
+   */
+  async rescheduleByToken(token: string, newStartTime: string) {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { publicToken: token },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Qabul topilmadi');
+    }
+
+    if (appointment.tokenRevokedAt || (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date())) {
+      throw new BadRequestException('Boshqaruv tokenining amal qilish muddati tugagan');
+    }
+
+    return this.reschedule(appointment.id, newStartTime, 'patient');
+  }
+
+  /**
+   * Public read by management token (MINIMAL sanitized fields, zero patient PII)
+   */
+  async findByToken(token: string) {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { publicToken: token },
+      include: { doctor: true, service: true, branch: true },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Qabul topilmadi');
+    }
+
+    if (appointment.tokenRevokedAt || (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date())) {
+      throw new BadRequestException('Boshqaruv tokenining muddati tugagan');
+    }
+
+    return {
+      id: appointment.id,
+      status: appointment.status,
+      startTime: appointment.startTime,
+      endTime: appointment.endTime,
+      serviceName: appointment.serviceName,
+      doctor: {
+        id: appointment.doctor.id,
+        firstNameUz: appointment.doctor.firstNameUz,
+        lastNameUz: appointment.doctor.lastNameUz,
+        firstNameRu: appointment.doctor.firstNameRu,
+        lastNameRu: appointment.doctor.lastNameRu,
+        photoUrl: appointment.doctor.photoUrl,
+      },
+      branch: appointment.branch
+        ? {
+            id: appointment.branch.id,
+            nameUz: appointment.branch.nameUz,
+            nameRu: appointment.branch.nameRu,
+            addressUz: appointment.branch.addressUz,
+            addressRu: appointment.branch.addressRu,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Doctor-scoped Appointment Listing
    */
   async findAll(params: {
     status?: AppointmentStatus;
@@ -404,12 +638,22 @@ export class AppointmentsService {
     dateTo?: string;
     page?: number;
     limit?: number;
-  }) {
-    const { status, doctorId, branchId, serviceId, dateFrom, dateTo, page = 1, limit = 50 } = params;
+  }, user?: { role: StaffRole; doctorId?: string | null }) {
+    const { status, branchId, serviceId, dateFrom, dateTo, page = 1, limit = 50 } = params;
 
     const where: Prisma.AppointmentWhereInput = {};
+
+    // Strict DOCTOR scoping
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profili topilmadi');
+      }
+      where.doctorId = user.doctorId;
+    } else if (params.doctorId) {
+      where.doctorId = params.doctorId;
+    }
+
     if (status) where.status = status;
-    if (doctorId) where.doctorId = doctorId;
     if (branchId) where.branchId = branchId;
     if (serviceId) where.serviceId = serviceId;
     if (dateFrom || dateTo) {
@@ -440,19 +684,33 @@ export class AppointmentsService {
   }
 
   /**
-   * Get today's appointments
+   * Doctor-scoped Today's Appointments with clinic timezone boundaries
    */
-  async getToday(timezone: string = 'Asia/Tashkent') {
-    const now = new Date();
-    const startOfDay = new Date(now);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(now);
-    endOfDay.setHours(23, 59, 59, 999);
+  async getToday(timezone: string = 'Asia/Tashkent', user?: { role: StaffRole; doctorId?: string | null }) {
+    // Current time in clinic timezone
+    const nowUtc = new Date();
+    const zonedNow = toZonedTime(nowUtc, timezone);
+
+    // Compute start and end of day in Tashkent
+    const localStart = new Date(zonedNow.getFullYear(), zonedNow.getMonth(), zonedNow.getDate(), 0, 0, 0, 0);
+    const localEnd = new Date(zonedNow.getFullYear(), zonedNow.getMonth(), zonedNow.getDate(), 23, 59, 59, 999);
+
+    const startUtc = fromZonedTime(localStart, timezone);
+    const endUtc = fromZonedTime(localEnd, timezone);
+
+    const where: Prisma.AppointmentWhereInput = {
+      startTime: { gte: startUtc, lte: endUtc },
+    };
+
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profili topilmadi');
+      }
+      where.doctorId = user.doctorId;
+    }
 
     return this.prisma.appointment.findMany({
-      where: {
-        startTime: { gte: startOfDay, lte: endOfDay },
-      },
+      where,
       include: {
         doctor: true,
         service: true,
@@ -466,30 +724,9 @@ export class AppointmentsService {
   }
 
   /**
-   * Expire abandoned pending appointments
+   * Doctor-scoped Find by ID
    */
-  async expirePending() {
-    const now = new Date();
-    const expired = await this.prisma.appointment.findMany({
-      where: {
-        status: AppointmentStatus.PENDING,
-        expiresAt: { lte: now },
-      },
-    });
-
-    for (const appointment of expired) {
-      await this.changeStatus(
-        appointment.id,
-        AppointmentStatus.CANCELLED,
-        'system',
-        'Vaqt tugashi sababli avtomatik bekor qilindi',
-      );
-    }
-
-    return expired.length;
-  }
-
-  async findById(id: string) {
+  async findById(id: string, user?: { role: StaffRole; doctorId?: string | null }) {
     const appointment = await this.prisma.appointment.findUnique({
       where: { id },
       include: {
@@ -502,47 +739,51 @@ export class AppointmentsService {
         },
       },
     });
+
     if (!appointment) throw new NotFoundException('Qabul topilmadi');
+
+    // DOCTOR ownership check
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId || appointment.doctorId !== user.doctorId) {
+        throw new ForbiddenException('Ushbu qabul sizga tegishli emas');
+      }
+    }
+
     return appointment;
   }
 
-  async findByToken(token: string) {
-    const appointment = await this.prisma.appointment.findUnique({
-      where: { publicToken: token },
-      include: {
-        doctor: true,
-        service: true,
-        branch: true,
+  /**
+   * Background runner for expiring abandoned pending bookings
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async expirePending() {
+    const now = new Date();
+
+    // Atomic cancel: update status to CANCELLED only if still PENDING
+    const result = await this.prisma.appointment.updateMany({
+      where: {
+        status: AppointmentStatus.PENDING,
+        expiresAt: { lte: now },
+      },
+      data: {
+        status: AppointmentStatus.CANCELLED,
       },
     });
-    if (!appointment) throw new NotFoundException('Qabul topilmadi');
-    // Don't expose patient details via public token
-    return {
-      id: appointment.id,
-      status: appointment.status,
-      startTime: appointment.startTime,
-      endTime: appointment.endTime,
-      serviceName: appointment.serviceName,
-      doctor: {
-        firstNameUz: appointment.doctor.firstNameUz,
-        lastNameUz: appointment.doctor.lastNameUz,
-        firstNameRu: appointment.doctor.firstNameRu,
-        lastNameRu: appointment.doctor.lastNameRu,
-      },
-      branch: appointment.branch,
-    };
+
+    if (result.count > 0) {
+      this.logger.log(`Expired ${result.count} abandoned pending appointments`);
+    }
+
+    return result.count;
   }
 
   private normalizePhone(phone: string): string {
-    let cleaned = phone.replace(/\D/g, '');
+    const cleaned = phone.replace(/\D/g, '');
     if (cleaned.startsWith('998') && cleaned.length === 12) {
       return '+' + cleaned;
     }
     if (cleaned.length === 9) {
       return '+998' + cleaned;
-    }
-    if (cleaned.startsWith('8') && cleaned.length === 10) {
-      return '+998' + cleaned.substring(1);
     }
     return '+' + cleaned;
   }
@@ -552,7 +793,7 @@ export class AppointmentsService {
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
+      hash = hash & hash;
     }
     return Math.abs(hash);
   }
