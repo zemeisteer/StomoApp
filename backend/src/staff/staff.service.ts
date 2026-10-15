@@ -137,7 +137,7 @@ export class StaffService {
         },
       });
     }, {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       timeout: 10000,
     });
   }

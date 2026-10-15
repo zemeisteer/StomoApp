@@ -223,6 +223,7 @@ export class AppointmentsController {
 
   @Post(':id/reschedule')
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @HttpCode(HttpStatus.OK)
   async reschedulePost(
     @Param('id') id: string,
     @Body() dto: RescheduleDto,

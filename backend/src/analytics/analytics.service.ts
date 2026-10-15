@@ -272,18 +272,26 @@ export class AnalyticsService {
       },
     });
 
-    // Enumerate clinic-local dates within the requested range
+    // Enumerate clinic-local dates within the requested range using clinic timezone
     const calendarDates: { dateString: string; dayOfWeek: DayOfWeek }[] = [];
-    const currentCursor = new Date(start.getTime());
+    const startDateStr = formatInTimeZone(start, timezone, 'yyyy-MM-dd');
+    const endDateStr = formatInTimeZone(end, timezone, 'yyyy-MM-dd');
 
-    while (currentCursor <= end) {
-      const dateString = formatInTimeZone(currentCursor, timezone, 'yyyy-MM-dd');
-      const zonedDate = toZonedTime(currentCursor, timezone);
-      const dowEnum = DOW_ENUM_MAP[zonedDate.getDay()];
+    const [sYear, sMonth, sDay] = startDateStr.split('-').map(Number);
+    const [eYear, eMonth, eDay] = endDateStr.split('-').map(Number);
+
+    const cursor = new Date(Date.UTC(sYear, sMonth - 1, sDay, 12, 0, 0));
+    const targetEnd = new Date(Date.UTC(eYear, eMonth - 1, eDay, 12, 0, 0));
+
+    while (cursor <= targetEnd) {
+      const y = cursor.getUTCFullYear();
+      const m = String(cursor.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(cursor.getUTCDate()).padStart(2, '0');
+      const dateString = `${y}-${m}-${d}`;
+      const dowEnum = DOW_ENUM_MAP[cursor.getUTCDay()];
       calendarDates.push({ dateString, dayOfWeek: dowEnum });
 
-      // Advance by 1 clinic-local day
-      currentCursor.setDate(currentCursor.getDate() + 1);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
     // Query booked minutes for eligible appointment statuses only (strictly exclude cancelled and no-show!)
@@ -296,13 +304,15 @@ export class AnalyticsService {
         id: true,
         doctorId: true,
         durationMinutes: true,
+        bufferMinutes: true,
       },
     });
 
-    const bookedMinutesMap = new Map<string, { minutes: number; count: number }>();
+    const bookedMinutesMap = new Map<string, { minutes: number; bufferMinutes: number; count: number }>();
     for (const appt of eligibleAppointments) {
-      const current = bookedMinutesMap.get(appt.doctorId) || { minutes: 0, count: 0 };
+      const current = bookedMinutesMap.get(appt.doctorId) || { minutes: 0, bufferMinutes: 0, count: 0 };
       current.minutes += appt.durationMinutes;
+      current.bufferMinutes += (appt.bufferMinutes ?? 5);
       current.count += 1;
       bookedMinutesMap.set(appt.doctorId, current);
     }
@@ -313,7 +323,6 @@ export class AnalyticsService {
       for (const { dateString, dayOfWeek } of calendarDates) {
         // Find matching weekly schedules for this weekday and branch
         const daySchedules = doc.schedules.filter((s) => s.dayOfWeek === dayOfWeek);
-        if (daySchedules.length === 0) continue;
 
         // Base intervals from working hours minus break
         let dayIntervals: TimeInterval[] = [];
@@ -336,7 +345,7 @@ export class AnalyticsService {
 
         // Apply exceptions for this doctor on this specific calendar date
         const dayExceptions = doc.exceptions.filter(
-          (ex) => formatInTimeZone(ex.date, timezone, 'yyyy-MM-dd') === dateString,
+          (ex) => ex.date.toISOString().split('T')[0] === dateString,
         );
 
         let isWholeDayOff = false;
@@ -355,34 +364,60 @@ export class AnalyticsService {
           continue;
         }
 
-        // Apply partial-day exceptions
+        // Deterministic Exception Precedence:
+        // 1. Add OVERTIME intervals (applies even if daySchedules was empty!)
         for (const ex of dayExceptions) {
-          if ((ex.type === ExceptionType.LEAVE || ex.type === ExceptionType.BLOCKED) && ex.startTime && ex.endTime) {
-            const exStart = parseTimeToMinutes(ex.startTime);
-            const exEnd = parseTimeToMinutes(ex.endTime);
-            const remaining: TimeInterval[] = [];
-            for (const item of dayIntervals) {
-              remaining.push(...subtractInterval(item, { start: exStart, end: exEnd }));
-            }
-            dayIntervals = remaining;
-          } else if (ex.type === ExceptionType.OVERTIME && ex.startTime && ex.endTime) {
+          if (ex.type === ExceptionType.OVERTIME && ex.startTime && ex.endTime) {
             const otStart = parseTimeToMinutes(ex.startTime);
             const otEnd = parseTimeToMinutes(ex.endTime);
-            dayIntervals.push({ start: otStart, end: otEnd });
+            if (otEnd > otStart) {
+              dayIntervals.push({ start: otStart, end: otEnd });
+            }
           }
         }
 
-        // Merge overlapping intervals so availability is never double counted
+        // 2. Merge additions
+        dayIntervals = mergeIntervals(dayIntervals);
+
+        // 3. Subtract BLOCKED intervals
+        for (const ex of dayExceptions) {
+          if (ex.type === ExceptionType.BLOCKED && ex.startTime && ex.endTime) {
+            const blStart = parseTimeToMinutes(ex.startTime);
+            const blEnd = parseTimeToMinutes(ex.endTime);
+            const remaining: TimeInterval[] = [];
+            for (const item of dayIntervals) {
+              remaining.push(...subtractInterval(item, { start: blStart, end: blEnd }));
+            }
+            dayIntervals = remaining;
+          }
+        }
+
+        // 4. Subtract partial LEAVE intervals
+        for (const ex of dayExceptions) {
+          if (ex.type === ExceptionType.LEAVE && ex.startTime && ex.endTime) {
+            const lvStart = parseTimeToMinutes(ex.startTime);
+            const lvEnd = parseTimeToMinutes(ex.endTime);
+            const remaining: TimeInterval[] = [];
+            for (const item of dayIntervals) {
+              remaining.push(...subtractInterval(item, { start: lvStart, end: lvEnd }));
+            }
+            dayIntervals = remaining;
+          }
+        }
+
+        // 5. Final merge
         const merged = mergeIntervals(dayIntervals);
         for (const m of merged) {
           totalAvailableMinutes += Math.max(0, m.end - m.start);
         }
       }
 
-      const bookedData = bookedMinutesMap.get(doc.id) || { minutes: 0, count: 0 };
+      const bookedData = bookedMinutesMap.get(doc.id) || { minutes: 0, bufferMinutes: 0, count: 0 };
       const bookedMinutes = bookedData.minutes;
+      const bufferMinutes = bookedData.bufferMinutes;
+      const occupiedMinutes = bookedMinutes + bufferMinutes;
 
-      // Real mathematical utilization percentage without artificial clamping
+      // Mathematical utilization percentage based on treatment duration vs total working capacity
       const utilizationRate =
         totalAvailableMinutes > 0
           ? Number(((bookedMinutes / totalAvailableMinutes) * 100).toFixed(1))
@@ -393,6 +428,8 @@ export class AnalyticsService {
         doctorName: `${doc.firstNameUz} ${doc.lastNameUz}`,
         appointmentsCount: bookedData.count,
         totalMinutesBooked: bookedMinutes,
+        totalBufferMinutes: bufferMinutes,
+        totalOccupiedMinutes: occupiedMinutes,
         totalHoursBooked: Math.round((bookedMinutes / 60) * 10) / 10,
         totalAvailableMinutes,
         utilizationRate,

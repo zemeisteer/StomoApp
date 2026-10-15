@@ -158,10 +158,47 @@
 ---
 
 ## Phase 6: Automated Testing & Verification (COMPLETED)
-- [x] Backend TypeScript build and lint verification (`npm run build:backend`, exit code 0) (**Verified**)
+- [x] Backend TypeScript build and lint verification (`npm run build`, `npm run lint` - 0 errors) (**Verified**)
 - [x] Dedicated test database isolation (`dentacare_test` PostgreSQL 18) (**Verified**)
 - [x] Fail-closed test database environment verification (**Verified**)
-- [x] Comprehensive integration suite against dedicated test database (14/14 passed) (`npm run test:e2e`) (**Verified**)
-- [x] Frontend build and lint verification (Next.js 28/28 routes prerendered) (`npm run build:frontend`) (**Verified**)
-- [x] Root build orchestration (`npm run build`) passing (**Verified**)
+- [x] Comprehensive integration suite against dedicated test database (21/21 passed) (`npm run test:e2e`) (**Verified**)
+- [x] Frontend build and lint verification (Next.js 28/28 routes prerendered) (`npm run build`, `npm run lint` - 0 errors) (**Verified**)
 - [x] Final handoff documentation (`README.md`, `PROGRESS.md`, `PLAN.md`) (**Verified**)
+
+---
+
+## Phase 7: Historical Data, Transactional Consistency, Notification Outbox & Browser Evidence (COMPLETED & VERIFIED)
+- [x] **Forward Migration for Historical Buffer & Revision Backfill**:
+  - `backend/prisma/migrations/20261015121500_backfill_historical_buffers_and_revisions` applied.
+  - Reconstructs historical `buffer_minutes = ROUND(EXTRACT(EPOCH FROM (end_time - start_time)) / 60)::integer - duration_minutes` where reliable (0..120 mins).
+  - Backfills `notification_jobs.appointment_revision` from `Appointment.revision`. (**Verified**)
+- [x] **Transactional & Consistent Scheduling**:
+  - `SchedulingService.isDoctorWorkingAt` and `isTimeSlotAvailable` accept transaction client `tx`.
+  - Advisory locks serialize booking, rescheduling, and doctor schedule/exception mutations.
+  - Adding blocked/leave periods checks active bookings and rejects with 409 Conflict.
+  - Deterministic exception precedence (Weekly -> Breaks -> Overtime -> Blocked -> Leaves/Holidays).
+  - Overtime supported on days without regular weekly schedules. (**Verified**)
+- [x] **Strict Legacy Idempotency Key Policy**:
+  - Canonical sorted JSON serialization for request fingerprints.
+  - Explicit policy rejecting unverifiable legacy keys without fingerprints (409 Conflict).
+  - Racing `P2002` catches and advisory locks enforce fingerprint matching. (**Verified**)
+- [x] **Transactional Notification Outbox**:
+  - Intent persisted inside the appointment mutation transaction (`enqueueBookingCreated`, `enqueueAppointmentConfirmed`, `enqueueAppointmentCancelled`, `enqueueAppointmentRescheduled`).
+  - Worker lease re-check (`status = PROCESSING AND lease_token = :token`) before delivery initiation.
+  - Bounded 5s timeouts on external channels.
+  - Stale reminder cancellation policy matching appointment revision. (**Verified**)
+- [x] **Analytics Calculations**:
+  - Count overtime availability even when `daySchedules` is empty.
+  - Deterministic exception precedence and UTC date enumeration.
+  - Added `totalBufferMinutes` and `totalOccupiedMinutes`. (**Verified**)
+- [x] **Replaced Misleading Regression Coverage**:
+  - Regression 16: True concurrent `Promise.all` submissions, fingerprint verification.
+  - Regression 18: Concurrency-safe dual owner protection, active owner remains.
+  - Regression 19: Isolated fixture doctor with exact date-level available minute calculations.
+  - Regression 20: Historical buffer preservation on reschedule.
+  - Regression 21: Transactional outbox notification intent persistence.
+  - 21/21 tests passing in 29.6s. (**Verified**)
+- [x] **Browser Workflow & Responsive Verification**:
+  - Local Chrome puppeteer-core automation across 1440px desktop, 768px tablet, and 390px mobile.
+  - Connected visitor booking -> admin calendar verification.
+  - 12 screenshots captured in artifact directory. (**Verified**)

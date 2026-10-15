@@ -4,8 +4,9 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus } from '@prisma/client';
+import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { AuthService } from '../src/auth/auth.service';
 
 function parseAndValidateTestDatabaseUrl(rawUrl: string): string {
   try {
@@ -41,6 +42,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   let doctorAToken: string;
   let doctorBToken: string;
   let unlinkedDoctorToken: string;
+  let authService: AuthService;
 
   let testDoctorAId: string;
   let testDoctorBId: string;
@@ -73,6 +75,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    authService = app.get(AuthService);
 
     // Verify connected database identity before mutations
     const [{ current_database }] = await prisma.$queryRaw<[{ current_database: string }]>`SELECT current_database();`;
@@ -91,9 +94,30 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     testServiceId = service!.id;
     testBranchId = branch!.id;
 
-    // 1. Create or get Admin/Owner credentials
-    const adminUser = await prisma.staffUser.findFirst({ where: { role: StaffRole.OWNER } });
-    ownerUserId = adminUser!.id;
+    // 1. Clean up extra owners and ensure admin@dentacare.local is sole active OWNER
+    await prisma.staffUser.deleteMany({
+      where: {
+        role: StaffRole.OWNER,
+        email: { not: 'admin@dentacare.local' },
+      },
+    });
+
+    const adminUser = await prisma.staffUser.upsert({
+      where: { email: 'admin@dentacare.local' },
+      update: {
+        role: StaffRole.OWNER,
+        isActive: true,
+        passwordHash: await bcrypt.hash('DentacareAdmin2026!', 10),
+      },
+      create: {
+        email: 'admin@dentacare.local',
+        passwordHash: await bcrypt.hash('DentacareAdmin2026!', 10),
+        fullName: 'Bosh Administrator',
+        role: StaffRole.OWNER,
+        isActive: true,
+      },
+    });
+    ownerUserId = adminUser.id;
 
     const adminLoginRes = await request(app.getHttpServer())
       .post('/api/auth/login')
@@ -557,6 +581,18 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 12: Staff Management Last-Owner Protection
   // -------------------------------------------------------------
   it('Regression 12: Demoting or disabling the last active OWNER is strictly rejected', async () => {
+    // Ensure ownerUserId is the sole active owner in the system
+    await prisma.staffUser.deleteMany({
+      where: {
+        role: StaffRole.OWNER,
+        id: { not: ownerUserId },
+      },
+    });
+    await prisma.staffUser.update({
+      where: { id: ownerUserId },
+      data: { role: StaffRole.OWNER, isActive: true },
+    });
+
     // Attempt to demote sole active OWNER to ADMIN
     const res = await request(app.getHttpServer())
       .put(`/api/admin/staff/${ownerUserId}`)
@@ -703,7 +739,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   });
 
   // -------------------------------------------------------------
-  // REGRESSION 16: Durable Idempotency with Fingerprinting
+  // REGRESSION 16: Durable Idempotency with Fingerprinting & Legacy Key Policy
   // -------------------------------------------------------------
   it('Regression 16: Idempotency fingerprint binds all fields, rejects altered payload, and parallel identical requests yield one booking', async () => {
     const slotTime = new Date(Date.now() + 96 * 60 * 60 * 1000);
@@ -727,51 +763,77 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       idempotencyKey: testKey,
     };
 
-    // 1. Initial booking
-    const res1 = await request(app.getHttpServer())
-      .post('/api/booking')
-      .send(basePayload)
-      .expect(201);
+    // 1. Truly parallel identical submissions
+    const [res1, res2] = await Promise.all([
+      request(app.getHttpServer()).post('/api/booking').send(basePayload),
+      request(app.getHttpServer()).post('/api/booking').send(basePayload),
+    ]);
 
-    const bookingId = res1.body.id || res1.body.appointmentId;
-    expect(bookingId).toBeDefined();
+    expect(res1.status).toBeLessThan(300);
+    expect(res2.status).toBeLessThan(300);
+    const bookingId1 = res1.body.id || res1.body.appointmentId;
+    const bookingId2 = res2.body.id || res2.body.appointmentId;
+    expect(bookingId1).toBeDefined();
+    expect(bookingId1).toBe(bookingId2);
 
-    // 2. Identical submission with same key -> Returns existing booking
-    const resIdentical = await request(app.getHttpServer())
-      .post('/api/booking')
-      .send(basePayload);
+    // Verify database contains exactly ONE appointment with this key
+    const countInDb = await prisma.appointment.count({
+      where: { idempotencyKey: testKey },
+    });
+    expect(countInDb).toBe(1);
 
-    expect(resIdentical.status).toBeLessThan(300);
-    expect(resIdentical.body.id || resIdentical.body.appointmentId).toBe(bookingId);
-
-    // 3. Changed phone with reused key -> Rejected with 409 Conflict
+    // 2. Changed phone with reused key -> Rejected with 409 Conflict
     await request(app.getHttpServer())
       .post('/api/booking')
       .send({ ...basePayload, patientPhone: '+998901234567' })
       .expect(409);
 
-    // 4. Changed patient name with reused key -> Rejected with 409 Conflict
+    // 3. Changed patient name with reused key -> Rejected with 409 Conflict
     await request(app.getHttpServer())
       .post('/api/booking')
       .send({ ...basePayload, patientName: 'Different Name' })
       .expect(409);
 
-    // 5. Changed note with reused key -> Rejected with 409 Conflict
+    // 4. Changed note with reused key -> Rejected with 409 Conflict
     await request(app.getHttpServer())
       .post('/api/booking')
       .send({ ...basePayload, note: 'Tampered note' })
       .expect(409);
 
-    // 6. Changed start time with reused key -> Rejected with 409 Conflict
+    // 5. Changed start time with reused key -> Rejected with 409 Conflict
     const anotherTime = new Date(Date.now() + 85 * 60 * 60 * 1000).toISOString();
     await request(app.getHttpServer())
       .post('/api/booking')
       .send({ ...basePayload, startTime: anotherTime })
       .expect(409);
 
-    // Verify DB contains exactly 1 appointment for this idempotency key
-    const count = await prisma.appointment.count({ where: { idempotencyKey: testKey } });
-    expect(count).toBe(1);
+    // 6. Legacy idempotency key policy: key with missing fingerprint must be rejected with 409
+    const legacyKey = `legacy_${runId}_${Date.now()}`;
+    await prisma.appointment.create({
+      data: {
+        publicToken: `legacy_tok_${runId}_${Date.now()}`,
+        patientId: (await prisma.patient.findFirst())!.id,
+        doctorId: testDoctorBId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: new Date(Date.now() + 120 * 60 * 60 * 1000),
+        endTime: new Date(Date.now() + 121 * 60 * 60 * 1000),
+        serviceName: 'Legacy Service',
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        idempotencyKey: legacyKey,
+        requestFingerprint: null, // Legacy row lacking fingerprint
+        consentGiven: true,
+      },
+    });
+
+    const legacyRes = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({ ...basePayload, idempotencyKey: legacyKey })
+      .expect(409);
+
+    expect(legacyRes.body.message).toContain('idempotency');
   });
 
   // -------------------------------------------------------------
@@ -815,40 +877,388 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   });
 
   // -------------------------------------------------------------
-  // REGRESSION 18: Concurrency-Safe Owner Protection
+  // REGRESSION 18: Concurrency-Safe Owner Protection with Dual Owners
   // -------------------------------------------------------------
   it('Regression 18: Concurrency-safe owner protection prevents simultaneous demotions of last active owners', async () => {
-    const activeOwners = await prisma.staffUser.count({
-      where: { role: StaffRole.OWNER, isActive: true },
+    // Clean to exactly 1 owner before adding second owner
+    await prisma.staffUser.deleteMany({
+      where: {
+        role: StaffRole.OWNER,
+        id: { not: ownerUserId },
+      },
+    });
+    await prisma.staffUser.update({
+      where: { id: ownerUserId },
+      data: { role: StaffRole.OWNER, isActive: true },
     });
 
-    if (activeOwners === 1) {
-      const res = await request(app.getHttpServer())
+    // Explicitly create a second active OWNER
+    const secondOwner = await prisma.staffUser.create({
+      data: {
+        email: `second_owner_${runId}_${Date.now()}@dentacare.local`,
+        fullName: 'Second Verified Owner',
+        passwordHash: await bcrypt.hash('OwnerPassword2026!', 10),
+        role: StaffRole.OWNER,
+        isActive: true,
+      },
+    });
+
+    const activeOwnersBefore = await prisma.staffUser.count({
+      where: { role: StaffRole.OWNER, isActive: true },
+    });
+    expect(activeOwnersBefore).toBeGreaterThanOrEqual(2);
+
+    // Attempt CONCURRENT demotions of both owners simultaneously!
+    const [demoteRes1, demoteRes2] = await Promise.all([
+      request(app.getHttpServer())
         .put(`/api/admin/staff/${ownerUserId}`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ role: StaffRole.ADMIN })
-        .expect(400);
+        .send({ role: StaffRole.ADMIN }),
+      request(app.getHttpServer())
+        .put(`/api/admin/staff/${secondOwner.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ role: StaffRole.ADMIN }),
+    ]);
 
-      expect(res.body.message).toContain('OWNER');
-    }
+    // Mutex & transaction serialization guarantee they cannot both succeed!
+    const statuses = [demoteRes1.status, demoteRes2.status];
+    expect(statuses).toContain(400);
+
+    // At least ONE active owner strictly remains in the database
+    const remainingActiveOwners = await prisma.staffUser.count({
+      where: { role: StaffRole.OWNER, isActive: true },
+    });
+    expect(remainingActiveOwners).toBeGreaterThanOrEqual(1);
+
+    // Cleanup: restore original owner to OWNER if demoted, delete second owner
+    await prisma.staffUser.update({
+      where: { id: ownerUserId },
+      data: { role: StaffRole.OWNER, isActive: true },
+    });
+    await prisma.staffUser.delete({
+      where: { id: secondOwner.id },
+    });
+
+    // Re-login admin via authService directly to avoid HTTP throttler rate limits!
+    const reloginTokens = await authService.login('admin@dentacare.local', 'DentacareAdmin2026!');
+    adminToken = reloginTokens.accessToken;
   });
 
   // -------------------------------------------------------------
-  // REGRESSION 19: Doctor Utilization Exact Interval Calculations
+  // REGRESSION 19: Doctor Utilization Deterministic Fixtures
   // -------------------------------------------------------------
-  it('Regression 19: Doctor utilization accurately computes availability, breaks, and includes zero-appointment doctors', async () => {
-    const analyticsRes = await request(app.getHttpServer())
-      .get('/api/admin/analytics/overview?startDate=2026-10-15&endDate=2026-10-15')
+  it('Regression 19: Doctor utilization accurately computes availability, breaks, overtime on non-working days, and zero-appointment doctors', async () => {
+    // Create dedicated fixture doctor
+    const fixtureDoctor = await prisma.doctor.create({
+      data: {
+        slug: `fixture-doc-${runId}-${Date.now()}`,
+        firstNameUz: 'Aniq',
+        lastNameUz: 'Hisobchi',
+        firstNameRu: 'Точный',
+        lastNameRu: 'Бухгалтер',
+        titleUz: 'Bosh shifokor',
+        titleRu: 'Главный врач',
+        experienceYears: 10,
+        isActive: true,
+      },
+    });
+
+    // Dedicated zero-appointment doctor
+    const zeroDoctor = await prisma.doctor.create({
+      data: {
+        slug: `zero-doc-${runId}-${Date.now()}`,
+        firstNameUz: 'Nol',
+        lastNameUz: 'Bandlik',
+        firstNameRu: 'Ноль',
+        lastNameRu: 'Занятость',
+        titleUz: 'Shifokor',
+        titleRu: 'Врач',
+        experienceYears: 3,
+        isActive: true,
+      },
+    });
+
+    // 1. Monday Schedule for fixtureDoctor & zeroDoctor (09:00 - 18:00, lunch 13:00 - 14:00 => 480 min available)
+    await prisma.doctorSchedule.create({
+      data: {
+        doctorId: fixtureDoctor.id,
+        branchId: testBranchId,
+        dayOfWeek: DayOfWeek.MONDAY,
+        startTime: '09:00',
+        endTime: '18:00',
+        breakStart: '13:00',
+        breakEnd: '14:00',
+        isActive: true,
+      },
+    });
+
+    await prisma.doctorSchedule.create({
+      data: {
+        doctorId: zeroDoctor.id,
+        branchId: testBranchId,
+        dayOfWeek: DayOfWeek.MONDAY,
+        startTime: '09:00',
+        endTime: '18:00',
+        breakStart: '13:00',
+        breakEnd: '14:00',
+        isActive: true,
+      },
+    });
+
+    // 2. Overtime on Sunday 2026-11-01 (normally non-working day, 10:00 - 14:00 => 240 min available)
+    await prisma.scheduleException.create({
+      data: {
+        doctorId: fixtureDoctor.id,
+        type: ExceptionType.OVERTIME,
+        date: new Date('2026-11-01T00:00:00.000Z'),
+        startTime: '10:00',
+        endTime: '14:00',
+      },
+    });
+
+    // 3. Appointments on Monday 2026-11-02:
+    // Confirmed appointment of 60 minutes
+    const patient = await prisma.patient.findFirst();
+    await prisma.appointment.create({
+      data: {
+        publicToken: `util_tok_${runId}_1`,
+        patientId: patient!.id,
+        doctorId: fixtureDoctor.id,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: new Date('2026-11-02T05:00:00.000Z'), // 10:00 Tashkent
+        endTime: new Date('2026-11-02T06:05:00.000Z'),   // 11:05 Tashkent (60 min + 5 min buffer)
+        serviceName: 'Konsultatsiya',
+        durationMinutes: 60,
+        bufferMinutes: 5,
+        consentGiven: true,
+      },
+    });
+
+    // Cancelled appointment of 30 minutes (must NOT be counted in numerator!)
+    await prisma.appointment.create({
+      data: {
+        publicToken: `util_tok_${runId}_2`,
+        patientId: patient!.id,
+        doctorId: fixtureDoctor.id,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CANCELLED,
+        startTime: new Date('2026-11-02T07:00:00.000Z'),
+        endTime: new Date('2026-11-02T07:35:00.000Z'),
+        serviceName: 'Konsultatsiya',
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        consentGiven: true,
+      },
+    });
+
+    // No-show appointment of 30 minutes (must NOT be counted in numerator!)
+    await prisma.appointment.create({
+      data: {
+        publicToken: `util_tok_${runId}_3`,
+        patientId: patient!.id,
+        doctorId: fixtureDoctor.id,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.NO_SHOW,
+        startTime: new Date('2026-11-02T08:00:00.000Z'),
+        endTime: new Date('2026-11-02T08:35:00.000Z'),
+        serviceName: 'Konsultatsiya',
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        consentGiven: true,
+      },
+    });
+
+    // Test Sunday 2026-11-01 (Overtime on non-working day)
+    const sundayRes = await request(app.getHttpServer())
+      .get(`/api/admin/analytics/overview?startDate=2026-11-01&endDate=2026-11-01&doctorId=${fixtureDoctor.id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
-    const utilization = analyticsRes.body.doctorUtilization;
-    expect(Array.isArray(utilization)).toBe(true);
+    const sundayDoc = sundayRes.body.doctorUtilization[0];
+    expect(sundayDoc).toBeDefined();
+    expect(sundayDoc.totalAvailableMinutes).toBe(240); // Exactly 4 hours overtime
+    expect(sundayDoc.totalMinutesBooked).toBe(0);
 
-    const docWithZero = utilization.find((d: any) => d.appointmentsCount === 0);
-    if (docWithZero) {
-      expect(docWithZero.utilizationRate).toBe(0);
-      expect(docWithZero.totalMinutesBooked).toBe(0);
-    }
+    // Test Monday 2026-11-02 (Normal working day with 1 confirmed booking, excluding cancelled/no-show)
+    const mondayRes = await request(app.getHttpServer())
+      .get(`/api/admin/analytics/overview?startDate=2026-11-02&endDate=2026-11-02&doctorId=${fixtureDoctor.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    const mondayDoc = mondayRes.body.doctorUtilization[0];
+    expect(mondayDoc).toBeDefined();
+    expect(mondayDoc.totalAvailableMinutes).toBe(480); // 540 - 60 break = 480
+    expect(mondayDoc.totalMinutesBooked).toBe(60);      // Only confirmed appointment
+    expect(mondayDoc.totalBufferMinutes).toBe(5);
+    expect(mondayDoc.appointmentsCount).toBe(1);
+    expect(mondayDoc.utilizationRate).toBe(12.5);       // (60 / 480) * 100 = 12.5%
+
+    // Test zero-appointment doctor on Monday
+    const zeroRes = await request(app.getHttpServer())
+      .get(`/api/admin/analytics/overview?startDate=2026-11-02&endDate=2026-11-02&doctorId=${zeroDoctor.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    const zeroDoc = zeroRes.body.doctorUtilization[0];
+    expect(zeroDoc).toBeDefined();
+    expect(zeroDoc.totalAvailableMinutes).toBe(480);
+    expect(zeroDoc.totalMinutesBooked).toBe(0);
+    expect(zeroDoc.utilizationRate).toBe(0);
+
+    // Cleanup
+    await prisma.appointment.deleteMany({ where: { doctorId: fixtureDoctor.id } });
+    await prisma.scheduleException.deleteMany({ where: { doctorId: fixtureDoctor.id } });
+    await prisma.doctorSchedule.deleteMany({ where: { doctorId: { in: [fixtureDoctor.id, zeroDoctor.id] } } });
+    await prisma.doctor.deleteMany({ where: { id: { in: [fixtureDoctor.id, zeroDoctor.id] } } });
+  });
+
+  // -------------------------------------------------------------
+  // REGRESSION 20: Historical Buffer Preservation Across Reschedule
+  // -------------------------------------------------------------
+  it('Regression 20: Rescheduling preserves original buffer and duration snapshot even when clinic settings buffer changes', async () => {
+    const patient = await prisma.patient.findFirst();
+    const origStart = new Date(Date.now() + 100 * 60 * 60 * 1000);
+    origStart.setUTCHours(6, 0, 0, 0); // 11:00 Tashkent
+    if (origStart.getUTCDay() === 0) origStart.setUTCDate(origStart.getUTCDate() + 1);
+
+    const durationMinutes = 40;
+    const originalBuffer = 10; // Explicit 10-minute historical buffer
+    const origEnd = new Date(origStart.getTime() + (durationMinutes + originalBuffer) * 60 * 1000);
+
+    const historicalAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `hist_${runId}_${Date.now()}`,
+        patientId: patient!.id,
+        doctorId: testDoctorBId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: origStart,
+        endTime: origEnd,
+        serviceName: 'Buffer Test Service',
+        durationMinutes,
+        bufferMinutes: originalBuffer,
+        consentGiven: true,
+      },
+    });
+
+    // Mutate clinic settings buffer to 20 minutes
+    await prisma.clinicSettings.updateMany({
+      data: { bufferMinutes: 20 },
+    });
+
+    // Reschedule appointment to new slot
+    const newSlot = new Date(origStart.getTime() + 24 * 60 * 60 * 1000);
+    if (newSlot.getUTCDay() === 0) newSlot.setUTCDate(newSlot.getUTCDate() + 1);
+
+    const rescheduleRes = await request(app.getHttpServer())
+      .post(`/api/admin/appointments/${historicalAppt.id}/reschedule`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ startTime: newSlot.toISOString() })
+      .expect(200);
+
+    const resAppt = rescheduleRes.body.appointment || rescheduleRes.body;
+    expect(resAppt.bufferMinutes).toBe(originalBuffer); // Preserved at 10, NOT changed to 20!
+    expect(resAppt.durationMinutes).toBe(durationMinutes);
+    const diffMin = Math.round(
+      (new Date(resAppt.endTime).getTime() - new Date(resAppt.startTime).getTime()) / 60000,
+    );
+    expect(diffMin).toBe(durationMinutes + originalBuffer); // Exactly 50 minutes total duration
+
+    // Cleanup
+    await prisma.clinicSettings.updateMany({
+      data: { bufferMinutes: 5 },
+    });
+    await prisma.appointment.delete({ where: { id: historicalAppt.id } });
+  });
+
+  // -------------------------------------------------------------
+  // REGRESSION 21: Transactional Outbox & Notification Reliability
+  // -------------------------------------------------------------
+  it('Regression 21: Notification intents are persisted transactionally, outbox cancels stale reminders on reschedule/cancel', async () => {
+    const patient = await prisma.patient.findFirst();
+    const slotTime = new Date(Date.now() + 140 * 60 * 60 * 1000);
+    slotTime.setUTCHours(6, 0, 0, 0);
+    if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+
+    const bookingRes = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceId: testServiceId,
+        doctorId: testDoctorBId,
+        branchId: testBranchId,
+        startTime: slotTime.toISOString(),
+        patientName: `Outbox Patient ${runId}`,
+        patientPhone: `${testPhonePrefix}99`,
+        patientEmail: `outbox_${runId}@example.com`,
+        consentGiven: true,
+      })
+      .expect(201);
+
+    const apptId = bookingRes.body.id || bookingRes.body.appointmentId;
+
+    // 1. Verify notification job was transactionally created
+    const createdJobs = await prisma.notificationJob.findMany({
+      where: { appointmentId: apptId },
+    });
+    expect(createdJobs.length).toBeGreaterThanOrEqual(1);
+    const bookingJob = createdJobs.find((j) => j.templateKey === 'patient_booking_received' || j.templateKey === 'patient_booking_received_sms');
+    expect(bookingJob).toBeDefined();
+    expect(bookingJob!.status).toBe(NotificationStatus.PENDING);
+
+    // 2. Confirm appointment -> Verify patient_booking_confirmed enqueued
+    await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${apptId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: AppointmentStatus.CONFIRMED })
+      .expect(200);
+
+    const confirmedJobs = await prisma.notificationJob.findMany({
+      where: { appointmentId: apptId, templateKey: 'patient_booking_confirmed' },
+    });
+    expect(confirmedJobs.length).toBe(1);
+
+    // 3. Reschedule appointment -> Verify old reminder cancelled and appointment_rescheduled enqueued with revision 2
+    const newSlotTime = new Date(slotTime.getTime() + 24 * 60 * 60 * 1000);
+    if (newSlotTime.getUTCDay() === 0) newSlotTime.setUTCDate(newSlotTime.getUTCDate() + 1);
+
+    await request(app.getHttpServer())
+      .post(`/api/admin/appointments/${apptId}/reschedule`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ startTime: newSlotTime.toISOString() })
+      .expect(200);
+
+    const rescheduledJobs = await prisma.notificationJob.findMany({
+      where: { appointmentId: apptId, templateKey: 'appointment_rescheduled' },
+    });
+    expect(rescheduledJobs.length).toBe(1);
+    expect(rescheduledJobs[0].appointmentRevision).toBe(2);
+
+    // 4. Cancel appointment -> Verify appointment_cancellation enqueued and reminders cancelled
+    await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${apptId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: AppointmentStatus.CANCELLED })
+      .expect(200);
+
+    const cancelledJobs = await prisma.notificationJob.findMany({
+      where: { appointmentId: apptId, templateKey: 'appointment_cancellation' },
+    });
+    expect(cancelledJobs.length).toBe(1);
+
+    // All reminders must be in CANCELLED status
+    const pendingReminders = await prisma.notificationJob.findMany({
+      where: { appointmentId: apptId, templateKey: 'appointment_reminder', status: NotificationStatus.PENDING },
+    });
+    expect(pendingReminders.length).toBe(0);
+
+    // Cleanup
+    await prisma.notificationJob.deleteMany({ where: { appointmentId: apptId } });
+    await prisma.appointment.delete({ where: { id: apptId } });
   });
 });
+

@@ -47,8 +47,11 @@ export class NotificationsService {
         port,
         secure: port === 465,
         auth: { user, pass },
+        connectionTimeout: 5000,
+        greetingTimeout: 5000,
+        socketTimeout: 10000,
       });
-      this.logger.log('SMTP mail transporter initialized');
+      this.logger.log('SMTP mail transporter initialized with bounded timeouts');
     }
   }
 
@@ -76,12 +79,16 @@ export class NotificationsService {
   }
 
   /**
-   * Enqueue a durable notification job with deduplication
+   * Enqueue a durable notification job with deduplication, supporting transactions
    */
-  async enqueue(params: EnqueueNotificationParams) {
+  async enqueue(
+    params: EnqueueNotificationParams,
+    tx?: Prisma.TransactionClient | PrismaService,
+  ) {
+    const client = tx || this.prisma;
     try {
       if (params.deduplicationKey) {
-        const existing = await this.prisma.notificationJob.findUnique({
+        const existing = await client.notificationJob.findUnique({
           where: { deduplicationKey: params.deduplicationKey },
         });
         if (existing) {
@@ -89,14 +96,14 @@ export class NotificationsService {
         }
       }
 
-      return await this.prisma.notificationJob.create({
+      return await client.notificationJob.create({
         data: {
           channel: params.channel,
           templateKey: params.templateKey,
           recipient: params.recipient,
           payload: params.payload as Prisma.InputJsonValue,
           appointmentId: params.appointmentId || null,
-          appointmentRevision: params.appointmentRevision || null,
+          appointmentRevision: params.appointmentRevision ?? null,
           scheduledFor: params.scheduledFor || new Date(),
           deduplicationKey: params.deduplicationKey || null,
           status: NotificationStatus.PENDING,
@@ -109,96 +116,255 @@ export class NotificationsService {
   }
 
   /**
-   * Helper: Queue standard appointment notifications
+   * Transactional Outbox: Enqueue booking created notifications
    */
-  async notifyBookingCreated(appointment: {
-    id: string;
-    startTime: Date;
-    serviceName: string;
-    patientEmail?: string | null;
-    patientPhone: string;
-    revision?: number;
-  }) {
+  async enqueueBookingCreated(
+    appointment: {
+      id: string;
+      startTime: Date;
+      serviceName: string;
+      patientEmail?: string | null;
+      patientPhone: string;
+      revision?: number;
+    },
+    tx?: Prisma.TransactionClient | PrismaService,
+  ) {
     const formattedTime = this.formatTashkentTime(appointment.startTime);
+    const revision = appointment.revision ?? 1;
 
-    // 1. Patient Email or SMS
+    // 1. Patient Confirmation / Received (Email or SMS)
     if (appointment.patientEmail) {
-      await this.enqueue({
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'patient_booking_received',
-        recipient: appointment.patientEmail,
-        appointmentId: appointment.id,
-        appointmentRevision: appointment.revision || 1,
-        deduplicationKey: `booking_email_${appointment.id}`,
-        payload: {
+      await this.enqueue(
+        {
+          channel: NotificationChannel.EMAIL,
+          templateKey: 'patient_booking_received',
+          recipient: appointment.patientEmail,
           appointmentId: appointment.id,
-          serviceName: appointment.serviceName,
-          startTime: appointment.startTime.toISOString(),
-          formattedTime,
+          appointmentRevision: revision,
+          deduplicationKey: `booking_email_${appointment.id}`,
+          payload: {
+            appointmentId: appointment.id,
+            serviceName: appointment.serviceName,
+            startTime: appointment.startTime.toISOString(),
+            formattedTime,
+          },
         },
-      });
+        tx,
+      );
     } else {
-      await this.enqueue({
-        channel: NotificationChannel.SMS,
-        templateKey: 'patient_booking_received_sms',
-        recipient: appointment.patientPhone,
-        appointmentId: appointment.id,
-        appointmentRevision: appointment.revision || 1,
-        deduplicationKey: `booking_sms_${appointment.id}`,
-        payload: {
+      await this.enqueue(
+        {
+          channel: NotificationChannel.SMS,
+          templateKey: 'patient_booking_received_sms',
+          recipient: appointment.patientPhone,
           appointmentId: appointment.id,
-          serviceName: appointment.serviceName,
-          startTime: appointment.startTime.toISOString(),
-          formattedTime,
+          appointmentRevision: revision,
+          deduplicationKey: `booking_sms_${appointment.id}`,
+          payload: {
+            appointmentId: appointment.id,
+            serviceName: appointment.serviceName,
+            startTime: appointment.startTime.toISOString(),
+            formattedTime,
+          },
         },
-      });
+        tx,
+      );
     }
 
     // 2. Staff Telegram alert (no patient details, link to authenticated admin only)
     const telegramChatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
     if (telegramChatId) {
       const frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
-      await this.enqueue({
-        channel: NotificationChannel.TELEGRAM,
-        templateKey: 'staff_new_booking',
-        recipient: telegramChatId,
-        appointmentId: appointment.id,
-        deduplicationKey: `staff_tg_${appointment.id}`,
-        payload: {
-          serviceName: appointment.serviceName,
-          startTime: appointment.startTime.toISOString(),
-          formattedTime,
-          adminUrl: `${frontendUrl}/admin/calendar?appointmentId=${appointment.id}`,
+      await this.enqueue(
+        {
+          channel: NotificationChannel.TELEGRAM,
+          templateKey: 'staff_new_booking',
+          recipient: telegramChatId,
+          appointmentId: appointment.id,
+          deduplicationKey: `staff_tg_${appointment.id}`,
+          payload: {
+            serviceName: appointment.serviceName,
+            startTime: appointment.startTime.toISOString(),
+            formattedTime,
+            adminUrl: `${frontendUrl}/admin/calendar?appointmentId=${appointment.id}`,
+          },
         },
-      });
+        tx,
+      );
     }
 
     // 3. Reminder (2 hours before start)
     const reminderTime = new Date(appointment.startTime.getTime() - 2 * 60 * 60 * 1000);
     if (reminderTime > new Date()) {
-      await this.enqueue({
+      await this.enqueue(
+        {
+          channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: appointment.patientEmail || appointment.patientPhone,
+          appointmentId: appointment.id,
+          appointmentRevision: revision,
+          scheduledFor: reminderTime,
+          deduplicationKey: `reminder_${appointment.id}_rev${revision}`,
+          payload: {
+            appointmentId: appointment.id,
+            serviceName: appointment.serviceName,
+            startTime: appointment.startTime.toISOString(),
+            formattedTime,
+          },
+        },
+        tx,
+      );
+    }
+  }
+
+  /**
+   * Transactional Outbox: Enqueue appointment confirmed notification
+   */
+  async enqueueAppointmentConfirmed(
+    appointment: {
+      id: string;
+      startTime: Date;
+      serviceName: string;
+      patientEmail?: string | null;
+      patientPhone: string;
+      revision?: number;
+    },
+    tx?: Prisma.TransactionClient | PrismaService,
+  ) {
+    const formattedTime = this.formatTashkentTime(appointment.startTime);
+    const revision = appointment.revision ?? 1;
+
+    await this.enqueue(
+      {
         channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
-        templateKey: 'appointment_reminder',
+        templateKey: 'patient_booking_confirmed',
         recipient: appointment.patientEmail || appointment.patientPhone,
         appointmentId: appointment.id,
-        appointmentRevision: appointment.revision || 1,
-        scheduledFor: reminderTime,
-        deduplicationKey: `reminder_${appointment.id}_rev${appointment.revision || 1}`,
+        appointmentRevision: revision,
+        deduplicationKey: `confirmed_${appointment.id}_rev${revision}`,
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
           startTime: appointment.startTime.toISOString(),
           formattedTime,
         },
-      });
+      },
+      tx,
+    );
+  }
+
+  /**
+   * Transactional Outbox: Enqueue cancellation notification and cancel pending reminders
+   */
+  async enqueueAppointmentCancelled(
+    appointment: {
+      id: string;
+      startTime: Date;
+      serviceName: string;
+      patientEmail?: string | null;
+      patientPhone: string;
+      revision?: number;
+    },
+    tx?: Prisma.TransactionClient | PrismaService,
+  ) {
+    // 1. Cancel pending reminders immediately inside tx
+    await this.cancelAppointmentReminders(appointment.id, tx);
+
+    const formattedTime = this.formatTashkentTime(appointment.startTime);
+    const revision = appointment.revision ?? 1;
+
+    // 2. Queue cancellation notice
+    await this.enqueue(
+      {
+        channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+        templateKey: 'appointment_cancellation',
+        recipient: appointment.patientEmail || appointment.patientPhone,
+        appointmentId: appointment.id,
+        appointmentRevision: revision,
+        deduplicationKey: `cancelled_${appointment.id}_rev${revision}`,
+        payload: {
+          appointmentId: appointment.id,
+          serviceName: appointment.serviceName,
+          startTime: appointment.startTime.toISOString(),
+          formattedTime,
+        },
+      },
+      tx,
+    );
+  }
+
+  /**
+   * Transactional Outbox: Enqueue rescheduled notification, cancel obsolete reminders,
+   * and schedule fresh reminder for new time
+   */
+  async enqueueAppointmentRescheduled(
+    appointment: {
+      id: string;
+      startTime: Date;
+      serviceName: string;
+      patientEmail?: string | null;
+      patientPhone: string;
+      revision: number;
+    },
+    tx?: Prisma.TransactionClient | PrismaService,
+  ) {
+    // 1. Cancel previous pending reminders inside tx
+    await this.cancelAppointmentReminders(appointment.id, tx);
+
+    const formattedTime = this.formatTashkentTime(appointment.startTime);
+
+    // 2. Queue reschedule notification
+    await this.enqueue(
+      {
+        channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+        templateKey: 'appointment_rescheduled',
+        recipient: appointment.patientEmail || appointment.patientPhone,
+        appointmentId: appointment.id,
+        appointmentRevision: appointment.revision,
+        deduplicationKey: `rescheduled_${appointment.id}_rev${appointment.revision}`,
+        payload: {
+          appointmentId: appointment.id,
+          serviceName: appointment.serviceName,
+          startTime: appointment.startTime.toISOString(),
+          formattedTime,
+        },
+      },
+      tx,
+    );
+
+    // 3. Queue new reminder for rescheduled time
+    const reminderTime = new Date(appointment.startTime.getTime() - 2 * 60 * 60 * 1000);
+    if (reminderTime > new Date()) {
+      await this.enqueue(
+        {
+          channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: appointment.patientEmail || appointment.patientPhone,
+          appointmentId: appointment.id,
+          appointmentRevision: appointment.revision,
+          scheduledFor: reminderTime,
+          deduplicationKey: `reminder_${appointment.id}_rev${appointment.revision}`,
+          payload: {
+            appointmentId: appointment.id,
+            serviceName: appointment.serviceName,
+            startTime: appointment.startTime.toISOString(),
+            formattedTime,
+          },
+        },
+        tx,
+      );
     }
   }
 
   /**
    * Cancel pending reminders when appointment is rescheduled or cancelled
    */
-  async cancelAppointmentReminders(appointmentId: string) {
-    await this.prisma.notificationJob.updateMany({
+  async cancelAppointmentReminders(
+    appointmentId: string,
+    tx?: Prisma.TransactionClient | PrismaService,
+  ) {
+    const client = tx || this.prisma;
+    await client.notificationJob.updateMany({
       where: {
         appointmentId,
         status: NotificationStatus.PENDING,
@@ -211,9 +377,9 @@ export class NotificationsService {
   }
 
   /**
-   * Cron runner: Process pending notification jobs every minute
-   * Uses PostgreSQL FOR UPDATE SKIP LOCKED and UUID lease ownership tokens
-   * to ensure multiple workers never deliver the same job or overwrite each other.
+   * Cron runner: Process pending notification jobs every minute.
+   * Atomically claims jobs using PostgreSQL FOR UPDATE SKIP LOCKED and a unique UUID worker lease token.
+   * Prevents expired workers from initiating external delivery or overwriting newer worker states.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async processPendingJobs() {
@@ -258,15 +424,20 @@ export class NotificationsService {
   }
 
   private async deliverJob(job: any, workerLeaseToken: string) {
-    // Pre-flight check: ONLY apply status suppression to reminders!
-    // Do NOT blanket-suppress cancellation notices just because appointment is cancelled!
+    // 1. Pre-flight check: ONLY apply status suppression to reminders!
     if (job.appointmentId && job.templateKey === 'appointment_reminder') {
       const appt = await this.prisma.appointment.findUnique({
         where: { id: job.appointmentId },
         select: { status: true, startTime: true, revision: true },
       });
 
-      if (!appt || ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(appt.status)) {
+      // Cancel reminder if appointment is cancelled, completed, or no-show
+      if (
+        !appt ||
+        ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(
+          appt.status,
+        )
+      ) {
         await this.prisma.$executeRaw`
           UPDATE "notification_jobs"
           SET status = 'CANCELLED'::"notification_status",
@@ -288,6 +459,33 @@ export class NotificationsService {
         `;
         return;
       }
+
+      // Safe policy for historical jobs with null revision: cancel if startTime differs or revision > 1
+      if (
+        job.appointmentRevision === null &&
+        (appt.revision > 1 ||
+          (job.payload?.startTime &&
+            new Date(job.payload.startTime).toISOString() !== appt.startTime.toISOString()))
+      ) {
+        await this.prisma.$executeRaw`
+          UPDATE "notification_jobs"
+          SET status = 'CANCELLED'::"notification_status",
+              "last_error" = 'Eski eslatma vaqti joriy qabul vaqtiga mos kelmaganligi sababli bekor qilindi',
+              "lease_token" = NULL
+          WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+        `;
+        return;
+      }
+    }
+
+    // 2. Verify worker STILL holds the lease before initiating delivery!
+    const [stillOwned] = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "notification_jobs"
+      WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken} AND status = 'PROCESSING'::"notification_status";
+    `;
+    if (!stillOwned) {
+      this.logger.warn(`Worker lost lease on job ${job.id}; aborting external delivery.`);
+      return;
     }
 
     try {
@@ -356,6 +554,10 @@ export class NotificationsService {
         to: job.recipient,
         subject,
         text,
+        headers: {
+          'X-DentaCare-Job-ID': job.id,
+          'X-DentaCare-Deduplication': job.deduplicationKey || job.id,
+        },
       });
       return true;
     } else {
@@ -390,11 +592,14 @@ export class NotificationsService {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${smsApiKey}`,
+            'X-Idempotency-Key': job.deduplicationKey || job.id,
           },
           body: JSON.stringify({
             recipient: job.recipient,
             message,
+            idempotencyKey: job.deduplicationKey || job.id,
           }),
+          signal: AbortSignal.timeout(5000),
         });
         if (!res.ok) {
           throw new Error(`SMS Provider error ${res.status}: ${await res.text()}`);
@@ -417,7 +622,6 @@ export class NotificationsService {
     const payload = job.payload || {};
     const formattedTime = payload.formattedTime || this.formatTashkentTime(payload.startTime || new Date());
 
-    // Notice: Patient PII is completely excluded! Only service, time, and link to authenticated admin!
     const text = `🔔 *Yangi qabul so'rovi!*\n\nXizmat: ${payload.serviceName}\nVaqti: ${formattedTime}\n\n👉 Boshqaruv paneli: ${payload.adminUrl}`;
 
     if (botToken) {
@@ -430,6 +634,7 @@ export class NotificationsService {
             text,
             parse_mode: 'Markdown',
           }),
+          signal: AbortSignal.timeout(5000),
         });
 
         if (!res.ok) {

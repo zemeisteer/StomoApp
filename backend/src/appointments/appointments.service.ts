@@ -66,20 +66,33 @@ export function computeBookingFingerprint(params: {
   const normalizedBranch = (params.branchId || '').trim();
   const normalizedStartTime = new Date(params.startTimeIso).toISOString();
 
-  const canonical = [
-    `scope:${params.scope}`,
-    `service:${params.serviceId}`,
-    `doctor:${params.doctorId}`,
-    `branch:${normalizedBranch}`,
-    `time:${normalizedStartTime}`,
-    `name:${normalizedName}`,
-    `phone:${normalizedPhone}`,
-    `email:${normalizedEmail}`,
-    `note:${normalizedNote}`,
-    `consent:${Boolean(params.consentGiven)}`,
-  ].join('|');
+  // Canonical JSON representation with fixed, sorted keys to prevent delimiter collision
+  const canonicalObj = {
+    branchId: normalizedBranch,
+    consentGiven: Boolean(params.consentGiven),
+    doctorId: params.doctorId,
+    email: normalizedEmail,
+    name: normalizedName,
+    note: normalizedNote,
+    phone: normalizedPhone,
+    scope: params.scope,
+    serviceId: params.serviceId,
+    startTimeIso: normalizedStartTime,
+  };
 
-  return crypto.createHash('sha256').update(canonical).digest('hex');
+  return crypto.createHash('sha256').update(JSON.stringify(canonicalObj)).digest('hex');
+}
+
+export function verifyFingerprintMatch(
+  existingFingerprint: string | null | undefined,
+  reqFingerprint: string,
+): boolean {
+  if (!existingFingerprint) {
+    // POLICY: Legacy idempotency rows lacking cryptographic request fingerprints
+    // cannot be safely verified; key reuse is rejected to prevent payload mismatch.
+    return false;
+  }
+  return existingFingerprint === reqFingerprint;
 }
 
 @Injectable()
@@ -124,31 +137,18 @@ export class AppointmentsService {
       });
 
       if (existing) {
-        // Validate request fingerprint: reject key reuse with ANY altered payload
-        let matches = false;
-        if (existing.requestFingerprint) {
-          matches = existing.requestFingerprint === reqFingerprint;
-        } else {
-          // Fallback legacy fingerprint check
-          const existingStartTime = existing.startTime.toISOString();
-          const reqStartTime = new Date(dto.startTime).toISOString();
-          const legacyMatch =
-            existing.doctorId === dto.doctorId &&
-            existing.serviceId === dto.serviceId &&
-            existingStartTime === reqStartTime &&
-            this.normalizePhone(existing.patient.phone) === this.normalizePhone(dto.patientPhone);
-          matches = legacyMatch;
-        }
-
-        if (!matches) {
+        if (!verifyFingerprintMatch(existing.requestFingerprint, reqFingerprint)) {
           throw new ConflictException(
-            'Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan',
+            existing.requestFingerprint
+              ? 'Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan'
+              : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
           );
         }
 
         // Return stable existing appointment response
         return {
           id: existing.id,
+          appointmentId: existing.id,
           publicToken: existing.publicToken,
           status: existing.status,
           startTime: existing.startTime,
@@ -302,6 +302,52 @@ export class AppointmentsService {
           // Acquire PostgreSQL transactional advisory lock
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
+          // If idempotencyKey was committed by a concurrent transaction while waiting for lock
+          if (dto.idempotencyKey) {
+            const existingInLock = await tx.appointment.findUnique({
+              where: { idempotencyKey: dto.idempotencyKey },
+              include: { doctor: true, service: true, branch: true, patient: true },
+            });
+            if (existingInLock) {
+              if (!verifyFingerprintMatch(existingInLock.requestFingerprint, reqFingerprint)) {
+                throw new ConflictException(
+                  existingInLock.requestFingerprint
+                    ? 'Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan'
+                    : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
+                );
+              }
+              return {
+                id: existingInLock.id,
+                appointmentId: existingInLock.id,
+                publicToken: existingInLock.publicToken,
+                status: existingInLock.status,
+                startTime: existingInLock.startTime,
+                endTime: existingInLock.endTime,
+                serviceName: existingInLock.serviceName,
+                doctor: {
+                  id: existingInLock.doctor.id,
+                  firstNameUz: existingInLock.doctor.firstNameUz,
+                  lastNameUz: existingInLock.doctor.lastNameUz,
+                  firstNameRu: existingInLock.doctor.firstNameRu,
+                  lastNameRu: existingInLock.doctor.lastNameRu,
+                },
+              };
+            }
+          }
+
+          // Revalidate working hours inside protected transaction lock
+          const isWorking = await this.schedulingService.isDoctorWorkingAt(
+            dto.doctorId,
+            startTimeUtc,
+            endTimeUtc,
+            timezone,
+            resolvedBranchId,
+            tx,
+          );
+          if (!isWorking) {
+            throw new BadRequestException('Tanlangan vaqt shifokor ish grafigidan tashqarida');
+          }
+
           // Double check overlap within lock
           const conflicting = await tx.appointment.findFirst({
             where: {
@@ -391,6 +437,19 @@ export class AppointmentsService {
             },
           });
 
+          // Transactional Outbox: persist notification intent inside the same transaction
+          await this.notificationsService.enqueueBookingCreated(
+            {
+              id: appointment.id,
+              startTime: appointment.startTime,
+              serviceName: appointment.serviceName,
+              patientEmail: patient.email || undefined,
+              patientPhone: patient.phone,
+              revision: appointment.revision,
+            },
+            tx,
+          );
+
           return appointment;
         }, {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -405,11 +464,16 @@ export class AppointmentsService {
             include: { doctor: true, service: true, branch: true, patient: true },
           });
           if (raced) {
-            if (raced.requestFingerprint && raced.requestFingerprint !== reqFingerprint) {
-              throw new ConflictException('Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan');
+            if (!verifyFingerprintMatch(raced.requestFingerprint, reqFingerprint)) {
+              throw new ConflictException(
+                raced.requestFingerprint
+                  ? 'Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan'
+                  : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
+              );
             }
             return {
               id: raced.id,
+              appointmentId: raced.id,
               publicToken: raced.publicToken,
               status: raced.status,
               startTime: raced.startTime,
@@ -441,20 +505,11 @@ export class AppointmentsService {
       }
     }
 
-    // Queue notifications after transaction is successfully committed
-    try {
-      await this.notificationsService.notifyBookingCreated({
-        id: createdAppointment.id,
-        startTime: createdAppointment.startTime,
-        serviceName: createdAppointment.serviceName,
-        patientEmail: createdAppointment.patient.email || undefined,
-        patientPhone: createdAppointment.patient.phone,
-      });
-    } catch (e: any) {
-      this.logger.warn(`Failed to queue booking notifications: ${e?.message}`);
-    }
-
-    return createdAppointment;
+    return {
+      ...createdAppointment,
+      id: createdAppointment.id,
+      appointmentId: createdAppointment.appointmentId || createdAppointment.id,
+    };
   }
 
   /**
@@ -538,21 +593,35 @@ export class AppointmentsService {
         },
       });
 
-      if (newStatus === AppointmentStatus.CANCELLED) {
-        didCancel = true;
+      // Transactional Outbox: persist notification intent for status changes
+      if (newStatus === AppointmentStatus.CONFIRMED) {
+        await this.notificationsService.enqueueAppointmentConfirmed(
+          {
+            id: appt.id,
+            startTime: appt.startTime,
+            serviceName: appt.serviceName,
+            patientEmail: appt.patient?.email || undefined,
+            patientPhone: appt.patient?.phone || '',
+            revision: appt.revision,
+          },
+          tx,
+        );
+      } else if (newStatus === AppointmentStatus.CANCELLED) {
+        await this.notificationsService.enqueueAppointmentCancelled(
+          {
+            id: appt.id,
+            startTime: appt.startTime,
+            serviceName: appt.serviceName,
+            patientEmail: appt.patient?.email || undefined,
+            patientPhone: appt.patient?.phone || '',
+            revision: appt.revision,
+          },
+          tx,
+        );
       }
 
       return appt;
     });
-
-    // Cancel pending reminders AFTER transaction commits
-    if (didCancel) {
-      try {
-        await this.notificationsService.cancelAppointmentReminders(appointmentId);
-      } catch (err: any) {
-        this.logger.warn(`Failed to cancel reminders for ${appointmentId}: ${err?.message}`);
-      }
-    }
 
     return updated;
   }
@@ -648,10 +717,14 @@ export class AppointmentsService {
           // Check doctor eligibility and active status inside transaction
           const doctor = await tx.doctor.findUnique({
             where: { id: appointment.doctorId },
-            include: { branches: true },
+            include: { branches: true, services: true },
           });
           if (!doctor || !doctor.isActive || doctor.isArchived) {
             throw new BadRequestException('Shifokor faol emas yoki arxivlangan');
+          }
+          const isServiceAssigned = doctor.services.some((s) => s.serviceId === appointment.serviceId);
+          if (!isServiceAssigned) {
+            throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatishga biriktirilmagan');
           }
 
           // Check service eligibility and active status inside transaction
@@ -670,19 +743,20 @@ export class AppointmentsService {
             if (!branch || !branch.isActive) {
               throw new BadRequestException('Filial faol emas');
             }
-            const isAssigned = doctor.branches.some(b => b.branchId === appointment.branchId);
+            const isAssigned = doctor.branches.some((b) => b.branchId === appointment.branchId);
             if (!isAssigned) {
               throw new BadRequestException('Shifokor bu filialga biriktirilmagan');
             }
           }
 
-          // Validate working hours inside transaction lock
+          // Validate working hours inside transaction lock using tx!
           const isWorking = await this.schedulingService.isDoctorWorkingAt(
             appointment.doctorId,
             newStartTime,
             newEndTime,
             timezone,
             appointment.branchId || undefined,
+            tx,
           );
           if (!isWorking) {
             throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
@@ -738,40 +812,18 @@ export class AppointmentsService {
             },
           });
 
-          // Transactionally durable notification intent: cancel old reminders in DB
-          await tx.notificationJob.updateMany({
-            where: {
-              appointmentId,
-              status: NotificationStatus.PENDING,
-              templateKey: 'appointment_reminder',
+          // Transactionally durable notification intent for rescheduling
+          await this.notificationsService.enqueueAppointmentRescheduled(
+            {
+              id: appt.id,
+              startTime: appt.startTime,
+              serviceName: appt.serviceName,
+              patientEmail: appt.patient?.email || undefined,
+              patientPhone: appt.patient?.phone || '',
+              revision: appt.revision,
             },
-            data: {
-              status: NotificationStatus.CANCELLED,
-            },
-          });
-
-          // Transactionally schedule new reminder in DB (outbox)
-          const reminderTime = new Date(newStartTime.getTime() - 2 * 60 * 60 * 1000);
-          if (reminderTime > new Date()) {
-            await tx.notificationJob.create({
-              data: {
-                channel: appt.patient.email ? NotificationChannel.EMAIL : NotificationChannel.SMS,
-                templateKey: 'appointment_reminder',
-                recipient: appt.patient.email || appt.patient.phone,
-                appointmentId: appt.id,
-                appointmentRevision: appt.revision,
-                scheduledFor: reminderTime,
-                deduplicationKey: `reminder_${appt.id}_rev${appt.revision}_${newStartTime.getTime()}`,
-                status: NotificationStatus.PENDING,
-                payload: {
-                  appointmentId: appt.id,
-                  serviceName: appt.serviceName,
-                  startTime: newStartTime.toISOString(),
-                  revision: appt.revision,
-                },
-              },
-            });
-          }
+            tx,
+          );
 
           return appt;
         }, {

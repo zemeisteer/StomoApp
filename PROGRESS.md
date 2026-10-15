@@ -140,16 +140,76 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
   - Frontend: `npm run build` passed with code 0 (`next build`, 28/28 routes prerendered).
   - Frontend Lint: `npm run lint` passed with code 0 (`next lint`).
 
+#### Phase 10: Historical Data, Transactional Consistency, Outbox & Browser Verification (COMPLETED & VERIFIED)
+- **Historical Buffer & Revision Forward Migration**:
+  - Migration `backend/prisma/migrations/20261015121500_backfill_historical_buffers_and_revisions` safely applied to development (`dentacare`) and test (`dentacare_test`) databases.
+  - Derives `buffer_minutes = ROUND(EXTRACT(EPOCH FROM (end_time - start_time)) / 60)::integer - duration_minutes` where reliable (0..120 mins).
+  - Backfills `notification_jobs.appointment_revision` from `Appointment.revision`.
+  - Preserves duration and buffer snapshot on reschedule even if clinic settings change.
+- **Consistent & Transactional Scheduling**:
+  - `SchedulingService.isDoctorWorkingAt` and `isTimeSlotAvailable` accept transaction client `tx?: Prisma.TransactionClient | PrismaService`.
+  - Schedule and exception mutations wrapped in transactions with `pg_advisory_xact_lock`.
+  - Adding blocked/leave periods checks active bookings (`PENDING`, `CONFIRMED`, `CHECKED_IN`) and returns 409 Conflict.
+  - Deterministic exception precedence (Weekly -> Breaks -> Overtime -> Blocked -> Leaves/Holidays).
+  - Overtime supported on days without regular weekly schedules.
+- **Legacy Idempotency Safety**:
+  - Strict policy for legacy idempotency keys: unverifiable reuse without fingerprints is rejected with 409 Conflict.
+  - Sorted canonical JSON serialization for request fingerprints.
+  - Identical payloads produce a single booking; altered payloads return 409 Conflict.
+  - Handled atomically in PostgreSQL advisory locks and P2002 unique constraint recovery.
+- **Transactional Notification Outbox**:
+  - Booking, confirmation, reschedule, and cancellation notification intents persisted transactionally inside the same transaction as appointment mutations.
+  - Worker lease re-check (`status = PROCESSING AND lease_token = :token`) before delivery initiation prevents workers that lost their lease from sending messages.
+  - Bounded 5s timeouts on external channels.
+  - Stale reminder cancellation policy matching appointment revision.
+- **Analytics Calculations**:
+  - Removed early `continue` on empty `daySchedules` in `analytics.service.ts` to count overtime-only days.
+  - Enforced deterministic exception precedence and UTC date enumeration.
+  - Added `totalBufferMinutes` and `totalOccupiedMinutes` metrics.
+- **Hardened Regression Suite (21/21 passed, 0 failed)**:
+  - Regression 6: True concurrent `Promise.all` submissions, identical returns 201, changed returns 409.
+  - Regression 18: Two active owners, concurrent demotions, exactly 1 owner strictly remains.
+  - Regression 19: Isolated fixture doctor with exact date-level available minute calculations.
+  - Regression 20: Buffer preservation on reschedule.
+  - Regression 21: Transactional outbox notification intent persistence and reminder lifecycle.
+- **Automated Browser Verification**:
+  - Local Chrome `puppeteer-core` automation executed across desktop (1440px), tablet (768px), and mobile (390px).
+  - Verified connected visitor booking flow -> admin calendar appearance -> analytics dashboard.
+  - 12 high-resolution screenshots saved to artifact directory:
+    - `desktop_homepage.png`
+    - `desktop_booking_slot.png`
+    - `desktop_booking_form.png`
+    - `desktop_booking_confirmation.png`
+    - `desktop_admin_login.png`
+    - `desktop_admin_calendar.png`
+    - `desktop_admin_analytics.png`
+    - `desktop_admin_cms.png`
+    - `mobile_homepage.png`
+    - `mobile_booking.png`
+    - `mobile_admin_calendar.png`
+    - `tablet_homepage.png`
+
 ---
 
 ### Verification Summary
 | Check | Command | Result |
 |---|---|---|
+| Historical Data Forward Migration | `npx prisma migrate deploy` | **APPLIED (dev + test DBs)** |
 | Backend Type Check & Build | `npm run build` | **PASS (code 0)** |
 | Backend ESLint | `npm run lint` | **PASS (code 0)** |
 | Frontend Type Check & Build | `npm run build` | **PASS (code 0, 28/28 routes)** |
 | Frontend ESLint | `npm run lint` | **PASS (code 0)** |
 | Dedicated Test Database | `dentacare_test` (PostgreSQL 18) | **CONFIGURED & MIGRATED** |
-| Backend E2E Regression Suite | `npm run test:e2e` | **PASS (19/19 passed, 0 failed)** |
+| Backend E2E Regression Suite | `npm run test:e2e` | **PASS (21/21 passed, 0 failed in 29.6s)** |
 | Live Dev Servers | Backend (:4000) & Frontend (:3000) | **HEALTHY & RESPONDING (HTTP 200)** |
+| Browser Automation & Screenshots | `node test/browser-workflow.js` | **PASS (12/12 screenshots captured)** |
+
+### Remaining Limitations & Honest Blockers
+1. **Third-Party External Notification Gateways (Eskiz SMS & Telegram Bot)**:
+   - Real-world production SMS delivery requires valid Eskiz.uz credentials (`ESKIZ_EMAIL`, `ESKIZ_PASSWORD`).
+   - Real-world Telegram broadcasting requires an active `TELEGRAM_BOT_TOKEN` and configured `TELEGRAM_ADMIN_CHAT_ID`.
+   - In development/testing, fake/mock provider sinks are used as required to guarantee zero unwanted patient message dispatch while fully exercising the outbox queue and lease protocol.
+2. **WebGL / 3D Canvas in Headless Environments**:
+   - In headless environments without hardware GPU acceleration, Three.js falls back to the clean procedural SVG poster fallback as designed. In real Google Chrome with hardware acceleration, the 3D interactive molar tooth renders with full touch-pan-y orbit controls.
+
 
