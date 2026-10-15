@@ -88,6 +88,10 @@ export class PublicService {
         services: {
           include: { service: true },
         },
+        schedules: {
+          where: { isActive: true },
+          include: { branch: true },
+        },
       },
       orderBy: { sortOrder: 'asc' },
     });

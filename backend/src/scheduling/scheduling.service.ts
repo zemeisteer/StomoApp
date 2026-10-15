@@ -283,6 +283,8 @@ export class SchedulingService {
     serviceId: string,
     branchId?: string,
     timezone: string = 'Asia/Tashkent',
+    customDurationMinutes?: number,
+    serviceIds?: string[],
   ): Promise<TimeSlot[]> {
     // Validate doctor
     const doctor = await this.prisma.doctor.findFirst({
@@ -322,9 +324,26 @@ export class SchedulingService {
     const localDay = new Date(year, month - 1, day, 0, 0, 0, 0);
 
     const clinicSettings = await this.prisma.clinicSettings.findFirst();
-    const durationMinutes = service.durationMinutes;
+
+    // Multi-service combined duration calculation
+    let effectiveDuration = customDurationMinutes ?? (doctorService.customDurationMinutes ?? service.durationMinutes);
+    if (!customDurationMinutes && serviceIds && serviceIds.length > 1) {
+      const allServices = await this.prisma.service.findMany({
+        where: { id: { in: serviceIds }, isActive: true, isArchived: false },
+      });
+      const doctorServices = await this.prisma.doctorService.findMany({
+        where: { doctorId, serviceId: { in: serviceIds } },
+      });
+      if (allServices.length > 0) {
+        effectiveDuration = allServices.reduce((sum, s) => {
+          const ds = doctorServices.find(d => d.serviceId === s.id);
+          return sum + (ds?.customDurationMinutes ?? s.durationMinutes);
+        }, 0);
+      }
+    }
+
     const bufferMinutes = clinicSettings?.bufferMinutes ?? 5;
-    const totalMinutes = durationMinutes + bufferMinutes;
+    const totalMinutes = effectiveDuration + bufferMinutes;
     const minNoticeHours = clinicSettings?.minBookingNoticeHours ?? 2;
     const nowUtc = new Date();
     const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);

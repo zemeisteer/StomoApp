@@ -12,12 +12,22 @@ import { Public } from '../auth/public.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { AppointmentStatus, StaffRole } from '@prisma/client';
 import {
-  IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min,
+  IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min, IsArray, Matches, IsEmail,
 } from 'class-validator';
 
 export class PublicBookingDto {
   @IsString()
   serviceId!: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serviceIds?: string[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  customDurationMinutes?: number;
 
   @IsString()
   doctorId!: string;
@@ -33,10 +43,13 @@ export class PublicBookingDto {
   patientName!: string;
 
   @IsString()
+  @Matches(/^\+998(\s?\(?\d{2}\)?\s?\d{3}[-\s]?\d{2}[-\s]?\d{2}|\d{9,12})$/, {
+    message: 'Telefon raqami O\'zbekiston formati (+998XXXXXXXXX)da bo\'lishi kerak',
+  })
   patientPhone!: string;
 
   @IsOptional()
-  @IsString()
+  @IsEmail({}, { message: 'Elektron pochta manzili formati noto\'g\'ri' })
   patientEmail?: string;
 
   @IsOptional()
@@ -119,6 +132,9 @@ export class PublicBookingController {
       source: 'website',
     });
     const aptId = (result as any).id || (result as any).appointmentId;
+    const doc = (result as any).doctor;
+    const docName = (result as any).doctorName || (doc ? `Dr. ${doc.firstNameUz} ${doc.lastNameUz}` : undefined);
+    const brName = (result as any).branchName || (result as any).branch?.nameUz;
     return {
       message: 'Qabulga so\'rov qabul qilindi. Tez orada tasdiqlaymiz.',
       id: aptId,
@@ -127,6 +143,11 @@ export class PublicBookingController {
       status: result.status,
       startTime: result.startTime,
       endTime: result.endTime,
+      doctorName: docName,
+      branchName: brName,
+      serviceName: (result as any).serviceName,
+      durationMinutes: (result as any).durationMinutes,
+      bufferMinutes: (result as any).bufferMinutes,
     };
   }
 

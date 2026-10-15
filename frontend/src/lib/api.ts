@@ -111,15 +111,26 @@ export const api = {
     return fetcher<any[]>(`/api/public/services${q}`);
   },
   getServiceBySlug: (slug: string) => fetcher<any>(`/api/public/services/${slug}`),
-  getAvailableSlots: (doctorId: string, date: string, serviceId: string, branchId?: string) => {
+  getAvailableSlots: (
+    doctorId: string,
+    date: string,
+    serviceId: string,
+    branchId?: string,
+    durationMinutes?: number,
+    serviceIds?: string[],
+  ) => {
     const q = new URLSearchParams({ doctorId, date, serviceId });
     if (branchId) q.set('branchId', branchId);
+    if (durationMinutes) q.set('durationMinutes', String(durationMinutes));
+    if (serviceIds && serviceIds.length > 0) q.set('serviceIds', serviceIds.join(','));
     return fetcher<any[]>(`/api/scheduling/slots?${q.toString()}`);
   },
 
   // Online Appointment Booking
   createBooking: (payload: {
     serviceId: string;
+    serviceIds?: string[];
+    customDurationMinutes?: number;
     doctorId: string;
     branchId?: string;
     startTime: string;
@@ -137,6 +148,11 @@ export const api = {
       status: string;
       startTime: string;
       endTime: string;
+      doctorName?: string;
+      branchName?: string;
+      serviceName?: string;
+      durationMinutes?: number;
+      bufferMinutes?: number;
     }>('/api/booking', {
       method: 'POST',
       body: JSON.stringify(payload),

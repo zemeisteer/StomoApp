@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -15,9 +15,111 @@ import {
   Building2,
   Stethoscope,
   Info,
+  Check,
+  Plus,
+  ArrowRight,
+  Sparkles,
 } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
+
+const DAY_NAME_MAP: Record<string, string> = {
+  MONDAY: 'Dushanba',
+  TUESDAY: 'Seshanba',
+  WEDNESDAY: 'Chorshanba',
+  THURSDAY: 'Payshanba',
+  FRIDAY: 'Juma',
+  SATURDAY: 'Shanba',
+  SUNDAY: 'Yakshanba',
+};
+
+const SHORT_DAY_NAMES = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'];
+
+const UZ_DAY_TO_INT: Record<string, number> = {
+  SUNDAY: 0,
+  MONDAY: 1,
+  TUESDAY: 2,
+  WEDNESDAY: 3,
+  THURSDAY: 4,
+  FRIDAY: 5,
+  SATURDAY: 6,
+};
+
+function formatUzPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  let localDigits = digits;
+  if (digits.startsWith('998')) {
+    localDigits = digits.slice(3);
+  }
+  localDigits = localDigits.slice(0, 9);
+
+  let formatted = '+998';
+  if (localDigits.length > 0) {
+    formatted += ' (' + localDigits.slice(0, 2);
+  }
+  if (localDigits.length >= 2) {
+    formatted += ') ' + localDigits.slice(2, 5);
+  }
+  if (localDigits.length >= 5) {
+    formatted += '-' + localDigits.slice(5, 7);
+  }
+  if (localDigits.length >= 7) {
+    formatted += '-' + localDigits.slice(7, 9);
+  }
+  return formatted;
+}
+
+const PHONE_REGEX = /^\+998\s?\((33|88|90|91|93|94|95|97|98|99|71|77|\d{2})\)\s?\d{3}-\d{2}-\d{2}$|^\+998\d{9}$/;
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+function getDoctorScheduleInfo(doctor: any, branchId?: string): { days: string[]; hours: string; summary: string } {
+  if (!doctor?.schedules || doctor.schedules.length === 0) {
+    return {
+      days: ['Dushanba', 'Chorshanba', 'Juma'],
+      hours: '09:00 - 18:00',
+      summary: 'Dushanba, Chorshanba, Juma (09:00 - 18:00)',
+    };
+  }
+
+  const filtered = branchId
+    ? doctor.schedules.filter((s: any) => s.branchId === branchId && s.isActive !== false)
+    : doctor.schedules.filter((s: any) => s.isActive !== false);
+
+  const activeSchedules = filtered.length > 0 ? filtered : doctor.schedules;
+  const days = Array.from(new Set(activeSchedules.map((s: any) => DAY_NAME_MAP[s.dayOfWeek] || s.dayOfWeek))) as string[];
+  const hours = activeSchedules[0] ? `${activeSchedules[0].startTime} - ${activeSchedules[0].endTime}` : '09:00 - 18:00';
+  const summary = `${days.join(', ')} (${hours})`;
+
+  return { days, hours, summary };
+}
+
+function isDoctorWorkingOnDate(dateStr: string, doctor: any, branchId?: string): boolean {
+  if (!doctor?.schedules || doctor.schedules.length === 0) return true;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return false;
+  const dateObj = new Date(y, m - 1, d);
+  const dayOfWeekNum = dateObj.getDay();
+
+  const filtered = branchId
+    ? doctor.schedules.filter((s: any) => s.branchId === branchId && s.isActive !== false)
+    : doctor.schedules.filter((s: any) => s.isActive !== false);
+  const activeSchedules = filtered.length > 0 ? filtered : doctor.schedules;
+
+  return activeSchedules.some((s: any) => UZ_DAY_TO_INT[s.dayOfWeek] === dayOfWeekNum);
+}
+
+function findNextWorkingDate(startDateStr: string, doctor: any, branchId?: string): string {
+  const [y, m, d] = startDateStr.split('-').map(Number);
+  let cur = new Date(y, m - 1, d);
+  for (let i = 0; i < 14; i++) {
+    const curStr = cur.toISOString().split('T')[0];
+    if (isDoctorWorkingOnDate(curStr, doctor, branchId)) {
+      return curStr;
+    }
+    cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return startDateStr;
+}
 
 function BookingContent() {
   const { t, language } = useI18n();
@@ -28,16 +130,20 @@ function BookingContent() {
 
   // Form state
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
-  const [selectedServiceId, setSelectedServiceId] = useState<string>('');
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedSlotTime, setSelectedSlotTime] = useState<string>('');
 
   const [patientName, setPatientName] = useState<string>('');
-  const [patientPhone, setPatientPhone] = useState<string>('');
+  const [patientPhone, setPatientPhone] = useState<string>('+998 ');
   const [patientEmail, setPatientEmail] = useState<string>('');
   const [patientNote, setPatientNote] = useState<string>('');
   const [consentGiven, setConsentGiven] = useState<boolean>(true);
+
+  // Validation state
+  const [isPhoneTouched, setIsPhoneTouched] = useState<boolean>(false);
+  const [isEmailTouched, setIsEmailTouched] = useState<boolean>(false);
 
   // Data collections from backend
   const [branches, setBranches] = useState<any[]>([]);
@@ -77,7 +183,7 @@ function BookingContent() {
 
         if (qBranch) setSelectedBranchId(qBranch);
         if (qService) {
-          setSelectedServiceId(qService);
+          setSelectedServiceIds([qService]);
           setStep(2);
         }
         if (qDoctor) {
@@ -85,7 +191,7 @@ function BookingContent() {
           setStep(3);
         }
 
-        // Set default date to tomorrow in YYYY-MM-DD
+        // Default date to tomorrow in YYYY-MM-DD
         const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
         const dateStr = tomorrow.toISOString().split('T')[0];
         setSelectedDate(dateStr);
@@ -98,10 +204,76 @@ function BookingContent() {
     loadData();
   }, [searchParams, t.common.error]);
 
+  // Derived selected services
+  const selectedServices = useMemo(() => {
+    return services.filter((s) => selectedServiceIds.includes(s.id));
+  }, [services, selectedServiceIds]);
+
+  const totalDuration = useMemo(() => {
+    return selectedServices.reduce((sum, s) => sum + (s.durationMinutes || 30), 0);
+  }, [selectedServices]);
+
+  const totalPrice = useMemo(() => {
+    return selectedServices.reduce((sum, s) => sum + (s.priceFrom || 0), 0);
+  }, [selectedServices]);
+
+  const selectedDoctorObj = useMemo(() => {
+    return doctors.find((d) => d.id === selectedDoctorId);
+  }, [doctors, selectedDoctorId]);
+
+  const selectedBranchObj = useMemo(() => {
+    return branches.find((b) => b.id === selectedBranchId);
+  }, [branches, selectedBranchId]);
+
+  // Doctor schedule for currently selected branch
+  const doctorScheduleInfo = useMemo(() => {
+    return getDoctorScheduleInfo(selectedDoctorObj, selectedBranchId);
+  }, [selectedDoctorObj, selectedBranchId]);
+
+  // Check if current date is working day for doctor
+  const isSelectedDateWorkingDay = useMemo(() => {
+    if (!selectedDate || !selectedDoctorObj) return true;
+    return isDoctorWorkingOnDate(selectedDate, selectedDoctorObj, selectedBranchId);
+  }, [selectedDate, selectedDoctorObj, selectedBranchId]);
+
+  // Nearest working date
+  const nextWorkingDate = useMemo(() => {
+    if (!selectedDoctorObj || !selectedDate) return selectedDate;
+    return findNextWorkingDate(selectedDate, selectedDoctorObj, selectedBranchId);
+  }, [selectedDoctorObj, selectedDate, selectedBranchId]);
+
+  // Toggle service selection (up to 3 services)
+  const toggleService = (serviceId: string) => {
+    setSelectedServiceIds((prev) => {
+      if (prev.includes(serviceId)) {
+        return prev.filter((id) => id !== serviceId);
+      } else {
+        if (prev.length >= 3) {
+          setErrorMessage('Bir vaqtning o\'zida ko\'pi bilan 3 ta xizmat tanlash mumkin');
+          return prev;
+        }
+        setErrorMessage(null);
+        return [...prev, serviceId];
+      }
+    });
+  };
+
+  // When step 4 opens, automatically snap date to nearest working date if non-working day
+  useEffect(() => {
+    if (step === 4 && selectedDoctorObj && selectedDate) {
+      if (!isDoctorWorkingOnDate(selectedDate, selectedDoctorObj, selectedBranchId)) {
+        const nextDate = findNextWorkingDate(selectedDate, selectedDoctorObj, selectedBranchId);
+        if (nextDate !== selectedDate) {
+          setSelectedDate(nextDate);
+        }
+      }
+    }
+  }, [step, selectedDoctorObj, selectedBranchId]);
+
   // Load available slots when Doctor, Service, and Date are chosen
   useEffect(() => {
     async function fetchSlots() {
-      if (!selectedDoctorId || !selectedServiceId || !selectedDate) {
+      if (!selectedDoctorId || selectedServiceIds.length === 0 || !selectedDate) {
         setAvailableSlots([]);
         return;
       }
@@ -112,8 +284,10 @@ function BookingContent() {
         const slots = await api.getAvailableSlots(
           selectedDoctorId,
           selectedDate,
-          selectedServiceId,
-          selectedBranchId || undefined
+          selectedServiceIds[0],
+          selectedBranchId || undefined,
+          totalDuration,
+          selectedServiceIds
         );
         setAvailableSlots(slots || []);
       } catch (err: any) {
@@ -127,18 +301,49 @@ function BookingContent() {
     if (step === 4) {
       fetchSlots();
     }
-  }, [step, selectedDoctorId, selectedServiceId, selectedDate, selectedBranchId]);
+  }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, totalDuration]);
+
+  // Real-time validation checks
+  const isPhoneValid = useMemo(() => {
+    const digitsOnly = patientPhone.replace(/\D/g, '');
+    return digitsOnly.length === 12 && digitsOnly.startsWith('998');
+  }, [patientPhone]);
+
+  const isEmailValid = useMemo(() => {
+    if (!patientEmail.trim()) return true; // optional
+    return EMAIL_REGEX.test(patientEmail.trim());
+  }, [patientEmail]);
+
+  // Handle phone input changes with auto-formatting
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setIsPhoneTouched(true);
+    const formatted = formatUzPhone(e.target.value);
+    setPatientPhone(formatted);
+  };
 
   // Handle final submission
   const handleFinalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsPhoneTouched(true);
+    setIsEmailTouched(true);
+
     if (!consentGiven) {
       setErrorMessage(t.booking.consentError);
       return;
     }
 
-    if (!patientName.trim() || !patientPhone.trim()) {
-      setErrorMessage('Iltimos, ismingiz va telefon raqamingizni kiriting');
+    if (!patientName.trim()) {
+      setErrorMessage('Iltimos, ismingizni kiriting');
+      return;
+    }
+
+    if (!isPhoneValid) {
+      setErrorMessage('Iltimos, telefon raqamini to\'liq kiriting (+998 XX XXX-XX-XX)');
+      return;
+    }
+
+    if (!isEmailValid) {
+      setErrorMessage('Elektron pochta manzili formati noto\'g\'ri');
       return;
     }
 
@@ -146,10 +351,12 @@ function BookingContent() {
       setIsSubmitting(true);
       setErrorMessage(null);
 
-      // Create booking payload
+      // Create booking payload with multi-service and custom combined duration
       const result = await api.createBooking({
         branchId: selectedBranchId || undefined,
-        serviceId: selectedServiceId,
+        serviceId: selectedServiceIds[0],
+        serviceIds: selectedServiceIds,
+        customDurationMinutes: totalDuration,
         doctorId: selectedDoctorId,
         startTime: selectedSlotTime,
         patientName: patientName.trim(),
@@ -159,8 +366,20 @@ function BookingContent() {
         consentGiven,
       });
 
-      setBookingResult(result);
-      setStep(6); // Step 6: Confirmation result
+      setBookingResult({
+        ...result,
+        doctorName:
+          result.doctorName ||
+          (selectedDoctorObj
+            ? `Dr. ${selectedDoctorObj.firstNameUz} ${selectedDoctorObj.lastNameUz}`
+            : 'Shifokor'),
+        branchName: result.branchName || selectedBranchObj?.nameUz || 'Asosiy filial',
+        serviceName:
+          result.serviceName ||
+          selectedServices.map((s) => s.nameUz).join(', '),
+        durationMinutes: result.durationMinutes || totalDuration,
+      });
+      setStep(6);
     } catch (err: any) {
       setErrorMessage(err?.message || 'Qabulga yozilishda xatolik yuz berdi. Iltimos qayta urinib ko\'ring.');
     } finally {
@@ -176,9 +395,27 @@ function BookingContent() {
     setTimeout(() => setCopiedToken(false), 2500);
   };
 
-  const selectedServiceObj = services.find((s) => s.id === selectedServiceId);
-  const selectedDoctorObj = doctors.find((d) => d.id === selectedDoctorId);
-  const selectedBranchObj = branches.find((b) => b.id === selectedBranchId);
+  // Quick 10-day date chip generator
+  const dateChips = useMemo(() => {
+    const list: Array<{ dateStr: string; dayName: string; dayNum: string; monthStr: string; isWorking: boolean }> = [];
+    const base = new Date();
+    // Start from tomorrow
+    base.setDate(base.getDate() + 1);
+
+    for (let i = 0; i < 10; i++) {
+      const cur = new Date(base.getTime() + i * 24 * 60 * 60 * 1000);
+      const dateStr = cur.toISOString().split('T')[0];
+      const dayName = SHORT_DAY_NAMES[cur.getDay()];
+      const dayNum = String(cur.getDate());
+      const monthStr = cur.toLocaleDateString('uz-UZ', { month: 'short' });
+      const isWorking = selectedDoctorObj
+        ? isDoctorWorkingOnDate(dateStr, selectedDoctorObj, selectedBranchId)
+        : true;
+
+      list.push({ dateStr, dayName, dayNum, monthStr, isWorking });
+    }
+    return list;
+  }, [selectedDoctorObj, selectedBranchId]);
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
@@ -295,45 +532,102 @@ function BookingContent() {
           </div>
         )}
 
-        {/* STEP 2: Service Selection */}
+        {/* STEP 2: Service Selection (Multi-Select Support) */}
         {step === 2 && (
           <div className="space-y-6 animate-fade-in">
-            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <Stethoscope className="w-5 h-5 text-teal-700" />
-              <span>{t.booking.selectService}</span>
-            </h2>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                  <Stethoscope className="w-5 h-5 text-teal-700" />
+                  <span>{t.booking.selectService}</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Bir vaqtning o&apos;zida 1 tadan 3 tagacha xizmatni tanlashingiz mumkin
+                </p>
+              </div>
+
+              {selectedServiceIds.length > 0 && (
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-teal-50 border border-teal-200 text-teal-800 text-xs font-bold">
+                  <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                  <span>{selectedServiceIds.length} ta tanlandi</span>
+                </div>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[440px] overflow-y-auto pr-2">
               {services.map((s) => {
                 const name = language === 'ru' && s.nameRu ? s.nameRu : s.nameUz;
                 const price = (s.priceFrom / 100).toLocaleString('uz-UZ');
-                const isSelected = selectedServiceId === s.id;
+                const isSelected = selectedServiceIds.includes(s.id);
 
                 return (
                   <button
                     type="button"
                     key={s.id}
-                    onClick={() => setSelectedServiceId(s.id)}
-                    className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                    onClick={() => toggleService(s.id)}
+                    className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between relative group ${
                       isSelected
-                        ? 'border-teal-700 bg-teal-50/50 ring-2 ring-teal-600'
-                        : 'border-slate-200 hover:border-teal-300 bg-white'
+                        ? 'border-teal-700 bg-teal-50/60 ring-2 ring-teal-600 shadow-sm'
+                        : 'border-slate-200 hover:border-teal-300 bg-white hover:bg-slate-50/50'
                     }`}
                   >
                     <div>
-                      <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                        <span className="font-bold text-teal-700 uppercase">{s.category}</span>
-                        <span>{s.durationMinutes} daq</span>
+                      <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+                        <span className="font-bold text-teal-700 uppercase tracking-wider text-[10px]">
+                          {s.category}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-500">{s.durationMinutes} daq</span>
+                          <span
+                            className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
+                              isSelected
+                                ? 'bg-teal-700 text-white'
+                                : 'border border-slate-300 text-transparent group-hover:border-teal-500'
+                            }`}
+                          >
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          </span>
+                        </div>
                       </div>
-                      <p className="font-bold text-sm text-slate-900">{name}</p>
+                      <p className="font-bold text-sm text-slate-900 pr-6">{name}</p>
                     </div>
-                    <p className="text-xs font-extrabold text-slate-800 mt-3">
-                      {price} {t.common.uzs}
-                    </p>
+                    <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-400">Boshlang&apos;ich narxi:</span>
+                      <p className="text-xs font-extrabold text-teal-900">
+                        {price} {t.common.uzs}
+                      </p>
+                    </div>
                   </button>
                 );
               })}
             </div>
+
+            {/* Selected Services Summary Pill */}
+            {selectedServiceIds.length > 0 && (
+              <div className="p-4 rounded-2xl bg-teal-50/80 border border-teal-200 text-xs text-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 font-bold text-teal-950">
+                    <CheckCircle2 className="w-4 h-4 text-teal-700" />
+                    <span>Tanlangan xizmatlar ({selectedServices.length} ta):</span>
+                  </div>
+                  <p className="text-slate-600 pl-6">
+                    {selectedServices.map((s) => s.nameUz).join(', ')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-4 shrink-0 sm:border-l sm:border-teal-200 sm:pl-4">
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-semibold">Jami vaqt:</span>
+                    <span className="font-extrabold text-slate-900 text-sm">{totalDuration} daqiqa</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-semibold">Jami narx:</span>
+                    <span className="font-extrabold text-teal-800 text-sm">
+                      {(totalPrice / 100).toLocaleString('uz-UZ')} {t.common.uzs}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="pt-4 flex items-center justify-between">
               <button
@@ -347,9 +641,9 @@ function BookingContent() {
 
               <button
                 type="button"
-                disabled={!selectedServiceId}
+                disabled={selectedServiceIds.length === 0}
                 onClick={() => setStep(3)}
-                className="px-6 py-3 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-md flex items-center gap-2"
+                className="px-6 py-3 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-md flex items-center gap-2 transition-all"
               >
                 <span>{t.common.next}</span>
                 <ChevronRight className="w-4 h-4" />
@@ -358,7 +652,7 @@ function BookingContent() {
           </div>
         )}
 
-        {/* STEP 3: Doctor Selection */}
+        {/* STEP 3: Doctor Selection (Displaying Schedules) */}
         {step === 3 && (
           <div className="space-y-6 animate-fade-in">
             <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -373,21 +667,39 @@ function BookingContent() {
                 }`;
                 const title = language === 'ru' && d.titleRu ? d.titleRu : d.titleUz;
                 const isSelected = selectedDoctorId === d.id;
+                const sched = getDoctorScheduleInfo(d, selectedBranchId);
 
                 return (
                   <button
                     type="button"
                     key={d.id}
-                    onClick={() => setSelectedDoctorId(d.id)}
+                    onClick={() => {
+                      setSelectedDoctorId(d.id);
+                      // Auto-check nearest working date
+                      if (selectedDate) {
+                        const nearest = findNextWorkingDate(selectedDate, d, selectedBranchId);
+                        setSelectedDate(nearest);
+                      }
+                    }}
                     className={`p-4 rounded-2xl border text-left transition-all ${
                       isSelected
-                        ? 'border-teal-700 bg-teal-50/50 ring-2 ring-teal-600'
+                        ? 'border-teal-700 bg-teal-50/50 ring-2 ring-teal-600 shadow-sm'
                         : 'border-slate-200 hover:border-teal-300 bg-white'
                     }`}
                   >
                     <p className="font-bold text-sm text-slate-900">Dr. {fullName}</p>
                     <p className="text-xs text-teal-700 font-medium mt-0.5">{title}</p>
-                    <p className="text-xs text-slate-400 mt-2">{d.experienceYears}+ yil tajriba</p>
+                    <p className="text-xs text-slate-400 mt-1">{d.experienceYears}+ yil tajriba</p>
+
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-start gap-1.5 text-xs text-slate-600">
+                      <Calendar className="w-3.5 h-3.5 text-teal-700 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold text-slate-700 block text-[11px]">
+                          Qabul kunlari:
+                        </span>
+                        <span className="text-[11px] text-teal-900 font-medium">{sched.summary}</span>
+                      </div>
+                    </div>
                   </button>
                 );
               })}
@@ -419,15 +731,80 @@ function BookingContent() {
         {/* STEP 4: Date & Available Slot Selection */}
         {step === 4 && (
           <div className="space-y-6 animate-fade-in">
-            <h2 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+            <h2 className="text-xl font-bold text-slate-900 mb-1 flex items-center gap-2">
               <Calendar className="w-5 h-5 text-teal-700" />
               <span>{t.booking.selectSlot}</span>
             </h2>
 
-            {/* Date Picker Input */}
+            {/* Doctor working schedule banner */}
+            {selectedDoctorObj && (
+              <div className="p-3.5 rounded-2xl bg-teal-50/70 border border-teal-200 text-xs text-teal-950 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-bold">
+                    Dr. {selectedDoctorObj.firstNameUz} {selectedDoctorObj.lastNameUz}
+                  </span>{' '}
+                  ish jadvali ({selectedBranchObj?.nameUz || 'Tanlangan filial'}):{' '}
+                  <span className="font-semibold text-teal-800">{doctorScheduleInfo.summary}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Quick 10-day date chips */}
             <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-2">
+                Tezkor sana tanlash:
+              </label>
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+                {dateChips.map((chip) => {
+                  const isSelected = selectedDate === chip.dateStr;
+                  return (
+                    <button
+                      type="button"
+                      key={chip.dateStr}
+                      onClick={() => {
+                        setSelectedDate(chip.dateStr);
+                        setSelectedSlotTime('');
+                      }}
+                      className={`flex flex-col items-center py-2 px-3 rounded-2xl min-w-[72px] border text-xs transition-all shrink-0 ${
+                        isSelected
+                          ? 'border-teal-700 bg-teal-700 text-white shadow-md'
+                          : chip.isWorking
+                          ? 'border-teal-200 bg-white hover:bg-teal-50/50 text-slate-800'
+                          : 'border-slate-200 bg-slate-50 text-slate-400 opacity-75'
+                      }`}
+                    >
+                      <span className={`text-[11px] font-semibold ${isSelected ? 'text-teal-100' : 'text-slate-500'}`}>
+                        {chip.dayName}
+                      </span>
+                      <span className="text-base font-extrabold my-0.5">{chip.dayNum}</span>
+                      <span className={`text-[10px] ${isSelected ? 'text-teal-100' : 'text-slate-400'}`}>
+                        {chip.monthStr}
+                      </span>
+                      <div className="mt-1 flex items-center gap-1">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            chip.isWorking
+                              ? isSelected
+                                ? 'bg-emerald-300'
+                                : 'bg-emerald-500'
+                              : 'bg-slate-300'
+                          }`}
+                        />
+                        <span className="text-[9px] font-medium">
+                          {chip.isWorking ? 'Ish kuni' : 'Dam olish'}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Date Picker Input */}
+            <div className="pt-2">
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                {t.booking.selectDate}
+                Yoki taqvimdan sanani ko&apos;rsating:
               </label>
               <input
                 type="date"
@@ -437,26 +814,85 @@ function BookingContent() {
                   setSelectedDate(e.target.value);
                   setSelectedSlotTime('');
                 }}
-                className="w-full sm:w-64 px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                className="w-full sm:w-64 px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
               />
             </div>
 
+            {/* Non-working Day Guidance Card */}
+            {!isSelectedDateWorkingDay && (
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">
+                      Tanlangan kunda ({selectedDate}) shifokor qabul qilmaydi.
+                    </p>
+                    <p className="text-amber-800 mt-0.5">
+                      Shifokor faqat {doctorScheduleInfo.days.join(', ')} kunlari ishlaydi.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDate(nextWorkingDate);
+                    setSelectedSlotTime('');
+                  }}
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-sm text-xs flex items-center gap-1.5 shrink-0 self-start sm:self-center"
+                >
+                  <span>Eng yaqin ish kuniga o&apos;tish ({nextWorkingDate})</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Slots Grid */}
             <div className="pt-2">
-              <label className="block text-xs font-semibold text-slate-700 mb-2">
-                {selectedDate} sana uchun mavjud vaqtlar:
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-semibold text-slate-700">
+                  {selectedDate} sana uchun mavjud vaqtlar (Davomiyligi: {totalDuration} daqiqa):
+                </label>
+                {selectedSlotTime && (
+                  <span className="text-xs font-bold text-teal-700">
+                    Tanlandi:{' '}
+                    {new Date(selectedSlotTime).toLocaleTimeString('uz-UZ', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      timeZone: 'Asia/Tashkent',
+                    })}
+                  </span>
+                )}
+              </div>
 
               {isLoadingSlots ? (
                 <div className="p-8 text-center text-slate-500 text-sm bg-slate-50 rounded-2xl">
                   {t.common.loading}
                 </div>
               ) : availableSlots.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                  <p>{t.booking.noSlots}</p>
+                <div className="p-8 text-center text-slate-600 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
+                  <p className="font-semibold text-slate-700">
+                    Tanlangan kunda bo&apos;sh vaqtlar mavjud emas yoki kun to&apos;liq band.
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Dr. {selectedDoctorObj?.firstNameUz} {selectedDoctorObj?.lastNameUz} qabul kunlari:{' '}
+                    {doctorScheduleInfo.summary}
+                  </p>
+                  {nextWorkingDate !== selectedDate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(nextWorkingDate);
+                        setSelectedSlotTime('');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm hover:bg-teal-800 transition-colors"
+                    >
+                      <span>Eng yaqin bo&apos;sh kunga o&apos;tish ({nextWorkingDate})</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-60 overflow-y-auto p-1">
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-60 overflow-y-auto p-1">
                   {availableSlots.map((slot) => {
                     const slotDate = new Date(slot.startTime);
                     const timeStr = slotDate.toLocaleTimeString('uz-UZ', {
@@ -472,15 +908,18 @@ function BookingContent() {
                         key={slot.startTime}
                         disabled={!slot.available}
                         onClick={() => setSelectedSlotTime(slot.startTime)}
-                        className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all ${
+                        className={`py-3 px-2 rounded-2xl text-xs font-bold transition-all flex flex-col items-center justify-center ${
                           !slot.available
-                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed line-through'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed line-through opacity-60'
                             : isSelected
-                            ? 'bg-teal-700 text-white ring-2 ring-teal-600 shadow-md'
-                            : 'bg-teal-50 text-teal-800 hover:bg-teal-100'
+                            ? 'bg-teal-700 text-white ring-2 ring-teal-600 shadow-md scale-[1.02]'
+                            : 'bg-teal-50 text-teal-800 hover:bg-teal-100 hover:scale-[1.01]'
                         }`}
                       >
-                        {timeStr}
+                        <span className="text-sm font-extrabold">{timeStr}</span>
+                        <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-teal-100' : 'text-teal-600'}`}>
+                          {totalDuration} daq
+                        </span>
                       </button>
                     );
                   })}
@@ -520,22 +959,34 @@ function BookingContent() {
             </h2>
 
             {/* Summary Preview Box */}
-            <div className="p-4 bg-teal-50/70 rounded-2xl border border-teal-100 text-xs text-slate-700 space-y-1.5 mb-4">
+            <div className="p-4 bg-teal-50/70 rounded-2xl border border-teal-100 text-xs text-slate-700 space-y-2 mb-4">
               <p>
                 <strong>{t.common.service}:</strong>{' '}
-                {selectedServiceObj?.nameUz || 'Tanlangan xizmat'}
+                {selectedServices.map((s) => s.nameUz).join(', ') || 'Tanlangan xizmat'}
               </p>
               <p>
                 <strong>{t.common.doctor}:</strong> Dr.{' '}
                 {selectedDoctorObj ? `${selectedDoctorObj.firstNameUz} ${selectedDoctorObj.lastNameUz}` : 'Tanlangan shifokor'}
               </p>
               <p>
+                <strong>{t.common.branch}:</strong>{' '}
+                {selectedBranchObj?.nameUz || 'Asosiy filial'}
+              </p>
+              <p>
                 <strong>{t.common.time}:</strong>{' '}
-                {selectedSlotTime ? new Date(selectedSlotTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' }) : ''}
+                {selectedSlotTime ? new Date(selectedSlotTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' }) : ''}{' '}
+                ({totalDuration} daqiqa)
+              </p>
+              <p>
+                <strong>Taxminiy narx:</strong>{' '}
+                <span className="font-extrabold text-teal-800">
+                  {(totalPrice / 100).toLocaleString('uz-UZ')} {t.common.uzs}
+                </span>
               </p>
             </div>
 
             <div className="space-y-4">
+              {/* Full Name */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {t.common.name} *
@@ -546,10 +997,11 @@ function BookingContent() {
                   value={patientName}
                   onChange={(e) => setPatientName(e.target.value)}
                   placeholder={t.booking.fullNamePlaceholder}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
                 />
               </div>
 
+              {/* Phone (+998 masked and regex validated) */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {t.common.phone} *
@@ -558,12 +1010,24 @@ function BookingContent() {
                   type="tel"
                   required
                   value={patientPhone}
-                  onChange={(e) => setPatientPhone(e.target.value)}
-                  placeholder={t.booking.phonePlaceholder}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  onChange={handlePhoneChange}
+                  onBlur={() => setIsPhoneTouched(true)}
+                  placeholder="+998 (90) 123-45-67"
+                  className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 bg-white transition-colors ${
+                    isPhoneTouched && !isPhoneValid
+                      ? 'border-red-400 focus:ring-red-500'
+                      : 'border-slate-200 focus:ring-teal-600'
+                  }`}
                 />
+                {isPhoneTouched && !isPhoneValid && (
+                  <p className="text-[11px] text-red-600 mt-1 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Telefon raqamini to&apos;liq kiriting: +998 (90) 123-45-67</span>
+                  </p>
+                )}
               </div>
 
+              {/* Email (Optional but regex validated) */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {t.common.email} (ixtiyoriy)
@@ -571,12 +1035,27 @@ function BookingContent() {
                 <input
                   type="email"
                   value={patientEmail}
-                  onChange={(e) => setPatientEmail(e.target.value)}
+                  onChange={(e) => {
+                    setIsEmailTouched(true);
+                    setPatientEmail(e.target.value);
+                  }}
+                  onBlur={() => setIsEmailTouched(true)}
                   placeholder="bemor@misol.uz"
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 bg-white transition-colors ${
+                    isEmailTouched && !isEmailValid
+                      ? 'border-red-400 focus:ring-red-500'
+                      : 'border-slate-200 focus:ring-teal-600'
+                  }`}
                 />
+                {isEmailTouched && !isEmailValid && (
+                  <p className="text-[11px] text-red-600 mt-1 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Elektron pochta manzili formati noto&apos;g&apos;ri (masalan: misol@gmail.com)</span>
+                  </p>
+                )}
               </div>
 
+              {/* Note */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {t.common.note}
@@ -586,7 +1065,7 @@ function BookingContent() {
                   value={patientNote}
                   onChange={(e) => setPatientNote(e.target.value)}
                   placeholder="Tish og'rig'i, bezovta qilayotgan belgilar..."
-                  className="w-full px-4 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-4 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
                 />
               </div>
 
@@ -616,7 +1095,7 @@ function BookingContent() {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !isPhoneValid || !isEmailValid}
                 className="px-8 py-3.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg shadow-teal-700/20 flex items-center gap-2"
               >
                 {isSubmitting ? (
@@ -660,14 +1139,28 @@ function BookingContent() {
                 </span>
               </div>
               <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">{t.common.service}:</span>
+                <span className="font-semibold text-slate-800">{bookingResult.serviceName}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-500">{t.common.time}:</span>
                 <span className="font-semibold text-slate-800">
                   {new Date(bookingResult.startTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' })}
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-500">{t.common.doctor}:</span>
                 <span className="font-semibold text-slate-800">{bookingResult.doctorName}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-200 pb-2">
+                <span className="text-slate-500">{t.common.branch}:</span>
+                <span className="font-semibold text-slate-800">{bookingResult.branchName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Qabul davomiyligi:</span>
+                <span className="font-semibold text-slate-800">
+                  {bookingResult.durationMinutes || totalDuration} daqiqa
+                </span>
               </div>
             </div>
 

@@ -85,8 +85,20 @@ export class SchedulingController {
     @Query('date') date: string,
     @Query('serviceId') serviceId: string,
     @Query('branchId') branchId?: string,
+    @Query('durationMinutes') durationMinutesStr?: string,
+    @Query('serviceIds') serviceIdsStr?: string,
   ) {
-    return this.service.getAvailableSlots(doctorId, date, serviceId, branchId);
+    const customDuration = durationMinutesStr ? parseInt(durationMinutesStr, 10) : undefined;
+    const serviceIds = serviceIdsStr ? serviceIdsStr.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    return this.service.getAvailableSlots(
+      doctorId,
+      date,
+      serviceId,
+      branchId,
+      undefined,
+      customDuration,
+      serviceIds,
+    );
   }
 
   // Admin endpoints

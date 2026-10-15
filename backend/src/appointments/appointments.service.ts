@@ -35,6 +35,8 @@ const TIME_RESERVING_STATUSES: AppointmentStatus[] = [
 
 export interface CreateBookingDto {
   serviceId: string;
+  serviceIds?: string[];
+  customDurationMinutes?: number;
   doctorId: string;
   branchId?: string;
   startTime: string; // ISO string
@@ -146,6 +148,8 @@ export class AppointmentsService {
         }
 
         // Return stable existing appointment response
+        const existingDocName = `Dr. ${existing.doctor.firstNameUz} ${existing.doctor.lastNameUz}`.trim();
+        const existingBranchName = existing.branch?.nameUz || '';
         return {
           id: existing.id,
           appointmentId: existing.id,
@@ -154,6 +158,10 @@ export class AppointmentsService {
           startTime: existing.startTime,
           endTime: existing.endTime,
           serviceName: existing.serviceName,
+          durationMinutes: existing.durationMinutes,
+          bufferMinutes: existing.bufferMinutes,
+          doctorName: existingDocName,
+          branchName: existingBranchName,
           doctor: {
             id: existing.doctor.id,
             firstNameUz: existing.doctor.firstNameUz,
@@ -172,6 +180,14 @@ export class AppointmentsService {
     if (!service) {
       throw new BadRequestException('Xizmat topilmadi yoki faol emas');
     }
+
+    let serviceIds = dto.serviceIds && dto.serviceIds.length > 0 ? dto.serviceIds : [dto.serviceId];
+    if (!serviceIds.includes(dto.serviceId)) {
+      serviceIds = [dto.serviceId, ...serviceIds];
+    }
+    const allServices = await this.prisma.service.findMany({
+      where: { id: { in: serviceIds }, isActive: true, isArchived: false },
+    });
 
     // 3. Validate Doctor
     const doctor = await this.prisma.doctor.findFirst({
@@ -231,8 +247,18 @@ export class AppointmentsService {
       throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga yozilish mumkin emas`);
     }
 
-    // Calculate duration & end time
-    const durationMinutes = doctorService.customDurationMinutes ?? service.durationMinutes;
+    // Calculate duration & end time (combined if multiple services)
+    const primaryDuration = doctorService.customDurationMinutes ?? service.durationMinutes;
+    let durationMinutes = dto.customDurationMinutes ?? primaryDuration;
+    if (!dto.customDurationMinutes && allServices.length > 1) {
+      durationMinutes = allServices.reduce((acc, s) => {
+        const ds = doctor.services.find(d => d.serviceId === s.id);
+        return acc + (ds?.customDurationMinutes ?? s.durationMinutes);
+      }, 0);
+    }
+    const combinedServiceName = allServices.length > 1 ? allServices.map(s => s.nameUz).join(', ') : service.nameUz;
+    const combinedPrice = allServices.reduce((sum, s) => sum + (s.priceFrom || 0), 0);
+
     const totalMinutes = durationMinutes + bufferMinutes;
     const endTimeUtc = new Date(startTimeUtc.getTime() + totalMinutes * 60 * 1000);
 
@@ -395,8 +421,8 @@ export class AppointmentsService {
               status: AppointmentStatus.PENDING,
               startTime: startTimeUtc,
               endTime: endTimeUtc,
-              serviceName: service.nameUz,
-              servicePriceFrom: service.priceFrom,
+              serviceName: combinedServiceName || service.nameUz,
+              servicePriceFrom: combinedPrice || service.priceFrom,
               durationMinutes,
               bufferMinutes,
               note: dto.note?.trim() || null,
@@ -471,6 +497,8 @@ export class AppointmentsService {
                   : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
               );
             }
+            const racedDocName = `Dr. ${raced.doctor.firstNameUz} ${raced.doctor.lastNameUz}`.trim();
+            const racedBranchName = raced.branch?.nameUz || '';
             return {
               id: raced.id,
               appointmentId: raced.id,
@@ -479,6 +507,10 @@ export class AppointmentsService {
               startTime: raced.startTime,
               endTime: raced.endTime,
               serviceName: raced.serviceName,
+              durationMinutes: raced.durationMinutes,
+              bufferMinutes: raced.bufferMinutes,
+              doctorName: racedDocName,
+              branchName: racedBranchName,
               doctor: {
                 id: raced.doctor.id,
                 firstNameUz: raced.doctor.firstNameUz,
@@ -916,18 +948,32 @@ export class AppointmentsService {
       throw new BadRequestException('Boshqaruv tokenining muddati tugagan');
     }
 
+    const doctorFullNameUz = `Dr. ${appointment.doctor.firstNameUz} ${appointment.doctor.lastNameUz}`.trim();
+    const doctorFullNameRu = `Д-р ${appointment.doctor.firstNameRu} ${appointment.doctor.lastNameRu}`.trim();
+    const branchNameUz = appointment.branch?.nameUz || '';
+    const branchNameRu = appointment.branch?.nameRu || '';
+
     return {
       id: appointment.id,
       status: appointment.status,
       startTime: appointment.startTime,
       endTime: appointment.endTime,
+      durationMinutes: appointment.durationMinutes,
+      bufferMinutes: appointment.bufferMinutes,
       serviceName: appointment.serviceName,
+      serviceId: appointment.serviceId,
+      doctorId: appointment.doctorId,
+      branchId: appointment.branchId,
+      doctorName: doctorFullNameUz,
+      branchName: branchNameUz,
       doctor: {
         id: appointment.doctor.id,
         firstNameUz: appointment.doctor.firstNameUz,
         lastNameUz: appointment.doctor.lastNameUz,
         firstNameRu: appointment.doctor.firstNameRu,
         lastNameRu: appointment.doctor.lastNameRu,
+        fullNameUz: doctorFullNameUz,
+        fullNameRu: doctorFullNameRu,
         photoUrl: appointment.doctor.photoUrl,
       },
       branch: appointment.branch

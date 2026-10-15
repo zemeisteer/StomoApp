@@ -37,6 +37,7 @@ export class DoctorsService {
         specialties: { include: { specialty: true } },
         branches: { include: { branch: true } },
         services: { include: { service: true } },
+        schedules: { where: { isActive: true }, include: { branch: true } },
       },
       orderBy: { sortOrder: 'asc' },
     });

@@ -10,10 +10,34 @@ interface CallbackModalProps {
   onClose: () => void;
 }
 
+function formatUzPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  let localDigits = digits;
+  if (digits.startsWith('998')) {
+    localDigits = digits.slice(3);
+  }
+  localDigits = localDigits.slice(0, 9);
+
+  let formatted = '+998';
+  if (localDigits.length > 0) {
+    formatted += ' (' + localDigits.slice(0, 2);
+  }
+  if (localDigits.length >= 2) {
+    formatted += ') ' + localDigits.slice(2, 5);
+  }
+  if (localDigits.length >= 5) {
+    formatted += '-' + localDigits.slice(5, 7);
+  }
+  if (localDigits.length >= 7) {
+    formatted += '-' + localDigits.slice(7, 9);
+  }
+  return formatted;
+}
+
 export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose }) => {
   const { t } = useI18n();
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState('+998 ');
   const [preferredBranch, setPreferredBranch] = useState('');
   const [preferredTime, setPreferredTime] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,8 +145,8 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
                     type="tel"
                     required
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder={t.callback.phonePlaceholder}
+                    onChange={(e) => setPhone(formatUzPhone(e.target.value))}
+                    placeholder="+998 (90) 123-45-67"
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent transition-all"
                   />
                 </div>

@@ -227,7 +227,9 @@ export default function BookingStatusPage() {
             <User className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
             <div>
               <span className="text-xs text-slate-400 block">{t.common.doctor}</span>
-              <span className="font-bold text-slate-800">{appointment.doctorName}</span>
+              <span className="font-bold text-slate-800">
+                {appointment.doctorName || (appointment.doctor ? `Dr. ${appointment.doctor.firstNameUz} ${appointment.doctor.lastNameUz}` : 'Shifokor')}
+              </span>
             </div>
           </div>
 
@@ -235,7 +237,9 @@ export default function BookingStatusPage() {
             <Building2 className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
             <div>
               <span className="text-xs text-slate-400 block">{t.common.branch}</span>
-              <span className="font-bold text-slate-800">{appointment.branchName}</span>
+              <span className="font-bold text-slate-800">
+                {appointment.branchName || appointment.branch?.nameUz || 'Asosiy filial'}
+              </span>
             </div>
           </div>
 
@@ -243,7 +247,9 @@ export default function BookingStatusPage() {
             <Calendar className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
             <div>
               <span className="text-xs text-slate-400 block">Qabul davomiyligi</span>
-              <span className="font-bold text-slate-800">{appointment.durationMinutes} daqiqa</span>
+              <span className="font-bold text-slate-800">
+                {appointment.durationMinutes || (appointment.startTime && appointment.endTime ? Math.round((new Date(appointment.endTime).getTime() - new Date(appointment.startTime).getTime()) / 60000) : 30)} daqiqa
+              </span>
             </div>
           </div>
         </div>
