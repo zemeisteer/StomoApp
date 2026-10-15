@@ -1,7 +1,7 @@
 import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
-import { StaffRole } from '@prisma/client';
+import { StaffRole, Prisma } from '@prisma/client';
 
 @Injectable()
 export class StaffService {
@@ -85,39 +85,60 @@ export class StaffService {
     isActive?: boolean;
     doctorId?: string | null;
   }) {
-    const user = await this.prisma.staffUser.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+    return this.prisma.$transaction(async (tx) => {
+      // Transactional advisory lock to serialize concurrent staff owner demotions/updates
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('staff_owner_mutex'))`;
 
-    // Prevent removing or disabling the last active owner
-    if (user.role === StaffRole.OWNER && (data.isActive === false || (data.role && data.role !== StaffRole.OWNER))) {
-      const activeOwners = await this.prisma.staffUser.count({
-        where: { role: StaffRole.OWNER, isActive: true },
-      });
-      if (activeOwners <= 1) {
-        throw new BadRequestException('Klinikada kamida bitta faol Egasi (OWNER) qolishi shart. Oxirgi egasini o\'chirib yoki rolini o\'zgartirib bo\'lmaydi');
+      const user = await tx.staffUser.findUnique({ where: { id } });
+      if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+      // Prevent removing or disabling the last active owner
+      const isTargetActiveOwner = user.role === StaffRole.OWNER && user.isActive === true;
+      const isBeingDemotedOrDisabled =
+        (data.isActive === false && user.isActive === true) ||
+        (data.role !== undefined && data.role !== StaffRole.OWNER && user.role === StaffRole.OWNER);
+
+      if (isTargetActiveOwner && isBeingDemotedOrDisabled) {
+        const activeOwners = await tx.staffUser.count({
+          where: { role: StaffRole.OWNER, isActive: true },
+        });
+        if (activeOwners <= 1) {
+          throw new BadRequestException(
+            'Klinikada kamida bitta faol Egasi (OWNER) qolishi shart. Oxirgi egasini o\'chirib yoki rolini o\'zgartirib bo\'lmaydi',
+          );
+        }
       }
-    }
 
-    // Invalidate sessions immediately if role changed or staff disabled
-    const roleChanged = data.role !== undefined && data.role !== user.role;
-    const deactivated = data.isActive === false && user.isActive === true;
-    const shouldInvalidate = roleChanged || deactivated;
+      // If doctor role, validate doctorId if supplied
+      if (data.role === StaffRole.DOCTOR && data.doctorId) {
+        const doctor = await tx.doctor.findUnique({ where: { id: data.doctorId } });
+        if (!doctor) throw new BadRequestException('Biriktirilayotgan shifokor topilmadi');
+      }
 
-    return this.prisma.staffUser.update({
-      where: { id },
-      data: {
-        ...data,
-        tokenVersion: shouldInvalidate ? { increment: 1 } : undefined,
-        refreshTokenHash: shouldInvalidate ? null : undefined,
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-        doctorId: true,
-      },
+      // Invalidate sessions immediately if role changed or staff disabled
+      const roleChanged = data.role !== undefined && data.role !== user.role;
+      const deactivated = data.isActive === false && user.isActive === true;
+      const shouldInvalidate = roleChanged || deactivated;
+
+      return tx.staffUser.update({
+        where: { id },
+        data: {
+          ...data,
+          tokenVersion: shouldInvalidate ? { increment: 1 } : undefined,
+          refreshTokenHash: shouldInvalidate ? null : undefined,
+        },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          isActive: true,
+          doctorId: true,
+        },
+      });
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: 10000,
     });
   }
 

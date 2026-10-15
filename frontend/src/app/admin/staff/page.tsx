@@ -97,7 +97,6 @@ export default function AdminStaffPage() {
     OWNER: 'bg-purple-100 text-purple-900 border-purple-300',
     ADMIN: 'bg-teal-100 text-teal-900 border-teal-300',
     DOCTOR: 'bg-blue-100 text-blue-900 border-blue-300',
-    RECEPTIONIST: 'bg-amber-100 text-amber-900 border-amber-300',
     EDITOR: 'bg-slate-100 text-slate-800 border-slate-300',
   };
 
@@ -305,7 +304,6 @@ export default function AdminStaffPage() {
                       <option value="OWNER">OWNER (To&apos;liq huquq)</option>
                       <option value="ADMIN">ADMIN (Operatsion)</option>
                       <option value="DOCTOR">DOCTOR (Shifokor)</option>
-                      <option value="RECEPTIONIST">RECEPTIONIST</option>
                       <option value="EDITOR">EDITOR (CMS / Sharhlar)</option>
                     </select>
                   </div>
@@ -395,7 +393,6 @@ export default function AdminStaffPage() {
                       <option value="OWNER">OWNER</option>
                       <option value="ADMIN">ADMIN</option>
                       <option value="DOCTOR">DOCTOR</option>
-                      <option value="RECEPTIONIST">RECEPTIONIST</option>
                       <option value="EDITOR">EDITOR</option>
                     </select>
                   </div>

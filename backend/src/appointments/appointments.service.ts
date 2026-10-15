@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
-import { AppointmentStatus, Prisma, StaffRole } from '@prisma/client';
+import { AppointmentStatus, NotificationChannel, NotificationStatus, Prisma, StaffRole } from '@prisma/client';
 import { nanoid } from 'nanoid';
 import * as crypto from 'crypto';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
@@ -47,6 +47,41 @@ export interface CreateBookingDto {
   source?: string;
 }
 
+export function computeBookingFingerprint(params: {
+  serviceId: string;
+  doctorId: string;
+  branchId?: string | null;
+  startTimeIso: string;
+  patientName: string;
+  phone: string;
+  email?: string | null;
+  note?: string | null;
+  consentGiven: boolean;
+  scope: 'public' | 'admin';
+}): string {
+  const normalizedPhone = (params.phone || '').replace(/[\s\-\(\)\+]/g, '');
+  const normalizedName = (params.patientName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const normalizedEmail = (params.email || '').trim().toLowerCase();
+  const normalizedNote = (params.note || '').trim();
+  const normalizedBranch = (params.branchId || '').trim();
+  const normalizedStartTime = new Date(params.startTimeIso).toISOString();
+
+  const canonical = [
+    `scope:${params.scope}`,
+    `service:${params.serviceId}`,
+    `doctor:${params.doctorId}`,
+    `branch:${normalizedBranch}`,
+    `time:${normalizedStartTime}`,
+    `name:${normalizedName}`,
+    `phone:${normalizedPhone}`,
+    `email:${normalizedEmail}`,
+    `note:${normalizedNote}`,
+    `consent:${Boolean(params.consentGiven)}`,
+  ].join('|');
+
+  return crypto.createHash('sha256').update(canonical).digest('hex');
+}
+
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
@@ -67,29 +102,51 @@ export class AppointmentsService {
       throw new BadRequestException('Shaxsiy ma\'lumotlarni qayta ishlashga rozilik zarur');
     }
 
+    const scope: 'public' | 'admin' = dto.source === 'admin' ? 'admin' : 'public';
+    const reqFingerprint = computeBookingFingerprint({
+      serviceId: dto.serviceId,
+      doctorId: dto.doctorId,
+      branchId: dto.branchId || null,
+      startTimeIso: dto.startTime,
+      patientName: dto.patientName,
+      phone: dto.patientPhone,
+      email: dto.patientEmail || null,
+      note: dto.note || null,
+      consentGiven: dto.consentGiven,
+      scope,
+    });
+
     // 1. Idempotency Key Validation
     if (dto.idempotencyKey) {
       const existing = await this.prisma.appointment.findUnique({
         where: { idempotencyKey: dto.idempotencyKey },
-        include: { doctor: true, service: true, branch: true },
+        include: { doctor: true, service: true, branch: true, patient: true },
       });
 
       if (existing) {
-        // Validate payload consistency: reject key reuse with altered payload
-        const reqStartTime = new Date(dto.startTime).getTime();
-        const existingStartTime = existing.startTime.getTime();
+        // Validate request fingerprint: reject key reuse with ANY altered payload
+        let matches = false;
+        if (existing.requestFingerprint) {
+          matches = existing.requestFingerprint === reqFingerprint;
+        } else {
+          // Fallback legacy fingerprint check
+          const existingStartTime = existing.startTime.toISOString();
+          const reqStartTime = new Date(dto.startTime).toISOString();
+          const legacyMatch =
+            existing.doctorId === dto.doctorId &&
+            existing.serviceId === dto.serviceId &&
+            existingStartTime === reqStartTime &&
+            this.normalizePhone(existing.patient.phone) === this.normalizePhone(dto.patientPhone);
+          matches = legacyMatch;
+        }
 
-        if (
-          existing.doctorId !== dto.doctorId ||
-          existing.serviceId !== dto.serviceId ||
-          Math.abs(existingStartTime - reqStartTime) > 1000
-        ) {
+        if (!matches) {
           throw new ConflictException(
             'Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan',
           );
         }
 
-        // Safe response: NEVER expose management token to a different caller or payload
+        // Return stable existing appointment response
         return {
           id: existing.id,
           publicToken: existing.publicToken,
@@ -295,9 +352,12 @@ export class AppointmentsService {
               serviceName: service.nameUz,
               servicePriceFrom: service.priceFrom,
               durationMinutes,
+              bufferMinutes,
               note: dto.note?.trim() || null,
               source: dto.source || 'website',
               idempotencyKey: dto.idempotencyKey || null,
+              requestFingerprint: reqFingerprint,
+              revision: 1,
               consentGiven: dto.consentGiven,
               expiresAt,
               tokenExpiresAt,
@@ -339,9 +399,35 @@ export class AppointmentsService {
 
         break; // Successfully committed
       } catch (err: any) {
+        if (err?.code === 'P2002' && dto.idempotencyKey) {
+          const raced = await this.prisma.appointment.findUnique({
+            where: { idempotencyKey: dto.idempotencyKey },
+            include: { doctor: true, service: true, branch: true, patient: true },
+          });
+          if (raced) {
+            if (raced.requestFingerprint && raced.requestFingerprint !== reqFingerprint) {
+              throw new ConflictException('Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan');
+            }
+            return {
+              id: raced.id,
+              publicToken: raced.publicToken,
+              status: raced.status,
+              startTime: raced.startTime,
+              endTime: raced.endTime,
+              serviceName: raced.serviceName,
+              doctor: {
+                id: raced.doctor.id,
+                firstNameUz: raced.doctor.firstNameUz,
+                lastNameUz: raced.doctor.lastNameUz,
+                firstNameRu: raced.doctor.firstNameRu,
+                lastNameRu: raced.doctor.lastNameRu,
+              },
+            };
+          }
+        }
+
         const isConflict =
           err?.code === 'P2034' ||
-          err?.code === 'P2002' ||
           err?.message?.includes('write conflict') ||
           err?.message?.includes('deadlock') ||
           err?.message?.includes('could not serialize');
@@ -504,7 +590,6 @@ export class AppointmentsService {
     const timezone = settings?.timezone || 'Asia/Tashkent';
     const minNoticeHours = settings?.minBookingNoticeHours ?? 2;
     const maxHorizonDays = settings?.maxBookingHorizonDays ?? 60;
-    const bufferMinutes = settings?.bufferMinutes ?? 5;
 
     const newStartTime = new Date(newStartTimeStr);
     const nowUtc = new Date();
@@ -524,21 +609,10 @@ export class AppointmentsService {
       throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga rejalashtirib bo\'lmaydi`);
     }
 
-    // CRITICAL: Preserve the buffer! totalMinutes = durationMinutes + bufferMinutes
+    // CRITICAL: Preserve duration and buffer snapshot! totalMinutes = durationMinutes + bufferMinutes
+    const bufferMinutes = appointment.bufferMinutes ?? settings?.bufferMinutes ?? 5;
     const totalMinutes = appointment.durationMinutes + bufferMinutes;
     const newEndTime = new Date(newStartTime.getTime() + totalMinutes * 60 * 1000);
-
-    // Validate working hours against doctor's schedule
-    const isWorking = await this.schedulingService.isDoctorWorkingAt(
-      appointment.doctorId,
-      newStartTime,
-      newEndTime,
-      timezone,
-      appointment.branchId || undefined,
-    );
-    if (!isWorking) {
-      throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
-    }
 
     const conflictingBeforeLock = await this.prisma.appointment.findFirst({
       where: {
@@ -555,88 +629,170 @@ export class AppointmentsService {
 
     const lockKey = this.hashStringToInt(`doc_${appointment.doctorId}`);
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+    const maxRetries = 3;
+    let updated: any;
 
-      // Revalidate current appointment state inside transaction
-      const [current] = await tx.$queryRaw<any[]>`
-        SELECT id, status FROM "appointments" WHERE id = ${appointmentId} FOR UPDATE
-      `;
-      if (!current || ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(current.status)) {
-        throw new BadRequestException('Qabul holati o\'zgarganligi sababli qayta rejalashtirib bo\'lmaydi');
-      }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        updated = await this.prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-      // Double-check conflicting slots (excluding current appointment)
-      const conflicting = await tx.appointment.findFirst({
-        where: {
-          doctorId: appointment.doctorId,
-          status: { in: TIME_RESERVING_STATUSES },
-          id: { not: appointmentId },
-          startTime: { lt: newEndTime },
-          endTime: { gt: newStartTime },
-        },
-      });
+          // Revalidate current appointment state inside transaction
+          const [current] = await tx.$queryRaw<any[]>`
+            SELECT id, status, revision FROM "appointments" WHERE id = ${appointmentId} FOR UPDATE
+          `;
+          if (!current || ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(current.status)) {
+            throw new BadRequestException('Qabul holati o\'zgarganligi sababli qayta rejalashtirib bo\'lmaydi');
+          }
 
-      if (conflicting) {
-        throw new ConflictException('Yangi tanlangan vaqt boshqa bemor tomonidan band qilindi');
-      }
+          // Check doctor eligibility and active status inside transaction
+          const doctor = await tx.doctor.findUnique({
+            where: { id: appointment.doctorId },
+            include: { branches: true },
+          });
+          if (!doctor || !doctor.isActive || doctor.isArchived) {
+            throw new BadRequestException('Shifokor faol emas yoki arxivlangan');
+          }
 
-      const appt = await tx.appointment.update({
-        where: { id: appointmentId },
-        data: {
-          startTime: newStartTime,
-          endTime: newEndTime,
-        },
-        include: { doctor: true, service: true, patient: true, branch: true },
-      });
+          // Check service eligibility and active status inside transaction
+          const service = await tx.service.findUnique({
+            where: { id: appointment.serviceId },
+          });
+          if (!service || !service.isActive || service.isArchived) {
+            throw new BadRequestException('Xizmat faol emas yoki arxivlangan');
+          }
 
-      await tx.appointmentStatusHistory.create({
-        data: {
-          appointmentId,
-          fromStatus: current.status as AppointmentStatus,
-          toStatus: current.status as AppointmentStatus,
-          reason: `Qayta rejalashtirildi: ${appointment.startTime.toISOString()} -> ${newStartTime.toISOString()}`,
-          changedBy: changedBy || 'patient',
-        },
-      });
+          // Check branch eligibility if set
+          if (appointment.branchId) {
+            const branch = await tx.branch.findUnique({
+              where: { id: appointment.branchId },
+            });
+            if (!branch || !branch.isActive) {
+              throw new BadRequestException('Filial faol emas');
+            }
+            const isAssigned = doctor.branches.some(b => b.branchId === appointment.branchId);
+            if (!isAssigned) {
+              throw new BadRequestException('Shifokor bu filialga biriktirilmagan');
+            }
+          }
 
-      await tx.auditLog.create({
-        data: {
-          userId: (changedBy && changedBy !== 'system' && changedBy !== 'patient') ? changedBy : null,
-          action: 'appointment.rescheduled',
-          entity: 'Appointment',
-          entityId: appointmentId,
-          details: { oldStartTime: appointment.startTime, newStartTime } as Prisma.InputJsonValue,
-        },
-      });
+          // Validate working hours inside transaction lock
+          const isWorking = await this.schedulingService.isDoctorWorkingAt(
+            appointment.doctorId,
+            newStartTime,
+            newEndTime,
+            timezone,
+            appointment.branchId || undefined,
+          );
+          if (!isWorking) {
+            throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
+          }
 
-      return appt;
-    }, {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      timeout: 10000,
-    });
+          // Double-check conflicting slots (excluding current appointment)
+          const conflicting = await tx.appointment.findFirst({
+            where: {
+              doctorId: appointment.doctorId,
+              status: { in: TIME_RESERVING_STATUSES },
+              id: { not: appointmentId },
+              startTime: { lt: newEndTime },
+              endTime: { gt: newStartTime },
+            },
+          });
 
-    // Update reminders after transaction commits: cancel old and schedule new
-    try {
-      await this.notificationsService.cancelAppointmentReminders(appointmentId);
-      const reminderTime = new Date(newStartTime.getTime() - 2 * 60 * 60 * 1000);
-      if (reminderTime > new Date()) {
-        await this.notificationsService.enqueue({
-          channel: updated.patient.email ? 'EMAIL' as any : 'SMS' as any,
-          templateKey: 'appointment_reminder',
-          recipient: updated.patient.email || updated.patient.phone,
-          appointmentId: updated.id,
-          scheduledFor: reminderTime,
-          deduplicationKey: `reminder_${updated.id}_${newStartTime.getTime()}`,
-          payload: {
-            appointmentId: updated.id,
-            serviceName: updated.serviceName,
-            startTime: newStartTime.toISOString(),
-          },
+          if (conflicting) {
+            throw new ConflictException('Yangi tanlangan vaqt boshqa bemor tomonidan band qilindi');
+          }
+
+          // Adjust management token expiry when moving appointment into future (extend to 7 days after appointment)
+          const newExtendedExpiry = new Date(newEndTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+          const appt = await tx.appointment.update({
+            where: { id: appointmentId },
+            data: {
+              startTime: newStartTime,
+              endTime: newEndTime,
+              bufferMinutes,
+              revision: { increment: 1 },
+              tokenExpiresAt: newExtendedExpiry,
+            },
+            include: { doctor: true, service: true, patient: true, branch: true },
+          });
+
+          await tx.appointmentStatusHistory.create({
+            data: {
+              appointmentId,
+              fromStatus: current.status as AppointmentStatus,
+              toStatus: current.status as AppointmentStatus,
+              reason: `Qayta rejalashtirildi: ${appointment.startTime.toISOString()} -> ${newStartTime.toISOString()}`,
+              changedBy: changedBy || 'patient',
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              userId: (changedBy && changedBy !== 'system' && changedBy !== 'patient') ? changedBy : null,
+              action: 'appointment.rescheduled',
+              entity: 'Appointment',
+              entityId: appointmentId,
+              details: { oldStartTime: appointment.startTime, newStartTime, revision: appt.revision } as Prisma.InputJsonValue,
+            },
+          });
+
+          // Transactionally durable notification intent: cancel old reminders in DB
+          await tx.notificationJob.updateMany({
+            where: {
+              appointmentId,
+              status: NotificationStatus.PENDING,
+              templateKey: 'appointment_reminder',
+            },
+            data: {
+              status: NotificationStatus.CANCELLED,
+            },
+          });
+
+          // Transactionally schedule new reminder in DB (outbox)
+          const reminderTime = new Date(newStartTime.getTime() - 2 * 60 * 60 * 1000);
+          if (reminderTime > new Date()) {
+            await tx.notificationJob.create({
+              data: {
+                channel: appt.patient.email ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+                templateKey: 'appointment_reminder',
+                recipient: appt.patient.email || appt.patient.phone,
+                appointmentId: appt.id,
+                appointmentRevision: appt.revision,
+                scheduledFor: reminderTime,
+                deduplicationKey: `reminder_${appt.id}_rev${appt.revision}_${newStartTime.getTime()}`,
+                status: NotificationStatus.PENDING,
+                payload: {
+                  appointmentId: appt.id,
+                  serviceName: appt.serviceName,
+                  startTime: newStartTime.toISOString(),
+                  revision: appt.revision,
+                },
+              },
+            });
+          }
+
+          return appt;
+        }, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 10000,
         });
+
+        break; // Transaction committed successfully
+      } catch (err: any) {
+        const isConflict =
+          err?.code === 'P2034' ||
+          err?.message?.includes('write conflict') ||
+          err?.message?.includes('deadlock') ||
+          err?.message?.includes('could not serialize');
+
+        if (isConflict && attempt < maxRetries) {
+          await new Promise((res) => setTimeout(res, 50 * attempt + Math.floor(Math.random() * 30)));
+          continue;
+        }
+        throw err;
       }
-    } catch (e: any) {
-      this.logger.warn(`Failed to update reminder for ${appointmentId}: ${e?.message}`);
     }
 
     return updated;

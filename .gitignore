@@ -8,4 +8,5 @@ dist
 .DS_Store
 coverage
 .turbo
-
+uploads
+*.tsbuildinfo

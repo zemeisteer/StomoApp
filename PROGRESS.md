@@ -112,9 +112,9 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
 
 #### Phase 9: Test Isolation & Comprehensive E2E Verification (COMPLETED & VERIFIED)
 - **Dedicated Test Database**: Created isolated `dentacare_test` database.
-- **Fail-Closed Security**: Test runner fails closed if `DATABASE_URL` is not recognized as a dedicated test database.
-- **Run-Specific Fixtures**: Unique timestamp-based phone prefixes (`+99800${runId}`). Broad phone prefix deletions (`+99890`) eliminated.
-- **14/14 Integration Tests Passing (`npm run test:e2e`)**:
+- **Fail-Closed Security**: Test runner validates database name with strict URL parsing, never prints connection credentials in errors, and confirms connected database via `SELECT current_database()` before mutations.
+- **Run-Specific Fixtures**: Unique timestamp-based phone prefixes (`+99800${runId}`). Scoped cleanup targeting generated IDs only.
+- **19/19 Integration Tests Passing (`npm run test:e2e`)**:
   - Regression 1: Health endpoint returns ok and database connection status.
   - Regression 2: Refresh succeeds with CSRF header, rotates tokens, and detects replay.
   - Regression 3: Doctor without linked profile fails closed (403).
@@ -129,16 +129,27 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
   - Regression 12: Demoting or disabling the last active OWNER is strictly rejected.
   - Regression 13: Doctor scheduling and exception CRUD operates correctly.
   - Regression 14: Analytics overview accurately aggregates database metrics.
-- **Production Builds**:
-  - Backend: `npm run build:backend` passed with code 0 (`nest build`).
-  - Frontend: `npm run build:frontend` passed with code 0 (`next build`, 28/28 routes prerendered).
+  - Regression 15: Media upload validates magic bytes (JPEG/PNG/WebP), rejects SVG, spoofed MIME, oversized files (413/400), and serves with secure headers (`nosniff`, `default-src 'none'`).
+  - Regression 16: Idempotency fingerprint binds all fields (service, doctor, branch, start time, name, phone, email, note, consent, scope), rejects altered payload with 409 Conflict, and parallel identical requests yield one booking.
+  - Regression 17: Update endpoints enforce runtime validation classes (`PartialType`), validating numeric bounds, URL schemes, and rejecting invalid or unexpected fields.
+  - Regression 18: Concurrency-safe owner protection with `pg_advisory_xact_lock` and serializable isolation prevents simultaneous demotions of last active owners.
+  - Regression 19: Doctor utilization accurately computes availability, breaks, holidays, partial-day leave, overtime, and includes zero-appointment doctors without silent clamping.
+- **Production Builds & Linting**:
+  - Backend: `npm run build` passed with code 0 (`nest build`).
+  - Backend Lint: `npm run lint` passed with code 0 (`eslint`).
+  - Frontend: `npm run build` passed with code 0 (`next build`, 28/28 routes prerendered).
+  - Frontend Lint: `npm run lint` passed with code 0 (`next lint`).
 
 ---
 
 ### Verification Summary
 | Check | Command | Result |
 |---|---|---|
-| Backend Type Check & Build | `npm run build:backend` | **PASS (code 0)** |
-| Frontend Type Check & Build | `npm run build:frontend` | **PASS (code 0, 28/28 routes)** |
+| Backend Type Check & Build | `npm run build` | **PASS (code 0)** |
+| Backend ESLint | `npm run lint` | **PASS (code 0)** |
+| Frontend Type Check & Build | `npm run build` | **PASS (code 0, 28/28 routes)** |
+| Frontend ESLint | `npm run lint` | **PASS (code 0)** |
 | Dedicated Test Database | `dentacare_test` (PostgreSQL 18) | **CONFIGURED & MIGRATED** |
-| Backend E2E Regression Suite | `npm run test:e2e` | **PASS (14/14 passed, 0 failed)** |
+| Backend E2E Regression Suite | `npm run test:e2e` | **PASS (19/19 passed, 0 failed)** |
+| Live Dev Servers | Backend (:4000) & Frontend (:3000) | **HEALTHY & RESPONDING (HTTP 200)** |
+

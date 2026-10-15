@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { PartialType } from '@nestjs/swagger';
 import { CmsService, CreateArticleDto, CreateFaqDto } from './cms.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -106,6 +107,9 @@ export class FaqInputDto {
   isActive?: boolean;
 }
 
+export class UpdateArticleDto extends PartialType(ArticleInputDto) {}
+export class UpdateFaqDto extends PartialType(FaqInputDto) {}
+
 @Controller()
 export class CmsController {
   constructor(private readonly cmsService: CmsService) {}
@@ -185,7 +189,7 @@ export class CmsController {
   @Put('admin/articles/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.EDITOR)
-  async updateArticle(@Param('id') id: string, @Body() dto: Partial<ArticleInputDto>) {
+  async updateArticle(@Param('id') id: string, @Body() dto: UpdateArticleDto) {
     return this.cmsService.updateArticle(id, dto);
   }
 
@@ -214,7 +218,7 @@ export class CmsController {
   @Put('admin/faqs/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.EDITOR)
-  async updateFaq(@Param('id') id: string, @Body() dto: Partial<FaqInputDto>) {
+  async updateFaq(@Param('id') id: string, @Body() dto: UpdateFaqDto) {
     return this.cmsService.updateFaq(id, dto);
   }
 

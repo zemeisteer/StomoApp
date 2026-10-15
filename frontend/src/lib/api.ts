@@ -396,12 +396,16 @@ export const api = {
   uploadMedia: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetcher<any>('/api/media/upload', {
+    return fetcher<any>('/api/admin/media/upload', {
       method: 'POST',
       body: formData,
     });
   },
-  getMediaList: () => fetcher<any[]>('/api/media'),
+  getMediaList: (category?: string, page = 1, limit = 50) => {
+    const q = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (category) q.set('category', category);
+    return fetcher<{ data: any[]; meta: any }>(`/api/admin/media?${q.toString()}`);
+  },
 
   // Analytics & Audit
   getAnalyticsOverview: (startDate?: string, endDate?: string) => {

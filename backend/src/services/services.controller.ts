@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { PartialType } from '@nestjs/swagger';
 import { ServicesService } from './services.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -21,6 +22,7 @@ import {
   IsInt,
   IsBoolean,
   Min,
+  Max,
   Length,
 } from 'class-validator';
 
@@ -76,6 +78,7 @@ export class CreateServiceDto {
 
   @IsInt()
   @Min(5)
+  @Max(480)
   durationMinutes!: number;
 
   @IsOptional()
@@ -95,7 +98,7 @@ export class CreateServiceDto {
   sortOrder?: number;
 }
 
-export class UpdateServiceDto extends CreateServiceDto {}
+export class UpdateServiceDto extends PartialType(CreateServiceDto) {}
 
 @Controller('services')
 export class ServicesController {
@@ -156,7 +159,7 @@ export class ServicesController {
   @Put('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.EDITOR)
-  update(@Param('id') id: string, @Body() dto: Partial<CreateServiceDto>) {
+  update(@Param('id') id: string, @Body() dto: UpdateServiceDto) {
     return this.servicesService.update(id, dto);
   }
 }

@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Param, Body, UseGuards } from '@nestjs/common';
+import { PartialType } from '@nestjs/swagger';
 import { DoctorsService } from './doctors.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -12,6 +13,7 @@ import {
   IsInt,
   IsArray,
   Length,
+  Min,
 } from 'class-validator';
 
 export class CreateDoctorDto {
@@ -65,10 +67,12 @@ export class CreateDoctorDto {
 
   @IsOptional()
   @IsInt()
+  @Min(0)
   experienceYears?: number;
 
   @IsOptional()
   @IsArray()
+  @IsString({ each: true })
   languages?: string[];
 
   @IsOptional()
@@ -81,18 +85,21 @@ export class CreateDoctorDto {
 
   @IsOptional()
   @IsArray()
+  @IsString({ each: true })
   specialtyIds?: string[];
 
   @IsOptional()
   @IsArray()
+  @IsString({ each: true })
   branchIds?: string[];
 
   @IsOptional()
   @IsArray()
+  @IsString({ each: true })
   serviceIds?: string[];
 }
 
-export class UpdateDoctorDto extends CreateDoctorDto {}
+export class UpdateDoctorDto extends PartialType(CreateDoctorDto) {}
 
 export class SpecialtyDto {
   @IsString()
@@ -160,7 +167,7 @@ export class DoctorsController {
   @Put('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  update(@Param('id') id: string, @Body() dto: Partial<CreateDoctorDto>) {
+  update(@Param('id') id: string, @Body() dto: UpdateDoctorDto) {
     return this.doctorsService.update(id, dto);
   }
 

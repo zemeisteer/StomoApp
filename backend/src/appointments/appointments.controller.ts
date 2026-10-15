@@ -118,9 +118,11 @@ export class PublicBookingController {
       ...dto,
       source: 'website',
     });
+    const aptId = (result as any).id || (result as any).appointmentId;
     return {
       message: 'Qabulga so\'rov qabul qilindi. Tez orada tasdiqlaymiz.',
-      appointmentId: result.id,
+      id: aptId,
+      appointmentId: aptId,
       publicToken: result.publicToken,
       status: result.status,
       startTime: result.startTime,

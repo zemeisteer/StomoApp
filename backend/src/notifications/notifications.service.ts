@@ -9,6 +9,8 @@ import {
   Prisma,
 } from '@prisma/client';
 import * as nodemailer from 'nodemailer';
+import { nanoid } from 'nanoid';
+import { formatInTimeZone } from 'date-fns-tz';
 
 export interface EnqueueNotificationParams {
   channel: NotificationChannel;
@@ -16,6 +18,7 @@ export interface EnqueueNotificationParams {
   recipient: string;
   payload: Record<string, any>;
   appointmentId?: string;
+  appointmentRevision?: number;
   scheduledFor?: Date;
   deduplicationKey?: string;
 }
@@ -61,6 +64,17 @@ export class NotificationsService {
     return '***';
   }
 
+  formatTashkentTime(dateOrIso: string | Date, tz = 'Asia/Tashkent'): string {
+    try {
+      const d = typeof dateOrIso === 'string' ? new Date(dateOrIso) : dateOrIso;
+      const day = formatInTimeZone(d, tz, 'dd.MM.yyyy');
+      const time = formatInTimeZone(d, tz, 'HH:mm');
+      return `${day} soat ${time} (Toshkent vaqti)`;
+    } catch {
+      return String(dateOrIso);
+    }
+  }
+
   /**
    * Enqueue a durable notification job with deduplication
    */
@@ -82,6 +96,7 @@ export class NotificationsService {
           recipient: params.recipient,
           payload: params.payload as Prisma.InputJsonValue,
           appointmentId: params.appointmentId || null,
+          appointmentRevision: params.appointmentRevision || null,
           scheduledFor: params.scheduledFor || new Date(),
           deduplicationKey: params.deduplicationKey || null,
           status: NotificationStatus.PENDING,
@@ -102,7 +117,10 @@ export class NotificationsService {
     serviceName: string;
     patientEmail?: string | null;
     patientPhone: string;
+    revision?: number;
   }) {
+    const formattedTime = this.formatTashkentTime(appointment.startTime);
+
     // 1. Patient Email or SMS
     if (appointment.patientEmail) {
       await this.enqueue({
@@ -110,11 +128,13 @@ export class NotificationsService {
         templateKey: 'patient_booking_received',
         recipient: appointment.patientEmail,
         appointmentId: appointment.id,
+        appointmentRevision: appointment.revision || 1,
         deduplicationKey: `booking_email_${appointment.id}`,
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
           startTime: appointment.startTime.toISOString(),
+          formattedTime,
         },
       });
     } else {
@@ -123,11 +143,13 @@ export class NotificationsService {
         templateKey: 'patient_booking_received_sms',
         recipient: appointment.patientPhone,
         appointmentId: appointment.id,
+        appointmentRevision: appointment.revision || 1,
         deduplicationKey: `booking_sms_${appointment.id}`,
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
           startTime: appointment.startTime.toISOString(),
+          formattedTime,
         },
       });
     }
@@ -145,6 +167,7 @@ export class NotificationsService {
         payload: {
           serviceName: appointment.serviceName,
           startTime: appointment.startTime.toISOString(),
+          formattedTime,
           adminUrl: `${frontendUrl}/admin/calendar?appointmentId=${appointment.id}`,
         },
       });
@@ -158,12 +181,14 @@ export class NotificationsService {
         templateKey: 'appointment_reminder',
         recipient: appointment.patientEmail || appointment.patientPhone,
         appointmentId: appointment.id,
+        appointmentRevision: appointment.revision || 1,
         scheduledFor: reminderTime,
-        deduplicationKey: `reminder_${appointment.id}`,
+        deduplicationKey: `reminder_${appointment.id}_rev${appointment.revision || 1}`,
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
           startTime: appointment.startTime.toISOString(),
+          formattedTime,
         },
       });
     }
@@ -176,7 +201,8 @@ export class NotificationsService {
     await this.prisma.notificationJob.updateMany({
       where: {
         appointmentId,
-        status: { in: [NotificationStatus.PENDING, NotificationStatus.PROCESSING] },
+        status: NotificationStatus.PENDING,
+        templateKey: 'appointment_reminder',
       },
       data: {
         status: NotificationStatus.CANCELLED,
@@ -186,14 +212,20 @@ export class NotificationsService {
 
   /**
    * Cron runner: Process pending notification jobs every minute
-   * Uses PostgreSQL FOR UPDATE SKIP LOCKED to ensure multiple workers never deliver the same job.
+   * Uses PostgreSQL FOR UPDATE SKIP LOCKED and UUID lease ownership tokens
+   * to ensure multiple workers never deliver the same job or overwrite each other.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async processPendingJobs() {
     try {
+      const workerLeaseToken = nanoid(24);
+
+      // Claim jobs atomically with UUID lease ownership token
       const claimedRows = await this.prisma.$queryRaw<{ id: string }[]>`
         UPDATE "notification_jobs"
-        SET status = 'PROCESSING'::"notification_status", "locked_at" = NOW()
+        SET status = 'PROCESSING'::"notification_status", 
+            "locked_at" = NOW(),
+            "lease_token" = ${workerLeaseToken}
         WHERE id IN (
           SELECT id FROM "notification_jobs"
           WHERE (
@@ -212,35 +244,48 @@ export class NotificationsService {
         return;
       }
 
-      const claimedIds = claimedRows.map(r => r.id);
+      const claimedIds = claimedRows.map((r) => r.id);
       const jobs = await this.prisma.notificationJob.findMany({
         where: { id: { in: claimedIds } },
       });
 
       for (const job of jobs) {
-        await this.deliverJob(job);
+        await this.deliverJob(job, workerLeaseToken);
       }
     } catch (err: any) {
       this.logger.error(`Error in processPendingJobs: ${err?.message}`);
     }
   }
 
-  private async deliverJob(job: any) {
-    // Pre-flight check: if reminder for an appointment that is no longer active, cancel without delivery
-    if (job.appointmentId) {
+  private async deliverJob(job: any, workerLeaseToken: string) {
+    // Pre-flight check: ONLY apply status suppression to reminders!
+    // Do NOT blanket-suppress cancellation notices just because appointment is cancelled!
+    if (job.appointmentId && job.templateKey === 'appointment_reminder') {
       const appt = await this.prisma.appointment.findUnique({
         where: { id: job.appointmentId },
-        select: { status: true },
+        select: { status: true, startTime: true, revision: true },
       });
 
       if (!appt || ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(appt.status)) {
-        await this.prisma.notificationJob.update({
-          where: { id: job.id },
-          data: {
-            status: NotificationStatus.CANCELLED,
-            lastError: `Qabul holati (${appt?.status || 'topilmadi'}) tufayli bildirishnoma bekor qilindi`,
-          },
-        });
+        await this.prisma.$executeRaw`
+          UPDATE "notification_jobs"
+          SET status = 'CANCELLED'::"notification_status",
+              "last_error" = 'Qabul bekor qilingan yoki yakunlanganligi sababli eslatma bekor qilindi',
+              "lease_token" = NULL
+          WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+        `;
+        return;
+      }
+
+      // Check revision match: if appointment was rescheduled, cancel stale reminder!
+      if (job.appointmentRevision !== null && appt.revision !== job.appointmentRevision) {
+        await this.prisma.$executeRaw`
+          UPDATE "notification_jobs"
+          SET status = 'CANCELLED'::"notification_status",
+              "last_error" = 'Qabul qayta rejalashtirilganligi sababli eski eslatma bekor qilindi',
+              "lease_token" = NULL
+          WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+        `;
         return;
       }
     }
@@ -255,47 +300,67 @@ export class NotificationsService {
         isRealDelivery = await this.deliverTelegram(job);
       }
 
-      await this.prisma.notificationJob.update({
-        where: { id: job.id },
-        data: {
-          status: isRealDelivery ? NotificationStatus.SENT : NotificationStatus.SIMULATED,
-          sentAt: new Date(),
-          attempts: job.attempts + 1,
-          lastError: isRealDelivery ? null : 'Development sink (simulated delivery)',
-        },
-      });
+      // Conditional completion update matching lease_token
+      await this.prisma.$executeRaw`
+        UPDATE "notification_jobs"
+        SET status = ${isRealDelivery ? 'SENT' : 'SIMULATED'}::"notification_status",
+            "sent_at" = NOW(),
+            "attempts" = ${job.attempts + 1},
+            "last_error" = ${isRealDelivery ? null : 'Development sink (simulated delivery)'},
+            "lease_token" = NULL
+        WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+      `;
     } catch (err: any) {
       const nextAttempts = job.attempts + 1;
       const willFail = nextAttempts >= job.maxAttempts;
 
-      await this.prisma.notificationJob.update({
-        where: { id: job.id },
-        data: {
-          attempts: nextAttempts,
-          status: willFail ? NotificationStatus.FAILED : NotificationStatus.PENDING,
-          lastError: err?.message || String(err),
-          lockedAt: null,
-        },
-      });
+      // Conditional retry/failure update matching lease_token
+      await this.prisma.$executeRaw`
+        UPDATE "notification_jobs"
+        SET attempts = ${nextAttempts},
+            status = ${willFail ? 'FAILED' : 'PENDING'}::"notification_status",
+            "last_error" = ${err?.message || String(err)},
+            "locked_at" = NULL,
+            "lease_token" = NULL,
+            "scheduled_for" = NOW() + INTERVAL '2 minutes'
+        WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+      `;
     }
   }
 
   private async deliverEmail(job: any): Promise<boolean> {
     const smtpFrom = this.configService.get<string>('SMTP_FROM', 'DentaCare <info@dentacare.uz>');
     const payload = job.payload || {};
+    const formattedTime = payload.formattedTime || this.formatTashkentTime(payload.startTime || new Date());
+
+    let subject = `DentaCare: Qabul bildirishnomasi`;
+    let text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz qayd etildi. Vaqti: ${formattedTime}.`;
+
+    if (job.templateKey === 'patient_booking_confirmed') {
+      subject = `DentaCare: Qabulingiz tasdiqlandi!`;
+      text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz tasdiqlandi. Qabul vaqti: ${formattedTime}. Sizni kutamiz!`;
+    } else if (job.templateKey === 'appointment_cancellation') {
+      subject = `DentaCare: Qabul bekor qilindi`;
+      text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz (${formattedTime}) bekor qilindi.`;
+    } else if (job.templateKey === 'appointment_rescheduled') {
+      subject = `DentaCare: Qabul yangi vaqtga ko'chirildi`;
+      text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz yangi vaqtga rejalashtirildi: ${formattedTime}.`;
+    } else if (job.templateKey === 'appointment_reminder') {
+      subject = `DentaCare: Qabul eslatmasi`;
+      text = `Hurmatli bemor! Eslatib o'tamiz, bugun ${formattedTime} da ${payload.serviceName || ''} qabuliga yozilgansiz.`;
+    }
 
     if (this.mailTransporter) {
       await this.mailTransporter.sendMail({
         from: smtpFrom,
         to: job.recipient,
-        subject: `DentaCare: Qabul tafsilotlari - ${payload.serviceName || ''}`,
-        text: `Hurmatli bemor! Sizning ${payload.serviceName} bo'yicha qabulingiz qayd etildi. Vaqti: ${payload.startTime}.`,
+        subject,
+        text,
       });
       return true;
     } else {
-      // Explicit development sink
       this.logger.log(
-        `[DEV SINK: EMAIL] To: ${this.redactRecipient(job.recipient)} | Template: ${job.templateKey}`,
+        `[DEV SINK: EMAIL] To: ${this.redactRecipient(job.recipient)} | Subject: ${subject}`,
       );
       return false;
     }
@@ -305,9 +370,20 @@ export class NotificationsService {
     const smsApiKey = this.configService.get<string>('SMS_API_KEY');
     const smsApiUrl = this.configService.get<string>('SMS_API_URL');
     const payload = job.payload || {};
+    const formattedTime = payload.formattedTime || this.formatTashkentTime(payload.startTime || new Date());
+
+    let message = `DentaCare: ${payload.serviceName || ''} - ${formattedTime}`;
+    if (job.templateKey === 'patient_booking_confirmed') {
+      message = `DentaCare: Qabulingiz tasdiqlandi. ${payload.serviceName || ''} - ${formattedTime}`;
+    } else if (job.templateKey === 'appointment_cancellation') {
+      message = `DentaCare: Qabulingiz bekor qilindi. ${payload.serviceName || ''}`;
+    } else if (job.templateKey === 'appointment_rescheduled') {
+      message = `DentaCare: Qabul yangi vaqtga ko'chirildi: ${formattedTime}`;
+    } else if (job.templateKey === 'appointment_reminder') {
+      message = `DentaCare Eslatma: Bugun ${formattedTime} da qabuldasiz.`;
+    }
 
     if (smsApiKey && smsApiUrl) {
-      // Real SMS provider dispatch
       try {
         const res = await fetch(smsApiUrl, {
           method: 'POST',
@@ -317,7 +393,7 @@ export class NotificationsService {
           },
           body: JSON.stringify({
             recipient: job.recipient,
-            message: `DentaCare: ${payload.serviceName} - ${payload.startTime}`,
+            message,
           }),
         });
         if (!res.ok) {
@@ -329,9 +405,8 @@ export class NotificationsService {
         throw e;
       }
     } else {
-      // Explicit development sink
       this.logger.log(
-        `[DEV SINK: SMS] To: ${this.redactRecipient(job.recipient)} | Template: ${job.templateKey}`,
+        `[DEV SINK: SMS] To: ${this.redactRecipient(job.recipient)} | Message: ${message}`,
       );
       return false;
     }
@@ -340,9 +415,10 @@ export class NotificationsService {
   private async deliverTelegram(job: any): Promise<boolean> {
     const botToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     const payload = job.payload || {};
+    const formattedTime = payload.formattedTime || this.formatTashkentTime(payload.startTime || new Date());
 
-    // Notice: Patient PII is completely excluded! Only link to authenticated admin!
-    const text = `🔔 *Yangi qabul so'rovi!*\n\nXizmat: ${payload.serviceName}\nVaqti: ${payload.startTime}\n\n👉 Boshqaruv paneli: ${payload.adminUrl}`;
+    // Notice: Patient PII is completely excluded! Only service, time, and link to authenticated admin!
+    const text = `🔔 *Yangi qabul so'rovi!*\n\nXizmat: ${payload.serviceName}\nVaqti: ${formattedTime}\n\n👉 Boshqaruv paneli: ${payload.adminUrl}`;
 
     if (botToken) {
       try {
@@ -365,7 +441,6 @@ export class NotificationsService {
         throw e;
       }
     } else {
-      // Explicit development sink
       this.logger.log(
         `[DEV SINK: TELEGRAM] Chat: ${this.redactRecipient(job.recipient)} | Message: ${text.replace(/\n/g, ' ')}`,
       );

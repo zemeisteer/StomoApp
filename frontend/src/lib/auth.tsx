@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from './api';
 
-export type StaffRole = 'OWNER' | 'ADMIN' | 'DOCTOR' | 'RECEPTIONIST' | 'EDITOR';
+export type StaffRole = 'OWNER' | 'ADMIN' | 'DOCTOR' | 'EDITOR';
 
 export interface StaffUserProfile {
   id: string;

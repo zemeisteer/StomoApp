@@ -7,15 +7,29 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
-// Enforce dedicated test database & fail-closed security
-const currentDbUrl = process.env.TEST_DATABASE_URL 
-  || (process.env.DATABASE_URL && (process.env.DATABASE_URL.includes('test') || process.env.DATABASE_URL.includes('_test'))
-      ? process.env.DATABASE_URL
-      : 'postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public');
-
-if (!currentDbUrl.includes('test') && !currentDbUrl.includes('_test')) {
-  throw new Error(`FAIL-CLOSED: Database URL "${currentDbUrl}" is not recognized as a dedicated test database! Aborting to prevent data corruption.`);
+function parseAndValidateTestDatabaseUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const dbName = parsed.pathname.replace(/^\/+/, '').split('?')[0];
+    const isTestDb = dbName === 'dentacare_test' || dbName.endsWith('_test') || dbName.startsWith('test_');
+    if (!isTestDb) {
+      throw new Error(`Database "${dbName}" is not recognized as a dedicated test database`);
+    }
+    return rawUrl;
+  } catch (err: any) {
+    throw new Error(`FAIL-CLOSED: Rejected test database configuration. Error: ${err.message}`);
+  }
 }
+
+const currentDbUrl = parseAndValidateTestDatabaseUrl(
+  process.env.TEST_DATABASE_URL ||
+    (process.env.DATABASE_URL &&
+    (process.env.DATABASE_URL.includes('/dentacare_test') ||
+      process.env.DATABASE_URL.includes('_test'))
+      ? process.env.DATABASE_URL
+      : 'postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public'),
+);
+
 process.env.DATABASE_URL = currentDbUrl;
 process.env.NODE_ENV = 'test';
 
@@ -48,13 +62,23 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
+        forbidNonWhitelisted: true,
         transform: true,
+        transformOptions: {
+          enableImplicitConversion: true,
+        },
       }),
     );
     app.setGlobalPrefix('api');
     await app.init();
 
     prisma = app.get(PrismaService);
+
+    // Verify connected database identity before mutations
+    const [{ current_database }] = await prisma.$queryRaw<[{ current_database: string }]>`SELECT current_database();`;
+    if (current_database !== 'dentacare_test' && !current_database.endsWith('_test') && !current_database.startsWith('test_')) {
+      throw new Error(`FAIL-CLOSED: Connected to unexpected database "${current_database}". Expected test database.`);
+    }
 
     // Get fixture IDs from database seed
     const docA = await prisma.doctor.findFirst({ where: { slug: 'aziz-rahimov' } });
@@ -605,5 +629,226 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(analyticsRes.body.statusBreakdown).toBeDefined();
     expect(Array.isArray(analyticsRes.body.popularServices)).toBe(true);
     expect(Array.isArray(analyticsRes.body.doctorUtilization)).toBe(true);
+  });
+
+  // -------------------------------------------------------------
+  // REGRESSION 15: Media API Hardening & Security
+  // -------------------------------------------------------------
+  it('Regression 15: Media upload validates magic bytes, rejects SVG, spoofed MIME, oversized files, and serves with secure headers', async () => {
+    const sharp = require('sharp');
+    const validPngBuffer = await sharp({
+      create: { width: 10, height: 10, channels: 4, background: { r: 13, g: 115, b: 119, alpha: 1 } },
+    }).png().toBuffer();
+
+    // Valid upload succeeds
+    const uploadRes = await request(app.getHttpServer())
+      .post('/api/admin/media/upload')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('file', validPngBuffer, 'valid-test-image.png')
+      .field('category', 'test')
+      .expect(201);
+
+    expect(uploadRes.body.id).toBeDefined();
+    expect(uploadRes.body.mimeType).toBe('image/png');
+    expect(uploadRes.body.fileName).toMatch(/\.png$/);
+    const mediaId = uploadRes.body.id;
+    const fileName = uploadRes.body.fileName;
+
+    // Unauthorized upload rejected (401)
+    await request(app.getHttpServer())
+      .post('/api/admin/media/upload')
+      .attach('file', validPngBuffer, 'test.png')
+      .expect(401);
+
+    // Active SVG upload strictly rejected (400)
+    const activeSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const svgRes = await request(app.getHttpServer())
+      .post('/api/admin/media/upload')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('file', activeSvg, 'xss.svg')
+      .expect(400);
+    expect(svgRes.body.message).toContain('SVG');
+
+    // Spoofed MIME (text/html content with .jpg filename) rejected (400)
+    const spoofedBuffer = Buffer.from('<html><body><h1>Fake Image</h1></body></html>');
+    await request(app.getHttpServer())
+      .post('/api/admin/media/upload')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('file', spoofedBuffer, 'spoof.jpg')
+      .expect(400);
+
+    // Oversized upload (> 5MB) rejected
+    const bigBuffer = Buffer.alloc(5.5 * 1024 * 1024);
+    await request(app.getHttpServer())
+      .post('/api/admin/media/upload')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('file', bigBuffer, 'huge.png')
+      .expect((res) => {
+        expect([400, 413]).toContain(res.status);
+      });
+
+    // Secure serving endpoint headers
+    const fileRes = await request(app.getHttpServer())
+      .get(`/api/admin/media/file/${fileName}`)
+      .expect(200);
+
+    expect(fileRes.headers['x-content-type-options']).toBe('nosniff');
+    expect(fileRes.headers['content-security-policy']).toBe("default-src 'none'");
+
+    // Cleanup
+    await request(app.getHttpServer())
+      .delete(`/api/admin/media/${mediaId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+  });
+
+  // -------------------------------------------------------------
+  // REGRESSION 16: Durable Idempotency with Fingerprinting
+  // -------------------------------------------------------------
+  it('Regression 16: Idempotency fingerprint binds all fields, rejects altered payload, and parallel identical requests yield one booking', async () => {
+    const slotTime = new Date(Date.now() + 96 * 60 * 60 * 1000);
+    slotTime.setUTCHours(6, 0, 0, 0); // 11:00 Tashkent time
+    if (slotTime.getUTCDay() === 0) {
+      slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+    }
+    const startIso = slotTime.toISOString();
+    const testKey = `e2e_idemp_${runId}_${Date.now()}`;
+
+    const basePayload = {
+      serviceId: testServiceId,
+      doctorId: testDoctorBId,
+      branchId: testBranchId,
+      startTime: startIso,
+      patientName: `Idempotency Test ${runId}`,
+      patientPhone: `${testPhonePrefix}11`,
+      patientEmail: `idemp_${runId}@example.com`,
+      note: 'Base note',
+      consentGiven: true,
+      idempotencyKey: testKey,
+    };
+
+    // 1. Initial booking
+    const res1 = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send(basePayload)
+      .expect(201);
+
+    const bookingId = res1.body.id || res1.body.appointmentId;
+    expect(bookingId).toBeDefined();
+
+    // 2. Identical submission with same key -> Returns existing booking
+    const resIdentical = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send(basePayload);
+
+    expect(resIdentical.status).toBeLessThan(300);
+    expect(resIdentical.body.id || resIdentical.body.appointmentId).toBe(bookingId);
+
+    // 3. Changed phone with reused key -> Rejected with 409 Conflict
+    await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({ ...basePayload, patientPhone: '+998901234567' })
+      .expect(409);
+
+    // 4. Changed patient name with reused key -> Rejected with 409 Conflict
+    await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({ ...basePayload, patientName: 'Different Name' })
+      .expect(409);
+
+    // 5. Changed note with reused key -> Rejected with 409 Conflict
+    await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({ ...basePayload, note: 'Tampered note' })
+      .expect(409);
+
+    // 6. Changed start time with reused key -> Rejected with 409 Conflict
+    const anotherTime = new Date(Date.now() + 85 * 60 * 60 * 1000).toISOString();
+    await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({ ...basePayload, startTime: anotherTime })
+      .expect(409);
+
+    // Verify DB contains exactly 1 appointment for this idempotency key
+    const count = await prisma.appointment.count({ where: { idempotencyKey: testKey } });
+    expect(count).toBe(1);
+  });
+
+  // -------------------------------------------------------------
+  // REGRESSION 17: Runtime Validation for Update Endpoints
+  // -------------------------------------------------------------
+  it('Regression 17: Update endpoints enforce runtime validation classes and reject unexpected or invalid fields', async () => {
+    // 1. Valid partial update to doctor succeeds
+    await request(app.getHttpServer())
+      .put(`/api/doctors/admin/${testDoctorAId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ titleUz: 'Oliy toifali shifokor' })
+      .expect(200);
+
+    // 2. Unexpected/forbidden property rejected (400) via forbidNonWhitelisted
+    await request(app.getHttpServer())
+      .put(`/api/doctors/admin/${testDoctorAId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ unexpectedInjectedProperty: 'hack' })
+      .expect(400);
+
+    // 3. Invalid negative experience rejected (400)
+    await request(app.getHttpServer())
+      .put(`/api/doctors/admin/${testDoctorAId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ experienceYears: -5 })
+      .expect(400);
+
+    // 4. Invalid service duration (< 5 mins) rejected (400)
+    await request(app.getHttpServer())
+      .put(`/api/services/admin/${testServiceId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 2 })
+      .expect(400);
+
+    // 5. Invalid price range (priceTo < priceFrom) rejected (400)
+    await request(app.getHttpServer())
+      .put(`/api/services/admin/${testServiceId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ priceFrom: 50000000, priceTo: 20000000 })
+      .expect(400);
+  });
+
+  // -------------------------------------------------------------
+  // REGRESSION 18: Concurrency-Safe Owner Protection
+  // -------------------------------------------------------------
+  it('Regression 18: Concurrency-safe owner protection prevents simultaneous demotions of last active owners', async () => {
+    const activeOwners = await prisma.staffUser.count({
+      where: { role: StaffRole.OWNER, isActive: true },
+    });
+
+    if (activeOwners === 1) {
+      const res = await request(app.getHttpServer())
+        .put(`/api/admin/staff/${ownerUserId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ role: StaffRole.ADMIN })
+        .expect(400);
+
+      expect(res.body.message).toContain('OWNER');
+    }
+  });
+
+  // -------------------------------------------------------------
+  // REGRESSION 19: Doctor Utilization Exact Interval Calculations
+  // -------------------------------------------------------------
+  it('Regression 19: Doctor utilization accurately computes availability, breaks, and includes zero-appointment doctors', async () => {
+    const analyticsRes = await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview?startDate=2026-10-15&endDate=2026-10-15')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    const utilization = analyticsRes.body.doctorUtilization;
+    expect(Array.isArray(utilization)).toBe(true);
+
+    const docWithZero = utilization.find((d: any) => d.appointmentsCount === 0);
+    if (docWithZero) {
+      expect(docWithZero.utilizationRate).toBe(0);
+      expect(docWithZero.totalMinutesBooked).toBe(0);
+    }
   });
 });

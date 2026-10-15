@@ -397,6 +397,7 @@ model Appointment {
   serviceName     String      @map("service_name")
   servicePriceFrom Int?       @map("service_price_from")
   durationMinutes  Int        @map("duration_minutes")
+  bufferMinutes    Int        @default(5) @map("buffer_minutes")
   
   // Patient note
   note      String?           @db.Text
@@ -405,7 +406,11 @@ model Appointment {
   source    String            @default("website") // website, phone, admin
   
   // Idempotency key to prevent duplicate submissions
-  idempotencyKey String?      @unique @map("idempotency_key")
+  idempotencyKey     String?      @unique @map("idempotency_key")
+  requestFingerprint String?      @map("request_fingerprint")
+  
+  // Revision tracking for rescheduling/reminders
+  revision  Int               @default(1) @map("revision")
   
   // Consent
   consentGiven Boolean        @default(false) @map("consent_given")
@@ -689,6 +694,10 @@ model NotificationJob {
   // Scheduling and Lease Lock
   scheduledFor  DateTime?          @map("scheduled_for")
   lockedAt      DateTime?          @map("locked_at")
+  leaseToken    String?            @map("lease_token")
+  
+  // Revision pinning (preflight check)
+  appointmentRevision Int?         @map("appointment_revision")
   
   // Delivery tracking
   attempts      Int                @default(0)

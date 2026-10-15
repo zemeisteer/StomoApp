@@ -14,7 +14,9 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
 import { DayOfWeek, ExceptionType, StaffRole } from '@prisma/client';
-import { IsString, IsEnum, IsOptional, IsDateString } from 'class-validator';
+import { IsString, IsEnum, IsOptional, IsDateString, Matches } from 'class-validator';
+
+const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 class SetScheduleDto {
   @IsString()
@@ -24,17 +26,21 @@ class SetScheduleDto {
   dayOfWeek!: DayOfWeek;
 
   @IsString()
+  @Matches(TIME_REGEX, { message: 'Boshlanish vaqti HH:MM formatida bo\'lishi kerak' })
   startTime!: string;
 
   @IsString()
+  @Matches(TIME_REGEX, { message: 'Tugash vaqti HH:MM formatida bo\'lishi kerak' })
   endTime!: string;
 
   @IsOptional()
   @IsString()
+  @Matches(TIME_REGEX, { message: 'Tanaffus boshlanishi HH:MM formatida bo\'lishi kerak' })
   breakStart?: string;
 
   @IsOptional()
   @IsString()
+  @Matches(TIME_REGEX, { message: 'Tanaffus tugashi HH:MM formatida bo\'lishi kerak' })
   breakEnd?: string;
 
   @IsOptional()
@@ -54,10 +60,12 @@ class AddExceptionDto {
 
   @IsOptional()
   @IsString()
+  @Matches(TIME_REGEX, { message: 'Vaqt HH:MM formatida bo\'lishi kerak' })
   startTime?: string;
 
   @IsOptional()
   @IsString()
+  @Matches(TIME_REGEX, { message: 'Vaqt HH:MM formatida bo\'lishi kerak' })
   endTime?: string;
 
   @IsOptional()

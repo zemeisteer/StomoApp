@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ServiceCategory } from '@prisma/client';
 
@@ -65,10 +65,22 @@ export class ServicesService {
   }
 
   async create(data: any) {
+    if (data.priceFrom !== undefined && data.priceTo !== undefined && data.priceTo < data.priceFrom) {
+      throw new BadRequestException('Maksimal narx (priceTo) minimal narxdan (priceFrom) kichik bo\'lishi mumkin emas');
+    }
     return this.prisma.service.create({ data });
   }
 
   async update(id: string, data: any) {
+    const existing = await this.prisma.service.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Xizmat topilmadi');
+
+    const effectiveFrom = data.priceFrom !== undefined ? data.priceFrom : existing.priceFrom;
+    const effectiveTo = data.priceTo !== undefined ? data.priceTo : existing.priceTo;
+    if (effectiveFrom !== null && effectiveTo !== null && effectiveTo < effectiveFrom) {
+      throw new BadRequestException('Maksimal narx (priceTo) minimal narxdan (priceFrom) kichik bo\'lishi mumkin emas');
+    }
+
     return this.prisma.service.update({ where: { id }, data });
   }
 

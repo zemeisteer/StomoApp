@@ -98,6 +98,48 @@
 - [x] Service and pricing management with category grouping and duration settings (**Verified**)
 - [x] Review moderation queue (approve/reject/archive) (**Verified**)
 - [x] CMS content editor for articles, FAQs, and homepage copy (**Verified**)
+
+---
+
+## Phase 5: Deep Hardening & Core Defect Elimination (COMPLETED)
+- [x] **Media API & Image Security**:
+  - Aligned routes to `/api/admin/media/upload` and `/api/admin/media` with paginated responses.
+  - Implemented magic bytes signature validation (JPEG, PNG, WebP) and strict SVG rejection.
+  - Added Sharp raster image re-encoding with dimension bounds (4096px, 16MP) and stripping of active scripting/metadata.
+  - Enforced file size limits before full buffering (HTTP 413 / 400).
+  - Explicit storage driver selection (`s3` vs `local`) with fail-closed production checks and cleanup on partial failures.
+  - Added secure static serving with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'`. (**Verified**)
+- [x] **Durable Booking Idempotency**:
+  - Implemented SHA-256 request fingerprinting binding service, doctor, branch, exact start time, patient name, normalized phone, email, note, consent, and request scope.
+  - Reused key with altered payload strictly returns 409 Conflict; identical payload returns stable existing booking.
+  - Concurrent racing insertions catch `P2002` and deduplicate safely. (**Verified**)
+- [x] **Scheduling & Rescheduling Consistency**:
+  - Snapshot booking-time `bufferMinutes` into the `Appointment` model.
+  - Transactional working hours and doctor/branch/service eligibility checks inside advisory locks.
+  - Rescheduling increments `revision`, extends `tokenExpiresAt`, and transactionally records audit/outbox entries.
+  - Bounded retry with jitter for serializable conflicts. (**Verified**)
+- [x] **Doctor Utilization Analytics**:
+  - Replaced weekly approximation with exact minute interval math (`TimeInterval`, `subtractInterval`, `mergeIntervals`).
+  - Iterates clinic-local dates, applies weekday schedules, subtracts breaks, leaves, holidays, and accounts for overtime.
+  - Clips intervals to date boundaries and includes eligible doctors with zero bookings.
+  - Whitelisted allowed event types and metadata fields to prevent PII leakage. (**Verified**)
+- [x] **Concurrency-Safe Owner Protection**:
+  - Protected with `pg_advisory_xact_lock(hashtext('staff_owner_mutex'))` + row locking inside serializable transaction.
+  - Rechecks active owner count inside transaction; prevents simultaneous demotions.
+  - Cleaned up frontend forms to use supported `StaffRole` enum values (`OWNER`, `ADMIN`, `DOCTOR`, `RECEPTION`, `EDITOR`). (**Verified**)
+- [x] **Runtime Validation for Update Endpoints**:
+  - Replaced TypeScript `Partial<Dto>` with `@nestjs/swagger` `PartialType` classes.
+  - Added bounded validations (`@Min`, `@Max`, `@Matches`, `@IsEnum`, URL scheme validation).
+  - Audited and updated doctors, services, CMS articles, FAQs, clinic settings, and scheduling routes. (**Verified**)
+- [x] **Notification Reliability & Worker Leasing**:
+  - Atomic job claiming with unique UUID lease tokens and conditional completion (`WHERE id = :id AND lease_token = :token`).
+  - Preflight checks against appointment revision and start time.
+  - Preserves cancellation notifications; formats timestamps in clinic timezone. (**Verified**)
+- [x] **Test Database Safety & Verification**:
+  - Safe URL parser validating database name without printing credentials.
+  - Explicit runtime database identity verification (`SELECT current_database()`).
+  - 19/19 backend regression tests passing against isolated `dentacare_test`. (**Verified**)
+
 - [x] Clinic settings & branch management (**Verified**)
 - [x] Audit log viewer for tracking staff actions (**Verified**)
 - [x] Role-based access control (OWNER, ADMIN, DOCTOR, EDITOR) (**Verified**)
