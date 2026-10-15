@@ -189,20 +189,93 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
     - `mobile_admin_calendar.png`
     - `tablet_homepage.png`
 
+
+---
+
+#### Phase 11: Multi-Service Booking Architecture, Server-Authoritative Duration, Persistence, Idempotency & Localization (COMPLETED & VERIFIED)
+- **Server-Authoritative Duration**:
+  - Removed `customDurationMinutes` and public control over appointment duration in `appointments.controller.ts` and `scheduling.controller.ts`.
+  - Backend derives authoritative duration: sum of doctor-specific durations from `DoctorService.customDurationMinutes` or fallback `Service.durationMinutes` + buffer added exactly once per appointment (`calculateAuthoritativeServiceDuration`).
+  - Added bounded staff override `PATCH /admin/appointments/:id/duration` (5 to 480 minutes) with reason and audit log.
+  - Reject invalid slot query parameters with `QuerySlotsDto`.
+  - Authoritative duration and price metadata returned from `GET /api/scheduling/slots`.
+- **Strict Multi-Service Contract (1–3 Unique Services)**:
+  - Validates 1 to 3 unique active services via `resolveServiceIds`.
+  - Ensures doctor provides every selected service and is assigned to the selected branch.
+  - Re-evaluates eligibility inside serializable database transaction with advisory lock.
+  - Consistent combinations accepted by both `/api/scheduling/slots` and `/api/booking`.
+- **Persistence & Historical Forward Migration**:
+  - Defined `AppointmentServiceItem` model in `schema.prisma` with service snapshots (`serviceNameUz`, `serviceNameRu`, `durationMinutes`, `priceFrom`, `sortOrder`).
+  - Created forward migration `20261015150000_appointment_service_items` without resetting database. Historical appointments preserved and backfilled.
+  - Unified serializer (`serializeAppointmentResponse`) for consistent response structures across booking, admin calendar, status lookup, and rescheduling.
+  - Service analytics counts individual `AppointmentServiceItem` entries without double-counting appointment totals or presenting estimates as collected revenue.
+- **Full Cryptographic Idempotency**:
+  - Request fingerprint binds sorted `serviceIds` and all request parameters.
+  - Verified across all 4 return paths: initial lookup, retry-loop lookup, locked lookup, and `P2002` race recovery.
+  - Frontend generates stable UUID v4 idempotency keys, reuses on retry, and generates a new key when booking parameters change.
+- **Schedule Honesty & Date Handling**:
+  - Removed fake Mon/Wed/Fri fallback and cross-branch schedules in `frontend/src/app/booking/page.tsx`.
+  - Pure calendar dates constructed at noon UTC (`Date.UTC(y, m - 1, d, 12, 0, 0)`) to prevent date shifting in `Asia/Tashkent`.
+  - Cascading selection resets (branch -> service -> doctor -> slot) with generation counter to prevent race conditions.
+  - 409 conflict handling preserves patient details and prompts for a new slot.
+  - Strict phone formatting (`+998` followed by 9 digits) across booking and callback forms.
+  - Full Uzbek and Russian translations for multi-service hints, limits, conflict notices, and item breakdowns.
+
 ---
 
 ### Verification Summary
+
+#### Tests Executed Before Multi-Service Commit (Base Regressions 1–21)
+| Test | Description | Result |
+|---|---|---|
+| Regression 1 | Health endpoint returns ok and database connection status | **PASS** |
+| Regression 2 | Refresh succeeds with CSRF header, rotates tokens, and detects replay | **PASS** |
+| Regression 3 | Doctor without linked profile fails closed (403) | **PASS** |
+| Regression 4 | Doctor A cannot read Doctor B appointment details | **PASS** |
+| Regression 5 | Simultaneous overlapping bookings cannot both succeed (one 201, one 409) | **PASS** |
+| Regression 6 | True concurrent idempotent submissions create one booking, changed payload rejected | **PASS** |
+| Regression 7 | Shared family phone does not silently merge different patients | **PASS** |
+| Regression 8 | Public reviews require moderation before appearing publicly | **PASS** |
+| Regression 9 | Failed rescheduling preserves original slot intact | **PASS** |
+| Regression 10 | Cannot confirm an already cancelled appointment | **PASS** |
+| Regression 11 | Callback requests persist preferred branch/time and internal notes | **PASS** |
+| Regression 12 | Demoting or disabling the last active OWNER is strictly rejected | **PASS** |
+| Regression 13 | Doctor scheduling and exception CRUD operates correctly | **PASS** |
+| Regression 14 | Analytics overview accurately aggregates database metrics | **PASS** |
+| Regression 15 | Media upload validates magic bytes (JPEG/PNG/WebP), rejects SVG, spoofed MIME | **PASS** |
+| Regression 16 | Idempotency fingerprint binds all fields, rejects altered payload with 409 | **PASS** |
+| Regression 17 | Update endpoints enforce runtime validation classes and reject unexpected fields | **PASS** |
+| Regression 18 | Concurrency-safe owner protection prevents simultaneous demotions of last active owners | **PASS** |
+| Regression 19 | Doctor utilization accurately computes availability, breaks, holidays, overtime | **PASS** |
+| Regression 20 | Historical buffer preservation on reschedule | **PASS** |
+| Regression 21 | Transactional outbox notification intent persistence | **PASS** |
+
+#### Tests Executed After Multi-Service Fixes (Multi-Service Regressions 22–31)
+| Test | Description | Result |
+|---|---|---|
+| Regression 22 | Two-service booking creates exact duration and price snapshots in `AppointmentServiceItem` and totals | **PASS** |
+| Regression 23 | Doctor-specific durations are server-authoritative and override service defaults | **PASS** |
+| Regression 24 | Unauthorized second service not provided by doctor is rejected with 400 | **PASS** |
+| Regression 25 | Missing, inactive, duplicate, and excessive service selections are rejected | **PASS** |
+| Regression 26 | Attempts to alter duration via public API are rejected; staff override supported with bounds & audit | **PASS** |
+| Regression 27 | Slot availability matches booking creation duration and buffer | **PASS** |
+| Regression 28 | Multi-service rescheduling preserves snapshots and validates all services | **PASS** |
+| Regression 29 | Idempotency binds full canonical service selection and rejects changed secondary services | **PASS** |
+| Regression 30 | Historical single-service appointments are preserved and backfilled into service items | **PASS** |
+| Regression 31 | Service analytics accurately count service items without double-counting appointments or estimated prices | **PASS** |
+
+#### Overall Build & Verification Status
 | Check | Command | Result |
 |---|---|---|
-| Historical Data Forward Migration | `npx prisma migrate deploy` | **APPLIED (dev + test DBs)** |
-| Backend Type Check & Build | `npm run build` | **PASS (code 0)** |
+| Forward Migration (Multi-Service) | `npx prisma migrate deploy` | **APPLIED (`20261015150000_appointment_service_items`)** |
+| Backend Build | `npm run build` | **PASS (code 0)** |
 | Backend ESLint | `npm run lint` | **PASS (code 0)** |
-| Frontend Type Check & Build | `npm run build` | **PASS (code 0, 28/28 routes)** |
+| Frontend Build | `npm run build` | **PASS (code 0, 28/28 routes prerendered)** |
 | Frontend ESLint | `npm run lint` | **PASS (code 0)** |
 | Dedicated Test Database | `dentacare_test` (PostgreSQL 18) | **CONFIGURED & MIGRATED** |
-| Backend E2E Regression Suite | `npm run test:e2e` | **PASS (21/21 passed, 0 failed in 29.6s)** |
+| Full E2E Test Suite | `npm run test:e2e` | **PASS (31/31 passed, 0 failed in 59.0s)** |
 | Live Dev Servers | Backend (:4000) & Frontend (:3000) | **HEALTHY & RESPONDING (HTTP 200)** |
-| Browser Automation & Screenshots | `node test/browser-workflow.js` | **PASS (12/12 screenshots captured)** |
+| Live E2E Integration Script | `node scratch/test-live-e2e-flow.js` | **PASS (All 6 live steps verified)** |
 
 ### Remaining Limitations & Honest Blockers
 1. **Third-Party External Notification Gateways (Eskiz SMS & Telegram Bot)**:
@@ -211,5 +284,7 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
    - In development/testing, fake/mock provider sinks are used as required to guarantee zero unwanted patient message dispatch while fully exercising the outbox queue and lease protocol.
 2. **WebGL / 3D Canvas in Headless Environments**:
    - In headless environments without hardware GPU acceleration, Three.js falls back to the clean procedural SVG poster fallback as designed. In real Google Chrome with hardware acceleration, the 3D interactive molar tooth renders with full touch-pan-y orbit controls.
+3. **Playwright Driver in Local Sandbox**:
+   - Automated browser subagent launch encountered a 404 driver download restriction from AzureEdge in the current restricted network environment; live end-to-end functionality was verified directly via automated HTTP integration flows and Next.js production builds.
 
 

@@ -67,13 +67,20 @@ export default function BookingStatusPage() {
       if (!isRescheduling || !appointment || !newDate) return;
       try {
         setIsLoadingSlots(true);
-        const slots = await api.getAvailableSlots(
+        const serviceIds = appointment.serviceItems && appointment.serviceItems.length > 0
+          ? appointment.serviceItems.map((s: any) => s.serviceId).filter(Boolean)
+          : (appointment.serviceId ? [appointment.serviceId] : undefined);
+
+        const res = await api.getAvailableSlots(
           appointment.doctorId,
           newDate,
           appointment.serviceId,
-          appointment.branchId
+          appointment.branchId,
+          undefined,
+          serviceIds,
         );
-        setAvailableSlots(slots || []);
+        const slots = Array.isArray(res) ? res : res?.slots || [];
+        setAvailableSlots(slots);
       } catch (err: any) {
         setErrorMessage(err?.message || 'Bo\'sh vaqtlarni yuklashda xatolik yuz berdi');
       } finally {
@@ -253,6 +260,32 @@ export default function BookingStatusPage() {
             </div>
           </div>
         </div>
+
+        {/* Multi-service Itemized Breakdown */}
+        {appointment.serviceItems && appointment.serviceItems.length > 0 && (
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+            <span className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
+              {t.booking.selectedServices} ({appointment.serviceItems.length}):
+            </span>
+            <div className="space-y-1.5">
+              {appointment.serviceItems.map((item: any, idx: number) => (
+                <div key={item.id || idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-xl border border-slate-200">
+                  <span className="font-semibold text-slate-800">
+                    {item.serviceNameUz}
+                  </span>
+                  <div className="text-right">
+                    <span className="text-slate-500 mr-2">{item.durationMinutes} daqiqa</span>
+                    {item.priceFrom ? (
+                      <span className="font-bold text-teal-800">
+                        {(item.priceFrom / 100).toLocaleString('uz-UZ')} {t.common.uzs}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Action Buttons (Disabled if completed/cancelled) */}
         {!isTerminal && !isRescheduling && !isCancelling && (

@@ -114,23 +114,29 @@ export const api = {
   getAvailableSlots: (
     doctorId: string,
     date: string,
-    serviceId: string,
+    serviceId?: string,
     branchId?: string,
-    durationMinutes?: number,
+    _deprecatedDuration?: number,
     serviceIds?: string[],
   ) => {
-    const q = new URLSearchParams({ doctorId, date, serviceId });
+    const q = new URLSearchParams({ doctorId, date });
+    if (serviceId) q.set('serviceId', serviceId);
     if (branchId) q.set('branchId', branchId);
-    if (durationMinutes) q.set('durationMinutes', String(durationMinutes));
     if (serviceIds && serviceIds.length > 0) q.set('serviceIds', serviceIds.join(','));
-    return fetcher<any[]>(`/api/scheduling/slots?${q.toString()}`);
+    return fetcher<{
+      slots: Array<{ startTime: string; endTime: string; available: boolean; reason?: string }>;
+      durationMinutes: number;
+      bufferMinutes: number;
+      totalDurationWithBufferMinutes: number;
+      priceFrom: number;
+      serviceName: string;
+    }>(`/api/scheduling/slots?${q.toString()}`);
   },
 
   // Online Appointment Booking
   createBooking: (payload: {
-    serviceId: string;
+    serviceId?: string;
     serviceIds?: string[];
-    customDurationMinutes?: number;
     doctorId: string;
     branchId?: string;
     startTime: string;
@@ -153,6 +159,16 @@ export const api = {
       serviceName?: string;
       durationMinutes?: number;
       bufferMinutes?: number;
+      servicePriceFrom?: number;
+      serviceItems?: Array<{
+        id: string;
+        serviceId: string;
+        sortOrder: number;
+        serviceNameUz: string;
+        serviceNameRu?: string;
+        durationMinutes: number;
+        priceFrom?: number;
+      }>;
     }>('/api/booking', {
       method: 'POST',
       body: JSON.stringify(payload),

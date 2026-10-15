@@ -60,6 +60,54 @@ export function mergeIntervals(intervals: TimeInterval[]): TimeInterval[] {
   return merged;
 }
 
+export function resolveServiceIds(serviceId?: string, serviceIdsInput?: string[] | string): string[] {
+  let list: string[] = [];
+  if (Array.isArray(serviceIdsInput)) {
+    list = serviceIdsInput.map((s) => String(s).trim()).filter(Boolean);
+  } else if (typeof serviceIdsInput === 'string' && serviceIdsInput.trim()) {
+    list = serviceIdsInput.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
+  if (serviceId && serviceId.trim()) {
+    const trimmed = serviceId.trim();
+    if (!list.includes(trimmed)) {
+      list = [trimmed, ...list];
+    }
+  }
+
+  const unique = new Set(list);
+  if (unique.size !== list.length) {
+    throw new BadRequestException('Takroriy xizmatlarni tanlash mumkin emas');
+  }
+
+  if (list.length < 1 || list.length > 3) {
+    throw new BadRequestException('1 tadan 3 tagacha xizmat tanlanishi lozim');
+  }
+
+  return list;
+}
+
+export interface AuthoritativeDurationResult {
+  services: Array<{
+    id: string;
+    nameUz: string;
+    nameRu: string | null;
+    durationMinutes: number;
+    priceFrom: number | null;
+  }>;
+  serviceItems: Array<{
+    serviceId: string;
+    sortOrder: number;
+    serviceNameUz: string;
+    serviceNameRu: string | null;
+    durationMinutes: number;
+    priceFrom: number | null;
+  }>;
+  totalDurationMinutes: number;
+  totalPriceFrom: number;
+  combinedNameUz: string;
+}
+
 @Injectable()
 export class SchedulingService {
   constructor(private readonly prisma: PrismaService) {}
@@ -275,75 +323,151 @@ export class SchedulingService {
   }
 
   /**
+   * Authoritatively calculate treatment duration and pricing based on doctor-specific settings
+   */
+  async calculateAuthoritativeServiceDuration(
+    doctorId: string,
+    serviceIds: string[],
+    tx?: Prisma.TransactionClient | PrismaService,
+  ): Promise<AuthoritativeDurationResult> {
+    const client = tx || this.prisma;
+
+    if (!serviceIds || serviceIds.length === 0 || serviceIds.length > 3) {
+      throw new BadRequestException('1 tadan 3 tagacha xizmat tanlanishi lozim');
+    }
+
+    const uniqueIds = new Set(serviceIds);
+    if (uniqueIds.size !== serviceIds.length) {
+      throw new BadRequestException('Takroriy xizmatlarni tanlash mumkin emas');
+    }
+
+    const doctor = await client.doctor.findFirst({
+      where: { id: doctorId, isActive: true, isArchived: false },
+      include: {
+        services: true,
+      },
+    });
+    if (!doctor) {
+      throw new BadRequestException('Shifokor topilmadi yoki faol emas');
+    }
+
+    const services = await client.service.findMany({
+      where: { id: { in: serviceIds } },
+    });
+
+    if (services.length !== serviceIds.length) {
+      throw new BadRequestException('Tanlangan xizmat(lar) topilmadi');
+    }
+
+    const inactiveOrArchived = services.find((s) => !s.isActive || s.isArchived);
+    if (inactiveOrArchived) {
+      throw new BadRequestException('Tanlangan xizmat faol emas yoki arxivlangan');
+    }
+
+    const doctorServices = doctor.services.filter((ds) => serviceIds.includes(ds.serviceId));
+    if (doctorServices.length !== serviceIds.length) {
+      throw new BadRequestException('Shifokor tanlangan barcha xizmatlarni ko\'rsatmaydi');
+    }
+
+    const items: Array<{
+      serviceId: string;
+      sortOrder: number;
+      serviceNameUz: string;
+      serviceNameRu: string | null;
+      durationMinutes: number;
+      priceFrom: number | null;
+    }> = [];
+
+    let totalDurationMinutes = 0;
+    let totalPriceFrom = 0;
+
+    serviceIds.forEach((id, index) => {
+      const s = services.find((srv) => srv.id === id)!;
+      const ds = doctorServices.find((d) => d.serviceId === id)!;
+      const duration = ds.customDurationMinutes ?? s.durationMinutes;
+
+      items.push({
+        serviceId: s.id,
+        sortOrder: index,
+        serviceNameUz: s.nameUz,
+        serviceNameRu: s.nameRu,
+        durationMinutes: duration,
+        priceFrom: s.priceFrom,
+      });
+
+      totalDurationMinutes += duration;
+      totalPriceFrom += (s.priceFrom || 0);
+    });
+
+    const combinedNameUz = items.map((i) => i.serviceNameUz).join(', ');
+
+    return {
+      services: services.map((s) => ({
+        id: s.id,
+        nameUz: s.nameUz,
+        nameRu: s.nameRu,
+        durationMinutes: s.durationMinutes,
+        priceFrom: s.priceFrom,
+      })),
+      serviceItems: items,
+      totalDurationMinutes,
+      totalPriceFrom,
+      combinedNameUz,
+    };
+  }
+
+  /**
    * Get available slots for a doctor on a specific date in clinic timezone
    */
   async getAvailableSlots(
     doctorId: string,
     dateStr: string, // YYYY-MM-DD
-    serviceId: string,
+    serviceId?: string,
     branchId?: string,
     timezone: string = 'Asia/Tashkent',
-    customDurationMinutes?: number,
     serviceIds?: string[],
-  ): Promise<TimeSlot[]> {
-    // Validate doctor
-    const doctor = await this.prisma.doctor.findFirst({
-      where: { id: doctorId, isActive: true, isArchived: false },
-    });
-    if (!doctor) return [];
-
-    // Validate service
-    const service = await this.prisma.service.findFirst({
-      where: { id: serviceId, isActive: true, isArchived: false },
-    });
-    if (!service) return [];
-
-    // Validate doctor provides this service
-    const doctorService = await this.prisma.doctorService.findUnique({
-      where: { doctorId_serviceId: { doctorId, serviceId } },
-    });
-    if (!doctorService) return [];
+  ): Promise<{
+    slots: TimeSlot[];
+    durationMinutes: number;
+    bufferMinutes: number;
+    totalDurationWithBufferMinutes: number;
+    priceFrom: number;
+    serviceName: string;
+  }> {
+    const effectiveServiceIds = resolveServiceIds(serviceId, serviceIds);
 
     // Validate branch if provided
     if (branchId) {
       const branch = await this.prisma.branch.findFirst({
         where: { id: branchId, isActive: true },
       });
-      if (!branch) return [];
+      if (!branch) {
+        throw new BadRequestException('Filial topilmadi yoki faol emas');
+      }
 
       const doctorBranch = await this.prisma.doctorBranch.findUnique({
         where: { doctorId_branchId: { doctorId, branchId } },
       });
-      if (!doctorBranch) return [];
+      if (!doctorBranch) {
+        throw new BadRequestException('Shifokor bu filialda ishlamaydi');
+      }
     }
+
+    const authoritative = await this.calculateAuthoritativeServiceDuration(doctorId, effectiveServiceIds);
 
     // Parse date in clinic timezone
     const [year, month, day] = dateStr.split('-').map(Number);
-    if (!year || !month || !day) return [];
+    if (!year || !month || !day) {
+      throw new BadRequestException('Noto\'g\'ri sana formati');
+    }
 
     const localDay = new Date(year, month - 1, day, 0, 0, 0, 0);
 
     const clinicSettings = await this.prisma.clinicSettings.findFirst();
-
-    // Multi-service combined duration calculation
-    let effectiveDuration = customDurationMinutes ?? (doctorService.customDurationMinutes ?? service.durationMinutes);
-    if (!customDurationMinutes && serviceIds && serviceIds.length > 1) {
-      const allServices = await this.prisma.service.findMany({
-        where: { id: { in: serviceIds }, isActive: true, isArchived: false },
-      });
-      const doctorServices = await this.prisma.doctorService.findMany({
-        where: { doctorId, serviceId: { in: serviceIds } },
-      });
-      if (allServices.length > 0) {
-        effectiveDuration = allServices.reduce((sum, s) => {
-          const ds = doctorServices.find(d => d.serviceId === s.id);
-          return sum + (ds?.customDurationMinutes ?? s.durationMinutes);
-        }, 0);
-      }
-    }
+    const effectiveTimezone = clinicSettings?.timezone || timezone;
 
     const bufferMinutes = clinicSettings?.bufferMinutes ?? 5;
-    const totalMinutes = effectiveDuration + bufferMinutes;
+    const totalMinutes = authoritative.totalDurationMinutes + bufferMinutes;
     const minNoticeHours = clinicSettings?.minBookingNoticeHours ?? 2;
     const nowUtc = new Date();
     const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
@@ -352,12 +476,19 @@ export class SchedulingService {
     const workingIntervals = await this.getDoctorWorkingIntervals(
       doctorId,
       localDay,
-      timezone,
+      effectiveTimezone,
       branchId,
     );
 
     if (workingIntervals.length === 0) {
-      return [];
+      return {
+        slots: [],
+        durationMinutes: authoritative.totalDurationMinutes,
+        bufferMinutes,
+        totalDurationWithBufferMinutes: totalMinutes,
+        priceFrom: authoritative.totalPriceFrom,
+        serviceName: authoritative.combinedNameUz,
+      };
     }
 
     const slots: TimeSlot[] = [];
@@ -369,7 +500,7 @@ export class SchedulingService {
         const slotStartHour = Math.floor(minutes / 60);
         const slotStartMinute = minutes % 60;
         const slotStartStr = `${dateStr} ${String(slotStartHour).padStart(2, '0')}:${String(slotStartMinute).padStart(2, '0')}:00`;
-        const slotStartUtc = fromZonedTime(slotStartStr, timezone);
+        const slotStartUtc = fromZonedTime(slotStartStr, effectiveTimezone);
         const slotEndUtc = new Date(slotStartUtc.getTime() + totalMinutes * 60 * 1000);
 
         if (slotStartUtc < minNoticeTime) {
@@ -380,7 +511,7 @@ export class SchedulingService {
           doctorId,
           slotStartUtc,
           slotEndUtc,
-          timezone,
+          effectiveTimezone,
           undefined,
           branchId,
         );
@@ -393,7 +524,14 @@ export class SchedulingService {
       }
     }
 
-    return slots;
+    return {
+      slots,
+      durationMinutes: authoritative.totalDurationMinutes,
+      bufferMinutes,
+      totalDurationWithBufferMinutes: totalMinutes,
+      priceFrom: authoritative.totalPriceFrom,
+      serviceName: authoritative.combinedNameUz,
+    };
   }
 
   async getDoctorSchedules(doctorId: string) {

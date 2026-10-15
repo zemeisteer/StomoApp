@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { SchedulingService } from '../scheduling/scheduling.service';
+import { SchedulingService, resolveServiceIds } from '../scheduling/scheduling.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { AppointmentStatus, NotificationChannel, NotificationStatus, Prisma, StaffRole } from '@prisma/client';
@@ -34,7 +34,7 @@ const TIME_RESERVING_STATUSES: AppointmentStatus[] = [
 ];
 
 export interface CreateBookingDto {
-  serviceId: string;
+  serviceId?: string;
   serviceIds?: string[];
   customDurationMinutes?: number;
   doctorId: string;
@@ -50,7 +50,7 @@ export interface CreateBookingDto {
 }
 
 export function computeBookingFingerprint(params: {
-  serviceId: string;
+  serviceIds: string[];
   doctorId: string;
   branchId?: string | null;
   startTimeIso: string;
@@ -67,6 +67,7 @@ export function computeBookingFingerprint(params: {
   const normalizedNote = (params.note || '').trim();
   const normalizedBranch = (params.branchId || '').trim();
   const normalizedStartTime = new Date(params.startTimeIso).toISOString();
+  const canonicalServiceIds = [...params.serviceIds].map((s) => s.trim()).filter(Boolean).sort();
 
   // Canonical JSON representation with fixed, sorted keys to prevent delimiter collision
   const canonicalObj = {
@@ -78,7 +79,7 @@ export function computeBookingFingerprint(params: {
     note: normalizedNote,
     phone: normalizedPhone,
     scope: params.scope,
-    serviceId: params.serviceId,
+    serviceIds: canonicalServiceIds,
     startTimeIso: normalizedStartTime,
   };
 
@@ -95,6 +96,59 @@ export function verifyFingerprintMatch(
     return false;
   }
   return existingFingerprint === reqFingerprint;
+}
+
+export function serializeAppointmentResponse(appointment: any) {
+  const doc = appointment.doctor;
+  const branch = appointment.branch;
+  const docName = appointment.doctorName || (doc ? `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`.trim() : undefined);
+  const branchName = appointment.branchName || branch?.nameUz || '';
+
+  const serviceItems = (appointment.serviceItems || []).map((item: any) => ({
+    id: item.id,
+    serviceId: item.serviceId,
+    sortOrder: item.sortOrder,
+    serviceNameUz: item.serviceNameUz,
+    serviceNameRu: item.serviceNameRu,
+    durationMinutes: item.durationMinutes,
+    priceFrom: item.priceFrom,
+    price: item.priceFrom,
+  }));
+
+  return {
+    id: appointment.id,
+    appointmentId: appointment.id,
+    publicToken: appointment.publicToken,
+    status: appointment.status,
+    startTime: appointment.startTime,
+    endTime: appointment.endTime,
+    serviceName: appointment.serviceName,
+    servicePriceFrom: appointment.servicePriceFrom,
+    price: appointment.servicePriceFrom,
+    priceFrom: appointment.servicePriceFrom,
+    durationMinutes: appointment.durationMinutes,
+    bufferMinutes: appointment.bufferMinutes ?? 5,
+    doctorName: docName,
+    branchName: branchName,
+    branchId: appointment.branchId,
+    serviceId: appointment.serviceId,
+    doctorId: appointment.doctorId,
+    serviceItems,
+    doctor: doc ? {
+      id: doc.id,
+      firstNameUz: doc.firstNameUz,
+      lastNameUz: doc.lastNameUz,
+      firstNameRu: doc.firstNameRu,
+      lastNameRu: doc.lastNameRu,
+    } : undefined,
+    patient: appointment.patient ? {
+      id: appointment.patient.id,
+      fullName: appointment.patient.fullName,
+      phone: appointment.patient.phone,
+      email: appointment.patient.email,
+    } : undefined,
+    managementUrl: `/booking/status/${appointment.publicToken}`,
+  };
 }
 
 @Injectable()
@@ -117,9 +171,11 @@ export class AppointmentsService {
       throw new BadRequestException('Shaxsiy ma\'lumotlarni qayta ishlashga rozilik zarur');
     }
 
+    const serviceIds = resolveServiceIds(dto.serviceId, dto.serviceIds);
+
     const scope: 'public' | 'admin' = dto.source === 'admin' ? 'admin' : 'public';
     const reqFingerprint = computeBookingFingerprint({
-      serviceId: dto.serviceId,
+      serviceIds,
       doctorId: dto.doctorId,
       branchId: dto.branchId || null,
       startTimeIso: dto.startTime,
@@ -131,11 +187,17 @@ export class AppointmentsService {
       scope,
     });
 
-    // 1. Idempotency Key Validation
+    // 1. Initial Idempotency Key Validation
     if (dto.idempotencyKey) {
       const existing = await this.prisma.appointment.findUnique({
         where: { idempotencyKey: dto.idempotencyKey },
-        include: { doctor: true, service: true, branch: true, patient: true },
+        include: {
+          doctor: true,
+          service: true,
+          branch: true,
+          patient: true,
+          serviceItems: { orderBy: { sortOrder: 'asc' } },
+        },
       });
 
       if (existing) {
@@ -146,65 +208,25 @@ export class AppointmentsService {
               : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
           );
         }
-
-        // Return stable existing appointment response
-        const existingDocName = `Dr. ${existing.doctor.firstNameUz} ${existing.doctor.lastNameUz}`.trim();
-        const existingBranchName = existing.branch?.nameUz || '';
-        return {
-          id: existing.id,
-          appointmentId: existing.id,
-          publicToken: existing.publicToken,
-          status: existing.status,
-          startTime: existing.startTime,
-          endTime: existing.endTime,
-          serviceName: existing.serviceName,
-          durationMinutes: existing.durationMinutes,
-          bufferMinutes: existing.bufferMinutes,
-          doctorName: existingDocName,
-          branchName: existingBranchName,
-          doctor: {
-            id: existing.doctor.id,
-            firstNameUz: existing.doctor.firstNameUz,
-            lastNameUz: existing.doctor.lastNameUz,
-            firstNameRu: existing.doctor.firstNameRu,
-            lastNameRu: existing.doctor.lastNameRu,
-          },
-        };
+        return serializeAppointmentResponse(existing);
       }
     }
 
-    // 2. Validate Service
-    const service = await this.prisma.service.findFirst({
-      where: { id: dto.serviceId, isActive: true, isArchived: false },
-    });
-    if (!service) {
-      throw new BadRequestException('Xizmat topilmadi yoki faol emas');
-    }
+    // 2. Authoritative Multi-Service Calculation & Eligibility
+    const authoritative = await this.schedulingService.calculateAuthoritativeServiceDuration(
+      dto.doctorId,
+      serviceIds,
+    );
 
-    let serviceIds = dto.serviceIds && dto.serviceIds.length > 0 ? dto.serviceIds : [dto.serviceId];
-    if (!serviceIds.includes(dto.serviceId)) {
-      serviceIds = [dto.serviceId, ...serviceIds];
-    }
-    const allServices = await this.prisma.service.findMany({
-      where: { id: { in: serviceIds }, isActive: true, isArchived: false },
-    });
-
-    // 3. Validate Doctor
+    // 3. Validate Doctor and Branch Assignment
     const doctor = await this.prisma.doctor.findFirst({
       where: { id: dto.doctorId, isActive: true, isArchived: false },
-      include: { services: true, branches: true },
+      include: { branches: true },
     });
     if (!doctor) {
       throw new BadRequestException('Shifokor topilmadi yoki faol emas');
     }
 
-    // 4. Validate Doctor-Service Eligibility
-    const doctorService = doctor.services.find(ds => ds.serviceId === dto.serviceId);
-    if (!doctorService) {
-      throw new BadRequestException('Ushbu shifokor tanlangan xizmatni ko\'rsatmaydi');
-    }
-
-    // 5. Validate Branch if provided or resolve
     let resolvedBranchId = dto.branchId;
     if (resolvedBranchId) {
       const branch = await this.prisma.branch.findFirst({
@@ -213,7 +235,7 @@ export class AppointmentsService {
       if (!branch) {
         throw new BadRequestException('Filial topilmadi yoki faol emas');
       }
-      const isAssigned = doctor.branches.some(b => b.branchId === resolvedBranchId);
+      const isAssigned = doctor.branches.some((b) => b.branchId === resolvedBranchId);
       if (!isAssigned) {
         throw new BadRequestException('Shifokor bu filialda ishlamaydi');
       }
@@ -221,7 +243,7 @@ export class AppointmentsService {
       resolvedBranchId = doctor.branches[0]?.branchId;
     }
 
-    // 6. Clinic Settings & Time Limits
+    // 4. Clinic Settings & Time Limits
     const settings = await this.prisma.clinicSettings.findFirst();
     const timezone = settings?.timezone || 'Asia/Tashkent';
     const minNoticeHours = settings?.minBookingNoticeHours ?? 2;
@@ -247,18 +269,8 @@ export class AppointmentsService {
       throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga yozilish mumkin emas`);
     }
 
-    // Calculate duration & end time (combined if multiple services)
-    const primaryDuration = doctorService.customDurationMinutes ?? service.durationMinutes;
-    let durationMinutes = dto.customDurationMinutes ?? primaryDuration;
-    if (!dto.customDurationMinutes && allServices.length > 1) {
-      durationMinutes = allServices.reduce((acc, s) => {
-        const ds = doctor.services.find(d => d.serviceId === s.id);
-        return acc + (ds?.customDurationMinutes ?? s.durationMinutes);
-      }, 0);
-    }
-    const combinedServiceName = allServices.length > 1 ? allServices.map(s => s.nameUz).join(', ') : service.nameUz;
-    const combinedPrice = allServices.reduce((sum, s) => sum + (s.priceFrom || 0), 0);
-
+    // Server-authoritative duration (custom duration is NOT accepted from public control)
+    const durationMinutes = authoritative.totalDurationMinutes;
     const totalMinutes = durationMinutes + bufferMinutes;
     const endTimeUtc = new Date(startTimeUtc.getTime() + totalMinutes * 60 * 1000);
 
@@ -287,40 +299,40 @@ export class AppointmentsService {
     }
 
     const normalizedPhone = this.normalizePhone(dto.patientPhone);
+    if (!/^\+998\d{9}$/.test(normalizedPhone)) {
+      throw new BadRequestException('Telefon raqami O\'zbekiston formati (+998XXXXXXXXX)da bo\'lishi kerak');
+    }
     const cleanName = dto.patientName.trim();
 
-    // 7. Atomic Concurrency Lock and DB Transaction with Bounded Retries for Serialization Conflicts
-    // Compute advisory lock key integer based on doctor ID
+    // 5. Atomic Concurrency Lock and DB Transaction with Bounded Retries
     const lockKey = this.hashStringToInt(`doc_${dto.doctorId}`);
-
     let createdAppointment: any;
     const maxRetries = 3;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // If idempotencyKey was already committed by a concurrent racing transaction
+        // 2nd path: Retry-loop Idempotency Key Lookup with strict fingerprint check
         if (dto.idempotencyKey) {
-          const existing = await this.prisma.appointment.findUnique({
+          const existingInRetry = await this.prisma.appointment.findUnique({
             where: { idempotencyKey: dto.idempotencyKey },
-            include: { doctor: true, service: true, branch: true },
+            include: {
+              doctor: true,
+              service: true,
+              branch: true,
+              patient: true,
+              serviceItems: { orderBy: { sortOrder: 'asc' } },
+            },
           });
 
-          if (existing) {
-            return {
-              id: existing.id,
-              publicToken: existing.publicToken,
-              status: existing.status,
-              startTime: existing.startTime,
-              endTime: existing.endTime,
-              serviceName: existing.serviceName,
-              doctor: {
-                id: existing.doctor.id,
-                firstNameUz: existing.doctor.firstNameUz,
-                lastNameUz: existing.doctor.lastNameUz,
-                firstNameRu: existing.doctor.firstNameRu,
-                lastNameRu: existing.doctor.lastNameRu,
-              },
-            };
+          if (existingInRetry) {
+            if (!verifyFingerprintMatch(existingInRetry.requestFingerprint, reqFingerprint)) {
+              throw new ConflictException(
+                existingInRetry.requestFingerprint
+                  ? 'Idempotency key allaqachon boshqa qabul parametrlari bilan ishlatilgan'
+                  : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
+              );
+            }
+            return serializeAppointmentResponse(existingInRetry);
           }
         }
 
@@ -328,11 +340,17 @@ export class AppointmentsService {
           // Acquire PostgreSQL transactional advisory lock
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-          // If idempotencyKey was committed by a concurrent transaction while waiting for lock
+          // 3rd path: Idempotency Key committed while waiting for advisory lock
           if (dto.idempotencyKey) {
             const existingInLock = await tx.appointment.findUnique({
               where: { idempotencyKey: dto.idempotencyKey },
-              include: { doctor: true, service: true, branch: true, patient: true },
+              include: {
+                doctor: true,
+                service: true,
+                branch: true,
+                patient: true,
+                serviceItems: { orderBy: { sortOrder: 'asc' } },
+              },
             });
             if (existingInLock) {
               if (!verifyFingerprintMatch(existingInLock.requestFingerprint, reqFingerprint)) {
@@ -342,27 +360,19 @@ export class AppointmentsService {
                     : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
                 );
               }
-              return {
-                id: existingInLock.id,
-                appointmentId: existingInLock.id,
-                publicToken: existingInLock.publicToken,
-                status: existingInLock.status,
-                startTime: existingInLock.startTime,
-                endTime: existingInLock.endTime,
-                serviceName: existingInLock.serviceName,
-                doctor: {
-                  id: existingInLock.doctor.id,
-                  firstNameUz: existingInLock.doctor.firstNameUz,
-                  lastNameUz: existingInLock.doctor.lastNameUz,
-                  firstNameRu: existingInLock.doctor.firstNameRu,
-                  lastNameRu: existingInLock.doctor.lastNameRu,
-                },
-              };
+              return serializeAppointmentResponse(existingInLock);
             }
           }
 
+          // Revalidate authoritative services within transaction lock
+          const txAuthoritative = await this.schedulingService.calculateAuthoritativeServiceDuration(
+            dto.doctorId,
+            serviceIds,
+            tx,
+          );
+
           // Revalidate working hours inside protected transaction lock
-          const isWorking = await this.schedulingService.isDoctorWorkingAt(
+          const isWorkingInLock = await this.schedulingService.isDoctorWorkingAt(
             dto.doctorId,
             startTimeUtc,
             endTimeUtc,
@@ -370,7 +380,7 @@ export class AppointmentsService {
             resolvedBranchId,
             tx,
           );
-          if (!isWorking) {
+          if (!isWorkingInLock) {
             throw new BadRequestException('Tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
@@ -397,7 +407,6 @@ export class AppointmentsService {
           });
 
           if (!patient) {
-            // Create distinct patient record for this name
             patient = await tx.patient.create({
               data: {
                 fullName: cleanName,
@@ -416,14 +425,14 @@ export class AppointmentsService {
               publicToken,
               patientId: patient.id,
               doctorId: dto.doctorId,
-              serviceId: dto.serviceId,
+              serviceId: txAuthoritative.services[0].id,
               branchId: resolvedBranchId || null,
               status: AppointmentStatus.PENDING,
               startTime: startTimeUtc,
               endTime: endTimeUtc,
-              serviceName: combinedServiceName || service.nameUz,
-              servicePriceFrom: combinedPrice || service.priceFrom,
-              durationMinutes,
+              serviceName: txAuthoritative.combinedNameUz,
+              servicePriceFrom: txAuthoritative.totalPriceFrom,
+              durationMinutes: txAuthoritative.totalDurationMinutes,
               bufferMinutes,
               note: dto.note?.trim() || null,
               source: dto.source || 'website',
@@ -433,12 +442,23 @@ export class AppointmentsService {
               consentGiven: dto.consentGiven,
               expiresAt,
               tokenExpiresAt,
+              serviceItems: {
+                create: txAuthoritative.serviceItems.map((item) => ({
+                  serviceId: item.serviceId,
+                  sortOrder: item.sortOrder,
+                  serviceNameUz: item.serviceNameUz,
+                  serviceNameRu: item.serviceNameRu,
+                  durationMinutes: item.durationMinutes,
+                  priceFrom: item.priceFrom,
+                })),
+              },
             },
             include: {
               doctor: true,
               service: true,
               branch: true,
               patient: true,
+              serviceItems: { orderBy: { sortOrder: 'asc' } },
             },
           });
 
@@ -476,7 +496,7 @@ export class AppointmentsService {
             tx,
           );
 
-          return appointment;
+          return serializeAppointmentResponse(appointment);
         }, {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
           timeout: 10000,
@@ -484,10 +504,17 @@ export class AppointmentsService {
 
         break; // Successfully committed
       } catch (err: any) {
+        // 4th path: P2002 race recovery on idempotencyKey unique constraint
         if (err?.code === 'P2002' && dto.idempotencyKey) {
           const raced = await this.prisma.appointment.findUnique({
             where: { idempotencyKey: dto.idempotencyKey },
-            include: { doctor: true, service: true, branch: true, patient: true },
+            include: {
+              doctor: true,
+              service: true,
+              branch: true,
+              patient: true,
+              serviceItems: { orderBy: { sortOrder: 'asc' } },
+            },
           });
           if (raced) {
             if (!verifyFingerprintMatch(raced.requestFingerprint, reqFingerprint)) {
@@ -497,28 +524,7 @@ export class AppointmentsService {
                   : 'Eski idempotency kalitini qayta ishlatish mumkin emas. Iltimos yangi kalit kiriting.',
               );
             }
-            const racedDocName = `Dr. ${raced.doctor.firstNameUz} ${raced.doctor.lastNameUz}`.trim();
-            const racedBranchName = raced.branch?.nameUz || '';
-            return {
-              id: raced.id,
-              appointmentId: raced.id,
-              publicToken: raced.publicToken,
-              status: raced.status,
-              startTime: raced.startTime,
-              endTime: raced.endTime,
-              serviceName: raced.serviceName,
-              durationMinutes: raced.durationMinutes,
-              bufferMinutes: raced.bufferMinutes,
-              doctorName: racedDocName,
-              branchName: racedBranchName,
-              doctor: {
-                id: raced.doctor.id,
-                firstNameUz: raced.doctor.firstNameUz,
-                lastNameUz: raced.doctor.lastNameUz,
-                firstNameRu: raced.doctor.firstNameRu,
-                lastNameRu: raced.doctor.lastNameRu,
-              },
-            };
+            return serializeAppointmentResponse(raced);
           }
         }
 
@@ -529,7 +535,6 @@ export class AppointmentsService {
           err?.message?.includes('could not serialize');
 
         if (isConflict && attempt < maxRetries) {
-          // Bounded jitter backoff
           await new Promise((res) => setTimeout(res, 50 * attempt + Math.floor(Math.random() * 30)));
           continue;
         }
@@ -537,11 +542,7 @@ export class AppointmentsService {
       }
     }
 
-    return {
-      ...createdAppointment,
-      id: createdAppointment.id,
-      appointmentId: createdAppointment.appointmentId || createdAppointment.id,
-    };
+    return createdAppointment;
   }
 
   /**
@@ -747,6 +748,13 @@ export class AppointmentsService {
           }
 
           // Check doctor eligibility and active status inside transaction
+          const apptItems = await tx.appointmentServiceItem.findMany({
+            where: { appointmentId },
+            select: { serviceId: true },
+          });
+          const itemServiceIds = apptItems.map((i) => i.serviceId).filter(Boolean) as string[];
+          const servicesToCheck = itemServiceIds.length > 0 ? itemServiceIds : [appointment.serviceId];
+
           const doctor = await tx.doctor.findUnique({
             where: { id: appointment.doctorId },
             include: { branches: true, services: true },
@@ -754,16 +762,18 @@ export class AppointmentsService {
           if (!doctor || !doctor.isActive || doctor.isArchived) {
             throw new BadRequestException('Shifokor faol emas yoki arxivlangan');
           }
-          const isServiceAssigned = doctor.services.some((s) => s.serviceId === appointment.serviceId);
-          if (!isServiceAssigned) {
-            throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatishga biriktirilmagan');
+          const doctorServiceIds = doctor.services.map((s) => s.serviceId);
+          for (const sId of servicesToCheck) {
+            if (!doctorServiceIds.includes(sId)) {
+              throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatishga biriktirilmagan');
+            }
           }
 
           // Check service eligibility and active status inside transaction
-          const service = await tx.service.findUnique({
-            where: { id: appointment.serviceId },
+          const services = await tx.service.findMany({
+            where: { id: { in: servicesToCheck } },
           });
-          if (!service || !service.isActive || service.isArchived) {
+          if (services.length !== servicesToCheck.length || services.some((s) => !s.isActive || s.isArchived)) {
             throw new BadRequestException('Xizmat faol emas yoki arxivlangan');
           }
 
@@ -821,7 +831,13 @@ export class AppointmentsService {
               revision: { increment: 1 },
               tokenExpiresAt: newExtendedExpiry,
             },
-            include: { doctor: true, service: true, patient: true, branch: true },
+            include: {
+              doctor: true,
+              service: true,
+              patient: true,
+              branch: true,
+              serviceItems: { orderBy: { sortOrder: 'asc' } },
+            },
           });
 
           await tx.appointmentStatusHistory.create({
@@ -857,7 +873,7 @@ export class AppointmentsService {
             tx,
           );
 
-          return appt;
+          return serializeAppointmentResponse(appt);
         }, {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
           timeout: 10000,
@@ -880,6 +896,105 @@ export class AppointmentsService {
     }
 
     return updated;
+  }
+
+  /**
+   * Admin-only duration override with bounds (5..480 min), schedule/conflict validation, and audit logging.
+   */
+  async overrideDuration(
+    appointmentId: string,
+    durationMinutes: number,
+    userId: string,
+    reason?: string,
+    user?: { role: StaffRole; doctorId?: string | null },
+  ) {
+    if (user && user.role !== StaffRole.OWNER && user.role !== StaffRole.ADMIN) {
+      throw new ForbiddenException('Faqat admin yoki owner qabul davomiyligini o\'zgartira oladi');
+    }
+
+    if (!Number.isFinite(durationMinutes) || durationMinutes < 5 || durationMinutes > 480) {
+      throw new BadRequestException('Davomiylik 5 dan 480 minutgacha bo\'lishi kerak');
+    }
+
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      include: { doctor: true, service: true, branch: true, patient: true, serviceItems: true },
+    });
+    if (!appointment) {
+      throw new NotFoundException('Qabul topilmadi');
+    }
+
+    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(appointment.status)) {
+      throw new BadRequestException('Tugallangan yoki bekor qilingan qabul davomiyligini o\'zgartirib bo\'lmaydi');
+    }
+
+    const settings = await this.prisma.clinicSettings.findFirst();
+    const timezone = settings?.timezone || 'Asia/Tashkent';
+    const bufferMinutes = appointment.bufferMinutes ?? settings?.bufferMinutes ?? 5;
+    const totalMinutes = durationMinutes + bufferMinutes;
+    const newEndTime = new Date(appointment.startTime.getTime() + totalMinutes * 60 * 1000);
+
+    const isWorking = await this.schedulingService.isDoctorWorkingAt(
+      appointment.doctorId,
+      appointment.startTime,
+      newEndTime,
+      timezone,
+      appointment.branchId || undefined,
+    );
+    if (!isWorking) {
+      throw new BadRequestException('Yangi davomiylik shifokor ish grafigidan tashqariga chiqadi');
+    }
+
+    const lockKey = this.hashStringToInt(`doc_${appointment.doctorId}`);
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+      const conflicting = await tx.appointment.findFirst({
+        where: {
+          doctorId: appointment.doctorId,
+          status: { in: TIME_RESERVING_STATUSES },
+          id: { not: appointmentId },
+          startTime: { lt: newEndTime },
+          endTime: { gt: appointment.startTime },
+        },
+      });
+      if (conflicting) {
+        throw new ConflictException('Davomiylikni uzaytirish boshqa qabul bilan to\'qnashuv keltiradi');
+      }
+
+      const updated = await tx.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          durationMinutes,
+          endTime: newEndTime,
+          revision: { increment: 1 },
+        },
+        include: {
+          doctor: true,
+          service: true,
+          branch: true,
+          patient: true,
+          serviceItems: { orderBy: { sortOrder: 'asc' } },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId,
+          action: 'appointment.duration_overridden',
+          entity: 'Appointment',
+          entityId: appointmentId,
+          details: {
+            oldDuration: appointment.durationMinutes,
+            newDuration: durationMinutes,
+            reason: reason || 'Admin duration override',
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      return serializeAppointmentResponse(updated);
+    });
   }
 
   /**
@@ -937,7 +1052,12 @@ export class AppointmentsService {
   async findByToken(token: string) {
     const appointment = await this.prisma.appointment.findUnique({
       where: { publicToken: token },
-      include: { doctor: true, service: true, branch: true },
+      include: {
+        doctor: true,
+        service: true,
+        branch: true,
+        serviceItems: { orderBy: { sortOrder: 'asc' } },
+      },
     });
 
     if (!appointment) {
@@ -961,11 +1081,18 @@ export class AppointmentsService {
       durationMinutes: appointment.durationMinutes,
       bufferMinutes: appointment.bufferMinutes,
       serviceName: appointment.serviceName,
+      servicePriceFrom: appointment.servicePriceFrom,
+      price: appointment.servicePriceFrom,
       serviceId: appointment.serviceId,
       doctorId: appointment.doctorId,
       branchId: appointment.branchId,
       doctorName: doctorFullNameUz,
       branchName: branchNameUz,
+      serviceItems: (appointment.serviceItems || []).map((si: any) => ({
+        ...si,
+        price: si.priceFrom,
+        priceFrom: si.priceFrom,
+      })),
       doctor: {
         id: appointment.doctor.id,
         firstNameUz: appointment.doctor.firstNameUz,
@@ -1034,6 +1161,7 @@ export class AppointmentsService {
             select: { id: true, fullName: true, phone: true, email: true },
           },
           branch: true,
+          serviceItems: { orderBy: { sortOrder: 'asc' } },
         },
         orderBy: { startTime: 'asc' },
         skip: (page - 1) * limit,
@@ -1042,7 +1170,20 @@ export class AppointmentsService {
       this.prisma.appointment.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    return {
+      items: items.map((a: any) => ({
+        ...a,
+        price: a.servicePriceFrom,
+        serviceItems: (a.serviceItems || []).map((si: any) => ({
+          ...si,
+          price: si.priceFrom,
+          priceFrom: si.priceFrom,
+        })),
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   /**
@@ -1080,6 +1221,7 @@ export class AppointmentsService {
           select: { id: true, fullName: true, phone: true },
         },
         branch: true,
+        serviceItems: { orderBy: { sortOrder: 'asc' } },
       },
       orderBy: { startTime: 'asc' },
     });
@@ -1096,6 +1238,7 @@ export class AppointmentsService {
         service: true,
         patient: true,
         branch: true,
+        serviceItems: { orderBy: { sortOrder: 'asc' } },
         statusHistory: {
           orderBy: { createdAt: 'asc' },
         },

@@ -73,6 +73,27 @@ class AddExceptionDto {
   reason?: string;
 }
 
+export class QuerySlotsDto {
+  @IsString()
+  doctorId!: string;
+
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Sana YYYY-MM-DD formatida bo\'lishi kerak' })
+  date!: string;
+
+  @IsOptional()
+  @IsString()
+  serviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  serviceIds?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+}
+
 @Controller('scheduling')
 export class SchedulingController {
   constructor(private readonly service: SchedulingService) {}
@@ -80,24 +101,14 @@ export class SchedulingController {
   // Public endpoint for booking flow
   @Get('slots')
   @Public()
-  async getAvailableSlots(
-    @Query('doctorId') doctorId: string,
-    @Query('date') date: string,
-    @Query('serviceId') serviceId: string,
-    @Query('branchId') branchId?: string,
-    @Query('durationMinutes') durationMinutesStr?: string,
-    @Query('serviceIds') serviceIdsStr?: string,
-  ) {
-    const customDuration = durationMinutesStr ? parseInt(durationMinutesStr, 10) : undefined;
-    const serviceIds = serviceIdsStr ? serviceIdsStr.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+  async getAvailableSlots(@Query() query: QuerySlotsDto) {
     return this.service.getAvailableSlots(
-      doctorId,
-      date,
-      serviceId,
-      branchId,
+      query.doctorId,
+      query.date,
+      query.serviceId,
+      query.branchId,
       undefined,
-      customDuration,
-      serviceIds,
+      query.serviceIds ? query.serviceIds.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
     );
   }
 

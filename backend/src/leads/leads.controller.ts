@@ -26,6 +26,8 @@ import {
   Min,
   IsDateString,
   Length,
+  Matches,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreatePublicLeadDto {
@@ -34,11 +36,14 @@ export class CreatePublicLeadDto {
   fullName!: string;
 
   @IsString()
-  @Length(7, 20)
+  @Matches(/^\+998(\s?\(?\d{2}\)?\s?\d{3}[-\s]?\d{2}[-\s]?\d{2}|\d{9})$/, {
+    message: 'Telefon raqami O\'zbekiston formati (+998XXXXXXXXX)da bo\'lishi kerak',
+  })
   phone!: string;
 
   @IsOptional()
-  @IsEmail()
+  @ValidateIf((o) => o.email !== undefined && o.email !== null && o.email !== '')
+  @IsEmail({}, { message: 'Elektron pochta manzili formati noto\'g\'ri' })
   email?: string;
 
   @IsOptional()

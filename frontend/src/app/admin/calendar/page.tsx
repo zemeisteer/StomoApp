@@ -560,11 +560,48 @@ export default function AdminCalendarPage() {
                   {selectedAppt.patient?.phone || selectedAppt.patientPhone}
                 </a>
               </div>
-              <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
-                <span className="text-slate-500">Xizmat:</span>
-                <span className="font-bold text-slate-800">
-                  {selectedAppt.serviceName || selectedAppt.service?.nameUz}
-                </span>
+              <div className="p-2.5 bg-slate-50 rounded-xl space-y-2">
+                <div className="flex justify-between items-center text-slate-500 font-medium">
+                  <span>Xizmatlar ({selectedAppt.serviceItems?.length || 1}):</span>
+                  {selectedAppt.durationMinutes && (
+                    <span className="text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
+                      {selectedAppt.durationMinutes} daq
+                    </span>
+                  )}
+                </div>
+                {selectedAppt.serviceItems && selectedAppt.serviceItems.length > 0 ? (
+                  <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
+                    {selectedAppt.serviceItems.map((item: any, idx: number) => (
+                      <div key={item.id || idx} className="flex justify-between items-center text-xs">
+                        <span className="font-semibold text-slate-800">
+                          {idx + 1}. {item.serviceNameUz || item.serviceNameRu}
+                        </span>
+                        <div className="flex items-center gap-2 text-slate-600 font-medium">
+                          <span>{item.durationMinutes} daq</span>
+                          <span>•</span>
+                          <span className="font-bold text-teal-700">{item.price?.toLocaleString('uz-UZ')} so&apos;m</span>
+                        </div>
+                      </div>
+                    ))}
+                    {selectedAppt.price && (
+                      <div className="flex justify-between items-center pt-1 border-t border-slate-200/60 text-xs font-bold text-slate-900">
+                        <span>Jami summa:</span>
+                        <span className="text-teal-800">{Number(selectedAppt.price).toLocaleString('uz-UZ')} so&apos;m</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-slate-800">
+                      {selectedAppt.serviceName || selectedAppt.service?.nameUz}
+                    </span>
+                    {selectedAppt.price && (
+                      <span className="font-bold text-teal-800">
+                        {Number(selectedAppt.price).toLocaleString('uz-UZ')} so&apos;m
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
                 <span className="text-slate-500">Shifokor:</span>

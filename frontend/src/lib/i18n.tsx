@@ -97,6 +97,21 @@ export interface Translations {
     appointmentId: string;
     managementTokenNotice: string;
     trackBooking: string;
+    maxServicesLimit: string;
+    servicesSelectionHint: string;
+    noScheduleConfigured: string;
+    notWorkingOnDate: string;
+    jumpToNextWorkingDate: string;
+    doctorIncompatible: string;
+    slotConflictNotice: string;
+    phoneValidationError: string;
+    emailValidationError: string;
+    nameRequired: string;
+    workingSchedule: string;
+    estimatedDuration: string;
+    estimatedPrice: string;
+    minutes: string;
+    selectedServices: string;
   };
   callback: {
     title: string;
@@ -231,6 +246,21 @@ const translations: Record<Language, Translations> = {
       appointmentId: 'Qabul ID raqami',
       managementTokenNotice: 'Qabul holatini kuzatish yoki vaqtini o\'zgartirish uchun havolani saqlab qo\'ying.',
       trackBooking: 'Qabul holatini ko\'rish',
+      maxServicesLimit: 'Bir vaqtning o\'zida ko\'pi bilan 3 ta xizmat tanlash mumkin',
+      servicesSelectionHint: 'Bir vaqtning o\'zida 1 tadan 3 tagacha xizmatni tanlashingiz mumkin',
+      noScheduleConfigured: 'Ushbu filial uchun qabul jadvali belgilanmagan',
+      notWorkingOnDate: 'Tanlangan kunda shifokor qabul qilmaydi',
+      jumpToNextWorkingDate: 'Eng yaqin ish kuniga o\'tish',
+      doctorIncompatible: 'Shifokor tanlangan barcha xizmatlarni ko\'rsatmaydi yoki ushbu filialda ishlamaydi',
+      slotConflictNotice: 'Tanlangan vaqt band qilindi. Iltimos, boshqa vaqtni tanlang.',
+      phoneValidationError: 'Iltimos, telefon raqamini to\'liq kiriting (+998 XX XXX-XX-XX)',
+      emailValidationError: 'Elektron pochta manzili formati noto\'g\'ri',
+      nameRequired: 'Iltimos, ismingizni kiriting',
+      workingSchedule: 'Qabul kunlari',
+      estimatedDuration: 'Umumiy davomiyligi',
+      estimatedPrice: 'Taxminiy narx',
+      minutes: 'daqiqa',
+      selectedServices: 'Tanlangan xizmatlar',
     },
     callback: {
       title: 'Qayta qo\'ng\'iroq buyurtma qilish',
@@ -363,6 +393,21 @@ const translations: Record<Language, Translations> = {
       appointmentId: 'Номер бронирования',
       managementTokenNotice: 'Сохраните эту ссылку для проверки статуса или переноса времени приема.',
       trackBooking: 'Проверить статус записи',
+      maxServicesLimit: 'Можно выбрать не более 3 услуг одновременно',
+      servicesSelectionHint: 'Вы можете выбрать от 1 до 3 услуг одновременно',
+      noScheduleConfigured: 'График приема для этого филиала не настроен',
+      notWorkingOnDate: 'В выбранный день врач не принимает',
+      jumpToNextWorkingDate: 'Перейти к ближайшему рабочему дню',
+      doctorIncompatible: 'Врач не оказывает все выбранные услуги или не принимает в этом филиале',
+      slotConflictNotice: 'Выбранное время уже занято. Пожалуйста, выберите другое время.',
+      phoneValidationError: 'Введите полный номер телефона (+998 XX XXX-XX-XX)',
+      emailValidationError: 'Неверный формат электронной почты',
+      nameRequired: 'Пожалуйста, укажите ваше имя',
+      workingSchedule: 'Дни приема',
+      estimatedDuration: 'Общая длительность',
+      estimatedPrice: 'Ориентировочная стоимость',
+      minutes: 'минут',
+      selectedServices: 'Выбранные услуги',
     },
     callback: {
       title: 'Заказать обратный звонок',

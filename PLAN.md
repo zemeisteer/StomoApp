@@ -202,3 +202,40 @@
   - Local Chrome puppeteer-core automation across 1440px desktop, 768px tablet, and 390px mobile.
   - Connected visitor booking -> admin calendar verification.
   - 12 screenshots captured in artifact directory. (**Verified**)
+
+---
+
+## Phase 8: Multi-Service Booking Architecture, Server-Authoritative Duration, Persistence, Idempotency, and Verification (COMPLETED & VERIFIED)
+- [x] **Server-Authoritative Duration**:
+  - Removed `customDurationMinutes` from public booking DTO and public slot queries.
+  - Duration calculated on the backend from selected services and doctor-specific duration overrides (`calculateAuthoritativeServiceDuration`).
+  - Clinic buffer added exactly once per appointment.
+  - Duration bounds and audit records for staff override (`PATCH /admin/appointments/:id/duration`).
+  - Slots endpoint (`GET /api/scheduling/slots`) returns authoritative duration and price metadata. (**Verified**)
+- [x] **Multi-Service Selection Contract & Validation**:
+  - 1 to 3 unique active services accepted (`resolveServiceIds`).
+  - Doctor eligibility: Doctor must provide every selected service and be assigned to the chosen branch.
+  - Dual validation: In availability slot calculation and again inside the serializable booking transaction.
+  - Consistent error responses for missing, inactive, duplicate, or incompatible selections. (**Verified**)
+- [x] **Service Item Model & Forward Migration**:
+  - Added `AppointmentServiceItem` model in `schema.prisma` with ordered duration and price snapshots.
+  - Forward migration `20261015150000_appointment_service_items` created and applied to dev and test databases without reset.
+  - Historical single-service appointments backfilled cleanly.
+  - Service analytics counts individual service items without double-counting appointment totals or presenting estimates as revenue. (**Verified**)
+- [x] **Cryptographic Idempotency & Unified Serialization**:
+  - Request fingerprint includes canonical sorted `serviceIds` and all semantic parameters.
+  - Fingerprint match verified across all 4 return paths (initial lookup, retry loop lookup, lock lookup, P2002 recovery).
+  - Unified serializer (`serializeAppointmentResponse`) provides consistent fields across all paths.
+  - Frontend generates and reuses stable idempotency key on network retry; generates new key on intent change. (**Verified**)
+- [x] **Frontend Honesty & Timezone Handling**:
+  - Removed fake Mon/Wed/Fri fallback and cross-branch leaking; honest unavailable state displayed.
+  - Pure calendar dates constructed at noon UTC to prevent date shifting in `Asia/Tashkent`.
+  - Cascading selection resets (branch -> service -> doctor -> slot) with generation check protecting against out-of-order slot responses.
+  - 409 conflict handling preserves patient details and redirects visitor to select a new slot.
+  - Strict phone formatting (`+998` followed by 9 digits) across booking and callback forms.
+  - Dual language support (Uzbek / Russian) with full localized keys. (**Verified**)
+- [x] **Comprehensive Testing & Verification**:
+  - Added Regressions 22–31 in `app.e2e-spec.ts`.
+  - All 31/31 backend tests passing (100%).
+  - Live end-to-end integration verified on running servers.
+  - Full frontend and backend production builds passing with zero errors. (**Verified**)

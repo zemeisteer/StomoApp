@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, Suspense, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -16,24 +16,24 @@ import {
   Stethoscope,
   Info,
   Check,
-  Plus,
   ArrowRight,
   Sparkles,
 } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 
-const DAY_NAME_MAP: Record<string, string> = {
-  MONDAY: 'Dushanba',
-  TUESDAY: 'Seshanba',
-  WEDNESDAY: 'Chorshanba',
-  THURSDAY: 'Payshanba',
-  FRIDAY: 'Juma',
-  SATURDAY: 'Shanba',
-  SUNDAY: 'Yakshanba',
+const DAY_NAME_MAP_LOCALIZED: Record<string, { uz: string; ru: string }> = {
+  MONDAY: { uz: 'Dushanba', ru: 'Понедельник' },
+  TUESDAY: { uz: 'Seshanba', ru: 'Вторник' },
+  WEDNESDAY: { uz: 'Chorshanba', ru: 'Среда' },
+  THURSDAY: { uz: 'Payshanba', ru: 'Четверг' },
+  FRIDAY: { uz: 'Juma', ru: 'Пятница' },
+  SATURDAY: { uz: 'Shanba', ru: 'Суббота' },
+  SUNDAY: { uz: 'Yakshanba', ru: 'Воскресенье' },
 };
 
-const SHORT_DAY_NAMES = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'];
+const SHORT_DAY_NAMES_UZ = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Juma', 'Shan'];
+const SHORT_DAY_NAMES_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
 const UZ_DAY_TO_INT: Record<string, number> = {
   SUNDAY: 0,
@@ -69,54 +69,107 @@ function formatUzPhone(raw: string): string {
   return formatted;
 }
 
-const PHONE_REGEX = /^\+998\s?\((33|88|90|91|93|94|95|97|98|99|71|77|\d{2})\)\s?\d{3}-\d{2}-\d{2}$|^\+998\d{9}$/;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
-function getDoctorScheduleInfo(doctor: any, branchId?: string): { days: string[]; hours: string; summary: string } {
+function getTashkentDateParts(date: Date = new Date()): { year: number; month: number; day: number } {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tashkent',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+  const parts = formatter.formatToParts(date);
+  const map: Record<string, number> = {};
+  for (const p of parts) {
+    if (p.type !== 'literal') {
+      map[p.type] = Number(p.value);
+    }
+  }
+  return { year: map.year, month: map.month, day: map.day };
+}
+
+function toCalendarDateStr(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseCalendarDate(str: string): Date {
+  const [y, m, d] = str.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+}
+
+function getDoctorScheduleInfo(
+  doctor: any,
+  branchId?: string,
+  lang: 'uz' | 'ru' = 'uz',
+  tNoSchedule = 'Jadval belgilanmagan',
+): { days: string[]; hours: string; summary: string; hasSchedule: boolean } {
   if (!doctor?.schedules || doctor.schedules.length === 0) {
     return {
-      days: ['Dushanba', 'Chorshanba', 'Juma'],
-      hours: '09:00 - 18:00',
-      summary: 'Dushanba, Chorshanba, Juma (09:00 - 18:00)',
+      days: [],
+      hours: '',
+      summary: tNoSchedule,
+      hasSchedule: false,
     };
   }
 
+  // Filter strictly for the chosen branch - do NOT fall back to other branch schedules
   const filtered = branchId
     ? doctor.schedules.filter((s: any) => s.branchId === branchId && s.isActive !== false)
     : doctor.schedules.filter((s: any) => s.isActive !== false);
 
-  const activeSchedules = filtered.length > 0 ? filtered : doctor.schedules;
-  const days = Array.from(new Set(activeSchedules.map((s: any) => DAY_NAME_MAP[s.dayOfWeek] || s.dayOfWeek))) as string[];
-  const hours = activeSchedules[0] ? `${activeSchedules[0].startTime} - ${activeSchedules[0].endTime}` : '09:00 - 18:00';
-  const summary = `${days.join(', ')} (${hours})`;
+  if (filtered.length === 0) {
+    return {
+      days: [],
+      hours: '',
+      summary: tNoSchedule,
+      hasSchedule: false,
+    };
+  }
 
-  return { days, hours, summary };
+  const days = Array.from(
+    new Set(
+      filtered.map(
+        (s: any) =>
+          DAY_NAME_MAP_LOCALIZED[s.dayOfWeek]?.[lang] || s.dayOfWeek,
+      ),
+    ),
+  ) as string[];
+
+  const first = filtered[0];
+  let hours = `${first.startTime} - ${first.endTime}`;
+  if (first.breakStart && first.breakEnd) {
+    hours += ` (${lang === 'ru' ? 'обед' : 'tushlik'}: ${first.breakStart}-${first.breakEnd})`;
+  }
+
+  const summary = `${days.join(', ')} (${hours})`;
+  return { days, hours, summary, hasSchedule: true };
 }
 
 function isDoctorWorkingOnDate(dateStr: string, doctor: any, branchId?: string): boolean {
-  if (!doctor?.schedules || doctor.schedules.length === 0) return true;
-  const [y, m, d] = dateStr.split('-').map(Number);
-  if (!y || !m || !d) return false;
-  const dateObj = new Date(y, m - 1, d);
-  const dayOfWeekNum = dateObj.getDay();
+  if (!doctor?.schedules || doctor.schedules.length === 0) return false;
+  const dateObj = parseCalendarDate(dateStr);
+  const dayOfWeekNum = dateObj.getUTCDay();
 
   const filtered = branchId
     ? doctor.schedules.filter((s: any) => s.branchId === branchId && s.isActive !== false)
     : doctor.schedules.filter((s: any) => s.isActive !== false);
-  const activeSchedules = filtered.length > 0 ? filtered : doctor.schedules;
 
-  return activeSchedules.some((s: any) => UZ_DAY_TO_INT[s.dayOfWeek] === dayOfWeekNum);
+  if (filtered.length === 0) return false;
+
+  return filtered.some((s: any) => UZ_DAY_TO_INT[s.dayOfWeek] === dayOfWeekNum);
 }
 
 function findNextWorkingDate(startDateStr: string, doctor: any, branchId?: string): string {
-  const [y, m, d] = startDateStr.split('-').map(Number);
-  let cur = new Date(y, m - 1, d);
+  const base = parseCalendarDate(startDateStr);
   for (let i = 0; i < 14; i++) {
-    const curStr = cur.toISOString().split('T')[0];
+    const cur = new Date(base.getTime() + i * 24 * 60 * 60 * 1000);
+    const curStr = toCalendarDateStr(cur);
     if (isDoctorWorkingOnDate(curStr, doctor, branchId)) {
       return curStr;
     }
-    cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
   }
   return startDateStr;
 }
@@ -151,15 +204,34 @@ function BookingContent() {
   const [doctors, setDoctors] = useState<any[]>([]);
   const [availableSlots, setAvailableSlots] = useState<any[]>([]);
 
+  // Server-authoritative calculations
+  const [serverDuration, setServerDuration] = useState<number | null>(null);
+  const [serverBuffer, setServerBuffer] = useState<number | null>(null);
+  const [serverPrice, setServerPrice] = useState<number | null>(null);
+  const [serverServiceName, setServerServiceName] = useState<string | null>(null);
+
   // Loading & error states
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [isLoadingSlots, setIsLoadingSlots] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Stable Idempotency Key
+  const [idempotencyKey, setIdempotencyKey] = useState<string>('');
+
   // Confirmation result
   const [bookingResult, setBookingResult] = useState<any | null>(null);
   const [copiedToken, setCopiedToken] = useState<boolean>(false);
+
+  // Race condition protection for slots fetching
+  const slotsRequestIdRef = useRef<number>(0);
+
+  // Initialize tomorrow's date in Tashkent timezone
+  useEffect(() => {
+    const todayParts = getTashkentDateParts();
+    const tomorrow = new Date(Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day + 1, 12, 0, 0));
+    setSelectedDate(toCalendarDateStr(tomorrow));
+  }, []);
 
   // Initial load
   useEffect(() => {
@@ -176,7 +248,6 @@ function BookingContent() {
         setServices(servicesRes || []);
         setDoctors(doctorsRes || []);
 
-        // Check query parameters
         const qBranch = searchParams.get('branchId');
         const qService = searchParams.get('serviceId');
         const qDoctor = searchParams.get('doctorId');
@@ -190,11 +261,6 @@ function BookingContent() {
           setSelectedDoctorId(qDoctor);
           setStep(3);
         }
-
-        // Default date to tomorrow in YYYY-MM-DD
-        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        const dateStr = tomorrow.toISOString().split('T')[0];
-        setSelectedDate(dateStr);
       } catch (err: any) {
         setErrorMessage(err?.message || t.common.error);
       } finally {
@@ -209,13 +275,16 @@ function BookingContent() {
     return services.filter((s) => selectedServiceIds.includes(s.id));
   }, [services, selectedServiceIds]);
 
-  const totalDuration = useMemo(() => {
+  const fallbackTotalDuration = useMemo(() => {
     return selectedServices.reduce((sum, s) => sum + (s.durationMinutes || 30), 0);
   }, [selectedServices]);
 
-  const totalPrice = useMemo(() => {
+  const fallbackTotalPrice = useMemo(() => {
     return selectedServices.reduce((sum, s) => sum + (s.priceFrom || 0), 0);
   }, [selectedServices]);
+
+  const totalDuration = serverDuration ?? fallbackTotalDuration;
+  const totalPrice = serverPrice ?? fallbackTotalPrice;
 
   const selectedDoctorObj = useMemo(() => {
     return doctors.find((d) => d.id === selectedDoctorId);
@@ -227,8 +296,13 @@ function BookingContent() {
 
   // Doctor schedule for currently selected branch
   const doctorScheduleInfo = useMemo(() => {
-    return getDoctorScheduleInfo(selectedDoctorObj, selectedBranchId);
-  }, [selectedDoctorObj, selectedBranchId]);
+    return getDoctorScheduleInfo(
+      selectedDoctorObj,
+      selectedBranchId,
+      language,
+      t.booking.noScheduleConfigured,
+    );
+  }, [selectedDoctorObj, selectedBranchId, language, t.booking.noScheduleConfigured]);
 
   // Check if current date is working day for doctor
   const isSelectedDateWorkingDay = useMemo(() => {
@@ -242,35 +316,81 @@ function BookingContent() {
     return findNextWorkingDate(selectedDate, selectedDoctorObj, selectedBranchId);
   }, [selectedDoctorObj, selectedDate, selectedBranchId]);
 
-  // Toggle service selection (up to 3 services)
+  // Helper to check if a doctor is eligible for current branch and all selected services
+  const isDoctorEligible = (doc: any) => {
+    if (selectedBranchId && doc.branches && doc.branches.length > 0) {
+      const worksAtBranch = doc.branches.some((b: any) => b.branchId === selectedBranchId);
+      if (!worksAtBranch) return false;
+    }
+    if (selectedServiceIds.length > 0 && doc.services) {
+      const providesAll = selectedServiceIds.every((srvId) =>
+        doc.services.some((ds: any) => ds.serviceId === srvId),
+      );
+      if (!providesAll) return false;
+    }
+    return true;
+  };
+
+  // Branch Selection handler with cascading resets
+  const handleSelectBranch = (branchId: string) => {
+    setSelectedBranchId(branchId);
+    setSelectedSlotTime('');
+    setIdempotencyKey('');
+    if (selectedDoctorObj && !isDoctorEligible(selectedDoctorObj)) {
+      setSelectedDoctorId('');
+    }
+  };
+
+  // Toggle service selection (1..3 services) with cascading resets
   const toggleService = (serviceId: string) => {
+    setSelectedSlotTime('');
+    setIdempotencyKey('');
     setSelectedServiceIds((prev) => {
+      let updated: string[];
       if (prev.includes(serviceId)) {
-        return prev.filter((id) => id !== serviceId);
+        updated = prev.filter((id) => id !== serviceId);
       } else {
         if (prev.length >= 3) {
-          setErrorMessage('Bir vaqtning o\'zida ko\'pi bilan 3 ta xizmat tanlash mumkin');
+          setErrorMessage(t.booking.maxServicesLimit);
           return prev;
         }
         setErrorMessage(null);
-        return [...prev, serviceId];
+        updated = [...prev, serviceId];
       }
+
+      // Revalidate currently selected doctor against new services
+      if (selectedDoctorObj) {
+        const stillEligible = updated.every((id) =>
+          selectedDoctorObj.services?.some((ds: any) => ds.serviceId === id),
+        );
+        if (!stillEligible) {
+          setSelectedDoctorId('');
+        }
+      }
+      return updated;
     });
   };
 
-  // When step 4 opens, automatically snap date to nearest working date if non-working day
-  useEffect(() => {
-    if (step === 4 && selectedDoctorObj && selectedDate) {
-      if (!isDoctorWorkingOnDate(selectedDate, selectedDoctorObj, selectedBranchId)) {
-        const nextDate = findNextWorkingDate(selectedDate, selectedDoctorObj, selectedBranchId);
-        if (nextDate !== selectedDate) {
-          setSelectedDate(nextDate);
-        }
-      }
+  // Doctor selection handler with cascading resets
+  const handleSelectDoctor = (doctorId: string) => {
+    setSelectedDoctorId(doctorId);
+    setSelectedSlotTime('');
+    setIdempotencyKey('');
+    const doc = doctors.find((d) => d.id === doctorId);
+    if (doc && selectedDate) {
+      const nearest = findNextWorkingDate(selectedDate, doc, selectedBranchId);
+      setSelectedDate(nearest);
     }
-  }, [step, selectedDoctorObj, selectedBranchId]);
+  };
 
-  // Load available slots when Doctor, Service, and Date are chosen
+  // Date selection handler with cascading resets
+  const handleSelectDate = (dateStr: string) => {
+    setSelectedDate(dateStr);
+    setSelectedSlotTime('');
+    setIdempotencyKey('');
+  };
+
+  // Fetch slots whenever doctor, services, date or branch changes
   useEffect(() => {
     async function fetchSlots() {
       if (!selectedDoctorId || selectedServiceIds.length === 0 || !selectedDate) {
@@ -278,30 +398,50 @@ function BookingContent() {
         return;
       }
 
+      const currentReqId = ++slotsRequestIdRef.current;
       try {
         setIsLoadingSlots(true);
         setErrorMessage(null);
-        const slots = await api.getAvailableSlots(
+
+        const res = await api.getAvailableSlots(
           selectedDoctorId,
           selectedDate,
           selectedServiceIds[0],
           selectedBranchId || undefined,
-          totalDuration,
-          selectedServiceIds
+          undefined,
+          selectedServiceIds,
         );
-        setAvailableSlots(slots || []);
+
+        // Ignore stale out-of-order response
+        if (slotsRequestIdRef.current !== currentReqId) {
+          return;
+        }
+
+        const slotList = Array.isArray(res) ? res : res?.slots || [];
+        setAvailableSlots(slotList);
+
+        if (res && typeof res === 'object' && !Array.isArray(res)) {
+          if (res.durationMinutes) setServerDuration(res.durationMinutes);
+          if (res.bufferMinutes) setServerBuffer(res.bufferMinutes);
+          if (res.priceFrom !== undefined) setServerPrice(res.priceFrom);
+          if (res.serviceName) setServerServiceName(res.serviceName);
+        }
       } catch (err: any) {
-        setAvailableSlots([]);
-        setErrorMessage(err?.message || 'Bo\'sh vaqtlarni yuklashda xatolik yuz berdi');
+        if (slotsRequestIdRef.current === currentReqId) {
+          setAvailableSlots([]);
+          setErrorMessage(err?.message || t.booking.noSlots);
+        }
       } finally {
-        setIsLoadingSlots(false);
+        if (slotsRequestIdRef.current === currentReqId) {
+          setIsLoadingSlots(false);
+        }
       }
     }
 
     if (step === 4) {
       fetchSlots();
     }
-  }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, totalDuration]);
+  }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, t.booking.noSlots]);
 
   // Real-time validation checks
   const isPhoneValid = useMemo(() => {
@@ -310,15 +450,22 @@ function BookingContent() {
   }, [patientPhone]);
 
   const isEmailValid = useMemo(() => {
-    if (!patientEmail.trim()) return true; // optional
+    if (!patientEmail.trim()) return true;
     return EMAIL_REGEX.test(patientEmail.trim());
   }, [patientEmail]);
 
-  // Handle phone input changes with auto-formatting
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setIsPhoneTouched(true);
     const formatted = formatUzPhone(e.target.value);
     setPatientPhone(formatted);
+  };
+
+  // Obtain stable idempotency key or generate new one
+  const getOrGenerateIdempotencyKey = () => {
+    if (idempotencyKey) return idempotencyKey;
+    const newKey = `idem_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    setIdempotencyKey(newKey);
+    return newKey;
   };
 
   // Handle final submission
@@ -333,30 +480,30 @@ function BookingContent() {
     }
 
     if (!patientName.trim()) {
-      setErrorMessage('Iltimos, ismingizni kiriting');
+      setErrorMessage(t.booking.nameRequired);
       return;
     }
 
     if (!isPhoneValid) {
-      setErrorMessage('Iltimos, telefon raqamini to\'liq kiriting (+998 XX XXX-XX-XX)');
+      setErrorMessage(t.booking.phoneValidationError);
       return;
     }
 
     if (!isEmailValid) {
-      setErrorMessage('Elektron pochta manzili formati noto\'g\'ri');
+      setErrorMessage(t.booking.emailValidationError);
       return;
     }
+
+    const currentKey = getOrGenerateIdempotencyKey();
 
     try {
       setIsSubmitting(true);
       setErrorMessage(null);
 
-      // Create booking payload with multi-service and custom combined duration
       const result = await api.createBooking({
         branchId: selectedBranchId || undefined,
         serviceId: selectedServiceIds[0],
         serviceIds: selectedServiceIds,
-        customDurationMinutes: totalDuration,
         doctorId: selectedDoctorId,
         startTime: selectedSlotTime,
         patientName: patientName.trim(),
@@ -364,6 +511,7 @@ function BookingContent() {
         patientEmail: patientEmail.trim() || undefined,
         note: patientNote.trim() || undefined,
         consentGiven,
+        idempotencyKey: currentKey,
       });
 
       setBookingResult({
@@ -376,12 +524,28 @@ function BookingContent() {
         branchName: result.branchName || selectedBranchObj?.nameUz || 'Asosiy filial',
         serviceName:
           result.serviceName ||
+          serverServiceName ||
           selectedServices.map((s) => s.nameUz).join(', '),
         durationMinutes: result.durationMinutes || totalDuration,
+        bufferMinutes: result.bufferMinutes || serverBuffer || 5,
+        servicePriceFrom: result.servicePriceFrom || totalPrice,
       });
       setStep(6);
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Qabulga yozilishda xatolik yuz berdi. Iltimos qayta urinib ko\'ring.');
+      // Slot conflict recovery (409)
+      const isConflict =
+        err?.status === 409 ||
+        err?.message?.includes('band') ||
+        err?.message?.includes('conflict') ||
+        err?.message?.includes('allaqachon');
+
+      if (isConflict) {
+        setErrorMessage(t.booking.slotConflictNotice);
+        setSelectedSlotTime('');
+        setStep(4);
+      } else {
+        setErrorMessage(err?.message || 'Qabulga yozilishda xatolik yuz berdi. Iltimos qayta urinib ko\'ring.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -395,19 +559,18 @@ function BookingContent() {
     setTimeout(() => setCopiedToken(false), 2500);
   };
 
-  // Quick 10-day date chip generator
+  // Pure 10-day date chip generator anchored in Tashkent timezone
   const dateChips = useMemo(() => {
     const list: Array<{ dateStr: string; dayName: string; dayNum: string; monthStr: string; isWorking: boolean }> = [];
-    const base = new Date();
-    // Start from tomorrow
-    base.setDate(base.getDate() + 1);
+    const todayParts = getTashkentDateParts(new Date());
 
-    for (let i = 0; i < 10; i++) {
-      const cur = new Date(base.getTime() + i * 24 * 60 * 60 * 1000);
-      const dateStr = cur.toISOString().split('T')[0];
-      const dayName = SHORT_DAY_NAMES[cur.getDay()];
-      const dayNum = String(cur.getDate());
-      const monthStr = cur.toLocaleDateString('uz-UZ', { month: 'short' });
+    for (let i = 1; i <= 10; i++) {
+      const cur = new Date(Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day + i, 12, 0, 0));
+      const dateStr = toCalendarDateStr(cur);
+      const dayOfWeekNum = cur.getUTCDay();
+      const dayName = language === 'ru' ? SHORT_DAY_NAMES_RU[dayOfWeekNum] : SHORT_DAY_NAMES_UZ[dayOfWeekNum];
+      const dayNum = String(cur.getUTCDate());
+      const monthStr = cur.toLocaleDateString(language === 'ru' ? 'ru-RU' : 'uz-UZ', { month: 'short' });
       const isWorking = selectedDoctorObj
         ? isDoctorWorkingOnDate(dateStr, selectedDoctorObj, selectedBranchId)
         : true;
@@ -415,7 +578,7 @@ function BookingContent() {
       list.push({ dateStr, dayName, dayNum, monthStr, isWorking });
     }
     return list;
-  }, [selectedDoctorObj, selectedBranchId]);
+  }, [selectedDoctorObj, selectedBranchId, language]);
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
@@ -501,7 +664,7 @@ function BookingContent() {
                   <button
                     type="button"
                     key={b.id}
-                    onClick={() => setSelectedBranchId(b.id)}
+                    onClick={() => handleSelectBranch(b.id)}
                     className={`p-5 rounded-2xl border text-left transition-all ${
                       isSelected
                         ? 'border-teal-700 bg-teal-50/50 ring-2 ring-teal-600'
@@ -532,7 +695,7 @@ function BookingContent() {
           </div>
         )}
 
-        {/* STEP 2: Service Selection (Multi-Select Support) */}
+        {/* STEP 2: Service Selection (Multi-Select Support 1..3) */}
         {step === 2 && (
           <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
@@ -542,14 +705,16 @@ function BookingContent() {
                   <span>{t.booking.selectService}</span>
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Bir vaqtning o&apos;zida 1 tadan 3 tagacha xizmatni tanlashingiz mumkin
+                  {t.booking.servicesSelectionHint}
                 </p>
               </div>
 
               {selectedServiceIds.length > 0 && (
                 <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-teal-50 border border-teal-200 text-teal-800 text-xs font-bold">
                   <Sparkles className="w-3.5 h-3.5 text-teal-600" />
-                  <span>{selectedServiceIds.length} ta tanlandi</span>
+                  <span>
+                    {selectedServiceIds.length} {language === 'ru' ? 'выбрано' : 'ta tanlandi'}
+                  </span>
                 </div>
               )}
             </div>
@@ -557,7 +722,7 @@ function BookingContent() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[440px] overflow-y-auto pr-2">
               {services.map((s) => {
                 const name = language === 'ru' && s.nameRu ? s.nameRu : s.nameUz;
-                const price = (s.priceFrom / 100).toLocaleString('uz-UZ');
+                const price = (s.priceFrom / 100).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ');
                 const isSelected = selectedServiceIds.includes(s.id);
 
                 return (
@@ -577,7 +742,7 @@ function BookingContent() {
                           {s.category}
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-slate-500">{s.durationMinutes} daq</span>
+                          <span className="font-medium text-slate-500">{s.durationMinutes} {t.booking.minutes}</span>
                           <span
                             className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
                               isSelected
@@ -592,7 +757,9 @@ function BookingContent() {
                       <p className="font-bold text-sm text-slate-900 pr-6">{name}</p>
                     </div>
                     <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
-                      <span className="text-[11px] text-slate-400">Boshlang&apos;ich narxi:</span>
+                      <span className="text-[11px] text-slate-400">
+                        {language === 'ru' ? 'Цена от:' : 'Boshlang\'ich narxi:'}
+                      </span>
                       <p className="text-xs font-extrabold text-teal-900">
                         {price} {t.common.uzs}
                       </p>
@@ -602,27 +769,33 @@ function BookingContent() {
               })}
             </div>
 
-            {/* Selected Services Summary Pill */}
+            {/* Selected Services Summary Box */}
             {selectedServiceIds.length > 0 && (
               <div className="p-4 rounded-2xl bg-teal-50/80 border border-teal-200 text-xs text-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 font-bold text-teal-950">
                     <CheckCircle2 className="w-4 h-4 text-teal-700" />
-                    <span>Tanlangan xizmatlar ({selectedServices.length} ta):</span>
+                    <span>{t.booking.selectedServices} ({selectedServices.length}):</span>
                   </div>
                   <p className="text-slate-600 pl-6">
-                    {selectedServices.map((s) => s.nameUz).join(', ')}
+                    {selectedServices.map((s) => (language === 'ru' && s.nameRu ? s.nameRu : s.nameUz)).join(', ')}
                   </p>
                 </div>
                 <div className="flex items-center gap-4 shrink-0 sm:border-l sm:border-teal-200 sm:pl-4">
                   <div>
-                    <span className="text-slate-500 block text-[10px] uppercase font-semibold">Jami vaqt:</span>
-                    <span className="font-extrabold text-slate-900 text-sm">{totalDuration} daqiqa</span>
+                    <span className="text-slate-500 block text-[10px] uppercase font-semibold">
+                      {t.booking.estimatedDuration}:
+                    </span>
+                    <span className="font-extrabold text-slate-900 text-sm">
+                      {totalDuration} {t.booking.minutes}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[10px] uppercase font-semibold">Jami narx:</span>
+                    <span className="text-slate-500 block text-[10px] uppercase font-semibold">
+                      {t.booking.estimatedPrice}:
+                    </span>
                     <span className="font-extrabold text-teal-800 text-sm">
-                      {(totalPrice / 100).toLocaleString('uz-UZ')} {t.common.uzs}
+                      {(totalPrice / 100).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ')} {t.common.uzs}
                     </span>
                   </div>
                 </div>
@@ -652,7 +825,7 @@ function BookingContent() {
           </div>
         )}
 
-        {/* STEP 3: Doctor Selection (Displaying Schedules) */}
+        {/* STEP 3: Doctor Selection with Eligibility Filtering */}
         {step === 3 && (
           <div className="space-y-6 animate-fade-in">
             <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -667,37 +840,55 @@ function BookingContent() {
                 }`;
                 const title = language === 'ru' && d.titleRu ? d.titleRu : d.titleUz;
                 const isSelected = selectedDoctorId === d.id;
-                const sched = getDoctorScheduleInfo(d, selectedBranchId);
+                const isEligible = isDoctorEligible(d);
+                const sched = getDoctorScheduleInfo(d, selectedBranchId, language, t.booking.noScheduleConfigured);
 
                 return (
                   <button
                     type="button"
                     key={d.id}
+                    disabled={!isEligible}
                     onClick={() => {
-                      setSelectedDoctorId(d.id);
-                      // Auto-check nearest working date
-                      if (selectedDate) {
-                        const nearest = findNextWorkingDate(selectedDate, d, selectedBranchId);
-                        setSelectedDate(nearest);
-                      }
+                      if (isEligible) handleSelectDoctor(d.id);
                     }}
                     className={`p-4 rounded-2xl border text-left transition-all ${
-                      isSelected
+                      !isEligible
+                        ? 'border-dashed border-slate-200 bg-slate-50/70 opacity-60 cursor-not-allowed'
+                        : isSelected
                         ? 'border-teal-700 bg-teal-50/50 ring-2 ring-teal-600 shadow-sm'
                         : 'border-slate-200 hover:border-teal-300 bg-white'
                     }`}
                   >
-                    <p className="font-bold text-sm text-slate-900">Dr. {fullName}</p>
-                    <p className="text-xs text-teal-700 font-medium mt-0.5">{title}</p>
-                    <p className="text-xs text-slate-400 mt-1">{d.experienceYears}+ yil tajriba</p>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-bold text-sm text-slate-900">Dr. {fullName}</p>
+                        <p className="text-xs text-teal-700 font-medium mt-0.5">{title}</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {d.experienceYears}+ {language === 'ru' ? 'лет опыта' : 'yil tajriba'}
+                        </p>
+                      </div>
+                      {!isEligible && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">
+                          {language === 'ru' ? 'Недоступен' : 'Mos emas'}
+                        </span>
+                      )}
+                    </div>
+
+                    {!isEligible && (
+                      <p className="text-[11px] text-amber-700 mt-2 bg-amber-50 p-2 rounded-xl">
+                        {t.booking.doctorIncompatible}
+                      </p>
+                    )}
 
                     <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-start gap-1.5 text-xs text-slate-600">
                       <Calendar className="w-3.5 h-3.5 text-teal-700 shrink-0 mt-0.5" />
                       <div>
                         <span className="font-semibold text-slate-700 block text-[11px]">
-                          Qabul kunlari:
+                          {t.booking.workingSchedule}:
                         </span>
-                        <span className="text-[11px] text-teal-900 font-medium">{sched.summary}</span>
+                        <span className={`text-[11px] font-medium ${sched.hasSchedule ? 'text-teal-900' : 'text-slate-400 italic'}`}>
+                          {sched.summary}
+                        </span>
                       </div>
                     </div>
                   </button>
@@ -742,10 +933,15 @@ function BookingContent() {
                 <Info className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
                   <span className="font-bold">
-                    Dr. {selectedDoctorObj.firstNameUz} {selectedDoctorObj.lastNameUz}
+                    Dr.{' '}
+                    {language === 'ru' && selectedDoctorObj.firstNameRu
+                      ? `${selectedDoctorObj.firstNameRu} ${selectedDoctorObj.lastNameRu}`
+                      : `${selectedDoctorObj.firstNameUz} ${selectedDoctorObj.lastNameUz}`}
                   </span>{' '}
-                  ish jadvali ({selectedBranchObj?.nameUz || 'Tanlangan filial'}):{' '}
-                  <span className="font-semibold text-teal-800">{doctorScheduleInfo.summary}</span>
+                  ({selectedBranchObj?.nameUz || 'Tanlangan filial'}):{' '}
+                  <span className="font-semibold text-teal-800">
+                    {doctorScheduleInfo.summary}
+                  </span>
                 </div>
               </div>
             )}
@@ -753,7 +949,7 @@ function BookingContent() {
             {/* Quick 10-day date chips */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-2">
-                Tezkor sana tanlash:
+                {language === 'ru' ? 'Быстрый выбор даты:' : 'Tezkor sana tanlash:'}
               </label>
               <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
                 {dateChips.map((chip) => {
@@ -762,10 +958,7 @@ function BookingContent() {
                     <button
                       type="button"
                       key={chip.dateStr}
-                      onClick={() => {
-                        setSelectedDate(chip.dateStr);
-                        setSelectedSlotTime('');
-                      }}
+                      onClick={() => handleSelectDate(chip.dateStr)}
                       className={`flex flex-col items-center py-2 px-3 rounded-2xl min-w-[72px] border text-xs transition-all shrink-0 ${
                         isSelected
                           ? 'border-teal-700 bg-teal-700 text-white shadow-md'
@@ -792,7 +985,9 @@ function BookingContent() {
                           }`}
                         />
                         <span className="text-[9px] font-medium">
-                          {chip.isWorking ? 'Ish kuni' : 'Dam olish'}
+                          {chip.isWorking
+                            ? language === 'ru' ? 'Прием' : 'Ish kuni'
+                            : language === 'ru' ? 'Выходной' : 'Dam olish'}
                         </span>
                       </div>
                     </button>
@@ -804,16 +999,13 @@ function BookingContent() {
             {/* Date Picker Input */}
             <div className="pt-2">
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Yoki taqvimdan sanani ko&apos;rsating:
+                {language === 'ru' ? 'Или укажите дату в календаре:' : 'Yoki taqvimdan sanani ko\'rsating:'}
               </label>
               <input
                 type="date"
                 value={selectedDate}
-                min={new Date().toISOString().split('T')[0]}
-                onChange={(e) => {
-                  setSelectedDate(e.target.value);
-                  setSelectedSlotTime('');
-                }}
+                min={toCalendarDateStr(new Date())}
+                onChange={(e) => handleSelectDate(e.target.value)}
                 className="w-full sm:w-64 px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
               />
             </div>
@@ -825,24 +1017,25 @@ function BookingContent() {
                   <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-bold">
-                      Tanlangan kunda ({selectedDate}) shifokor qabul qilmaydi.
+                      {t.booking.notWorkingOnDate} ({selectedDate}).
                     </p>
                     <p className="text-amber-800 mt-0.5">
-                      Shifokor faqat {doctorScheduleInfo.days.join(', ')} kunlari ishlaydi.
+                      {doctorScheduleInfo.hasSchedule
+                        ? `${language === 'ru' ? 'Дни приема врача:' : 'Shifokor qabul kunlari:'} ${doctorScheduleInfo.summary}`
+                        : t.booking.noScheduleConfigured}
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDate(nextWorkingDate);
-                    setSelectedSlotTime('');
-                  }}
-                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-sm text-xs flex items-center gap-1.5 shrink-0 self-start sm:self-center"
-                >
-                  <span>Eng yaqin ish kuniga o&apos;tish ({nextWorkingDate})</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                {nextWorkingDate !== selectedDate && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectDate(nextWorkingDate)}
+                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-sm text-xs flex items-center gap-1.5 shrink-0 self-start sm:self-center"
+                  >
+                    <span>{t.booking.jumpToNextWorkingDate} ({nextWorkingDate})</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             )}
 
@@ -850,12 +1043,13 @@ function BookingContent() {
             <div className="pt-2">
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-xs font-semibold text-slate-700">
-                  {selectedDate} sana uchun mavjud vaqtlar (Davomiyligi: {totalDuration} daqiqa):
+                  {selectedDate} — {t.booking.estimatedDuration}: {totalDuration} {t.booking.minutes}
+                  {serverBuffer ? ` (+${serverBuffer} ${t.booking.minutes} bufer)` : ''}:
                 </label>
                 {selectedSlotTime && (
                   <span className="text-xs font-bold text-teal-700">
-                    Tanlandi:{' '}
-                    {new Date(selectedSlotTime).toLocaleTimeString('uz-UZ', {
+                    {language === 'ru' ? 'Выбрано:' : 'Tanlandi:'}{' '}
+                    {new Date(selectedSlotTime).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'uz-UZ', {
                       hour: '2-digit',
                       minute: '2-digit',
                       timeZone: 'Asia/Tashkent',
@@ -871,22 +1065,20 @@ function BookingContent() {
               ) : availableSlots.length === 0 ? (
                 <div className="p-8 text-center text-slate-600 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
                   <p className="font-semibold text-slate-700">
-                    Tanlangan kunda bo&apos;sh vaqtlar mavjud emas yoki kun to&apos;liq band.
+                    {t.booking.noSlots}
                   </p>
-                  <p className="text-xs text-slate-500">
-                    Dr. {selectedDoctorObj?.firstNameUz} {selectedDoctorObj?.lastNameUz} qabul kunlari:{' '}
-                    {doctorScheduleInfo.summary}
-                  </p>
+                  {doctorScheduleInfo.hasSchedule && (
+                    <p className="text-xs text-slate-500">
+                      {doctorScheduleInfo.summary}
+                    </p>
+                  )}
                   {nextWorkingDate !== selectedDate && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setSelectedDate(nextWorkingDate);
-                        setSelectedSlotTime('');
-                      }}
+                      onClick={() => handleSelectDate(nextWorkingDate)}
                       className="inline-flex items-center gap-1.5 px-4 py-2 bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm hover:bg-teal-800 transition-colors"
                     >
-                      <span>Eng yaqin bo&apos;sh kunga o&apos;tish ({nextWorkingDate})</span>
+                      <span>{t.booking.jumpToNextWorkingDate} ({nextWorkingDate})</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -895,7 +1087,7 @@ function BookingContent() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-60 overflow-y-auto p-1">
                   {availableSlots.map((slot) => {
                     const slotDate = new Date(slot.startTime);
-                    const timeStr = slotDate.toLocaleTimeString('uz-UZ', {
+                    const timeStr = slotDate.toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'uz-UZ', {
                       hour: '2-digit',
                       minute: '2-digit',
                       timeZone: 'Asia/Tashkent',
@@ -918,7 +1110,7 @@ function BookingContent() {
                       >
                         <span className="text-sm font-extrabold">{timeStr}</span>
                         <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-teal-100' : 'text-teal-600'}`}>
-                          {totalDuration} daq
+                          {totalDuration} {t.booking.minutes}
                         </span>
                       </button>
                     );
@@ -962,11 +1154,16 @@ function BookingContent() {
             <div className="p-4 bg-teal-50/70 rounded-2xl border border-teal-100 text-xs text-slate-700 space-y-2 mb-4">
               <p>
                 <strong>{t.common.service}:</strong>{' '}
-                {selectedServices.map((s) => s.nameUz).join(', ') || 'Tanlangan xizmat'}
+                {serverServiceName ||
+                  selectedServices.map((s) => (language === 'ru' && s.nameRu ? s.nameRu : s.nameUz)).join(', ')}
               </p>
               <p>
                 <strong>{t.common.doctor}:</strong> Dr.{' '}
-                {selectedDoctorObj ? `${selectedDoctorObj.firstNameUz} ${selectedDoctorObj.lastNameUz}` : 'Tanlangan shifokor'}
+                {selectedDoctorObj
+                  ? language === 'ru' && selectedDoctorObj.firstNameRu
+                    ? `${selectedDoctorObj.firstNameRu} ${selectedDoctorObj.lastNameRu}`
+                    : `${selectedDoctorObj.firstNameUz} ${selectedDoctorObj.lastNameUz}`
+                  : 'Tanlangan shifokor'}
               </p>
               <p>
                 <strong>{t.common.branch}:</strong>{' '}
@@ -974,13 +1171,17 @@ function BookingContent() {
               </p>
               <p>
                 <strong>{t.common.time}:</strong>{' '}
-                {selectedSlotTime ? new Date(selectedSlotTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' }) : ''}{' '}
-                ({totalDuration} daqiqa)
+                {selectedSlotTime
+                  ? new Date(selectedSlotTime).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ', {
+                      timeZone: 'Asia/Tashkent',
+                    })
+                  : ''}{' '}
+                ({totalDuration} {t.booking.minutes})
               </p>
               <p>
-                <strong>Taxminiy narx:</strong>{' '}
+                <strong>{t.booking.estimatedPrice}:</strong>{' '}
                 <span className="font-extrabold text-teal-800">
-                  {(totalPrice / 100).toLocaleString('uz-UZ')} {t.common.uzs}
+                  {(totalPrice / 100).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ')} {t.common.uzs}
                 </span>
               </p>
             </div>
@@ -1022,7 +1223,7 @@ function BookingContent() {
                 {isPhoneTouched && !isPhoneValid && (
                   <p className="text-[11px] text-red-600 mt-1 font-medium flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Telefon raqamini to&apos;liq kiriting: +998 (90) 123-45-67</span>
+                    <span>{t.booking.phoneValidationError}</span>
                   </p>
                 )}
               </div>
@@ -1030,7 +1231,7 @@ function BookingContent() {
               {/* Email (Optional but regex validated) */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t.common.email} (ixtiyoriy)
+                  {t.common.email} ({language === 'ru' ? 'необязательно' : 'ixtiyoriy'})
                 </label>
                 <input
                   type="email"
@@ -1050,7 +1251,7 @@ function BookingContent() {
                 {isEmailTouched && !isEmailValid && (
                   <p className="text-[11px] text-red-600 mt-1 font-medium flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Elektron pochta manzili formati noto&apos;g&apos;ri (masalan: misol@gmail.com)</span>
+                    <span>{t.booking.emailValidationError}</span>
                   </p>
                 )}
               </div>
@@ -1064,7 +1265,7 @@ function BookingContent() {
                   rows={2}
                   value={patientNote}
                   onChange={(e) => setPatientNote(e.target.value)}
-                  placeholder="Tish og'rig'i, bezovta qilayotgan belgilar..."
+                  placeholder={language === 'ru' ? 'Симптомы, жалобы...' : 'Tish og\'rig\'i, bezovta qilayotgan belgilar...'}
                   className="w-full px-4 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
                 />
               </div>
@@ -1135,17 +1336,52 @@ function BookingContent() {
               <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-500">{t.common.status}:</span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
-                  {bookingResult.status === 'PENDING' ? 'Kutilmoqda (So\'rov qabul qilindi)' : bookingResult.status}
+                  {bookingResult.status === 'PENDING'
+                    ? language === 'ru'
+                      ? 'Ожидает подтверждения'
+                      : 'Kutilmoqda (So\'rov qabul qilindi)'
+                    : bookingResult.status}
                 </span>
               </div>
               <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-500">{t.common.service}:</span>
                 <span className="font-semibold text-slate-800">{bookingResult.serviceName}</span>
               </div>
+
+              {/* Service Items Itemized Breakdown */}
+              {bookingResult.serviceItems && bookingResult.serviceItems.length > 0 && (
+                <div className="py-2 border-b border-slate-200 space-y-1.5">
+                  <span className="text-[11px] font-bold text-slate-600 uppercase block">
+                    {t.booking.selectedServices}:
+                  </span>
+                  {bookingResult.serviceItems.map((item: any, idx: number) => (
+                    <div
+                      key={item.id || idx}
+                      className="flex items-center justify-between text-xs bg-white p-2 rounded-xl border border-slate-100"
+                    >
+                      <span className="font-medium text-slate-800">
+                        {language === 'ru' && item.serviceNameRu ? item.serviceNameRu : item.serviceNameUz}
+                      </span>
+                      <div className="text-right">
+                        <span className="text-slate-500 mr-2">{item.durationMinutes} {t.booking.minutes}</span>
+                        {item.priceFrom ? (
+                          <span className="font-bold text-teal-800">
+                            {(item.priceFrom / 100).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ')}{' '}
+                            {t.common.uzs}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-500">{t.common.time}:</span>
                 <span className="font-semibold text-slate-800">
-                  {new Date(bookingResult.startTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' })}
+                  {new Date(bookingResult.startTime).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ', {
+                    timeZone: 'Asia/Tashkent',
+                  })}
                 </span>
               </div>
               <div className="flex justify-between border-b border-slate-200 pb-2">
@@ -1157,9 +1393,9 @@ function BookingContent() {
                 <span className="font-semibold text-slate-800">{bookingResult.branchName}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Qabul davomiyligi:</span>
+                <span className="text-slate-500">{t.booking.estimatedDuration}:</span>
                 <span className="font-semibold text-slate-800">
-                  {bookingResult.durationMinutes || totalDuration} daqiqa
+                  {bookingResult.durationMinutes || totalDuration} {t.booking.minutes}
                 </span>
               </div>
             </div>
@@ -1170,7 +1406,7 @@ function BookingContent() {
                 <Info className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
                 <div className="text-xs text-slate-700 space-y-2">
                   <p className="font-semibold text-slate-900">
-                    Qabulni mustaqil boshqarish havolasi:
+                    {language === 'ru' ? 'Ссылка для управления записью:' : 'Qabulni mustaqil boshqarish havolasi:'}
                   </p>
                   <p className="text-slate-600">{t.booking.managementTokenNotice}</p>
                   <button
@@ -1179,7 +1415,11 @@ function BookingContent() {
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-teal-200 rounded-lg text-teal-800 font-semibold shadow-sm hover:bg-teal-50 transition-colors"
                   >
                     <Copy className="w-3.5 h-3.5" />
-                    <span>{copiedToken ? 'Nusxa olindi!' : 'Havoladan nusxa olish'}</span>
+                    <span>
+                      {copiedToken
+                        ? language === 'ru' ? 'Скопировано!' : 'Nusxa olindi!'
+                        : language === 'ru' ? 'Скопировать ссылку' : 'Havoladan nusxa olish'}
+                    </span>
                   </button>
                 </div>
               </div>

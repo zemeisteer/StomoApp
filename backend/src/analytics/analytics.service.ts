@@ -222,23 +222,27 @@ export class AnalyticsService {
     const cancellationRate = totalAppointments > 0 ? (cancelled / totalAppointments) * 100 : 0;
     const noShowRate = totalAppointments > 0 ? (noShow / totalAppointments) * 100 : 0;
 
-    // 2. Popular services
-    const popularServicesRaw = await this.prisma.appointment.groupBy({
-      by: ['serviceName'],
-      where: appointmentWhere,
+    // 2. Popular services: Group by distinct service item name snapshots to count individual services performed
+    const totalServiceItems = await this.prisma.appointmentServiceItem.count({
+      where: { appointment: appointmentWhere },
+    });
+
+    const popularServicesRaw = await this.prisma.appointmentServiceItem.groupBy({
+      by: ['serviceNameUz'],
+      where: { appointment: appointmentWhere },
       _count: true,
       orderBy: {
         _count: {
-          serviceName: 'desc',
+          serviceNameUz: 'desc',
         },
       },
       take: 7,
     });
 
     const popularServices = popularServicesRaw.map((s) => ({
-      name: s.serviceName,
+      name: s.serviceNameUz,
       count: s._count,
-      percentage: totalAppointments > 0 ? Math.round((s._count / totalAppointments) * 100) : 0,
+      percentage: totalServiceItems > 0 ? Math.round((s._count / totalServiceItems) * 100) : 0,
     }));
 
     // 3. Exact Interval-Based Doctor Utilization Calculation

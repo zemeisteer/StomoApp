@@ -12,22 +12,18 @@ import { Public } from '../auth/public.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { AppointmentStatus, StaffRole } from '@prisma/client';
 import {
-  IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min, IsArray, Matches, IsEmail,
+  IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min, Max, IsArray, Matches, IsEmail, ValidateIf,
 } from 'class-validator';
 
 export class PublicBookingDto {
+  @IsOptional()
   @IsString()
-  serviceId!: string;
+  serviceId?: string;
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   serviceIds?: string[];
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  customDurationMinutes?: number;
 
   @IsString()
   doctorId!: string;
@@ -43,12 +39,13 @@ export class PublicBookingDto {
   patientName!: string;
 
   @IsString()
-  @Matches(/^\+998(\s?\(?\d{2}\)?\s?\d{3}[-\s]?\d{2}[-\s]?\d{2}|\d{9,12})$/, {
+  @Matches(/^\+998(\s?\(?\d{2}\)?\s?\d{3}[-\s]?\d{2}[-\s]?\d{2}|\d{9})$/, {
     message: 'Telefon raqami O\'zbekiston formati (+998XXXXXXXXX)da bo\'lishi kerak',
   })
   patientPhone!: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.patientEmail !== undefined && o.patientEmail !== null && o.patientEmail !== '')
   @IsEmail({}, { message: 'Elektron pochta manzili formati noto\'g\'ri' })
   patientEmail?: string;
 
@@ -62,6 +59,17 @@ export class PublicBookingDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+}
+
+export class OverrideDurationDto {
+  @IsInt()
+  @Min(5)
+  @Max(480)
+  durationMinutes!: number;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }
 
 export class StatusChangeDto {
@@ -140,14 +148,19 @@ export class PublicBookingController {
       id: aptId,
       appointmentId: aptId,
       publicToken: result.publicToken,
+      token: result.publicToken,
       status: result.status,
       startTime: result.startTime,
       endTime: result.endTime,
       doctorName: docName,
       branchName: brName,
       serviceName: (result as any).serviceName,
+      price: (result as any).price,
       durationMinutes: (result as any).durationMinutes,
       bufferMinutes: (result as any).bufferMinutes,
+      serviceItems: (result as any).serviceItems,
+      doctor: (result as any).doctor,
+      branch: (result as any).branch,
     };
   }
 
@@ -176,8 +189,19 @@ export class PublicBookingController {
     const updated = await this.service.rescheduleByToken(token, dto.startTime);
     return {
       message: 'Qabul muvaffaqiyatli qayta rejalashtirildi',
+      id: updated.id,
+      appointmentId: updated.id,
+      publicToken: updated.publicToken,
+      status: updated.status,
       startTime: updated.startTime,
       endTime: updated.endTime,
+      durationMinutes: updated.durationMinutes,
+      bufferMinutes: updated.bufferMinutes,
+      serviceName: updated.serviceName,
+      price: (updated as any).price,
+      serviceItems: (updated as any).serviceItems,
+      doctor: updated.doctor,
+      branch: updated.branch,
     };
   }
 }
@@ -210,7 +234,6 @@ export class AppointmentsController {
   }
 
   @Post()
-  @Post()
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async createFromAdmin(@Body() dto: PublicBookingDto, @CurrentUser() user: JwtPayload) {
     if (user.role === StaffRole.DOCTOR && dto.doctorId !== user.doctorId) {
@@ -220,6 +243,16 @@ export class AppointmentsController {
       ...dto,
       source: 'admin',
     });
+  }
+
+  @Patch(':id/duration')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  async overrideDuration(
+    @Param('id') id: string,
+    @Body() dto: OverrideDurationDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.overrideDuration(id, dto.durationMinutes, user.sub, dto.reason, user);
   }
 
   @Patch(':id/status')
