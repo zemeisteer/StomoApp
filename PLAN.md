@@ -239,3 +239,36 @@
   - All 31/31 backend tests passing (100%).
   - Live end-to-end integration verified on running servers.
   - Full frontend and backend production builds passing with zero errors. (**Verified**)
+
+---
+
+## Phase 9: Transactional Duration & End-Time Consistency, Concurrency-Safe Overrides, Appointment-Aware Rescheduling, Repaired Legacy Bundles, and Full E2E & Browser Verification (COMPLETED & VERIFIED)
+- [x] **Consistent Booking Duration, Buffer, and End-Time Inside Transaction**:
+  - Inside the protected transaction with advisory locks, `createBooking` derives final duration, buffer, and `txEndTimeUtc` strictly from transaction-level service reads.
+  - Snapshot items and totals stored consistently; eliminates race conditions where concurrent catalog edits altered duration between pre-flight check and commit. (**Verified**)
+- [x] **Concurrency-Safe Admin Duration Overrides & Reminder Preservation**:
+  - Doctor advisory lock (`doc_${doctorId}`) + row lock (`FOR UPDATE`) inside a serializable transaction.
+  - Rejects completed/cancelled/no-show terminal states.
+  - Validates working hours and slot overlap through transaction client `tx` using newly computed end time.
+  - Transactionally updates pending reminder jobs with the incremented revision to prevent worker lease drops.
+  - Records previous duration, new duration, service items total, duration adjustment, and reason in audit logs. (**Verified**)
+- [x] **Appointment-Aware Rescheduling Availability**:
+  - `SchedulingService.getRescheduleSlotsForAppointment` uses stored duration and buffer snapshots from the appointment itself.
+  - Excludes the appointment being rescheduled from overlap calculations (`id: { not: appointmentId }`), allowing moving within existing slots.
+  - Re-evaluates active status for doctor, assigned branch, and all service items.
+  - Exposed via public route `GET /api/booking/reschedule/:token/slots` (and alias `/api/booking/status/:token/slots`) and staff route `GET /api/admin/appointments/:id/reschedule-slots`. (**Verified**)
+- [x] **Historical Service-Item Migration Repairs**:
+  - Migration `20261015170000_repair_historical_service_items` preserves original snapshot names in `service_name_uz`.
+  - Clears fabricated Russian translations if historical snapshot differed from catalog service.
+  - Detects unresolved multi-service comma bundles (`LIKE '%,%'`), sets `is_legacy_bundle = true`, and disassociates `service_id` to prevent false analytics attribution to single catalog services.
+  - Applied to `dentacare` and `dentacare_test` databases. (**Verified**)
+- [x] **Frontend Calendar Accuracy & Dual Localization**:
+  - Public booking and self-service status pages fully localized in Uzbek and Russian (`uz`, `ru`).
+  - Doctor schedule display handles per-weekday intervals, lunch breaks, and overtime exceptions.
+  - Admin calendar displays duration adjustment badges and integrates appointment-aware slot selection. (**Verified**)
+- [x] **Full E2E Regression Suite & Real Browser Verification**:
+  - Regressions 1–36 all passing (100% green, 36/36 passed in 17.7s).
+  - Production builds (`npm run build`) passing with zero errors in both backend and frontend (28/28 static pages).
+  - Strict ESLint checks passing (`npm run lint` - 0 errors).
+  - 12 high-resolution browser verification screenshots captured across Desktop (1440px), Tablet (768px), and Mobile (390px) using local Chrome `puppeteer-core`. (**Verified**)
+

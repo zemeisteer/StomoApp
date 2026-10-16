@@ -113,7 +113,11 @@ export function serializeAppointmentResponse(appointment: any) {
     durationMinutes: item.durationMinutes,
     priceFrom: item.priceFrom,
     price: item.priceFrom,
+    isLegacyBundle: Boolean(item.isLegacyBundle),
   }));
+
+  const serviceItemsTotalDuration = serviceItems.reduce((acc: number, i: any) => acc + (i.durationMinutes || 0), 0);
+  const durationAdjustmentMinutes = (appointment.durationMinutes ?? 0) - serviceItemsTotalDuration;
 
   return {
     id: appointment.id,
@@ -127,6 +131,8 @@ export function serializeAppointmentResponse(appointment: any) {
     price: appointment.servicePriceFrom,
     priceFrom: appointment.servicePriceFrom,
     durationMinutes: appointment.durationMinutes,
+    serviceItemsDurationMinutes: serviceItemsTotalDuration,
+    durationAdjustmentMinutes,
     bufferMinutes: appointment.bufferMinutes ?? 5,
     doctorName: docName,
     branchName: branchName,
@@ -364,32 +370,86 @@ export class AppointmentsService {
             }
           }
 
-          // Revalidate authoritative services within transaction lock
+          // Revalidate doctor inside transaction lock
+          const txDoctor = await tx.doctor.findFirst({
+            where: { id: dto.doctorId, isActive: true, isArchived: false },
+            include: { branches: true },
+          });
+          if (!txDoctor) {
+            throw new BadRequestException('Shifokor topilmadi yoki faol emas');
+          }
+
+          // Read authoritative clinic settings inside transaction
+          const txSettings = await tx.clinicSettings.findFirst();
+          const txTimezone = txSettings?.timezone || 'Asia/Tashkent';
+          const txPendingExpiryMinutes = txSettings?.pendingExpiryMinutes ?? 30;
+          const txBufferMinutes = txSettings?.bufferMinutes ?? 5;
+
+          // Revalidate or resolve branch consistently with slot endpoint inside transaction
+          let txBranchId = dto.branchId;
+          if (txBranchId) {
+            const branch = await tx.branch.findFirst({
+              where: { id: txBranchId, isActive: true },
+            });
+            if (!branch) {
+              throw new BadRequestException('Filial topilmadi yoki faol emas');
+            }
+            const isAssigned = txDoctor.branches.some((b) => b.branchId === txBranchId);
+            if (!isAssigned) {
+              throw new BadRequestException('Shifokor bu filialda ishlamaydi');
+            }
+          } else {
+            // Omitted branch selection: resolve matching branch from doctor's schedules/exceptions or active assignment
+            const candidateSchedules = await tx.doctorSchedule.findMany({
+              where: { doctorId: dto.doctorId, isActive: true },
+              include: { branch: true },
+            });
+            const dateOnlyZoned = toZonedTime(startTimeUtc, txTimezone);
+            const dayOfWeekNum = dateOnlyZoned.getDay();
+            const daysArr = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+            const dayOfWeek = daysArr[dayOfWeekNum];
+            const timeMinutes = dateOnlyZoned.getHours() * 60 + dateOnlyZoned.getMinutes();
+
+            const matchingSched = candidateSchedules.find((s) => {
+              if (s.dayOfWeek !== dayOfWeek || !s.branch?.isActive) return false;
+              const [sh, sm] = s.startTime.split(':').map(Number);
+              const [eh, em] = s.endTime.split(':').map(Number);
+              return timeMinutes >= sh * 60 + sm && timeMinutes < eh * 60 + em;
+            });
+            txBranchId = matchingSched?.branchId || txDoctor.branches[0]?.branchId || undefined;
+          }
+
+          // Revalidate authoritative services and doctor-specific duration within transaction lock
           const txAuthoritative = await this.schedulingService.calculateAuthoritativeServiceDuration(
             dto.doctorId,
             serviceIds,
             tx,
           );
 
-          // Revalidate working hours inside protected transaction lock
+          // Calculate consistent duration, buffer, and end time from transaction read
+          const txDurationMinutes = txAuthoritative.totalDurationMinutes;
+          const txTotalMinutes = txDurationMinutes + txBufferMinutes;
+          const txEndTimeUtc = new Date(startTimeUtc.getTime() + txTotalMinutes * 60 * 1000);
+
+          // Revalidate working hours inside protected transaction lock using the exact txEndTimeUtc
           const isWorkingInLock = await this.schedulingService.isDoctorWorkingAt(
             dto.doctorId,
             startTimeUtc,
-            endTimeUtc,
-            timezone,
-            resolvedBranchId,
+            txEndTimeUtc,
+            txTimezone,
+            txBranchId,
             tx,
           );
           if (!isWorkingInLock) {
             throw new BadRequestException('Tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
-          // Double check overlap within lock
+          // Double check overlap within lock using the exact txEndTimeUtc
           const conflicting = await tx.appointment.findFirst({
             where: {
               doctorId: dto.doctorId,
               status: { in: TIME_RESERVING_STATUSES },
-              startTime: { lt: endTimeUtc },
+              startTime: { lt: txEndTimeUtc },
               endTime: { gt: startTimeUtc },
             },
           });
@@ -417,8 +477,8 @@ export class AppointmentsService {
           }
 
           const publicToken = nanoid(32);
-          const expiresAt = new Date(nowUtc.getTime() + pendingExpiryMinutes * 60 * 1000);
-          const tokenExpiresAt = new Date(endTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const expiresAt = new Date(nowUtc.getTime() + txPendingExpiryMinutes * 60 * 1000);
+          const tokenExpiresAt = new Date(txEndTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
           const appointment = await tx.appointment.create({
             data: {
@@ -426,14 +486,14 @@ export class AppointmentsService {
               patientId: patient.id,
               doctorId: dto.doctorId,
               serviceId: txAuthoritative.services[0].id,
-              branchId: resolvedBranchId || null,
+              branchId: txBranchId || null,
               status: AppointmentStatus.PENDING,
               startTime: startTimeUtc,
-              endTime: endTimeUtc,
+              endTime: txEndTimeUtc,
               serviceName: txAuthoritative.combinedNameUz,
               servicePriceFrom: txAuthoritative.totalPriceFrom,
-              durationMinutes: txAuthoritative.totalDurationMinutes,
-              bufferMinutes,
+              durationMinutes: txDurationMinutes,
+              bufferMinutes: txBufferMinutes,
               note: dto.note?.trim() || null,
               source: dto.source || 'website',
               idempotencyKey: dto.idempotencyKey || null,
@@ -899,7 +959,8 @@ export class AppointmentsService {
   }
 
   /**
-   * Admin-only duration override with bounds (5..480 min), schedule/conflict validation, and audit logging.
+   * Admin-only duration override with bounds (5..480 min), safe concurrency locks,
+   * working hour validation within tx, transactional reminder revision update, and audit logging.
    */
   async overrideDuration(
     appointmentId: string,
@@ -916,85 +977,162 @@ export class AppointmentsService {
       throw new BadRequestException('Davomiylik 5 dan 480 minutgacha bo\'lishi kerak');
     }
 
-    const appointment = await this.prisma.appointment.findUnique({
+    const pre = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      include: { doctor: true, service: true, branch: true, patient: true, serviceItems: true },
+      select: { id: true, doctorId: true, status: true },
     });
-    if (!appointment) {
+    if (!pre) {
       throw new NotFoundException('Qabul topilmadi');
     }
-
-    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(appointment.status)) {
+    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(pre.status)) {
       throw new BadRequestException('Tugallangan yoki bekor qilingan qabul davomiyligini o\'zgartirib bo\'lmaydi');
     }
 
-    const settings = await this.prisma.clinicSettings.findFirst();
-    const timezone = settings?.timezone || 'Asia/Tashkent';
-    const bufferMinutes = appointment.bufferMinutes ?? settings?.bufferMinutes ?? 5;
-    const totalMinutes = durationMinutes + bufferMinutes;
-    const newEndTime = new Date(appointment.startTime.getTime() + totalMinutes * 60 * 1000);
+    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+    const maxRetries = 3;
+    let updated: any;
 
-    const isWorking = await this.schedulingService.isDoctorWorkingAt(
-      appointment.doctorId,
-      appointment.startTime,
-      newEndTime,
-      timezone,
-      appointment.branchId || undefined,
-    );
-    if (!isWorking) {
-      throw new BadRequestException('Yangi davomiylik shifokor ish grafigidan tashqariga chiqadi');
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        updated = await this.prisma.$transaction(
+          async (tx) => {
+            // 1. Acquire shared doctor advisory lock
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+            // 2. Acquire row lock on appointment in consistent order
+            const [locked] = await tx.$queryRaw<Array<{ id: string; status: string; revision: number }>>`
+              SELECT id, status, revision FROM appointments WHERE id = ${appointmentId} FOR UPDATE
+            `;
+            if (!locked) {
+              throw new NotFoundException('Qabul topilmadi');
+            }
+
+            // 3. Re-read appointment with all relations inside transaction
+            const currentAppt = await tx.appointment.findUnique({
+              where: { id: appointmentId },
+              include: {
+                doctor: true,
+                service: true,
+                branch: true,
+                patient: true,
+                serviceItems: { orderBy: { sortOrder: 'asc' } },
+              },
+            });
+            if (!currentAppt) {
+              throw new NotFoundException('Qabul topilmadi');
+            }
+
+            // 4. Reject terminal states
+            if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(currentAppt.status)) {
+              throw new BadRequestException('Tugallangan yoki bekor qilingan qabul davomiyligini o\'zgartirib bo\'lmaydi');
+            }
+
+            // 5. Calculate new end time from current start time and stored buffer
+            const settings = await tx.clinicSettings.findFirst();
+            const timezone = settings?.timezone || 'Asia/Tashkent';
+            const bufferMinutes = currentAppt.bufferMinutes ?? settings?.bufferMinutes ?? 5;
+            const totalMinutes = durationMinutes + bufferMinutes;
+            const newEndTime = new Date(currentAppt.startTime.getTime() + totalMinutes * 60 * 1000);
+
+            // 6. Validate working hours through transaction client tx
+            const isWorking = await this.schedulingService.isDoctorWorkingAt(
+              currentAppt.doctorId,
+              currentAppt.startTime,
+              newEndTime,
+              timezone,
+              currentAppt.branchId || undefined,
+              tx,
+            );
+            if (!isWorking) {
+              throw new BadRequestException('Yangi davomiylik shifokor ish grafigidan tashqariga chiqadi');
+            }
+
+            // 7. Validate overlap through transaction client tx
+            const conflicting = await tx.appointment.findFirst({
+              where: {
+                doctorId: currentAppt.doctorId,
+                status: { in: TIME_RESERVING_STATUSES },
+                id: { not: appointmentId },
+                startTime: { lt: newEndTime },
+                endTime: { gt: currentAppt.startTime },
+              },
+            });
+            if (conflicting) {
+              throw new ConflictException('Davomiylikni uzaytirish boshqa qabul bilan to\'qnashuv keltiradi');
+            }
+
+            const newRevision = currentAppt.revision + 1;
+            const saved = await tx.appointment.update({
+              where: { id: appointmentId },
+              data: {
+                durationMinutes,
+                endTime: newEndTime,
+                revision: newRevision,
+              },
+              include: {
+                doctor: true,
+                service: true,
+                branch: true,
+                patient: true,
+                serviceItems: { orderBy: { sortOrder: 'asc' } },
+              },
+            });
+
+            // 8. Transactionally update pending reminder jobs so the notification worker does NOT cancel them on revision mismatch
+            await tx.notificationJob.updateMany({
+              where: {
+                appointmentId: currentAppt.id,
+                templateKey: 'appointment_reminder',
+                status: NotificationStatus.PENDING,
+              },
+              data: {
+                appointmentRevision: newRevision,
+              },
+            });
+
+            // 9. Record previous values, adjustments, and reason in audit log
+            const serviceItemsTotal = currentAppt.serviceItems.reduce((acc, i) => acc + i.durationMinutes, 0);
+            await tx.auditLog.create({
+              data: {
+                userId,
+                action: 'appointment.duration_override',
+                entity: 'Appointment',
+                entityId: appointmentId,
+                details: {
+                  previousDurationMinutes: currentAppt.durationMinutes,
+                  newDurationMinutes: durationMinutes,
+                  previousEndTime: currentAppt.endTime.toISOString(),
+                  newEndTime: newEndTime.toISOString(),
+                  serviceItemsTotalDuration: serviceItemsTotal,
+                  adjustmentMinutes: durationMinutes - serviceItemsTotal,
+                  reason: reason || 'Admin duration override',
+                } as Prisma.InputJsonValue,
+              },
+            });
+
+            return serializeAppointmentResponse(saved);
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+            timeout: 10000,
+          },
+        );
+
+        break;
+      } catch (err: any) {
+        const isConflict =
+          err?.code === 'P2034' ||
+          err?.message?.includes('could not serialize access') ||
+          err?.message?.includes('deadlock detected');
+        if (isConflict && attempt < maxRetries) {
+          await new Promise((res) => setTimeout(res, 50 * attempt + Math.floor(Math.random() * 30)));
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const lockKey = this.hashStringToInt(`doc_${appointment.doctorId}`);
-
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
-
-      const conflicting = await tx.appointment.findFirst({
-        where: {
-          doctorId: appointment.doctorId,
-          status: { in: TIME_RESERVING_STATUSES },
-          id: { not: appointmentId },
-          startTime: { lt: newEndTime },
-          endTime: { gt: appointment.startTime },
-        },
-      });
-      if (conflicting) {
-        throw new ConflictException('Davomiylikni uzaytirish boshqa qabul bilan to\'qnashuv keltiradi');
-      }
-
-      const updated = await tx.appointment.update({
-        where: { id: appointmentId },
-        data: {
-          durationMinutes,
-          endTime: newEndTime,
-          revision: { increment: 1 },
-        },
-        include: {
-          doctor: true,
-          service: true,
-          branch: true,
-          patient: true,
-          serviceItems: { orderBy: { sortOrder: 'asc' } },
-        },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          userId,
-          action: 'appointment.duration_overridden',
-          entity: 'Appointment',
-          entityId: appointmentId,
-          details: {
-            oldDuration: appointment.durationMinutes,
-            newDuration: durationMinutes,
-            reason: reason || 'Admin duration override',
-          } as Prisma.InputJsonValue,
-        },
-      });
-
-      return serializeAppointmentResponse(updated);
-    });
+    return updated;
   }
 
   /**
@@ -1047,6 +1185,25 @@ export class AppointmentsService {
   }
 
   /**
+   * Internal raw lookup by management token with token validation
+   */
+  async findRawByToken(token: string) {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { publicToken: token },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Qabul topilmadi');
+    }
+
+    if (appointment.tokenRevokedAt || (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date())) {
+      throw new BadRequestException('Boshqaruv tokenining muddati tugagan');
+    }
+
+    return appointment;
+  }
+
+  /**
    * Public read by management token (MINIMAL sanitized fields, zero patient PII)
    */
   async findByToken(token: string) {
@@ -1079,6 +1236,8 @@ export class AppointmentsService {
       startTime: appointment.startTime,
       endTime: appointment.endTime,
       durationMinutes: appointment.durationMinutes,
+      serviceItemsDurationMinutes: (appointment.serviceItems || []).reduce((acc: number, i: any) => acc + (i.durationMinutes || 0), 0),
+      durationAdjustmentMinutes: appointment.durationMinutes - (appointment.serviceItems || []).reduce((acc: number, i: any) => acc + (i.durationMinutes || 0), 0),
       bufferMinutes: appointment.bufferMinutes,
       serviceName: appointment.serviceName,
       servicePriceFrom: appointment.servicePriceFrom,

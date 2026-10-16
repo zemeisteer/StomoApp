@@ -1,9 +1,10 @@
 import {
   Controller, Get, Post, Put, Patch, Body, Param, Query,
-  UseGuards, HttpCode, HttpStatus, ForbiddenException,
+  UseGuards, HttpCode, HttpStatus, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AppointmentsService } from './appointments.service';
+import { SchedulingService } from '../scheduling/scheduling.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -128,7 +129,10 @@ export class ListQueryDto {
 
 @Controller('booking')
 export class PublicBookingController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(
+    private readonly service: AppointmentsService,
+    private readonly schedulingService: SchedulingService,
+  ) {}
 
   @Post()
   @Public()
@@ -204,6 +208,34 @@ export class PublicBookingController {
       branch: updated.branch,
     };
   }
+
+  @Get('reschedule/:token/slots')
+  @Public()
+  async getRescheduleSlots(
+    @Param('token') token: string,
+    @Query('date') date: string,
+    @Query('timezone') timezone?: string,
+  ) {
+    if (!date) {
+      throw new BadRequestException('Sana ko\'rsatilishi shart');
+    }
+    const appointment = await this.service.findRawByToken(token);
+    return this.schedulingService.getRescheduleSlotsForAppointment(
+      appointment.id,
+      date,
+      timezone || 'Asia/Tashkent',
+    );
+  }
+
+  @Get('status/:token/slots')
+  @Public()
+  async getStatusRescheduleSlots(
+    @Param('token') token: string,
+    @Query('date') date: string,
+    @Query('timezone') timezone?: string,
+  ) {
+    return this.getRescheduleSlots(token, date, timezone);
+  }
 }
 
 // ============================================================
@@ -213,7 +245,10 @@ export class PublicBookingController {
 @Controller('admin/appointments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(
+    private readonly service: AppointmentsService,
+    private readonly schedulingService: SchedulingService,
+  ) {}
 
   @Get()
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
@@ -284,5 +319,24 @@ export class AppointmentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.reschedule(id, dto.startTime, user.sub, user);
+  }
+
+  @Get(':id/reschedule-slots')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  async getAdminRescheduleSlots(
+    @Param('id') id: string,
+    @Query('date') date: string,
+    @Query('timezone') timezone: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!date) {
+      throw new BadRequestException('Sana ko\'rsatilishi shart');
+    }
+    const appointment = await this.service.findById(id, user);
+    return this.schedulingService.getRescheduleSlotsForAppointment(
+      appointment.id,
+      date,
+      timezone || 'Asia/Tashkent',
+    );
   }
 }

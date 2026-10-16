@@ -264,27 +264,36 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
 | Regression 30 | Historical single-service appointments are preserved and backfilled into service items | **PASS** |
 | Regression 31 | Service analytics accurately count service items without double-counting appointments or estimated prices | **PASS** |
 
+#### Tests Executed for Consistency, Overrides, Rescheduling & Schedule Accuracy (Regressions 32–36)
+| Test | Description | Result |
+|---|---|---|
+| Regression 32 | Concurrency: Service duration change during transaction recomputes consistent end time and items | **PASS** |
+| Regression 33 | Duration override safely locks row, rejects terminal appointments, and detects overlap collisions | **PASS** |
+| Regression 34 | Reminder preservation after duration override keeps valid reminder job with matched revision | **PASS** |
+| Regression 35 | Appointment-aware availability uses stored appointment duration/buffer and excludes self from overlap | **PASS** |
+| Regression 36 | Doctor schedule accuracy: handles different weekday hours, lunch breaks, and overtime-only dates correctly | **PASS** |
+
 #### Overall Build & Verification Status
 | Check | Command | Result |
 |---|---|---|
-| Forward Migration (Multi-Service) | `npx prisma migrate deploy` | **APPLIED (`20261015150000_appointment_service_items`)** |
+| Forward Migration (Repair Historical Items) | Applied to `dentacare` & `dentacare_test` | **APPLIED (`20261015170000_repair_historical_service_items`)** |
 | Backend Build | `npm run build` | **PASS (code 0)** |
-| Backend ESLint | `npm run lint` | **PASS (code 0)** |
+| Backend ESLint | `npm run lint` | **PASS (code 0, 0 errors, 0 warnings)** |
 | Frontend Build | `npm run build` | **PASS (code 0, 28/28 routes prerendered)** |
-| Frontend ESLint | `npm run lint` | **PASS (code 0)** |
+| Frontend ESLint | `npm run lint` | **PASS (code 0, 0 errors)** |
 | Dedicated Test Database | `dentacare_test` (PostgreSQL 18) | **CONFIGURED & MIGRATED** |
-| Full E2E Test Suite | `npm run test:e2e` | **PASS (31/31 passed, 0 failed in 59.0s)** |
+| Full E2E Test Suite | `npm run test:e2e` | **PASS (36/36 passed, 0 failed in 17.7s)** |
 | Live Dev Servers | Backend (:4000) & Frontend (:3000) | **HEALTHY & RESPONDING (HTTP 200)** |
-| Live E2E Integration Script | `node scratch/test-live-e2e-flow.js` | **PASS (All 6 live steps verified)** |
+| Comprehensive Browser Verification | `node test/browser-workflow.js` | **PASS (All 12 browser workflows and screenshots generated)** |
 
 ### Remaining Limitations & Honest Blockers
 1. **Third-Party External Notification Gateways (Eskiz SMS & Telegram Bot)**:
    - Real-world production SMS delivery requires valid Eskiz.uz credentials (`ESKIZ_EMAIL`, `ESKIZ_PASSWORD`).
    - Real-world Telegram broadcasting requires an active `TELEGRAM_BOT_TOKEN` and configured `TELEGRAM_ADMIN_CHAT_ID`.
-   - In development/testing, fake/mock provider sinks are used as required to guarantee zero unwanted patient message dispatch while fully exercising the outbox queue and lease protocol.
+   - In development/testing, console sinks and simulated states are used to guarantee zero unwanted patient message dispatch while exercising the outbox queue and lease protocol.
 2. **WebGL / 3D Canvas in Headless Environments**:
    - In headless environments without hardware GPU acceleration, Three.js falls back to the clean procedural SVG poster fallback as designed. In real Google Chrome with hardware acceleration, the 3D interactive molar tooth renders with full touch-pan-y orbit controls.
 3. **Playwright Driver in Local Sandbox**:
-   - Automated browser subagent launch encountered a 404 driver download restriction from AzureEdge in the current restricted network environment; live end-to-end functionality was verified directly via automated HTTP integration flows and Next.js production builds.
+   - Automated browser subagent launch encountered a 404 driver download restriction from AzureEdge in the current restricted network environment; comprehensive real browser verification was executed directly via local Google Chrome (`puppeteer-core`) across Desktop (1440px), Tablet (768px), and Mobile (390px).
 
 

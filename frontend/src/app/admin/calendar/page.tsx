@@ -64,6 +64,8 @@ export default function AdminCalendarPage() {
   const [rescheduleDate, setRescheduleDate] = useState<string>('');
   const [rescheduleTime, setRescheduleTime] = useState<string>('10:00');
   const [isRescheduling, setIsRescheduling] = useState(false);
+  const [adminSlots, setAdminSlots] = useState<any[]>([]);
+  const [isLoadingAdminSlots, setIsLoadingAdminSlots] = useState(false);
 
   // Create Appointment Modal
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -169,6 +171,26 @@ export default function AdminCalendarPage() {
   useEffect(() => {
     loadAppointments();
   }, [selectedDoctorId, selectedBranchId, selectedServiceId, selectedStatus, viewMode, currentDate]);
+
+  useEffect(() => {
+    async function loadAdminSlots() {
+      if (!isRescheduling || !selectedAppt || !rescheduleDate) {
+        setAdminSlots([]);
+        return;
+      }
+      try {
+        setIsLoadingAdminSlots(true);
+        const res = await api.getAdminRescheduleSlots(selectedAppt.id, rescheduleDate);
+        setAdminSlots(res?.slots || []);
+      } catch (e) {
+        console.error('Failed to load reschedule slots', e);
+        setAdminSlots([]);
+      } finally {
+        setIsLoadingAdminSlots(false);
+      }
+    }
+    loadAdminSlots();
+  }, [isRescheduling, selectedAppt, rescheduleDate]);
 
   const handlePrevDate = () => {
     const d = new Date(currentDate);
@@ -564,8 +586,16 @@ export default function AdminCalendarPage() {
                 <div className="flex justify-between items-center text-slate-500 font-medium">
                   <span>Xizmatlar ({selectedAppt.serviceItems?.length || 1}):</span>
                   {selectedAppt.durationMinutes && (
-                    <span className="text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
+                    <span className="text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md flex items-center gap-1.5">
                       {selectedAppt.durationMinutes} daq
+                      {selectedAppt.durationAdjustmentMinutes !== undefined && selectedAppt.durationAdjustmentMinutes !== 0 && (
+                        <span
+                          className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold"
+                          title="Administrator tomonidan kiritilgan davomiylik tuzatmasi"
+                        >
+                          {selectedAppt.durationAdjustmentMinutes > 0 ? `+${selectedAppt.durationAdjustmentMinutes}` : selectedAppt.durationAdjustmentMinutes} daq tuzatish
+                        </span>
+                      )}
                     </span>
                   )}
                 </div>
@@ -702,7 +732,14 @@ export default function AdminCalendarPage() {
                 {!isRescheduling ? (
                   <button
                     type="button"
-                    onClick={() => setIsRescheduling(true)}
+                    onClick={() => {
+                      setIsRescheduling(true);
+                      const target = selectedAppt.startTime
+                        ? new Date(selectedAppt.startTime)
+                        : new Date(Date.now() + 24 * 60 * 60 * 1000);
+                      const dStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(target);
+                      setRescheduleDate(dStr);
+                    }}
                     className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all"
                   >
                     Boshqa vaqtga ko&apos;chirish (Reschedule)
@@ -716,12 +753,13 @@ export default function AdminCalendarPage() {
                         <input
                           type="date"
                           value={rescheduleDate}
+                          min={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date())}
                           onChange={(e) => setRescheduleDate(e.target.value)}
                           className="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-500 block mb-1">Vaqt</label>
+                        <label className="text-[11px] text-slate-500 block mb-1">Tanlangan vaqt</label>
                         <input
                           type="time"
                           value={rescheduleTime}
@@ -729,6 +767,46 @@ export default function AdminCalendarPage() {
                           className="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"
                         />
                       </div>
+                    </div>
+
+                    {/* Appointment-aware slots */}
+                    <div>
+                      <span className="text-[11px] text-slate-500 block mb-1.5">
+                        Mavjud bo&apos;sh vaqtlar ({selectedAppt.durationMinutes} daq qabul):
+                      </span>
+                      {isLoadingAdminSlots ? (
+                        <div className="p-3 text-center text-xs text-slate-400">Bo&apos;sh vaqtlar tekshirilmoqda...</div>
+                      ) : adminSlots.length > 0 ? (
+                        <div className="grid grid-cols-4 gap-1.5 max-h-32 overflow-y-auto">
+                          {adminSlots.map((slot: any) => {
+                            const timeStr = new Date(slot.startTime).toLocaleTimeString('uz-UZ', {
+                              timeZone: 'Asia/Tashkent',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            });
+                            const isSelected = rescheduleTime === timeStr;
+                            return (
+                              <button
+                                type="button"
+                                key={slot.startTime}
+                                disabled={!slot.available}
+                                onClick={() => setRescheduleTime(timeStr)}
+                                className={`py-1 px-1 text-xs font-semibold rounded-lg ${
+                                  !slot.available
+                                    ? 'bg-slate-200 text-slate-400 line-through'
+                                    : isSelected
+                                    ? 'bg-teal-700 text-white'
+                                    : 'bg-white border border-teal-200 text-teal-800 hover:bg-teal-50'
+                                }`}
+                              >
+                                {timeStr}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">Ushbu sanada bo&apos;sh vaqtlar topilmadi</p>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 pt-1">

@@ -453,6 +453,7 @@ model AppointmentServiceItem {
   serviceNameRu   String?     @map("service_name_ru")
   durationMinutes Int         @map("duration_minutes")
   priceFrom       Int?        @map("price_from") // In minor units (tiyin)
+  isLegacyBundle  Boolean     @default(false) @map("is_legacy_bundle")
   
   createdAt       DateTime    @default(now()) @map("created_at")
 

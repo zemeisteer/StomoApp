@@ -223,13 +223,20 @@ export class AnalyticsService {
     const noShowRate = totalAppointments > 0 ? (noShow / totalAppointments) * 100 : 0;
 
     // 2. Popular services: Group by distinct service item name snapshots to count individual services performed
+    // Strictly exclude unresolved legacy bundles from falsely inflating individual catalog service stats
     const totalServiceItems = await this.prisma.appointmentServiceItem.count({
-      where: { appointment: appointmentWhere },
+      where: {
+        appointment: appointmentWhere,
+        isLegacyBundle: false,
+      },
     });
 
     const popularServicesRaw = await this.prisma.appointmentServiceItem.groupBy({
       by: ['serviceNameUz'],
-      where: { appointment: appointmentWhere },
+      where: {
+        appointment: appointmentWhere,
+        isLegacyBundle: false,
+      },
       _count: true,
       orderBy: {
         _count: {
@@ -244,6 +251,13 @@ export class AnalyticsService {
       count: s._count,
       percentage: totalServiceItems > 0 ? Math.round((s._count / totalServiceItems) * 100) : 0,
     }));
+
+    const legacyBundlesCount = await this.prisma.appointmentServiceItem.count({
+      where: {
+        appointment: appointmentWhere,
+        isLegacyBundle: true,
+      },
+    });
 
     // 3. Exact Interval-Based Doctor Utilization Calculation
     // Query active doctors matching filter (include zero-appointment doctors!)
@@ -558,6 +572,7 @@ export class AnalyticsService {
       },
       statusBreakdown: statusMap,
       popularServices,
+      legacyBundlesCount,
       doctorUtilization,
       leads: {
         totalLeads,

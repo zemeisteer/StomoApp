@@ -176,14 +176,27 @@ export class SchedulingService {
       dayIntervals.push(...currentList);
     }
 
-    // Query exceptions on this calendar date
+    // Query exceptions on this calendar date (handling UTC midnight, local midnight, and zoned day bounds)
+    const y = dateOnlyZoned.getFullYear();
+    const m = String(dateOnlyZoned.getMonth() + 1).padStart(2, '0');
+    const d = String(dateOnlyZoned.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+
+    const startOfZonedDay = fromZonedTime(`${dateStr} 00:00:00`, timezone);
+    const endOfZonedDay = fromZonedTime(`${dateStr} 23:59:59.999`, timezone);
+    const utcMidnight = new Date(`${dateStr}T00:00:00.000Z`);
+
     const dateQuery = new Date(dateOnlyZoned);
     dateQuery.setHours(0, 0, 0, 0);
 
     const exceptions = await client.scheduleException.findMany({
       where: {
         doctorId,
-        date: dateQuery,
+        OR: [
+          { date: { gte: startOfZonedDay, lte: endOfZonedDay } },
+          { date: utcMidnight },
+          { date: dateQuery },
+        ],
       },
     });
 
@@ -712,4 +725,156 @@ export class SchedulingService {
       return tx.scheduleException.delete({ where: { id } });
     });
   }
+
+  /**
+   * Appointment-aware availability for rescheduling:
+   * Uses stored duration and buffer snapshots from the appointment itself.
+   * Excludes the appointment itself from overlap checks so the patient can shift or re-pick their slot.
+   * Revalidates current doctor, service, and branch eligibility.
+   */
+  async getRescheduleSlotsForAppointment(
+    appointmentId: string,
+    dateStr: string,
+    timezone: string = 'Asia/Tashkent',
+  ): Promise<{
+    slots: TimeSlot[];
+    durationMinutes: number;
+    bufferMinutes: number;
+    totalDurationWithBufferMinutes: number;
+    priceFrom: number | null;
+    serviceName: string;
+    serviceItems: any[];
+  }> {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      include: {
+        doctor: { include: { branches: true } },
+        service: true,
+        branch: true,
+        serviceItems: { orderBy: { sortOrder: 'asc' } },
+      },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Qabul topilmadi');
+    }
+
+    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(appointment.status)) {
+      throw new BadRequestException('Tugallangan yoki bekor qilingan qabulni qayta rejalashtirib bo\'lmaydi');
+    }
+
+    // Validate doctor eligibility
+    if (!appointment.doctor || !appointment.doctor.isActive || appointment.doctor.isArchived) {
+      throw new BadRequestException('Shifokor profili faol emas');
+    }
+
+    // Validate branch eligibility if branch assigned
+    if (appointment.branchId) {
+      if (!appointment.branch || !appointment.branch.isActive) {
+        throw new BadRequestException('Filial faol emas');
+      }
+      const isAssigned = appointment.doctor.branches.some((b) => b.branchId === appointment.branchId);
+      if (!isAssigned) {
+        throw new BadRequestException('Shifokor bu filialga biriktirilmagan');
+      }
+    }
+
+    // Validate all services in serviceItems (or primary serviceId) are still active and not archived
+    const serviceIdsToCheck = appointment.serviceItems.length > 0
+      ? (appointment.serviceItems.map((si) => si.serviceId).filter(Boolean) as string[])
+      : [appointment.serviceId];
+
+    if (serviceIdsToCheck.length > 0) {
+      const activeServices = await this.prisma.service.findMany({
+        where: { id: { in: serviceIdsToCheck } },
+      });
+      if (activeServices.length !== serviceIdsToCheck.length || activeServices.some((s) => !s.isActive || s.isArchived)) {
+        throw new BadRequestException('Tanlangan xizmatlardan biri faol emas yoki arxivlangan');
+      }
+    }
+
+    // Parse date in clinic timezone
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if (!year || !month || !day) {
+      throw new BadRequestException('Noto\'g\'ri sana formati');
+    }
+    const localDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+
+    const clinicSettings = await this.prisma.clinicSettings.findFirst();
+    const effectiveTimezone = clinicSettings?.timezone || timezone;
+
+    // USE STORED HISTORICAL SNAPSHOTS FROM APPOINTMENT ITSELF!
+    const durationMinutes = appointment.durationMinutes;
+    const bufferMinutes = appointment.bufferMinutes ?? clinicSettings?.bufferMinutes ?? 5;
+    const totalMinutes = durationMinutes + bufferMinutes;
+
+    const minNoticeHours = clinicSettings?.minBookingNoticeHours ?? 2;
+    const maxHorizonDays = clinicSettings?.maxBookingHorizonDays ?? 60;
+    const nowUtc = new Date();
+    const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
+    const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
+
+    const workingIntervals = await this.getDoctorWorkingIntervals(
+      appointment.doctorId,
+      localDay,
+      effectiveTimezone,
+      appointment.branchId || undefined,
+    );
+
+    if (workingIntervals.length === 0) {
+      return {
+        slots: [],
+        durationMinutes,
+        bufferMinutes,
+        totalDurationWithBufferMinutes: totalMinutes,
+        priceFrom: appointment.servicePriceFrom,
+        serviceName: appointment.serviceName,
+        serviceItems: appointment.serviceItems,
+      };
+    }
+
+    const slots: TimeSlot[] = [];
+    const step = 30; // 30-minute standard slot alignment
+
+    for (const interval of workingIntervals) {
+      for (let minutes = interval.start; minutes + totalMinutes <= interval.end; minutes += step) {
+        const slotStartHour = Math.floor(minutes / 60);
+        const slotStartMinute = minutes % 60;
+        const slotStartStr = `${dateStr} ${String(slotStartHour).padStart(2, '0')}:${String(slotStartMinute).padStart(2, '0')}:00`;
+        const slotStartUtc = fromZonedTime(slotStartStr, effectiveTimezone);
+        const slotEndUtc = new Date(slotStartUtc.getTime() + totalMinutes * 60 * 1000);
+
+        if (slotStartUtc < minNoticeTime || slotStartUtc > maxHorizonTime) {
+          continue;
+        }
+
+        // Exclude the current appointment from overlap check!
+        const available = await this.isTimeSlotAvailable(
+          appointment.doctorId,
+          slotStartUtc,
+          slotEndUtc,
+          effectiveTimezone,
+          appointment.id, // Exclude appointment!
+          appointment.branchId || undefined,
+        );
+
+        slots.push({
+          startTime: slotStartUtc.toISOString(),
+          endTime: slotEndUtc.toISOString(),
+          available,
+        });
+      }
+    }
+
+    return {
+      slots,
+      durationMinutes,
+      bufferMinutes,
+      totalDurationWithBufferMinutes: totalMinutes,
+      priceFrom: appointment.servicePriceFrom,
+      serviceName: appointment.serviceName,
+      serviceItems: appointment.serviceItems,
+    };
+  }
 }
+

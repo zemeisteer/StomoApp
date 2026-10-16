@@ -129,27 +129,79 @@ function getDoctorScheduleInfo(
     };
   }
 
-  const days = Array.from(
-    new Set(
-      filtered.map(
-        (s: any) =>
-          DAY_NAME_MAP_LOCALIZED[s.dayOfWeek]?.[lang] || s.dayOfWeek,
-      ),
-    ),
-  ) as string[];
-
-  const first = filtered[0];
-  let hours = `${first.startTime} - ${first.endTime}`;
-  if (first.breakStart && first.breakEnd) {
-    hours += ` (${lang === 'ru' ? 'обед' : 'tushlik'}: ${first.breakStart}-${first.breakEnd})`;
+  const dayOrder = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+  const daySchedulesMap = new Map<string, any[]>();
+  for (const s of filtered) {
+    const list = daySchedulesMap.get(s.dayOfWeek) || [];
+    list.push(s);
+    daySchedulesMap.set(s.dayOfWeek, list);
   }
 
-  const summary = `${days.join(', ')} (${hours})`;
+  const formattedDays: Array<{ dayKey: string; dayName: string; intervals: string[]; text: string }> = [];
+  for (const dayKey of dayOrder) {
+    const scheds = daySchedulesMap.get(dayKey);
+    if (!scheds || scheds.length === 0) continue;
+    const dayName = DAY_NAME_MAP_LOCALIZED[dayKey]?.[lang] || dayKey;
+    const intervals = scheds.map((s: any) => {
+      let intText = `${s.startTime} - ${s.endTime}`;
+      if (s.breakStart && s.breakEnd) {
+        intText += ` (${lang === 'ru' ? 'обед' : 'tushlik'}: ${s.breakStart}-${s.breakEnd})`;
+      }
+      return intText;
+    });
+    formattedDays.push({
+      dayKey,
+      dayName,
+      intervals,
+      text: `${dayName}: ${intervals.join(', ')}`,
+    });
+  }
+
+  const allIntervalsSame = formattedDays.length > 1 && formattedDays.every((d) => d.intervals.join('; ') === formattedDays[0].intervals.join('; '));
+
+  let summary = '';
+  let hours = '';
+  const days = formattedDays.map((d) => d.dayName);
+
+  if (allIntervalsSame) {
+    const firstDay = formattedDays[0].dayName;
+    const lastDay = formattedDays[formattedDays.length - 1].dayName;
+    hours = formattedDays[0].intervals.join(', ');
+    const rangeStr = (formattedDays.length === 5 && formattedDays[0].dayKey === 'MONDAY' && formattedDays[4].dayKey === 'FRIDAY')
+      ? `${firstDay} - ${lastDay}`
+      : days.join(', ');
+    summary = `${rangeStr}: ${hours}`;
+  } else {
+    summary = formattedDays.map((d) => d.text).join('; ');
+    hours = formattedDays.map((d) => `${d.dayName}: ${d.intervals.join(', ')}`).join(' | ');
+  }
+
   return { days, hours, summary, hasSchedule: true };
 }
 
 function isDoctorWorkingOnDate(dateStr: string, doctor: any, branchId?: string): boolean {
-  if (!doctor?.schedules || doctor.schedules.length === 0) return false;
+  if (!doctor) return false;
+
+  // 1. Check doctor exceptions for this specific calendar date
+  const exceptions = doctor.exceptions || [];
+  const dayExceptions = exceptions.filter((ex: any) => {
+    const exDate = typeof ex.date === 'string' ? ex.date.split('T')[0] : new Date(ex.date).toISOString().split('T')[0];
+    return exDate === dateStr;
+  });
+
+  // Check whole-day off: HOLIDAY or full-day LEAVE/BLOCKED
+  const isWholeDayOff = dayExceptions.some((ex: any) =>
+    ex.type === 'HOLIDAY' ||
+    ((ex.type === 'LEAVE' || ex.type === 'BLOCKED') && (!ex.startTime || !ex.endTime))
+  );
+  if (isWholeDayOff) return false;
+
+  // Check OVERTIME: if doctor has overtime scheduled on this date, doctor is working!
+  const hasOvertime = dayExceptions.some((ex: any) => ex.type === 'OVERTIME');
+  if (hasOvertime) return true;
+
+  // 2. Check weekly recurring schedule
+  if (!doctor.schedules || doctor.schedules.length === 0) return false;
   const dateObj = parseCalendarDate(dateStr);
   const dayOfWeekNum = dateObj.getUTCDay();
 
@@ -307,8 +359,12 @@ function BookingContent() {
   // Check if current date is working day for doctor
   const isSelectedDateWorkingDay = useMemo(() => {
     if (!selectedDate || !selectedDoctorObj) return true;
+    // Backend slot availability is definitive: if slots exist and are available, doctor is bookable!
+    if (availableSlots && availableSlots.some((s: any) => s.available)) {
+      return true;
+    }
     return isDoctorWorkingOnDate(selectedDate, selectedDoctorObj, selectedBranchId);
-  }, [selectedDate, selectedDoctorObj, selectedBranchId]);
+  }, [selectedDate, selectedDoctorObj, selectedBranchId, availableSlots]);
 
   // Nearest working date
   const nextWorkingDate = useMemo(() => {

@@ -174,6 +174,19 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getBookingByToken: (token: string) => fetcher<any>(`/api/booking/status/${token}`),
+  getRescheduleSlots: (token: string, date: string, timezone?: string) => {
+    const q = new URLSearchParams({ date });
+    if (timezone) q.set('timezone', timezone);
+    return fetcher<{
+      slots: Array<{ startTime: string; endTime: string; available: boolean; reason?: string }>;
+      durationMinutes: number;
+      bufferMinutes: number;
+      totalDurationWithBufferMinutes: number;
+      priceFrom?: number;
+      serviceName?: string;
+      serviceItems?: any[];
+    }>(`/api/booking/reschedule/${token}/slots?${q.toString()}`);
+  },
   rescheduleBooking: (token: string, startTime: string) =>
     fetcher<any>(`/api/booking/reschedule/${token}`, {
       method: 'POST',
@@ -258,6 +271,19 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ startTime }),
     }),
+  getAdminRescheduleSlots: (id: string, date: string, timezone?: string) => {
+    const q = new URLSearchParams({ date });
+    if (timezone) q.set('timezone', timezone);
+    return fetcher<{
+      slots: Array<{ startTime: string; endTime: string; available: boolean; reason?: string }>;
+      durationMinutes: number;
+      bufferMinutes: number;
+      totalDurationWithBufferMinutes: number;
+      priceFrom?: number;
+      serviceName?: string;
+      serviceItems?: any[];
+    }>(`/api/admin/appointments/${id}/reschedule-slots?${q.toString()}`);
+  },
 
   // Admin Patient Management
   getAdminPatients: (search?: string, page = 1, limit = 20) => {

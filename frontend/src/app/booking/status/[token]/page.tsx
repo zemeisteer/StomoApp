@@ -17,8 +17,18 @@ import {
 import { useI18n } from '../../../../lib/i18n';
 import { api } from '../../../../lib/api';
 
+function getTashkentDateString(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tashkent',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
 export default function BookingStatusPage() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
+  const currentLang = language;
   const params = useParams();
   const token = params.token as string;
 
@@ -49,9 +59,9 @@ export default function BookingStatusPage() {
       setAppointment(data);
 
       const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      setNewDate(tomorrow.toISOString().split('T')[0]);
+      setNewDate(getTashkentDateString(tomorrow));
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Qabul ma\'lumotlarini topib bo\'lmadi');
+      setErrorMessage(err?.message || (currentLang === 'ru' ? 'Не удалось найти запись' : 'Qabul ma\'lumotlarini topib bo\'lmadi'));
     } finally {
       setIsLoading(false);
     }
@@ -61,34 +71,23 @@ export default function BookingStatusPage() {
     loadAppointment();
   }, [token]);
 
-  // Load slots when rescheduling
+  // Load appointment-aware slots when rescheduling (preserves historical duration & buffer)
   useEffect(() => {
     async function loadSlots() {
-      if (!isRescheduling || !appointment || !newDate) return;
+      if (!isRescheduling || !appointment || !newDate || !token) return;
       try {
         setIsLoadingSlots(true);
-        const serviceIds = appointment.serviceItems && appointment.serviceItems.length > 0
-          ? appointment.serviceItems.map((s: any) => s.serviceId).filter(Boolean)
-          : (appointment.serviceId ? [appointment.serviceId] : undefined);
-
-        const res = await api.getAvailableSlots(
-          appointment.doctorId,
-          newDate,
-          appointment.serviceId,
-          appointment.branchId,
-          undefined,
-          serviceIds,
-        );
+        const res = await api.getRescheduleSlots(token, newDate, 'Asia/Tashkent');
         const slots = Array.isArray(res) ? res : res?.slots || [];
         setAvailableSlots(slots);
       } catch (err: any) {
-        setErrorMessage(err?.message || 'Bo\'sh vaqtlarni yuklashda xatolik yuz berdi');
+        setErrorMessage(err?.message || (currentLang === 'ru' ? 'Ошибка загрузки свободного времени' : 'Bo\'sh vaqtlarni yuklashda xatolik yuz berdi'));
       } finally {
         setIsLoadingSlots(false);
       }
     }
     loadSlots();
-  }, [isRescheduling, appointment, newDate]);
+  }, [isRescheduling, appointment, newDate, token, currentLang]);
 
   const handleRescheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,11 +97,11 @@ export default function BookingStatusPage() {
       setIsSubmittingReschedule(true);
       setErrorMessage(null);
       await api.rescheduleBooking(token, selectedSlotTime);
-      setSuccessMessage('Qabul vaqti muvaffaqiyatli o\'zgartirildi!');
+      setSuccessMessage(currentLang === 'ru' ? 'Время приема успешно изменено!' : 'Qabul vaqti muvaffaqiyatli o\'zgartirildi!');
       setIsRescheduling(false);
       await loadAppointment();
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Vaqtni o\'zgartirishda xatolik yuz berdi');
+      setErrorMessage(err?.message || (currentLang === 'ru' ? 'Ошибка при переносе приема' : 'Vaqtni o\'zgartirishda xatolik yuz berdi'));
     } finally {
       setIsSubmittingReschedule(false);
     }
@@ -161,16 +160,56 @@ export default function BookingStatusPage() {
     NO_SHOW: 'bg-slate-100 text-slate-800 border-slate-200',
   };
 
-  const statusLabelMap: Record<string, string> = {
-    PENDING: 'Kutilmoqda (So\'rov qabul qilindi)',
-    CONFIRMED: 'Tasdiqlangan',
-    CHECKED_IN: 'Klinikada qabulda',
-    COMPLETED: 'Muvaffaqiyatli yakunlangan',
-    CANCELLED: 'Bekor qilingan',
-    NO_SHOW: 'Kelmadi',
+  const statusLabelMap: Record<string, Record<'uz' | 'ru', string>> = {
+    PENDING: {
+      uz: 'Kutilmoqda (So\'rov qabul qilindi)',
+      ru: 'Ожидает подтверждения',
+    },
+    CONFIRMED: {
+      uz: 'Tasdiqlangan',
+      ru: 'Подтверждено',
+    },
+    CHECKED_IN: {
+      uz: 'Klinikada qabulda',
+      ru: 'В клинике на приеме',
+    },
+    COMPLETED: {
+      uz: 'Muvaffaqiyatli yakunlangan',
+      ru: 'Завершено',
+    },
+    CANCELLED: {
+      uz: 'Bekor qilingan',
+      ru: 'Отменено',
+    },
+    NO_SHOW: {
+      uz: 'Kelmadi',
+      ru: 'Не явился',
+    },
   };
 
   const isTerminal = appointment?.status === 'COMPLETED' || appointment?.status === 'CANCELLED';
+
+  const doctorDisplayName = appointment
+    ? (currentLang === 'ru'
+        ? (appointment.doctorFullNameRu || (appointment.doctor ? `Д-р ${appointment.doctor.firstNameRu} ${appointment.doctor.lastNameRu}` : 'Врач'))
+        : (appointment.doctorName || appointment.doctorFullNameUz || (appointment.doctor ? `Dr. ${appointment.doctor.firstNameUz} ${appointment.doctor.lastNameUz}` : 'Shifokor')))
+    : '';
+
+  const branchDisplayName = appointment
+    ? (currentLang === 'ru'
+        ? (appointment.branchNameRu || appointment.branch?.nameRu || 'Главный филиал')
+        : (appointment.branchName || appointment.branchNameUz || appointment.branch?.nameUz || 'Asosiy filial'))
+    : '';
+
+  const serviceTitle = appointment
+    ? (appointment.serviceItems && appointment.serviceItems.length > 0
+        ? appointment.serviceItems.map((i: any) => currentLang === 'ru' && i.serviceNameRu ? i.serviceNameRu : i.serviceNameUz).join(', ')
+        : (appointment.serviceName || (currentLang === 'ru' ? 'Стоматологическая услуга' : 'Stomatologiya xizmati')))
+    : '';
+
+  const durationMinutes = appointment
+    ? (appointment.durationMinutes || (appointment.startTime && appointment.endTime ? Math.round((new Date(appointment.endTime).getTime() - new Date(appointment.startTime).getTime()) / 60000) : 30))
+    : 30;
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
@@ -202,10 +241,10 @@ export default function BookingStatusPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-5">
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700">
-              Qabul tafsilotlari
+              {currentLang === 'ru' ? 'Детали записи' : 'Qabul tafsilotlari'}
             </span>
             <h1 className="text-2xl font-extrabold text-slate-900 mt-0.5">
-              {appointment.serviceName}
+              {serviceTitle}
             </h1>
           </div>
 
@@ -214,7 +253,7 @@ export default function BookingStatusPage() {
               statusColorMap[appointment.status] || 'bg-slate-100 text-slate-700'
             }`}
           >
-            {statusLabelMap[appointment.status] || appointment.status}
+            {statusLabelMap[appointment.status]?.[currentLang] || appointment.status}
           </span>
         </div>
 
@@ -225,7 +264,7 @@ export default function BookingStatusPage() {
             <div>
               <span className="text-xs text-slate-400 block">{t.common.time}</span>
               <span className="font-bold text-slate-800">
-                {new Date(appointment.startTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' })}
+                {new Date(appointment.startTime).toLocaleString(currentLang === 'ru' ? 'ru-RU' : 'uz-UZ', { timeZone: 'Asia/Tashkent' })}
               </span>
             </div>
           </div>
@@ -235,7 +274,7 @@ export default function BookingStatusPage() {
             <div>
               <span className="text-xs text-slate-400 block">{t.common.doctor}</span>
               <span className="font-bold text-slate-800">
-                {appointment.doctorName || (appointment.doctor ? `Dr. ${appointment.doctor.firstNameUz} ${appointment.doctor.lastNameUz}` : 'Shifokor')}
+                {doctorDisplayName}
               </span>
             </div>
           </div>
@@ -245,7 +284,7 @@ export default function BookingStatusPage() {
             <div>
               <span className="text-xs text-slate-400 block">{t.common.branch}</span>
               <span className="font-bold text-slate-800">
-                {appointment.branchName || appointment.branch?.nameUz || 'Asosiy filial'}
+                {branchDisplayName}
               </span>
             </div>
           </div>
@@ -253,9 +292,19 @@ export default function BookingStatusPage() {
           <div className="p-4 bg-slate-50 rounded-2xl flex items-start gap-3">
             <Calendar className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
             <div>
-              <span className="text-xs text-slate-400 block">Qabul davomiyligi</span>
-              <span className="font-bold text-slate-800">
-                {appointment.durationMinutes || (appointment.startTime && appointment.endTime ? Math.round((new Date(appointment.endTime).getTime() - new Date(appointment.startTime).getTime()) / 60000) : 30)} daqiqa
+              <span className="text-xs text-slate-400 block">
+                {currentLang === 'ru' ? 'Длительность приема' : 'Qabul davomiyligi'}
+              </span>
+              <span className="font-bold text-slate-800 flex items-center flex-wrap gap-1">
+                {durationMinutes} {currentLang === 'ru' ? 'минут' : 'daqiqa'}
+                {appointment.durationAdjustmentMinutes !== undefined && appointment.durationAdjustmentMinutes !== 0 && (
+                  <span
+                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200"
+                    title={currentLang === 'ru' ? 'Длительность изменена администратором' : 'Administrator tomonidan davomiylik o\'zgartirilgan'}
+                  >
+                    {appointment.durationAdjustmentMinutes > 0 ? `+${appointment.durationAdjustmentMinutes}` : appointment.durationAdjustmentMinutes} {currentLang === 'ru' ? 'мин (коррекция)' : 'daq (tuzatish)'}
+                  </span>
+                )}
               </span>
             </div>
           </div>
@@ -268,21 +317,29 @@ export default function BookingStatusPage() {
               {t.booking.selectedServices} ({appointment.serviceItems.length}):
             </span>
             <div className="space-y-1.5">
-              {appointment.serviceItems.map((item: any, idx: number) => (
-                <div key={item.id || idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-xl border border-slate-200">
-                  <span className="font-semibold text-slate-800">
-                    {item.serviceNameUz}
-                  </span>
-                  <div className="text-right">
-                    <span className="text-slate-500 mr-2">{item.durationMinutes} daqiqa</span>
-                    {item.priceFrom ? (
-                      <span className="font-bold text-teal-800">
-                        {(item.priceFrom / 100).toLocaleString('uz-UZ')} {t.common.uzs}
-                      </span>
-                    ) : null}
+              {appointment.serviceItems.map((item: any, idx: number) => {
+                const itemName = currentLang === 'ru' && item.serviceNameRu ? item.serviceNameRu : item.serviceNameUz;
+                return (
+                  <div key={item.id || idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-xl border border-slate-200">
+                    <span className="font-semibold text-slate-800">
+                      {itemName}
+                      {item.isLegacyBundle && (
+                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                          {currentLang === 'ru' ? 'Пакет' : 'Paket'}
+                        </span>
+                      )}
+                    </span>
+                    <div className="text-right">
+                      <span className="text-slate-500 mr-2">{item.durationMinutes} {currentLang === 'ru' ? 'мин' : 'daqiqa'}</span>
+                      {item.priceFrom ? (
+                        <span className="font-bold text-teal-800">
+                          {(item.priceFrom / 100).toLocaleString(currentLang === 'ru' ? 'ru-RU' : 'uz-UZ')} {t.common.uzs}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -317,7 +374,7 @@ export default function BookingStatusPage() {
           >
             <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
               <RefreshCw className="w-4 h-4 text-teal-700" />
-              <span>Yangi qabul vaqtini tanlang</span>
+              <span>{currentLang === 'ru' ? 'Выберите новое время приема' : 'Yangi qabul vaqtini tanlang'}</span>
             </h3>
 
             <div>
@@ -327,7 +384,7 @@ export default function BookingStatusPage() {
               <input
                 type="date"
                 value={newDate}
-                min={new Date().toISOString().split('T')[0]}
+                min={getTashkentDateString()}
                 onChange={(e) => {
                   setNewDate(e.target.value);
                   setSelectedSlotTime('');
@@ -338,7 +395,7 @@ export default function BookingStatusPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-2">
-                Mavjud bo&apos;sh vaqtlar:
+                {currentLang === 'ru' ? 'Доступное свободное время:' : 'Mavjud bo\'sh vaqtlar:'}
               </label>
               {isLoadingSlots ? (
                 <div className="p-4 text-center text-xs text-slate-500">{t.common.loading}</div>
@@ -348,7 +405,7 @@ export default function BookingStatusPage() {
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
                   {availableSlots.map((slot) => {
                     const slotDate = new Date(slot.startTime);
-                    const timeStr = slotDate.toLocaleTimeString('uz-UZ', {
+                    const timeStr = slotDate.toLocaleTimeString(currentLang === 'ru' ? 'ru-RU' : 'uz-UZ', {
                       hour: '2-digit',
                       minute: '2-digit',
                       timeZone: 'Asia/Tashkent',
@@ -404,22 +461,24 @@ export default function BookingStatusPage() {
           >
             <h3 className="font-bold text-red-900 text-base flex items-center gap-2">
               <XCircle className="w-5 h-5 text-red-600" />
-              <span>Qabulni bekor qilish</span>
+              <span>{currentLang === 'ru' ? 'Отмена записи' : 'Qabulni bekor qilish'}</span>
             </h3>
 
             <p className="text-xs text-red-700">
-              Qabulni bekor qilishga ishonchingiz komilmi? Bu amalni orqaga qaytarib bo&apos;lmaydi.
+              {currentLang === 'ru'
+                ? 'Вы уверены, что хотите отменить запись? Это действие нельзя отменить.'
+                : 'Qabulni bekor qilishga ishonchingiz komilmi? Bu amalni orqaga qaytarib bo\'lmaydi.'}
             </p>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Bekor qilish sababi (ixtiyoriy)
+                {currentLang === 'ru' ? 'Причина отмены (необязательно)' : 'Bekor qilish sababi (ixtiyoriy)'}
               </label>
               <input
                 type="text"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="Rejalar o'zgardi, boshqa vaqtga qoldirildi..."
+                placeholder={currentLang === 'ru' ? 'Планы изменились...' : "Rejalar o'zgardi, boshqa vaqtga qoldirildi..."}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white"
               />
             </div>
@@ -430,14 +489,14 @@ export default function BookingStatusPage() {
                 onClick={() => setIsCancelling(false)}
                 className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-lg"
               >
-                Ortga
+                {currentLang === 'ru' ? 'Назад' : 'Ortga'}
               </button>
               <button
                 type="submit"
                 disabled={isSubmittingCancel}
                 className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow"
               >
-                {isSubmittingCancel ? t.common.loading : 'Ha, bekor qilinsin'}
+                {isSubmittingCancel ? t.common.loading : (currentLang === 'ru' ? 'Да, отменить' : 'Ha, bekor qilinsin')}
               </button>
             </div>
           </form>

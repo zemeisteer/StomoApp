@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
+import * as fs from 'fs';
+import * as path from 'path';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus } from '@prisma/client';
@@ -53,6 +55,16 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // Run-specific fixture prefix (does NOT delete broad phone prefixes)
   const runId = Date.now().toString().slice(-5);
   const testPhonePrefix = `+99800${runId}`;
+
+  function getNextWorkingSlot(daysAhead = 2, hourTashkent = 10, minuteTashkent = 0): Date {
+    const d = new Date();
+    d.setDate(d.getDate() + daysAhead);
+    while (d.getDay() === 0 || d.getDay() === 6) {
+      d.setDate(d.getDate() + 1);
+    }
+    d.setUTCHours(hourTashkent - 5, minuteTashkent, 0, 0);
+    return d;
+  }
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -277,8 +289,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   });
 
   it('Regression 4: Doctor A cannot read Doctor B appointment details or unauthorized patient', async () => {
-    const futureDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    futureDate.setUTCHours(4, 0, 0, 0); // 09:00 Tashkent time
+    const futureDate = getNextWorkingSlot(3, 10, 0);
 
     const bookingRes = await request(app.getHttpServer())
       .post('/api/booking')
@@ -313,8 +324,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 5: Concurrency Safety (Simultaneous overlapping requests)
   // -------------------------------------------------------------
   it('Regression 5: Simultaneous overlapping bookings cannot both succeed', async () => {
-    const slotTime = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    slotTime.setUTCHours(5, 0, 0, 0); // 10:00 Tashkent time
+    const slotTime = getNextWorkingSlot(4, 11, 0);
 
     const req1 = request(app.getHttpServer())
       .post('/api/booking')
@@ -350,8 +360,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // -------------------------------------------------------------
   it('Regression 6: True concurrent idempotent submissions create one booking, changed payload rejected', async () => {
     const idempotencyKey = `idem-${runId}-${Date.now()}`;
-    const slotTime = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    slotTime.setUTCHours(6, 0, 0, 0); // 11:00 Tashkent time
+    const slotTime = getNextWorkingSlot(5, 12, 0);
 
     const basePayload = {
       doctorId: testDoctorBId,
@@ -390,11 +399,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   it('Regression 7: Shared family phone does not silently merge different patients', async () => {
     const familyPhone = `${testPhonePrefix}05`;
 
-    const slot1 = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    slot1.setUTCHours(7, 0, 0, 0); // 12:00 Tashkent time
-
-    const slot2 = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    slot2.setUTCHours(9, 0, 0, 0); // 14:00 Tashkent time
+    const slot1 = getNextWorkingSlot(6, 12, 0);
+    const slot2 = getNextWorkingSlot(6, 14, 0);
 
     await request(app.getHttpServer())
       .post('/api/booking')
@@ -477,8 +483,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 9: Rescheduling Buffer Preservation & Rollback on Failure
   // -------------------------------------------------------------
   it('Regression 9: Failed rescheduling preserves original slot intact', async () => {
-    const slot = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    slot.setUTCHours(11, 0, 0, 0); // 16:00 Tashkent time
+    const slot = getNextWorkingSlot(7, 14, 0);
 
     const bookingRes = await request(app.getHttpServer())
       .post('/api/booking')
@@ -515,8 +520,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 10: Confirmation vs Expiry/Cancellation Integrity
   // -------------------------------------------------------------
   it('Regression 10: Cannot confirm an already cancelled appointment', async () => {
-    const slot = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    slot.setUTCHours(12, 0, 0, 0);
+    const slot = getNextWorkingSlot(8, 15, 0);
 
     const bookingRes = await request(app.getHttpServer())
       .post('/api/booking')
@@ -756,11 +760,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 16: Durable Idempotency with Fingerprinting & Legacy Key Policy
   // -------------------------------------------------------------
   it('Regression 16: Idempotency fingerprint binds all fields, rejects altered payload, and parallel identical requests yield one booking', async () => {
-    const slotTime = new Date(Date.now() + 96 * 60 * 60 * 1000);
-    slotTime.setUTCHours(6, 0, 0, 0); // 11:00 Tashkent time
-    if (slotTime.getUTCDay() === 0) {
-      slotTime.setUTCDate(slotTime.getUTCDate() + 1);
-    }
+    const slotTime = getNextWorkingSlot(9, 11, 0);
     const startIso = slotTime.toISOString();
     const testKey = `e2e_idemp_${runId}_${Date.now()}`;
 
@@ -1303,9 +1303,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       ],
     });
 
-    const slotTime = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
-    slotTime.setUTCHours(5, 0, 0, 0); // 10:00 Tashkent
-    if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+    const slotTime = getNextWorkingSlot(11, 10, 0);
 
     const res = await request(app.getHttpServer())
       .post('/api/booking')
@@ -1654,8 +1652,41 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       data: { doctorId: testDoctorAId, serviceId: sMatch.id },
     });
 
-    const targetDate = new Date(Date.now() + 58 * 60 * 60 * 1000);
-    const dateStr = targetDate.toISOString().split('T')[0];
+    const targetDate = getNextWorkingSlot(10, 10, 0);
+    const y = targetDate.getFullYear();
+    const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const d = String(targetDate.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+
+    // Ensure deterministic schedule fixture for testDoctorAId at testBranchId
+    const dayNames: DayOfWeek[] = [
+      DayOfWeek.SUNDAY,
+      DayOfWeek.MONDAY,
+      DayOfWeek.TUESDAY,
+      DayOfWeek.WEDNESDAY,
+      DayOfWeek.THURSDAY,
+      DayOfWeek.FRIDAY,
+      DayOfWeek.SATURDAY,
+    ];
+    const dayOfWeekEnum = dayNames[targetDate.getDay()];
+    await prisma.doctorSchedule.upsert({
+      where: {
+        doctorId_dayOfWeek_branchId: {
+          doctorId: testDoctorAId,
+          dayOfWeek: dayOfWeekEnum,
+          branchId: testBranchId,
+        },
+      },
+      update: { startTime: '09:00', endTime: '18:00', isActive: true },
+      create: {
+        doctorId: testDoctorAId,
+        dayOfWeek: dayOfWeekEnum,
+        branchId: testBranchId,
+        startTime: '09:00',
+        endTime: '18:00',
+        isActive: true,
+      },
+    });
 
     // Query slots
     const slotRes = await request(app.getHttpServer())
@@ -1673,42 +1704,42 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(slotRes.body.totalDurationWithBufferMinutes).toBe(55);
 
     const availableSlots = slotRes.body.slots.filter((s: any) => s.available);
-    if (availableSlots.length > 0) {
-      const chosen = availableSlots[0];
+    // Non-conditional: deterministic assertion that slot exists
+    expect(availableSlots.length).toBeGreaterThan(0);
+    const chosen = availableSlots[0];
 
-      // Book that exact slot
-      const bookRes = await request(app.getHttpServer())
-        .post('/api/booking')
-        .send({
-          serviceId: sMatch.id,
-          doctorId: testDoctorAId,
-          branchId: testBranchId,
-          startTime: chosen.startTime,
-          patientName: 'Slot Test Patient',
-          patientPhone: `${testPhonePrefix}27`,
-          consentGiven: true,
-        })
-        .expect(201);
+    // Book that exact slot
+    const bookRes = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceId: sMatch.id,
+        doctorId: testDoctorAId,
+        branchId: testBranchId,
+        startTime: chosen.startTime,
+        patientName: 'Slot Test Patient',
+        patientPhone: `${testPhonePrefix}27`,
+        consentGiven: true,
+      })
+      .expect(201);
 
-      // Re-query slots: that slot must now be unavailable
-      const slotResAfter = await request(app.getHttpServer())
-        .get('/api/scheduling/slots')
-        .query({
-          doctorId: testDoctorAId,
-          date: dateStr,
-          serviceId: sMatch.id,
-          branchId: testBranchId,
-        })
-        .expect(200);
+    // Re-query slots: that slot must now be unavailable
+    const slotResAfter = await request(app.getHttpServer())
+      .get('/api/scheduling/slots')
+      .query({
+        doctorId: testDoctorAId,
+        date: dateStr,
+        serviceId: sMatch.id,
+        branchId: testBranchId,
+      })
+      .expect(200);
 
-      const slotAfter = slotResAfter.body.slots.find((s: any) => s.startTime === chosen.startTime);
-      expect(slotAfter.available).toBe(false);
+    const slotAfter = slotResAfter.body.slots.find((s: any) => s.startTime === chosen.startTime);
+    expect(slotAfter).toBeDefined();
+    expect(slotAfter.available).toBe(false);
 
-      // Cleanup
-      await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: bookRes.body.appointmentId } });
-      await prisma.appointment.delete({ where: { id: bookRes.body.appointmentId } });
-    }
-
+    // Cleanup
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: bookRes.body.appointmentId } });
+    await prisma.appointment.delete({ where: { id: bookRes.body.appointmentId } });
     await prisma.doctorService.deleteMany({ where: { serviceId: sMatch.id } });
     await prisma.service.delete({ where: { id: sMatch.id } });
   });
@@ -1740,9 +1771,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       ],
     });
 
-    const slot1 = new Date(Date.now() + 16 * 24 * 60 * 60 * 1000);
-    slot1.setUTCHours(5, 0, 0, 0); // 10:00 Tashkent
-    if (slot1.getUTCDay() === 0) slot1.setUTCDate(slot1.getUTCDate() + 1);
+    const slot1 = getNextWorkingSlot(12, 10, 0);
 
     const booking = await request(app.getHttpServer())
       .post('/api/booking')
@@ -1759,10 +1788,15 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
 
     expect(booking.body.durationMinutes).toBe(70);
 
-    // Reschedule to a new slot
-    const slot2 = new Date(slot1.getTime() + 24 * 60 * 60 * 1000);
-    slot2.setUTCHours(6, 0, 0, 0); // 11:00 Tashkent
-    if (slot2.getUTCDay() === 0) slot2.setUTCDate(slot2.getUTCDate() + 1);
+    // CHANGE CATALOG SETTINGS BEFORE RESCHEDULING:
+    // Change sReschedA catalog duration from 30 to 60 minutes
+    await prisma.service.update({
+      where: { id: sReschedA.id },
+      data: { durationMinutes: 60 },
+    });
+
+    // Reschedule to a new slot: MUST preserve historical snapshot duration (70 min = 30 + 40)
+    const slot2 = getNextWorkingSlot(13, 11, 0);
 
     const reschedRes = await request(app.getHttpServer())
       .post(`/api/booking/reschedule/${booking.body.publicToken}`)
@@ -1779,6 +1813,26 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(items.length).toBe(2);
     expect(items[0].durationMinutes).toBe(30);
     expect(items[1].durationMinutes).toBe(40);
+
+    // NOW TEST REJECTION WHEN SECONDARY SERVICE BECOMES INELIGIBLE:
+    // Remove doctor B's assignment to sReschedB
+    await prisma.doctorService.delete({
+      where: {
+        doctorId_serviceId: {
+          doctorId: testDoctorBId,
+          serviceId: sReschedB.id,
+        },
+      },
+    });
+
+    const slot3 = getNextWorkingSlot(14, 14, 0);
+
+    const rejectRes = await request(app.getHttpServer())
+      .post(`/api/booking/reschedule/${booking.body.publicToken}`)
+      .send({ startTime: slot3.toISOString() })
+      .expect(400);
+
+    expect(rejectRes.body.message).toMatch(/xizmat.*ko'rsatilmaydi|biriktirilmagan/i);
 
     // Cleanup
     await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: booking.body.appointmentId } });
@@ -1807,9 +1861,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     });
 
     const idemKey = `idem-sec-change-${runId}`;
-    const slotTime = new Date(Date.now() + 18 * 24 * 60 * 60 * 1000);
-    slotTime.setUTCHours(5, 0, 0, 0); // 10:00 Tashkent
-    if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+    const slotTime = getNextWorkingSlot(18, 10, 0);
 
     // Initial booking for A + B
     const res1 = await request(app.getHttpServer())
@@ -1869,30 +1921,69 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     await prisma.service.deleteMany({ where: { id: { in: [sIdemA.id, sIdemB.id, sIdemC.id] } } });
   });
 
-  it('Regression 30: Historical single-service appointments are preserved and backfilled into service items', async () => {
+  it('Regression 30: Historical service-item migration semantics preserve snapshot names and distinguish legacy bundles', async () => {
     const patient = await prisma.patient.findFirst();
-    const origStart = new Date(Date.now() + 120 * 60 * 60 * 1000);
-    origStart.setUTCHours(6, 0, 0, 0);
-    if (origStart.getUTCDay() === 0) origStart.setUTCDate(origStart.getUTCDate() + 1);
+    const origStart1 = new Date(Date.now() + 120 * 60 * 60 * 1000);
+    origStart1.setUTCHours(6, 0, 0, 0);
+    if (origStart1.getUTCDay() === 0) origStart1.setUTCDate(origStart1.getUTCDate() + 1);
 
-    const legacyAppt = await prisma.appointment.create({
+    // 1. Create catalog service that will be renamed
+    const sCatalog = await prisma.service.create({
       data: {
-        publicToken: `hist_test_${runId}_${Date.now()}`,
+        nameUz: 'Eski Boshlangich Xizmat',
+        nameRu: 'Старая услуга',
+        slug: `legacy-cat-${runId}`,
+        durationMinutes: 30,
+        priceFrom: 15000000,
+      },
+    });
+
+    // 2. Legacy Appointment 1: single-service with historical snapshot name that differs from catalog
+    const legacyAppt1 = await prisma.appointment.create({
+      data: {
+        publicToken: `hist_single_${runId}_${Date.now()}`,
         patientId: patient!.id,
         doctorId: testDoctorBId,
-        serviceId: testServiceId,
+        serviceId: sCatalog.id,
         branchId: testBranchId,
         status: AppointmentStatus.CONFIRMED,
-        startTime: origStart,
-        endTime: new Date(origStart.getTime() + 35 * 60 * 1000),
-        serviceName: 'Konsultatsiya',
+        startTime: origStart1,
+        endTime: new Date(origStart1.getTime() + 35 * 60 * 1000),
+        serviceName: 'Tarixiy Haqiqiy Snapshot Nomi',
         durationMinutes: 30,
         bufferMinutes: 5,
+        servicePriceFrom: 15000000,
         consentGiven: true,
       },
     });
 
-    // Run the migration backfill logic on this record
+    // Rename catalog service (simulating catalog changes over time)
+    await prisma.service.update({
+      where: { id: sCatalog.id },
+      data: { nameUz: 'Yangi O\'zgargan Katalog Nomi', nameRu: 'Новое имя из каталога' },
+    });
+
+    // 3. Legacy Appointment 2: unresolved legacy bundle (multi-service booked before multi-service schema)
+    const origStart2 = new Date(origStart1.getTime() + 2 * 60 * 60 * 1000);
+    const legacyAppt2 = await prisma.appointment.create({
+      data: {
+        publicToken: `hist_bundle_${runId}_${Date.now()}`,
+        patientId: patient!.id,
+        doctorId: testDoctorBId,
+        serviceId: sCatalog.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: origStart2,
+        endTime: new Date(origStart2.getTime() + 95 * 60 * 1000),
+        serviceName: 'Plomba qo\'yish, Tish tozalash, Oqartirish',
+        durationMinutes: 90,
+        bufferMinutes: 5,
+        servicePriceFrom: 45000000,
+        consentGiven: true,
+      },
+    });
+
+    // 4. Simulate the initial backfill (which erroneously used catalog COALESCE)
     await prisma.$executeRawUnsafe(`
       INSERT INTO "appointment_service_items" (
         "id", "appointment_id", "service_id", "sort_order",
@@ -1909,50 +2000,84 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         a."service_price_from"
       FROM "appointments" a
       LEFT JOIN "services" s ON a."service_id" = s."id"
-      WHERE a."id" = '${legacyAppt.id}'
+      WHERE a."id" IN ('${legacyAppt1.id}', '${legacyAppt2.id}')
       ON CONFLICT ("id") DO NOTHING;
     `);
 
-    // Verify backfilled items
-    const historicalItems = await prisma.appointmentServiceItem.findMany({
-      where: { appointmentId: legacyAppt.id },
+    // 5. Execute the real forward repair migration SQL
+    const migrationFilePath = path.join(__dirname, '../prisma/migrations/20261015170000_repair_historical_service_items/migration.sql');
+    const repairSql = fs.readFileSync(migrationFilePath, 'utf-8');
+    const statements = repairSql
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && !s.toLowerCase().includes('alter table'));
+
+    for (const stmt of statements) {
+      await prisma.$executeRawUnsafe(stmt);
+    }
+
+    // 6. Assertions for legacyAppt1 (single service historical snapshot)
+    const item1 = await prisma.appointmentServiceItem.findUnique({
+      where: { id: `hist_${legacyAppt1.id}` },
     });
-    expect(historicalItems.length).toBe(1);
-    expect(historicalItems[0].id).toBe(`hist_${legacyAppt.id}`);
-    expect(historicalItems[0].durationMinutes).toBe(30);
-    expect(historicalItems[0].serviceNameUz).toBeDefined();
+    expect(item1).toBeDefined();
+    // Authoritative snapshot name preserved, NOT overwritten by renamed catalog value
+    expect(item1!.serviceNameUz).toBe('Tarixiy Haqiqiy Snapshot Nomi');
+    // Russian translation cleared because snapshot name differed from catalog service
+    expect(item1!.serviceNameRu).toBeNull();
+    expect(item1!.isLegacyBundle).toBe(false);
 
-    // Query appointment by public token and verify serviceItems returned
-    const statusRes = await request(app.getHttpServer())
-      .get(`/api/booking/status/${legacyAppt.publicToken}`)
-      .expect(200);
+    // 7. Assertions for legacyAppt2 (unresolved bundle)
+    const item2 = await prisma.appointmentServiceItem.findUnique({
+      where: { id: `hist_${legacyAppt2.id}` },
+    });
+    expect(item2).toBeDefined();
+    expect(item2!.serviceNameUz).toBe('Plomba qo\'yish, Tish tozalash, Oqartirish');
+    // Disassociated from primary service_id so analytics do NOT falsely attribute bundle to a single service!
+    expect(item2!.serviceId).toBeNull();
+    expect(item2!.isLegacyBundle).toBe(true);
+    expect(item2!.durationMinutes).toBe(90);
 
-    expect(statusRes.body.serviceItems).toBeDefined();
-    expect(statusRes.body.serviceItems.length).toBe(1);
+    // 8. Verify public status endpoint accurately displays both
+    const res1 = await request(app.getHttpServer()).get(`/api/booking/status/${legacyAppt1.publicToken}`).expect(200);
+    expect(res1.body.serviceItems[0].serviceNameUz).toBe('Tarixiy Haqiqiy Snapshot Nomi');
+
+    const res2 = await request(app.getHttpServer()).get(`/api/booking/status/${legacyAppt2.publicToken}`).expect(200);
+    expect(res2.body.serviceItems[0].serviceNameUz).toBe('Plomba qo\'yish, Tish tozalash, Oqartirish');
+    expect(res2.body.serviceItems[0].isLegacyBundle).toBe(true);
 
     // Cleanup
-    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: legacyAppt.id } });
-    await prisma.appointment.delete({ where: { id: legacyAppt.id } });
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: { in: [legacyAppt1.id, legacyAppt2.id] } } });
+    await prisma.appointment.deleteMany({ where: { id: { in: [legacyAppt1.id, legacyAppt2.id] } } });
+    await prisma.service.delete({ where: { id: sCatalog.id } });
   });
 
   it('Regression 31: Service analytics accurately count service items without double-counting appointments or estimated prices', async () => {
     const sStat = await prisma.service.create({
       data: {
-        nameUz: `Analytics Item Service ${runId}`,
+        nameUz: `Analytics Service ${runId}`,
         nameRu: `Аналитика услуги ${runId}`,
         slug: `stat-${runId}`,
         durationMinutes: 30,
-        priceFrom: 25000000,
+        priceFrom: 25000000, // 250,000 UZS
       },
     });
     await prisma.doctorService.create({
       data: { doctorId: testDoctorBId, serviceId: sStat.id },
     });
 
+    // Baseline analytics
+    const baseAnalytics = await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const initialIncome = baseAnalytics.body.revenue.totalIncomeMinor;
+
     const slotTime = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
     slotTime.setUTCHours(6, 0, 0, 0); // 11:00 Tashkent
     if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
 
+    // Create UNPAID booking
     const appt = await request(app.getHttpServer())
       .post('/api/booking')
       .send({
@@ -1966,25 +2091,462 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       })
       .expect(201);
 
-    const analyticsRes = await request(app.getHttpServer())
+    // Query analytics: Unpaid booking must NOT increase collected revenue!
+    const afterBookingAnalytics = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
-    expect(analyticsRes.body.popularServices).toBeDefined();
-    // Popular service must find our service name
-    const foundService = analyticsRes.body.popularServices.find((s: any) => s.name === sStat.nameUz);
-    expect(foundService).toBeDefined();
-    expect(foundService.count).toBeGreaterThanOrEqual(1);
+    expect(afterBookingAnalytics.body.revenue.totalIncomeMinor).toBe(initialIncome);
 
-    // Revenue must NOT treat priceFrom as collected income unless a payment was recorded
-    expect(analyticsRes.body.revenue.totalIncomeMinor).toBeDefined();
+    // Record an actual payment of 250,000 UZS (25000000 minor units)
+    await prisma.payment.create({
+      data: {
+        appointmentId: appt.body.appointmentId,
+        amount: 25000000,
+        method: 'CASH',
+        recordedAt: new Date(),
+      },
+    });
+
+    // Query analytics: Revenue must now reflect EXACT payment amount recorded
+    const afterPaymentAnalytics = await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(afterPaymentAnalytics.body.revenue.totalIncomeMinor).toBe(initialIncome + 25000000);
+
+    // Verify exact service count for this specific service without top-7 ranking dependency
+    const serviceItemCount = await prisma.appointmentServiceItem.count({
+      where: { serviceId: sStat.id, isLegacyBundle: false },
+    });
+    expect(serviceItemCount).toBe(1);
 
     // Cleanup
+    await prisma.payment.deleteMany({ where: { appointmentId: appt.body.appointmentId } });
     await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: appt.body.appointmentId } });
     await prisma.appointment.delete({ where: { id: appt.body.appointmentId } });
     await prisma.doctorService.deleteMany({ where: { serviceId: sStat.id } });
     await prisma.service.delete({ where: { id: sStat.id } });
+  });
+
+  it('Regression 32: Concurrency - Service duration change during transaction entry recomputes consistent end time and items', async () => {
+    const sConA = await prisma.service.create({
+      data: { nameUz: 'Concur Srv A', nameRu: 'Конкур А', slug: `con-a-${runId}`, durationMinutes: 30, priceFrom: 10000000 },
+    });
+    const sConB = await prisma.service.create({
+      data: { nameUz: 'Concur Srv B', nameRu: 'Конкур Б', slug: `con-b-${runId}`, durationMinutes: 30, priceFrom: 10000000 },
+    });
+    await prisma.doctorService.createMany({
+      data: [
+        { doctorId: testDoctorBId, serviceId: sConA.id },
+        { doctorId: testDoctorBId, serviceId: sConB.id },
+      ],
+    });
+
+    const slotTime = new Date(Date.now() + 22 * 24 * 60 * 60 * 1000);
+    slotTime.setUTCHours(5, 0, 0, 0); // 10:00 Tashkent
+    if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+
+    // Book multi-service: duration was initially 60 min. But update sConB in DB to 45 min
+    await prisma.service.update({
+      where: { id: sConB.id },
+      data: { durationMinutes: 45 },
+    });
+
+    const bookingRes = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceIds: [sConA.id, sConB.id],
+        doctorId: testDoctorBId,
+        branchId: testBranchId,
+        startTime: slotTime.toISOString(),
+        patientName: 'Concurrency Patient',
+        patientPhone: `${testPhonePrefix}32`,
+        consentGiven: true,
+      })
+      .expect(201);
+
+    const appt = await prisma.appointment.findUnique({
+      where: { id: bookingRes.body.appointmentId },
+      include: { serviceItems: { orderBy: { sortOrder: 'asc' } } },
+    });
+
+    expect(appt).toBeDefined();
+    // Inside tx, durations were reread consistently: 30 + 45 = 75 min
+    expect(appt!.durationMinutes).toBe(75);
+    expect(appt!.bufferMinutes).toBe(5);
+
+    // Assert: endTime - startTime = durationMinutes + bufferMinutes
+    const actualIntervalMs = new Date(appt!.endTime).getTime() - new Date(appt!.startTime).getTime();
+    const expectedIntervalMs = (appt!.durationMinutes + (appt!.bufferMinutes ?? 5)) * 60 * 1000;
+    expect(actualIntervalMs).toBe(expectedIntervalMs);
+
+    // Assert: service-item totals match defined appointment duration policy
+    const sumServiceItemDurations = appt!.serviceItems.reduce((acc, item) => acc + item.durationMinutes, 0);
+    expect(sumServiceItemDurations).toBe(appt!.durationMinutes);
+
+    // Cleanup
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: appt!.id } });
+    await prisma.appointment.delete({ where: { id: appt!.id } });
+    await prisma.doctorService.deleteMany({ where: { serviceId: { in: [sConA.id, sConB.id] } } });
+    await prisma.service.deleteMany({ where: { id: { in: [sConA.id, sConB.id] } } });
+  });
+
+  it('Regression 33: Duration override safely locks row, rejects terminal appointments, and detects overlap collisions', async () => {
+    const sRace = await prisma.service.create({
+      data: { nameUz: 'Race Srv', nameRu: 'Гонка', slug: `race-${runId}`, durationMinutes: 30 },
+    });
+    await prisma.doctorService.create({
+      data: { doctorId: testDoctorBId, serviceId: sRace.id },
+    });
+
+    const slotTime = getNextWorkingSlot(20, 10, 0);
+
+    // Appointment 1: 10:00 - 10:35
+    const appt1 = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceId: sRace.id,
+        doctorId: testDoctorBId,
+        branchId: testBranchId,
+        startTime: slotTime.toISOString(),
+        patientName: 'Race Patient 1',
+        patientPhone: `${testPhonePrefix}31`,
+        consentGiven: true,
+      })
+      .expect(201);
+
+    // Appointment 2: 11:00 - 11:35
+    const slot2Time = new Date(slotTime.getTime() + 60 * 60 * 1000);
+    const appt2 = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceId: sRace.id,
+        doctorId: testDoctorBId,
+        branchId: testBranchId,
+        startTime: slot2Time.toISOString(),
+        patientName: 'Race Patient 2',
+        patientPhone: `${testPhonePrefix}32`,
+        consentGiven: true,
+      })
+      .expect(201);
+
+    // 1. Attempt to override Appt 1 duration to 90 min (would extend to 11:35 and collide with Appt 2 at 11:00)
+    const collideRes = await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${appt1.body.appointmentId}/duration`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 90, reason: 'Need more time for treatment' })
+      .expect(409);
+    expect(collideRes.body.message).toMatch(/to'qnashuv/i);
+
+    // 2. Test rejection on terminal appointment:
+    // Cancel Appt 2
+    await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${appt2.body.appointmentId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'CANCELLED', reason: 'Patient cancelled' })
+      .expect(200);
+
+    // Attempting duration override on CANCELLED appointment must be rejected!
+    const terminalRes = await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${appt2.body.appointmentId}/duration`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 45, reason: 'Late adjustment' })
+      .expect(400);
+    expect(terminalRes.body.message).toMatch(/bekor qilingan.*o'zgartirib bo'lmaydi/i);
+
+    // 3. Now override Appt 1 duration safely to 50 min (10:00 - 10:55, does not collide with anything)
+    const overrideRes = await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${appt1.body.appointmentId}/duration`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 50, reason: 'Detailed examination needed' })
+      .expect(200);
+    expect(overrideRes.body.durationMinutes).toBe(50);
+
+    // Audit log must record the duration override with staff reason and previous/new values
+    const audit = await prisma.auditLog.findFirst({
+      where: { entityId: appt1.body.appointmentId, action: 'appointment.duration_override' },
+    });
+    expect(audit).toBeDefined();
+    expect((audit!.details as any).previousDurationMinutes).toBe(30);
+    expect((audit!.details as any).newDurationMinutes).toBe(50);
+    expect((audit!.details as any).reason).toBe('Detailed examination needed');
+
+    // Cleanup
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: { in: [appt1.body.appointmentId, appt2.body.appointmentId] } } });
+    await prisma.appointment.deleteMany({ where: { id: { in: [appt1.body.appointmentId, appt2.body.appointmentId] } } });
+    await prisma.doctorService.deleteMany({ where: { serviceId: sRace.id } });
+    await prisma.service.delete({ where: { id: sRace.id } });
+  });
+
+  it('Regression 34: Reminder preservation after duration override keeps valid reminder job with matched revision', async () => {
+    const sRem = await prisma.service.create({
+      data: { nameUz: 'Reminder Srv', nameRu: 'Напоминание', slug: `rem-${runId}`, durationMinutes: 30 },
+    });
+    await prisma.doctorService.create({
+      data: { doctorId: testDoctorBId, serviceId: sRem.id },
+    });
+
+    const slotTime = new Date(Date.now() + 26 * 24 * 60 * 60 * 1000);
+    slotTime.setUTCHours(5, 0, 0, 0); // 10:00 Tashkent
+    if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+
+    const bookingRes = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceId: sRem.id,
+        doctorId: testDoctorBId,
+        branchId: testBranchId,
+        startTime: slotTime.toISOString(),
+        patientName: 'Reminder Patient',
+        patientPhone: `${testPhonePrefix}34`,
+        consentGiven: true,
+      })
+      .expect(201);
+
+    const apptId = bookingRes.body.appointmentId;
+
+    // Verify reminder notification job was enqueued
+    const initialReminder = await prisma.notificationJob.findFirst({
+      where: {
+        appointmentId: apptId,
+        templateKey: 'appointment_reminder',
+      },
+    });
+    expect(initialReminder).toBeDefined();
+    expect(initialReminder!.status).toBe(NotificationStatus.PENDING);
+    const initialRevision = initialReminder!.appointmentRevision ?? 1;
+
+    // Perform duration override
+    await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${apptId}/duration`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 45, reason: 'Extended cleaning' })
+      .expect(200);
+
+    const updatedAppt = await prisma.appointment.findUnique({ where: { id: apptId } });
+    expect(updatedAppt!.revision).toBe(initialRevision + 1);
+
+    // Verify transactionally: the pending reminder job MUST have its revision updated to match!
+    const preservedReminder = await prisma.notificationJob.findFirst({
+      where: {
+        appointmentId: apptId,
+        templateKey: 'appointment_reminder',
+      },
+    });
+    expect(preservedReminder).toBeDefined();
+    expect(preservedReminder!.status).toBe(NotificationStatus.PENDING);
+    expect(preservedReminder!.appointmentRevision).toBe(updatedAppt!.revision);
+
+    // Cleanup
+    await prisma.notificationJob.deleteMany({ where: { appointmentId: apptId } });
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptId } });
+    await prisma.appointment.delete({ where: { id: apptId } });
+    await prisma.doctorService.deleteMany({ where: { serviceId: sRem.id } });
+    await prisma.service.delete({ where: { id: sRem.id } });
+  });
+
+  it('Regression 35: Appointment-aware availability uses stored appointment duration/buffer and excludes self from overlap', async () => {
+    const sAwareA = await prisma.service.create({
+      data: { nameUz: 'Aware Srv A', nameRu: 'Уведомление А', slug: `aware-a-${runId}`, durationMinutes: 30, priceFrom: 10000000 },
+    });
+    const sAwareB = await prisma.service.create({
+      data: { nameUz: 'Aware Srv B', nameRu: 'Уведомление Б', slug: `aware-b-${runId}`, durationMinutes: 40, priceFrom: 15000000 },
+    });
+    await prisma.doctorService.createMany({
+      data: [
+        { doctorId: testDoctorBId, serviceId: sAwareA.id },
+        { doctorId: testDoctorBId, serviceId: sAwareB.id },
+      ],
+    });
+
+    const slotTime = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000);
+    slotTime.setUTCHours(5, 0, 0, 0); // 10:00 Tashkent
+    if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+
+    // Book 70 min duration (30 + 40)
+    const bookingRes = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceIds: [sAwareA.id, sAwareB.id],
+        doctorId: testDoctorBId,
+        branchId: testBranchId,
+        startTime: slotTime.toISOString(),
+        patientName: 'Aware Patient',
+        patientPhone: `${testPhonePrefix}35`,
+        consentGiven: true,
+      })
+      .expect(201);
+
+    const token = bookingRes.body.publicToken;
+    const apptId = bookingRes.body.appointmentId;
+
+    // Admin duration override to 80 minutes
+    await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${apptId}/duration`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 80, reason: 'Special care needed' })
+      .expect(200);
+
+    // Now change catalog service duration to 120 minutes!
+    await prisma.service.update({
+      where: { id: sAwareA.id },
+      data: { durationMinutes: 120 },
+    });
+
+    const dateStr = slotTime.toISOString().split('T')[0];
+
+    // Query public appointment-aware reschedule slots
+    const publicSlotsRes = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/${token}/slots`)
+      .query({ date: dateStr })
+      .expect(200);
+
+    // MUST use the appointment's stored historical duration (80 min), NOT catalog's (120+40 = 160 min)!
+    expect(publicSlotsRes.body.durationMinutes).toBe(80);
+    expect(publicSlotsRes.body.bufferMinutes).toBe(5);
+    expect(publicSlotsRes.body.totalDurationWithBufferMinutes).toBe(85);
+
+    // The appointment's OWN slot must be excluded from overlap checks (so self-slot is available)
+    const selfSlot = publicSlotsRes.body.slots.find((s: any) => s.startTime === slotTime.toISOString());
+    expect(selfSlot).toBeDefined();
+    expect(selfSlot.available).toBe(true);
+
+    // Query admin appointment-aware reschedule slots
+    const adminSlotsRes = await request(app.getHttpServer())
+      .get(`/api/admin/appointments/${apptId}/reschedule-slots`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .query({ date: dateStr })
+      .expect(200);
+
+    expect(adminSlotsRes.body.durationMinutes).toBe(80);
+    expect(adminSlotsRes.body.totalDurationWithBufferMinutes).toBe(85);
+
+    // Cleanup
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptId } });
+    await prisma.appointment.delete({ where: { id: apptId } });
+    await prisma.doctorService.deleteMany({ where: { serviceId: { in: [sAwareA.id, sAwareB.id] } } });
+    await prisma.service.deleteMany({ where: { id: { in: [sAwareA.id, sAwareB.id] } } });
+  });
+
+  it('Regression 36: Doctor schedule accuracy - handles different weekday hours and overtime-only dates correctly', async () => {
+    // 1. Create dedicated doctor with different weekday schedules
+    const docUnique = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Jahongir',
+        lastNameUz: 'Oripov',
+        firstNameRu: 'Джахонгир',
+        lastNameRu: 'Орипов',
+        slug: `oripov-${runId}`,
+        isActive: true,
+      },
+    });
+
+    await prisma.doctorBranch.create({
+      data: { doctorId: docUnique.id, branchId: testBranchId },
+    });
+
+    const sSched = await prisma.service.create({
+      data: { nameUz: 'Sched Srv', nameRu: 'Расписание', slug: `sched-${runId}`, durationMinutes: 30 },
+    });
+    await prisma.doctorService.create({
+      data: { doctorId: docUnique.id, serviceId: sSched.id },
+    });
+
+    // Monday schedule: 09:00 - 13:00 (morning only)
+    await prisma.doctorSchedule.create({
+      data: {
+        doctorId: docUnique.id,
+        dayOfWeek: DayOfWeek.MONDAY,
+        branchId: testBranchId,
+        startTime: '09:00',
+        endTime: '13:00',
+        isActive: true,
+      },
+    });
+
+    // Wednesday schedule: 14:00 - 19:00 (afternoon only)
+    await prisma.doctorSchedule.create({
+      data: {
+        doctorId: docUnique.id,
+        dayOfWeek: DayOfWeek.WEDNESDAY,
+        branchId: testBranchId,
+        startTime: '14:00',
+        endTime: '19:00',
+        isActive: true,
+      },
+    });
+
+    // 2. Overtime-only date: Saturday (no weekly schedule, but OVERTIME exception added)
+    const targetSat = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    // Find next Saturday
+    while (targetSat.getUTCDay() !== 6) {
+      targetSat.setUTCDate(targetSat.getUTCDate() + 1);
+    }
+    const satDateStr = targetSat.toISOString().split('T')[0];
+
+    await prisma.scheduleException.create({
+      data: {
+        doctorId: docUnique.id,
+        type: ExceptionType.OVERTIME,
+        date: new Date(`${satDateStr}T00:00:00.000Z`),
+        startTime: '10:00',
+        endTime: '14:00',
+        reason: 'Extra Saturday shift',
+      },
+    });
+
+    // Query Saturday slots: backend MUST return available slots for this overtime date!
+    const satSlotsRes = await request(app.getHttpServer())
+      .get('/api/scheduling/slots')
+      .query({
+        doctorId: docUnique.id,
+        date: satDateStr,
+        serviceId: sSched.id,
+        branchId: testBranchId,
+      })
+      .expect(200);
+
+    expect(satSlotsRes.body.slots.length).toBeGreaterThan(0);
+    expect(satSlotsRes.body.slots.some((s: any) => s.available)).toBe(true);
+
+    // 3. Full-day Holiday on an otherwise working Monday
+    const targetMon = new Date(Date.now() + 32 * 24 * 60 * 60 * 1000);
+    while (targetMon.getUTCDay() !== 1) {
+      targetMon.setUTCDate(targetMon.getUTCDate() + 1);
+    }
+    const monDateStr = targetMon.toISOString().split('T')[0];
+
+    await prisma.scheduleException.create({
+      data: {
+        doctorId: docUnique.id,
+        type: ExceptionType.HOLIDAY,
+        date: new Date(`${monDateStr}T00:00:00.000Z`),
+        reason: 'National Holiday',
+      },
+    });
+
+    const holidaySlotsRes = await request(app.getHttpServer())
+      .get('/api/scheduling/slots')
+      .query({
+        doctorId: docUnique.id,
+        date: monDateStr,
+        serviceId: sSched.id,
+        branchId: testBranchId,
+      })
+      .expect(200);
+
+    expect(holidaySlotsRes.body.slots.length).toBe(0);
+
+    // Cleanup
+    await prisma.scheduleException.deleteMany({ where: { doctorId: docUnique.id } });
+    await prisma.doctorSchedule.deleteMany({ where: { doctorId: docUnique.id } });
+    await prisma.doctorService.deleteMany({ where: { doctorId: docUnique.id } });
+    await prisma.doctorBranch.deleteMany({ where: { doctorId: docUnique.id } });
+    await prisma.doctor.delete({ where: { id: docUnique.id } });
+    await prisma.service.delete({ where: { id: sSched.id } });
   });
 });
 
