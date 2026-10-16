@@ -503,7 +503,7 @@ export class AppointmentsService {
               expiresAt,
               tokenExpiresAt,
               serviceItems: {
-                create: txAuthoritative.serviceItems.map((item) => ({
+                create: txAuthoritative.serviceItems.map((item: any) => ({
                   serviceId: item.serviceId,
                   sortOrder: item.sortOrder,
                   serviceNameUz: item.serviceNameUz,
@@ -729,67 +729,31 @@ export class AppointmentsService {
     changedBy: string,
     user?: { role: StaffRole; doctorId?: string | null },
   ) {
-    const appointment = await this.prisma.appointment.findUnique({
+    const pre = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      include: { service: true, doctor: { include: { services: true } } },
+      select: { id: true, doctorId: true, status: true },
     });
 
-    if (!appointment) {
+    if (!pre) {
       throw new NotFoundException('Qabul topilmadi');
     }
 
     if (user && user.role === StaffRole.DOCTOR) {
-      if (!user.doctorId || appointment.doctorId !== user.doctorId) {
+      if (!user.doctorId || pre.doctorId !== user.doctorId) {
         throw new ForbiddenException('Faqat o\'zingizning qabullaringizni qayta rejalashtira olasiz');
       }
     }
 
-    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(appointment.status)) {
+    if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(pre.status)) {
       throw new BadRequestException('Tugallangan yoki bekor qilingan qabulni qayta rejalashtirib bo\'lmaydi');
     }
 
-    const settings = await this.prisma.clinicSettings.findFirst();
-    const timezone = settings?.timezone || 'Asia/Tashkent';
-    const minNoticeHours = settings?.minBookingNoticeHours ?? 2;
-    const maxHorizonDays = settings?.maxBookingHorizonDays ?? 60;
-
     const newStartTime = new Date(newStartTimeStr);
-    const nowUtc = new Date();
-
     if (isNaN(newStartTime.getTime())) {
       throw new BadRequestException('Noto\'g\'ri sana formati');
     }
 
-    // Validate booking window
-    const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
-    if (newStartTime < minNoticeTime) {
-      throw new BadRequestException(`Kamida ${minNoticeHours} soat oldin rejalashtirish lozim`);
-    }
-
-    const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
-    if (newStartTime > maxHorizonTime) {
-      throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga rejalashtirib bo\'lmaydi`);
-    }
-
-    // CRITICAL: Preserve duration and buffer snapshot! totalMinutes = durationMinutes + bufferMinutes
-    const bufferMinutes = appointment.bufferMinutes ?? settings?.bufferMinutes ?? 5;
-    const totalMinutes = appointment.durationMinutes + bufferMinutes;
-    const newEndTime = new Date(newStartTime.getTime() + totalMinutes * 60 * 1000);
-
-    const conflictingBeforeLock = await this.prisma.appointment.findFirst({
-      where: {
-        doctorId: appointment.doctorId,
-        status: { in: TIME_RESERVING_STATUSES },
-        id: { not: appointmentId },
-        startTime: { lt: newEndTime },
-        endTime: { gt: newStartTime },
-      },
-    });
-    if (conflictingBeforeLock) {
-      throw new ConflictException('Bu yangi vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
-    }
-
-    const lockKey = this.hashStringToInt(`doc_${appointment.doctorId}`);
+    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
 
     const maxRetries = 3;
     let updated: any;
@@ -797,80 +761,127 @@ export class AppointmentsService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         updated = await this.prisma.$transaction(async (tx) => {
+          // 1. Acquire doctor advisory lock
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-          // Revalidate current appointment state inside transaction
-          const [current] = await tx.$queryRaw<any[]>`
-            SELECT id, status, revision FROM "appointments" WHERE id = ${appointmentId} FOR UPDATE
+          // 2. Acquire row lock on appointment in consistent order
+          const [lockedRow] = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "appointments" WHERE id = ${appointmentId} FOR UPDATE
           `;
-          if (!current || ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(current.status)) {
+          if (!lockedRow) {
+            throw new NotFoundException('Qabul topilmadi');
+          }
+
+          // 3. Reread complete current appointment and relevant service items through tx AFTER acquiring locks
+          const currentAppt = await tx.appointment.findUnique({
+            where: { id: appointmentId },
+            include: {
+              doctor: { include: { branches: true, services: true } },
+              service: true,
+              branch: true,
+              patient: true,
+              serviceItems: { orderBy: { sortOrder: 'asc' } },
+            },
+          });
+
+          if (!currentAppt) {
+            throw new NotFoundException('Qabul topilmadi');
+          }
+
+          // 4. Re-check terminal status inside lock
+          if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(currentAppt.status)) {
             throw new BadRequestException('Qabul holati o\'zgarganligi sababli qayta rejalashtirib bo\'lmaydi');
           }
 
-          // Check doctor eligibility and active status inside transaction
-          const apptItems = await tx.appointmentServiceItem.findMany({
-            where: { appointmentId },
-            select: { serviceId: true },
-          });
-          const itemServiceIds = apptItems.map((i) => i.serviceId).filter(Boolean) as string[];
-          const servicesToCheck = itemServiceIds.length > 0 ? itemServiceIds : [appointment.serviceId];
+          // 5. Read clinic settings and re-apply current booking window rules inside tx on every attempt
+          const settings = await tx.clinicSettings.findFirst();
+          const timezone = settings?.timezone || 'Asia/Tashkent';
+          const minNoticeHours = settings?.minBookingNoticeHours ?? 2;
+          const maxHorizonDays = settings?.maxBookingHorizonDays ?? 60;
+          const nowUtc = new Date();
 
-          const doctor = await tx.doctor.findUnique({
-            where: { id: appointment.doctorId },
-            include: { branches: true, services: true },
-          });
-          if (!doctor || !doctor.isActive || doctor.isArchived) {
+          const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
+          if (newStartTime < minNoticeTime) {
+            throw new BadRequestException(`Kamida ${minNoticeHours} soat oldin rejalashtirish lozim`);
+          }
+
+          const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
+          if (newStartTime > maxHorizonTime) {
+            throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga rejalashtirib bo\'lmaydi`);
+          }
+
+          // 6. Calculate new end strictly from current stored duration and buffer (recomputed on every retry)
+          const txBufferMinutes = currentAppt.bufferMinutes ?? settings?.bufferMinutes ?? 5;
+          const txDurationMinutes = currentAppt.durationMinutes;
+          const txTotalMinutes = txDurationMinutes + txBufferMinutes;
+          const txNewEndTime = new Date(newStartTime.getTime() + txTotalMinutes * 60 * 1000);
+
+          // 7. Explicit policy for unresolved legacy bundles: do not claim eligibility verified when component services are unknown
+          const hasUnresolvedBundle =
+            currentAppt.serviceItems.some(
+              (si: any) => si.isLegacyBundle || si.legacyProvenance === 'AMBIGUOUS_BUNDLE' || !si.serviceId,
+            ) || (!currentAppt.serviceId && currentAppt.serviceItems.length === 0);
+
+          if (hasUnresolvedBundle) {
+            throw new BadRequestException(
+              'Tarixiy ko\'p xizmatli qabul tarkibi noaniq bo\'lganligi sababli qayta rejalashtirish xodimlar ko\'rib chiqishini talab qiladi',
+            );
+          }
+
+          // 8. Check doctor activity and branch assignment
+          if (!currentAppt.doctor || !currentAppt.doctor.isActive || currentAppt.doctor.isArchived) {
             throw new BadRequestException('Shifokor faol emas yoki arxivlangan');
           }
-          const doctorServiceIds = doctor.services.map((s) => s.serviceId);
-          for (const sId of servicesToCheck) {
-            if (!doctorServiceIds.includes(sId)) {
-              throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatishga biriktirilmagan');
-            }
-          }
 
-          // Check service eligibility and active status inside transaction
-          const services = await tx.service.findMany({
-            where: { id: { in: servicesToCheck } },
-          });
-          if (services.length !== servicesToCheck.length || services.some((s) => !s.isActive || s.isArchived)) {
-            throw new BadRequestException('Xizmat faol emas yoki arxivlangan');
-          }
-
-          // Check branch eligibility if set
-          if (appointment.branchId) {
-            const branch = await tx.branch.findUnique({
-              where: { id: appointment.branchId },
-            });
-            if (!branch || !branch.isActive) {
+          if (currentAppt.branchId) {
+            if (!currentAppt.branch || !currentAppt.branch.isActive) {
               throw new BadRequestException('Filial faol emas');
             }
-            const isAssigned = doctor.branches.some((b) => b.branchId === appointment.branchId);
+            const isAssigned = currentAppt.doctor.branches.some((b) => b.branchId === currentAppt.branchId);
             if (!isAssigned) {
               throw new BadRequestException('Shifokor bu filialga biriktirilmagan');
             }
           }
 
-          // Validate working hours inside transaction lock using tx!
+          // 9. Check every known service's activity and doctor assignment inside transaction
+          const itemServiceIds = currentAppt.serviceItems.map((si) => si.serviceId).filter(Boolean) as string[];
+          const servicesToCheck = itemServiceIds.length > 0 ? itemServiceIds : (currentAppt.serviceId ? [currentAppt.serviceId] : []);
+
+          if (servicesToCheck.length > 0) {
+            const activeServices = await tx.service.findMany({
+              where: { id: { in: servicesToCheck } },
+            });
+            if (activeServices.length !== servicesToCheck.length || activeServices.some((s) => !s.isActive || s.isArchived)) {
+              throw new BadRequestException('Tanlangan xizmatlardan biri faol emas yoki arxivlangan');
+            }
+            const doctorServiceIds = currentAppt.doctor.services.map((s) => s.serviceId);
+            for (const sId of servicesToCheck) {
+              if (!doctorServiceIds.includes(sId)) {
+                throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatishga biriktirilmagan');
+              }
+            }
+          }
+
+          // 10. Validate working hours inside transaction lock using tx and txNewEndTime!
           const isWorking = await this.schedulingService.isDoctorWorkingAt(
-            appointment.doctorId,
+            currentAppt.doctorId,
             newStartTime,
-            newEndTime,
+            txNewEndTime,
             timezone,
-            appointment.branchId || undefined,
+            currentAppt.branchId || undefined,
             tx,
           );
           if (!isWorking) {
             throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
-          // Double-check conflicting slots (excluding current appointment)
+          // 11. Double-check conflicting slots (excluding current appointment) using txNewEndTime
           const conflicting = await tx.appointment.findFirst({
             where: {
-              doctorId: appointment.doctorId,
+              doctorId: currentAppt.doctorId,
               status: { in: TIME_RESERVING_STATUSES },
               id: { not: appointmentId },
-              startTime: { lt: newEndTime },
+              startTime: { lt: txNewEndTime },
               endTime: { gt: newStartTime },
             },
           });
@@ -879,16 +890,17 @@ export class AppointmentsService {
             throw new ConflictException('Yangi tanlangan vaqt boshqa bemor tomonidan band qilindi');
           }
 
-          // Adjust management token expiry when moving appointment into future (extend to 7 days after appointment)
-          const newExtendedExpiry = new Date(newEndTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+          // 12. Adjust management token expiry when moving appointment into future
+          const newExtendedExpiry = new Date(txNewEndTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const newRevision = currentAppt.revision + 1;
 
           const appt = await tx.appointment.update({
             where: { id: appointmentId },
             data: {
               startTime: newStartTime,
-              endTime: newEndTime,
-              bufferMinutes,
-              revision: { increment: 1 },
+              endTime: txNewEndTime,
+              bufferMinutes: txBufferMinutes,
+              revision: newRevision,
               tokenExpiresAt: newExtendedExpiry,
             },
             include: {
@@ -900,12 +912,13 @@ export class AppointmentsService {
             },
           });
 
+          // 13. Record actual prior start time in history and audit log
           await tx.appointmentStatusHistory.create({
             data: {
               appointmentId,
-              fromStatus: current.status as AppointmentStatus,
-              toStatus: current.status as AppointmentStatus,
-              reason: `Qayta rejalashtirildi: ${appointment.startTime.toISOString()} -> ${newStartTime.toISOString()}`,
+              fromStatus: currentAppt.status as AppointmentStatus,
+              toStatus: currentAppt.status as AppointmentStatus,
+              reason: `Qayta rejalashtirildi: ${currentAppt.startTime.toISOString()} -> ${newStartTime.toISOString()}`,
               changedBy: changedBy || 'patient',
             },
           });
@@ -916,11 +929,18 @@ export class AppointmentsService {
               action: 'appointment.rescheduled',
               entity: 'Appointment',
               entityId: appointmentId,
-              details: { oldStartTime: appointment.startTime, newStartTime, revision: appt.revision } as Prisma.InputJsonValue,
+              details: {
+                oldStartTime: currentAppt.startTime,
+                newStartTime,
+                durationMinutes: txDurationMinutes,
+                bufferMinutes: txBufferMinutes,
+                newEndTime: txNewEndTime,
+                revision: appt.revision,
+              } as Prisma.InputJsonValue,
             },
           });
 
-          // Transactionally durable notification intent for rescheduling
+          // 14. Transactionally durable notification intent for rescheduling
           await this.notificationsService.enqueueAppointmentRescheduled(
             {
               id: appt.id,
@@ -1078,7 +1098,8 @@ export class AppointmentsService {
               },
             });
 
-            // 8. Transactionally update pending reminder jobs so the notification worker does NOT cancel them on revision mismatch
+            // 8. Coherent transactional reminder lifecycle covering PENDING and PROCESSING jobs:
+            // Update PENDING reminder jobs so they reflect the new revision
             await tx.notificationJob.updateMany({
               where: {
                 appointmentId: currentAppt.id,
@@ -1089,6 +1110,48 @@ export class AppointmentsService {
                 appointmentRevision: newRevision,
               },
             });
+
+            // Ensure an eligible upcoming appointment retains a valid reminder.
+            // Check if there is an active (PENDING or PROCESSING) or delivered (SENT or SIMULATED) reminder.
+            const existingActiveOrDelivered = await tx.notificationJob.findFirst({
+              where: {
+                appointmentId: currentAppt.id,
+                templateKey: 'appointment_reminder',
+                status: {
+                  in: [
+                    NotificationStatus.PENDING,
+                    NotificationStatus.PROCESSING,
+                    NotificationStatus.SENT,
+                    NotificationStatus.SIMULATED,
+                  ],
+                },
+              },
+            });
+
+            const nowUtc = new Date();
+            if (!existingActiveOrDelivered && currentAppt.startTime > nowUtc) {
+              const reminderTime = new Date(currentAppt.startTime.getTime() - 2 * 60 * 60 * 1000);
+              // Defined behavior: If scheduled reminder time has already arrived, schedule for immediate dispatch
+              const scheduledFor = reminderTime > nowUtc ? reminderTime : nowUtc;
+              await this.notificationsService.enqueue(
+                {
+                  channel: currentAppt.patient?.email ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+                  templateKey: 'appointment_reminder',
+                  recipient: currentAppt.patient?.email || currentAppt.patient?.phone || '',
+                  appointmentId: currentAppt.id,
+                  appointmentRevision: newRevision,
+                  scheduledFor,
+                  deduplicationKey: `reminder_${currentAppt.id}_rev${newRevision}`,
+                  payload: {
+                    appointmentId: currentAppt.id,
+                    serviceName: currentAppt.serviceName,
+                    startTime: currentAppt.startTime.toISOString(),
+                    formattedTime: this.notificationsService.formatTashkentTime(currentAppt.startTime),
+                  },
+                },
+                tx,
+              );
+            }
 
             // 9. Record previous values, adjustments, and reason in audit log
             const serviceItemsTotal = currentAppt.serviceItems.reduce((acc, i) => acc + i.durationMinutes, 0);

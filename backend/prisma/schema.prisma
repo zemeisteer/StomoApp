@@ -454,11 +454,14 @@ model AppointmentServiceItem {
   durationMinutes Int         @map("duration_minutes")
   priceFrom       Int?        @map("price_from") // In minor units (tiyin)
   isLegacyBundle  Boolean     @default(false) @map("is_legacy_bundle")
+  originalServiceId String?   @map("original_service_id")
+  legacyProvenance  String    @default("MODERN") @map("legacy_provenance")
   
   createdAt       DateTime    @default(now()) @map("created_at")
 
   @@index([appointmentId])
   @@index([serviceId])
+  @@index([legacyProvenance])
   @@map("appointment_service_items")
 }
 

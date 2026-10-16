@@ -112,4 +112,76 @@ export class ServicesService {
       orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }],
     });
   }
+
+  async getLegacyReviewReport() {
+    const records = await this.prisma.appointmentServiceItem.findMany({
+      where: {
+        OR: [
+          { legacyProvenance: 'AMBIGUOUS_BUNDLE' },
+          { isLegacyBundle: true },
+          { serviceId: null },
+        ],
+      },
+      include: {
+        appointment: {
+          select: {
+            id: true,
+            status: true,
+            startTime: true,
+            serviceName: true,
+            patient: { select: { fullName: true, phone: true } },
+            doctor: { select: { firstNameUz: true, lastNameUz: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const verifiedCount = await this.prisma.appointmentServiceItem.count({
+      where: { legacyProvenance: 'VERIFIED_SINGLE' },
+    });
+
+    return {
+      unresolvedCount: records.length,
+      verifiedHistoricalCount: verifiedCount,
+      records: records.map((r) => ({
+        id: r.id,
+        appointmentId: r.appointmentId,
+        serviceNameUz: r.serviceNameUz,
+        originalServiceId: r.originalServiceId,
+        durationMinutes: r.durationMinutes,
+        priceFrom: r.priceFrom,
+        legacyProvenance: r.legacyProvenance,
+        isLegacyBundle: r.isLegacyBundle,
+        appointment: r.appointment,
+      })),
+    };
+  }
+
+  async reconcileLegacyRecord(itemId: string, dto: { serviceId?: string; action?: string }) {
+    const item = await this.prisma.appointmentServiceItem.findUnique({
+      where: { id: itemId },
+    });
+    if (!item) throw new NotFoundException('Xizmat bandi topilmadi');
+
+    const targetServiceId = dto.serviceId || item.originalServiceId;
+    if (!targetServiceId) {
+      throw new BadRequestException('Bog\'lash uchun xizmat tanlanishi lozim');
+    }
+
+    const service = await this.prisma.service.findUnique({
+      where: { id: targetServiceId },
+    });
+    if (!service) throw new NotFoundException('Katalog xizmati topilmadi');
+
+    return this.prisma.appointmentServiceItem.update({
+      where: { id: itemId },
+      data: {
+        serviceId: service.id,
+        serviceNameRu: service.nameRu,
+        isLegacyBundle: false,
+        legacyProvenance: 'RESOLVED_MANUAL',
+      },
+    });
+  }
 }

@@ -273,18 +273,41 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
 | Regression 35 | Appointment-aware availability uses stored appointment duration/buffer and excludes self from overlap | **PASS** |
 | Regression 36 | Doctor schedule accuracy: handles different weekday hours, lunch breaks, and overtime-only dates correctly | **PASS** |
 
+#### Tests Executed for Reschedule Stale Reads, Reminder Lifecycle, Agreement, Strict Queries & Honest Provenance (Regressions 37–41)
+| Test | Description | Result |
+|---|---|---|
+| Regression 37 | Deterministic concurrent tests for override versus reschedule, in both execution orders (interval = duration + buffer, no overlap) | **PASS** |
+| Regression 38 | Controlled fake provider race test for duration override reminder lifecycle (in-flight PROCESSING kept, reschedule cancels stale) | **PASS** |
+| Regression 39 | Reschedule availability agrees with reschedule execution (doctor assignment, terminal status, unresolved bundle 400 review policy) | **PASS** |
+| Regression 40 | Strict reschedule slot and booking slot query validation (rejects Feb 30, Month 13, April 31, invalid TZ, enforces booking horizon) | **PASS** |
+| Regression 41 | Legacy classification without guessing, reconciliation, and transparent analytics (legitimate comma services, review endpoint, reconciliation) | **PASS** |
+
 #### Overall Build & Verification Status
 | Check | Command | Result |
 |---|---|---|
 | Forward Migration (Repair Historical Items) | Applied to `dentacare` & `dentacare_test` | **APPLIED (`20261015170000_repair_historical_service_items`)** |
+| Forward Migration (Repair Legacy Provenance) | Applied to `dentacare` & `dentacare_test` | **APPLIED (`20261016180000_repair_legacy_provenance`)** |
 | Backend Build | `npm run build` | **PASS (code 0)** |
 | Backend ESLint | `npm run lint` | **PASS (code 0, 0 errors, 0 warnings)** |
 | Frontend Build | `npm run build` | **PASS (code 0, 28/28 routes prerendered)** |
 | Frontend ESLint | `npm run lint` | **PASS (code 0, 0 errors)** |
 | Dedicated Test Database | `dentacare_test` (PostgreSQL 18) | **CONFIGURED & MIGRATED** |
-| Full E2E Test Suite | `npm run test:e2e` | **PASS (36/36 passed, 0 failed in 17.7s)** |
+| Full E2E Test Suite | `npm run test:e2e` | **PASS (41/41 passed, 0 failed in 33.3s)** |
 | Live Dev Servers | Backend (:4000) & Frontend (:3000) | **HEALTHY & RESPONDING (HTTP 200)** |
-| Comprehensive Browser Verification | `node test/browser-workflow.js` | **PASS (All 12 browser workflows and screenshots generated)** |
+| Live E2E Integration Script | `node scratch/test-live-e2e-flow.js` | **PASS (All 6 live integration steps succeeded)** |
+| Chrome DevTools Protocol Browser Suite | `node scratch/browser-cdp-suite.js` | **PASS (All browser workflows executed, screenshots captured)** |
+| Visual Browser Verification | Real Google Chrome (1440px Desktop, 390px Mobile) | **VERIFIED (High-resolution screenshots in artifacts)** |
+
+### Visual Browser Verification vs HTTP Tests
+- **HTTP Tests**: Validated via Jest E2E suite (`backend/test/app.e2e-spec.ts`, 41 regressions) executing HTTP requests against NestJS application controllers connected to isolated `dentacare_test` database.
+- **Visual Browser Verification**: Executed live against Next.js dev server (:3000) and NestJS backend (:4000) running with PostgreSQL database `dentacare` using real Google Chrome via Chrome DevTools Protocol (CDP). Captured full-page rendered screenshots:
+  - `desktop_homepage_verified.png`: 3D interactive molar tooth hero with orbit controls fallback, animated teal-and-white design tokens, header navigation, and UZ/RU switcher.
+  - `mobile_homepage_uz.png`: 390px mobile viewport in Uzbek showing responsive hero banner, hamburger navigation, and feature badges.
+  - `mobile_homepage_ru.png`: 390px mobile viewport in Russian showing localized hero copy ("Здоровая улыбка — надежное и безболезненное лечение").
+  - `browser_walkthrough_01_two_services.png`: Step 1 clinic branch selection with teal border highlight on active branch.
+  - `desktop_booking_doctor.png`: Step 2 service catalog showing individual durations and prices with 1-to-3 selection limit.
+  - `browser_08_mobile_390px_uz.png`: 390px mobile booking flow in Uzbek with branch list and primary CTA button.
+  - `browser_walkthrough_06_admin_dashboard.png`: Dark mode admin login portal with teal security badge, input validation, and password masking.
 
 ### Remaining Limitations & Honest Blockers
 1. **Third-Party External Notification Gateways (Eskiz SMS & Telegram Bot)**:
@@ -293,7 +316,8 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
    - In development/testing, console sinks and simulated states are used to guarantee zero unwanted patient message dispatch while exercising the outbox queue and lease protocol.
 2. **WebGL / 3D Canvas in Headless Environments**:
    - In headless environments without hardware GPU acceleration, Three.js falls back to the clean procedural SVG poster fallback as designed. In real Google Chrome with hardware acceleration, the 3D interactive molar tooth renders with full touch-pan-y orbit controls.
-3. **Playwright Driver in Local Sandbox**:
-   - Automated browser subagent launch encountered a 404 driver download restriction from AzureEdge in the current restricted network environment; comprehensive real browser verification was executed directly via local Google Chrome (`puppeteer-core`) across Desktop (1440px), Tablet (768px), and Mobile (390px).
+3. **In-Flight External Provider Network Calls During Concurrent Overrides**:
+   - When an SMS or Telegram API request has already been dispatched over the wire before an admin duration override completes, the external network packet cannot be aborted remotely. Database state is transactionally protected against stale revision updates, and the delivered state is properly synchronized upon provider callback.
+
 
 

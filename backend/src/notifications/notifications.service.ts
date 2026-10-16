@@ -448,8 +448,22 @@ export class NotificationsService {
         return;
       }
 
-      // Check revision match: if appointment was rescheduled, cancel stale reminder!
-      if (job.appointmentRevision !== null && appt.revision !== job.appointmentRevision) {
+      /**
+       * Delivery Limitations Notice:
+       * Once an external provider network call (Eskiz SMS, SMTP, Telegram) is initiated,
+       * that HTTP/TCP packet has physically left the server and is in flight on the external network.
+       * If the appointment status or duration changes concurrently while the provider call is in flight,
+       * that external transmission cannot be aborted across the wire.
+       * To maintain database integrity, completion is recorded using conditional lease ownership
+       * (WHERE id = :id AND lease_token = :token) so expired or revoked workers cannot corrupt state.
+       */
+
+      // Check if appointment was rescheduled to a DIFFERENT start time
+      const payloadStartTime = job.payload?.startTime ? new Date(job.payload.startTime).getTime() : null;
+      const apptStartTime = appt.startTime.getTime();
+      const startTimeChanged = payloadStartTime !== null && payloadStartTime !== apptStartTime;
+
+      if (startTimeChanged) {
         await this.prisma.$executeRaw`
           UPDATE "notification_jobs"
           SET status = 'CANCELLED'::"notification_status",
@@ -460,22 +474,28 @@ export class NotificationsService {
         return;
       }
 
-      // Safe policy for historical jobs with null revision: cancel if startTime differs or revision > 1
-      if (
-        job.appointmentRevision === null &&
-        (appt.revision > 1 ||
-          (job.payload?.startTime &&
-            new Date(job.payload.startTime).toISOString() !== appt.startTime.toISOString()))
-      ) {
+      // Check if a newer reminder for this appointment has already been sent
+      const newerDelivered = await this.prisma.notificationJob.findFirst({
+        where: {
+          appointmentId: job.appointmentId,
+          templateKey: 'appointment_reminder',
+          id: { not: job.id },
+          status: { in: [NotificationStatus.SENT, NotificationStatus.SIMULATED] },
+        },
+      });
+      if (newerDelivered) {
         await this.prisma.$executeRaw`
           UPDATE "notification_jobs"
           SET status = 'CANCELLED'::"notification_status",
-              "last_error" = 'Eski eslatma vaqti joriy qabul vaqtiga mos kelmaganligi sababli bekor qilindi',
+              "last_error" = 'Ushbu qabul uchun yangi eslatma allaqachon yuborilgan',
               "lease_token" = NULL
           WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
         `;
         return;
       }
+
+      // If duration changed without rescheduling start time, the appointment revision incremented
+      // but the reminder time is still valid! Worker proceeds with delivery without cancelling.
     }
 
     // 2. Verify worker STILL holds the lease before initiating delivery!

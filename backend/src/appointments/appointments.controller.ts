@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AppointmentsService } from './appointments.service';
-import { SchedulingService } from '../scheduling/scheduling.service';
+import { SchedulingService, IsStrictCalendarDate, IsValidTimezone } from '../scheduling/scheduling.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -85,6 +85,17 @@ export class StatusChangeDto {
 export class RescheduleDto {
   @IsDateString()
   startTime!: string;
+}
+
+export class QueryRescheduleSlotsDto {
+  @IsString()
+  @IsStrictCalendarDate()
+  date!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsValidTimezone()
+  timezone?: string;
 }
 
 export class ListQueryDto {
@@ -213,17 +224,13 @@ export class PublicBookingController {
   @Public()
   async getRescheduleSlots(
     @Param('token') token: string,
-    @Query('date') date: string,
-    @Query('timezone') timezone?: string,
+    @Query() query: QueryRescheduleSlotsDto,
   ) {
-    if (!date) {
-      throw new BadRequestException('Sana ko\'rsatilishi shart');
-    }
     const appointment = await this.service.findRawByToken(token);
     return this.schedulingService.getRescheduleSlotsForAppointment(
       appointment.id,
-      date,
-      timezone || 'Asia/Tashkent',
+      query.date,
+      query.timezone,
     );
   }
 
@@ -231,10 +238,9 @@ export class PublicBookingController {
   @Public()
   async getStatusRescheduleSlots(
     @Param('token') token: string,
-    @Query('date') date: string,
-    @Query('timezone') timezone?: string,
+    @Query() query: QueryRescheduleSlotsDto,
   ) {
-    return this.getRescheduleSlots(token, date, timezone);
+    return this.getRescheduleSlots(token, query);
   }
 }
 
@@ -325,18 +331,14 @@ export class AppointmentsController {
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   async getAdminRescheduleSlots(
     @Param('id') id: string,
-    @Query('date') date: string,
-    @Query('timezone') timezone: string,
+    @Query() query: QueryRescheduleSlotsDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    if (!date) {
-      throw new BadRequestException('Sana ko\'rsatilishi shart');
-    }
     const appointment = await this.service.findById(id, user);
     return this.schedulingService.getRescheduleSlotsForAppointment(
       appointment.id,
-      date,
-      timezone || 'Asia/Tashkent',
+      query.date,
+      query.timezone,
     );
   }
 }

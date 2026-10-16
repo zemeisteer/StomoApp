@@ -272,3 +272,56 @@
   - Strict ESLint checks passing (`npm run lint` - 0 errors).
   - 12 high-resolution browser verification screenshots captured across Desktop (1440px), Tablet (768px), and Mobile (390px) using local Chrome `puppeteer-core`. (**Verified**)
 
+---
+
+## Phase 10: Stale Read Elimination on Reschedule, Transactional Reminder Lifecycle During Duration Overrides, Reschedule Availability vs Execution Agreement, Strict Query DTO Validation, Honest Provenance Classification & Forward Repair Migration, and Frontend Availability Guidance (COMPLETED & VERIFIED)
+- [x] **Elimination of Stale Reads During Rescheduling**:
+  - Inside `AppointmentsService.reschedule`, acquires doctor advisory lock (`pg_advisory_xact_lock`) and appointment row lock (`SELECT id FROM appointments WHERE id = :id FOR UPDATE`) before reading appointment data.
+  - Re-reads complete current appointment and relevant `serviceItems` through `tx` inside the locked transaction.
+  - Calculates `txNewEndTime` strictly from current stored duration and buffer (`currentAppt.durationMinutes + txBufferMinutes`).
+  - Recomputes end time, schedule validation, conflict detection, persistence, token expiry, notification intent, and audit history on every transaction retry.
+  - Records actual prior start time in `appointmentStatusHistory` and `auditLog` (`details.oldStartTime` -> `details.newStartTime`).
+  - Re-applies current booking-window rules (`minBookingNoticeHours`, `maxBookingHorizonDays`) inside `tx`.
+  - Added deterministic concurrent tests for override versus reschedule in both execution orders (Regression 37). (**Verified**)
+- [x] **Transactional Reminder Lifecycle During Duration Overrides**:
+  - In `notifications.service.ts`: Updated worker preflight check in `deliverJob` so in-flight `PROCESSING` reminders are NOT rejected as stale if `startTime` is unchanged (duration override).
+  - Re-scheduling with actual `startTime` change or newer delivered reminder triggers clean obsolete cancellation.
+  - Preserves worker lease ownership checks (`leaseToken`) and idempotency deduplication keys.
+  - In `appointments.service.ts`: `overrideDuration` updates `PENDING` reminder jobs with incremented revision. If no active or delivered reminder exists and appointment is upcoming (`startTime > now`), enqueues a replacement reminder with `scheduledFor = max(startTime - 2h, nowUtc)` and deduplication key `reminder_${currentAppt.id}_rev${newRevision}`.
+  - Documented delivery limitations when an external provider call is already in flight across the wire.
+  - Added race test with controlled fake provider and explicit synchronization (Regression 38). (**Verified**)
+- [x] **Reschedule Availability & Execution Agreement**:
+  - Unified eligibility rules across `getRescheduleSlotsForAppointment` and `reschedule`:
+    - Doctor activity and archive status.
+    - Branch activity and doctor branch assignment.
+    - Every known service's activity and doctor assignment.
+    - Exclusion of the appointment's own reservation from conflict checks.
+    - Stored duration and buffer snapshots.
+  - Explicit policy for unresolved legacy bundles: if `isLegacyBundle: true` or `legacyProvenance === 'AMBIGUOUS_BUNDLE'`, both availability and mutation fail closed with a controlled 400 Bad Request requiring staff review (`'Tarixiy ko\'p xizmatli qabul tarkibi noaniq bo\'lganligi sababli qayta rejalashtirish xodimlar ko\'rib chiqishini talab qiladi'`).
+  - Added Regression 39 testing that removing a doctor's secondary-service assignment affects both availability and rescheduling consistently. (**Verified**)
+- [x] **Strict Reschedule Slot & Booking Slot Query Validation**:
+  - Implemented `validateCalendarDate` and `validateTimezone`:
+    - Enforces exact `YYYY-MM-DD` format.
+    - Rejects impossible calendar dates (February 30, Month 13, April 31) with controlled 400 Bad Request.
+    - Validates timezone using `Intl.DateTimeFormat`.
+    - Applied configured booking horizon (`maxBookingHorizonDays`) consistently.
+  - Created `IsStrictCalendarDate` and `IsValidTimezone` class-validator decorators used across `QuerySlotsDto` and `QueryRescheduleSlotsDto`.
+  - Added Regression 40 covering impossible dates, malformed inputs, invalid timezones, and horizon limits. (**Verified**)
+- [x] **Honest Historical Classification Without Guessing & Forward Repair Migration**:
+  - Added `original_service_id` and `legacy_provenance` (`MODERN`, `VERIFIED_SINGLE`, `AMBIGUOUS_BUNDLE`, `RESOLVED_MANUAL`) to `AppointmentServiceItem` model.
+  - Created forward migration `20261016180000_repair_legacy_provenance` applied to `dentacare` and `dentacare_test`.
+  - Reclassified legitimate comma-containing catalog services as `VERIFIED_SINGLE`, preserving `service_id` and catalog linkage.
+  - Added Admin Legacy Review endpoint (`GET /api/services/admin/legacy-review`) and Reconciliation endpoint (`POST /api/services/admin/reconcile-legacy`).
+  - Added `unresolvedRecords` transparency object to `getOverview` in `analytics.service.ts`.
+  - Added Regression 41 testing legitimate comma-containing services, renamed services, bundles, review, and reconciliation. (**Verified**)
+- [x] **Frontend Availability Guidance**:
+  - Public doctor API (`getDoctors`, `getDoctorBySlug`) now provides sanitized `exceptions` (`type`, `date`, `startTime`, `endTime`) without leaking internal notes.
+  - Frontend booking UI computes date availability based on doctor exceptions (overtime-only, holidays, full-day leaves) and working schedules.
+  - Clean warning and date jumping guidance when dates are fully booked or off-schedule. (**Verified**)
+- [x] **Full Test Suite & Browser Verification**:
+  - All 41/41 backend integration & regression tests passing (`npm run test:e2e` in 33.3s).
+  - Backend build (`nest build`) and ESLint passing (0 errors, 0 warnings).
+  - Frontend build (`next build`) passing (28/28 static pages prerendered) and ESLint passing.
+  - Real browser workflows executed in Google Chrome via Chrome DevTools Protocol across Desktop (1440px) and Mobile (390px) in Uzbek and Russian with screenshots captured in artifact directory. (**Verified**)
+
+

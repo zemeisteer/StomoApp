@@ -100,6 +100,19 @@ export class CreateServiceDto {
 
 export class UpdateServiceDto extends PartialType(CreateServiceDto) {}
 
+export class ReconcileLegacyDto {
+  @IsString()
+  itemId!: string;
+
+  @IsOptional()
+  @IsString()
+  serviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  action?: string;
+}
+
 @Controller('services')
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
@@ -135,6 +148,20 @@ export class ServicesController {
   }
 
   // Admin
+  @Get('admin/legacy-review')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  getLegacyReview() {
+    return this.servicesService.getLegacyReviewReport();
+  }
+
+  @Post('admin/reconcile-legacy')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  reconcileLegacy(@Body() dto: ReconcileLegacyDto) {
+    return this.servicesService.reconcileLegacyRecord(dto.itemId, dto);
+  }
+
   @Get('admin/all')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.EDITOR)

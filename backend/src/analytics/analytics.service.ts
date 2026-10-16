@@ -573,6 +573,10 @@ export class AnalyticsService {
       statusBreakdown: statusMap,
       popularServices,
       legacyBundlesCount,
+      unresolvedRecords: {
+        unresolvedCount: legacyBundlesCount,
+        note: 'Tarixiy ko\'p xizmatli noaniq qabullar katalog xizmatlari statistikasidan chiqarilgan',
+      },
       doctorUtilization,
       leads: {
         totalLeads,

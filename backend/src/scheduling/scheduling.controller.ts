@@ -8,7 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { SchedulingService } from './scheduling.service';
+import { SchedulingService, IsStrictCalendarDate, IsValidTimezone } from './scheduling.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -78,7 +78,7 @@ export class QuerySlotsDto {
   doctorId!: string;
 
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Sana YYYY-MM-DD formatida bo\'lishi kerak' })
+  @IsStrictCalendarDate()
   date!: string;
 
   @IsOptional()
@@ -92,6 +92,11 @@ export class QuerySlotsDto {
   @IsOptional()
   @IsString()
   branchId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsValidTimezone()
+  timezone?: string;
 }
 
 @Controller('scheduling')
@@ -107,7 +112,7 @@ export class SchedulingController {
       query.date,
       query.serviceId,
       query.branchId,
-      undefined,
+      query.timezone,
       query.serviceIds ? query.serviceIds.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
     );
   }

@@ -1140,7 +1140,22 @@ function BookingContent() {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-60 overflow-y-auto p-1">
+                <div className="space-y-3">
+                  {availableSlots.length > 0 && availableSlots.every((s: any) => !s.available) && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-medium flex items-center justify-between">
+                      <span>{language === 'ru' ? 'Bce окна на этот день уже заняты' : 'Ushbu kundagi barcha qabul vaqtlari band qilingan'}</span>
+                      {nextWorkingDate !== selectedDate && (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectDate(nextWorkingDate)}
+                          className="px-3 py-1 bg-amber-700 text-white rounded-lg text-xs font-bold hover:bg-amber-800 transition-colors"
+                        >
+                          {language === 'ru' ? 'Следующая дата' : 'Keyingi sana'} ({nextWorkingDate})
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 max-h-60 overflow-y-auto p-1">
                   {availableSlots.map((slot) => {
                     const slotDate = new Date(slot.startTime);
                     const timeStr = slotDate.toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'uz-UZ', {
@@ -1172,7 +1187,8 @@ function BookingContent() {
                     );
                   })}
                 </div>
-              )}
+              </div>
+            )}
             </div>
 
             <div className="pt-4 flex items-center justify-between">

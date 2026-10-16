@@ -92,6 +92,14 @@ export class PublicService {
           where: { isActive: true },
           include: { branch: true },
         },
+        exceptions: {
+          select: {
+            type: true,
+            date: true,
+            startTime: true,
+            endTime: true,
+          },
+        },
       },
       orderBy: { sortOrder: 'asc' },
     });
@@ -128,6 +136,18 @@ export class PublicService {
         },
         services: {
           include: { service: true },
+        },
+        schedules: {
+          where: { isActive: true },
+          include: { branch: true },
+        },
+        exceptions: {
+          select: {
+            type: true,
+            date: true,
+            startTime: true,
+            endTime: true,
+          },
         },
       },
     });

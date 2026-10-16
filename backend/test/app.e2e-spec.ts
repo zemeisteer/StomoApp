@@ -9,6 +9,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/auth/auth.service';
+import { NotificationsService } from '../src/notifications/notifications.service';
+import { AppointmentsService } from '../src/appointments/appointments.service';
 
 function parseAndValidateTestDatabaseUrl(rawUrl: string): string {
   try {
@@ -51,6 +53,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   let testServiceId: string;
   let testBranchId: string;
   let ownerUserId: string;
+  let notificationsService: NotificationsService;
+  let appointmentsService: AppointmentsService;
 
   // Run-specific fixture prefix (does NOT delete broad phone prefixes)
   const runId = Date.now().toString().slice(-5);
@@ -88,6 +92,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
 
     prisma = app.get(PrismaService);
     authService = app.get(AuthService);
+    notificationsService = app.get(NotificationsService);
+    appointmentsService = app.get(AppointmentsService);
 
     // Verify connected database identity before mutations
     const [{ current_database }] = await prisma.$queryRaw<[{ current_database: string }]>`SELECT current_database();`;
@@ -2547,6 +2553,662 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     await prisma.doctorBranch.deleteMany({ where: { doctorId: docUnique.id } });
     await prisma.doctor.delete({ where: { id: docUnique.id } });
     await prisma.service.delete({ where: { id: sSched.id } });
+  });
+
+  it('Regression 37: Deterministic concurrent tests for override versus reschedule, in both execution orders', async () => {
+    const docConc = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Concurrent',
+        lastNameUz: 'Doctor',
+        firstNameRu: 'Конкурент',
+        lastNameRu: 'Доктор',
+        slug: `concurrent-doc-${runId}`,
+        isActive: true,
+      },
+    });
+    const srvConc = await prisma.service.create({
+      data: {
+        nameUz: 'Concurrent Srv',
+        nameRu: 'Конкурент',
+        slug: `conc-srv-${runId}`,
+        durationMinutes: 30,
+        priceFrom: 10000000,
+      },
+    });
+    await prisma.doctorService.create({
+      data: { doctorId: docConc.id, serviceId: srvConc.id },
+    });
+    await prisma.doctorBranch.create({
+      data: { doctorId: docConc.id, branchId: testBranchId },
+    });
+
+    for (const d of [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]) {
+      await prisma.doctorSchedule.create({
+        data: { doctorId: docConc.id, dayOfWeek: d, branchId: testBranchId, startTime: '08:00', endTime: '20:00', isActive: true },
+      });
+    }
+
+    const testSlot1 = getNextWorkingSlot(5, 9, 0);
+    const patientConc = await prisma.patient.create({
+      data: { fullName: 'Concurrent Patient', phone: `${testPhonePrefix}91` },
+    });
+
+    // ORDER A: Duration override started first, reschedule concurrent
+    const apptA = await prisma.appointment.create({
+      data: {
+        publicToken: `conc_a_${runId}_${Date.now()}`,
+        patientId: patientConc.id,
+        doctorId: docConc.id,
+        serviceId: srvConc.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: testSlot1,
+        endTime: new Date(testSlot1.getTime() + 35 * 60 * 1000),
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        serviceName: srvConc.nameUz,
+        servicePriceFrom: srvConc.priceFrom,
+        consentGiven: true,
+        serviceItems: {
+          create: [{
+            serviceId: srvConc.id,
+            serviceNameUz: srvConc.nameUz,
+            durationMinutes: 30,
+            priceFrom: srvConc.priceFrom,
+            sortOrder: 0,
+          }],
+        },
+      },
+    });
+
+    const newSlotA = new Date(testSlot1.getTime() + 2 * 60 * 60 * 1000);
+
+    const [overrideResA, rescheduleResA] = await Promise.all([
+      request(app.getHttpServer())
+        .patch(`/api/admin/appointments/${apptA.id}/duration`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ durationMinutes: 60 }),
+      request(app.getHttpServer())
+        .put(`/api/admin/appointments/${apptA.id}/reschedule`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ startTime: newSlotA.toISOString() }),
+    ]);
+
+    expect(overrideResA.status).toBe(200);
+    expect(rescheduleResA.status).toBe(200);
+
+    const finalApptA = await prisma.appointment.findUnique({
+      where: { id: apptA.id },
+    });
+    expect(finalApptA).toBeDefined();
+    expect(finalApptA!.durationMinutes).toBe(60);
+    const intervalA = (finalApptA!.endTime.getTime() - finalApptA!.startTime.getTime()) / (60 * 1000);
+    expect(intervalA).toBe(finalApptA!.durationMinutes + finalApptA!.bufferMinutes);
+    expect(intervalA).toBe(65);
+
+    const overlapSlotA = new Date(finalApptA!.startTime.getTime() + 15 * 60 * 1000);
+    const conflictResA = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        doctorId: docConc.id,
+        serviceId: srvConc.id,
+        branchId: testBranchId,
+        startTime: overlapSlotA.toISOString(),
+        patientName: 'Overlap Patient',
+        patientPhone: `${testPhonePrefix}92`,
+        consentGiven: true,
+      });
+    expect(conflictResA.status).toBe(409);
+
+    // ORDER B: Reschedule started first, override concurrent
+    const testSlot2 = new Date(testSlot1.getTime() + 24 * 60 * 60 * 1000);
+    const apptB = await prisma.appointment.create({
+      data: {
+        publicToken: `conc_b_${runId}_${Date.now()}`,
+        patientId: patientConc.id,
+        doctorId: docConc.id,
+        serviceId: srvConc.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: testSlot2,
+        endTime: new Date(testSlot2.getTime() + 35 * 60 * 1000),
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        serviceName: srvConc.nameUz,
+        servicePriceFrom: srvConc.priceFrom,
+        consentGiven: true,
+        serviceItems: {
+          create: [{
+            serviceId: srvConc.id,
+            serviceNameUz: srvConc.nameUz,
+            durationMinutes: 30,
+            priceFrom: srvConc.priceFrom,
+            sortOrder: 0,
+          }],
+        },
+      },
+    });
+
+    const newSlotB = new Date(testSlot2.getTime() + 3 * 60 * 60 * 1000);
+
+    const [rescheduleResB, overrideResB] = await Promise.all([
+      request(app.getHttpServer())
+        .put(`/api/admin/appointments/${apptB.id}/reschedule`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ startTime: newSlotB.toISOString() }),
+      request(app.getHttpServer())
+        .patch(`/api/admin/appointments/${apptB.id}/duration`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ durationMinutes: 45 }),
+    ]);
+
+    expect(rescheduleResB.status).toBe(200);
+    expect(overrideResB.status).toBe(200);
+
+    const finalApptB = await prisma.appointment.findUnique({
+      where: { id: apptB.id },
+    });
+    expect(finalApptB).toBeDefined();
+    expect(finalApptB!.durationMinutes).toBe(45);
+    const intervalB = (finalApptB!.endTime.getTime() - finalApptB!.startTime.getTime()) / (60 * 1000);
+    expect(intervalB).toBe(finalApptB!.durationMinutes + finalApptB!.bufferMinutes);
+    expect(intervalB).toBe(50);
+
+    const overlapSlotB = new Date(finalApptB!.startTime.getTime() + 10 * 60 * 1000);
+    const conflictResB = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        doctorId: docConc.id,
+        serviceId: srvConc.id,
+        branchId: testBranchId,
+        startTime: overlapSlotB.toISOString(),
+        patientName: 'Overlap Patient B',
+        patientPhone: `${testPhonePrefix}93`,
+        consentGiven: true,
+      });
+    expect(conflictResB.status).toBe(409);
+
+    // Cleanup
+    await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: { in: [apptA.id, apptB.id] } } });
+    await prisma.notificationJob.deleteMany({ where: { appointmentId: { in: [apptA.id, apptB.id] } } });
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: { in: [apptA.id, apptB.id] } } });
+    await prisma.auditLog.deleteMany({ where: { entityId: { in: [apptA.id, apptB.id] } } });
+    await prisma.appointment.deleteMany({ where: { id: { in: [apptA.id, apptB.id] } } });
+    await prisma.patient.delete({ where: { id: patientConc.id } });
+    await prisma.doctorSchedule.deleteMany({ where: { doctorId: docConc.id } });
+    await prisma.doctorService.deleteMany({ where: { doctorId: docConc.id } });
+    await prisma.doctorBranch.deleteMany({ where: { doctorId: docConc.id } });
+    await prisma.doctor.delete({ where: { id: docConc.id } });
+    await prisma.service.delete({ where: { id: srvConc.id } });
+  });
+
+  it('Regression 38: Controlled fake provider race test for duration override reminder lifecycle', async () => {
+    const docReminder = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Reminder',
+        lastNameUz: 'Doctor',
+        firstNameRu: 'Напоминание',
+        lastNameRu: 'Доктор',
+        slug: `reminder-doc-${runId}`,
+        isActive: true,
+      },
+    });
+    const srvReminder = await prisma.service.create({
+      data: { nameUz: 'Reminder Srv', nameRu: 'Напоминание', slug: `rem-srv-${runId}`, durationMinutes: 30 },
+    });
+    await prisma.doctorService.create({ data: { doctorId: docReminder.id, serviceId: srvReminder.id } });
+    await prisma.doctorBranch.create({ data: { doctorId: docReminder.id, branchId: testBranchId } });
+
+    for (const d of [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]) {
+      await prisma.doctorSchedule.create({
+        data: { doctorId: docReminder.id, dayOfWeek: d, branchId: testBranchId, startTime: '08:00', endTime: '20:00', isActive: true },
+      });
+    }
+
+    const futureSlot = getNextWorkingSlot(4, 10, 0);
+    const patientRem = await prisma.patient.create({
+      data: { fullName: 'Reminder Patient', phone: `${testPhonePrefix}94` },
+    });
+
+    const apptRem = await prisma.appointment.create({
+      data: {
+        publicToken: `rem_tok_${runId}_${Date.now()}`,
+        patientId: patientRem.id,
+        doctorId: docReminder.id,
+        serviceId: srvReminder.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: futureSlot,
+        endTime: new Date(futureSlot.getTime() + 35 * 60 * 1000),
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        serviceName: srvReminder.nameUz,
+        consentGiven: true,
+        revision: 1,
+        serviceItems: {
+          create: [{
+            serviceId: srvReminder.id,
+            serviceNameUz: srvReminder.nameUz,
+            durationMinutes: 30,
+            sortOrder: 0,
+          }],
+        },
+      },
+    });
+
+    // 1. Create a reminder job leased as PROCESSING by worker
+    const workerLease = `worker-lease-race-token-${runId}`;
+    const job = await prisma.notificationJob.create({
+      data: {
+        appointmentId: apptRem.id,
+        templateKey: 'appointment_reminder',
+        channel: 'SMS',
+        recipient: patientRem.phone,
+        appointmentRevision: 1,
+        status: NotificationStatus.PROCESSING,
+        leaseToken: workerLease,
+        lockedAt: new Date(),
+        scheduledFor: new Date(Date.now() - 5000),
+        payload: {
+          appointmentId: apptRem.id,
+          startTime: apptRem.startTime.toISOString(),
+          formattedTime: 'Bugun soat 10:00',
+        },
+      },
+    });
+
+    // 2. Concurrently execute overrideDuration (revisions 1 -> 2, startTime unchanged)
+    await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${apptRem.id}/duration`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 60 })
+      .expect(200);
+
+    const apptAfterOverride = await prisma.appointment.findUnique({ where: { id: apptRem.id } });
+    expect(apptAfterOverride!.revision).toBe(2);
+
+    // 3. Worker completes delivery of the in-flight job
+    await (notificationsService as any).deliverJob(job, workerLease);
+
+    // 4. Assert: because startTime was unchanged, the reminder was NOT cancelled as stale!
+    const jobAfterDelivery = await prisma.notificationJob.findUnique({ where: { id: job.id } });
+    expect(jobAfterDelivery!.status).toBe(NotificationStatus.SIMULATED);
+    expect(jobAfterDelivery!.leaseToken).toBeNull();
+
+    // 5. Contrast scenario: genuine reschedule changes startTime -> in-flight reminder IS cancelled
+    const jobRescheduled = await prisma.notificationJob.create({
+      data: {
+        appointmentId: apptRem.id,
+        templateKey: 'appointment_reminder',
+        channel: 'SMS',
+        recipient: patientRem.phone,
+        appointmentRevision: 2,
+        status: NotificationStatus.PROCESSING,
+        leaseToken: `worker-lease-resched-${runId}`,
+        lockedAt: new Date(),
+        scheduledFor: new Date(Date.now() - 5000),
+        payload: {
+          appointmentId: apptRem.id,
+          startTime: apptRem.startTime.toISOString(),
+        },
+      },
+    });
+
+    const genuinelyNewSlot = new Date(futureSlot.getTime() + 4 * 60 * 60 * 1000);
+    await request(app.getHttpServer())
+      .put(`/api/admin/appointments/${apptRem.id}/reschedule`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ startTime: genuinelyNewSlot.toISOString() })
+      .expect(200);
+
+    await (notificationsService as any).deliverJob(jobRescheduled, `worker-lease-resched-${runId}`);
+
+    const jobAfterReschedDelivery = await prisma.notificationJob.findUnique({ where: { id: jobRescheduled.id } });
+    expect(jobAfterReschedDelivery!.status).toBe(NotificationStatus.CANCELLED);
+    expect(jobAfterReschedDelivery!.lastError).toContain('Qabul qayta rejalashtirilganligi');
+
+    // Cleanup
+    await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: apptRem.id } });
+    await prisma.notificationJob.deleteMany({ where: { appointmentId: apptRem.id } });
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptRem.id } });
+    await prisma.auditLog.deleteMany({ where: { entityId: apptRem.id } });
+    await prisma.appointment.delete({ where: { id: apptRem.id } });
+    await prisma.patient.delete({ where: { id: patientRem.id } });
+    await prisma.doctorSchedule.deleteMany({ where: { doctorId: docReminder.id } });
+    await prisma.doctorService.deleteMany({ where: { doctorId: docReminder.id } });
+    await prisma.doctorBranch.deleteMany({ where: { doctorId: docReminder.id } });
+    await prisma.doctor.delete({ where: { id: docReminder.id } });
+    await prisma.service.delete({ where: { id: srvReminder.id } });
+  });
+
+  it('Regression 39: Reschedule availability agrees with reschedule execution', async () => {
+    const docAgree = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Agree',
+        lastNameUz: 'Doctor',
+        firstNameRu: 'Агри',
+        lastNameRu: 'Доктор',
+        slug: `agree-doc-${runId}`,
+        isActive: true,
+      },
+    });
+    const srvA = await prisma.service.create({
+      data: { nameUz: 'Srv Primary', nameRu: 'Основной', slug: `srv-a-${runId}`, durationMinutes: 30 },
+    });
+    const srvB = await prisma.service.create({
+      data: { nameUz: 'Srv Secondary', nameRu: 'Вторичный', slug: `srv-b-${runId}`, durationMinutes: 30 },
+    });
+
+    await prisma.doctorService.create({ data: { doctorId: docAgree.id, serviceId: srvA.id } });
+    await prisma.doctorService.create({ data: { doctorId: docAgree.id, serviceId: srvB.id } });
+    await prisma.doctorBranch.create({ data: { doctorId: docAgree.id, branchId: testBranchId } });
+
+    for (const d of [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]) {
+      await prisma.doctorSchedule.create({
+        data: { doctorId: docAgree.id, dayOfWeek: d, branchId: testBranchId, startTime: '08:00', endTime: '20:00', isActive: true },
+      });
+    }
+
+    const testSlot = getNextWorkingSlot(6, 10, 0);
+    const patientAgree = await prisma.patient.create({
+      data: { fullName: 'Agree Patient', phone: `${testPhonePrefix}95` },
+    });
+
+    const apptAgree = await prisma.appointment.create({
+      data: {
+        patientId: patientAgree.id,
+        doctorId: docAgree.id,
+        serviceId: srvA.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: testSlot,
+        endTime: new Date(testSlot.getTime() + 65 * 60 * 1000),
+        durationMinutes: 60,
+        bufferMinutes: 5,
+        serviceName: `${srvA.nameUz}, ${srvB.nameUz}`,
+        consentGiven: true,
+        publicToken: `agree-token-${runId}`,
+        serviceItems: {
+          create: [
+            { serviceId: srvA.id, serviceNameUz: srvA.nameUz, durationMinutes: 30, sortOrder: 0 },
+            { serviceId: srvB.id, serviceNameUz: srvB.nameUz, durationMinutes: 30, sortOrder: 1 },
+          ],
+        },
+      },
+    });
+
+    const targetDateStr = testSlot.toISOString().split('T')[0];
+
+    // Initial state: doctor has both services -> availability succeeds
+    const availRes1 = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/${apptAgree.publicToken}/slots`)
+      .query({ date: targetDateStr })
+      .expect(200);
+    expect(availRes1.body.slots.length).toBeGreaterThan(0);
+
+    // Remove doctor's assignment to secondary service B
+    await prisma.doctorService.delete({
+      where: { doctorId_serviceId: { doctorId: docAgree.id, serviceId: srvB.id } },
+    });
+
+    // 1. Availability check MUST fail with 400
+    const availRes2 = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/${apptAgree.publicToken}/slots`)
+      .query({ date: targetDateStr })
+      .expect(400);
+    expect(availRes2.body.message).toContain('biriktirilmagan');
+
+    // 2. Reschedule mutation MUST ALSO fail with 400
+    const newSlotTime = new Date(testSlot.getTime() + 2 * 60 * 60 * 1000);
+    const reschedRes = await request(app.getHttpServer())
+      .put(`/api/admin/appointments/${apptAgree.id}/reschedule`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ startTime: newSlotTime.toISOString() })
+      .expect(400);
+    expect(reschedRes.body.message).toContain('biriktirilmagan');
+
+    // 3. Unresolved legacy bundle policy: component services unknown
+    await prisma.doctorService.create({ data: { doctorId: docAgree.id, serviceId: srvB.id } });
+
+    await prisma.appointmentServiceItem.updateMany({
+      where: { appointmentId: apptAgree.id },
+      data: { isLegacyBundle: true, legacyProvenance: 'AMBIGUOUS_BUNDLE', serviceId: null },
+    });
+
+    const bundleAvailRes = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/${apptAgree.publicToken}/slots`)
+      .query({ date: targetDateStr })
+      .expect(400);
+    expect(bundleAvailRes.body.message).toContain('xodimlar ko\'rib chiqishini talab qiladi');
+
+    const bundleReschedRes = await request(app.getHttpServer())
+      .put(`/api/admin/appointments/${apptAgree.id}/reschedule`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ startTime: newSlotTime.toISOString() })
+      .expect(400);
+    expect(bundleReschedRes.body.message).toContain('xodimlar ko\'rib chiqishini talab qiladi');
+
+    // Cleanup
+    await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: apptAgree.id } });
+    await prisma.notificationJob.deleteMany({ where: { appointmentId: apptAgree.id } });
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptAgree.id } });
+    await prisma.auditLog.deleteMany({ where: { entityId: apptAgree.id } });
+    await prisma.appointment.delete({ where: { id: apptAgree.id } });
+    await prisma.patient.delete({ where: { id: patientAgree.id } });
+    await prisma.doctorSchedule.deleteMany({ where: { doctorId: docAgree.id } });
+    await prisma.doctorService.deleteMany({ where: { doctorId: docAgree.id } });
+    await prisma.doctorBranch.deleteMany({ where: { doctorId: docAgree.id } });
+    await prisma.doctor.delete({ where: { id: docAgree.id } });
+    await prisma.service.deleteMany({ where: { id: { in: [srvA.id, srvB.id] } } });
+  });
+
+  it('Regression 40: Strict reschedule slot and booking slot query validation', async () => {
+    // 1. Impossible calendar dates: Feb 30, Month 13, April 31
+    const feb30Res = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/nonexistent-token/slots`)
+      .query({ date: '2026-02-30' });
+    expect(feb30Res.status).toBe(400);
+
+    const month13Res = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/nonexistent-token/slots`)
+      .query({ date: '2026-13-01' });
+    expect(month13Res.status).toBe(400);
+
+    const april31Res = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/nonexistent-token/slots`)
+      .query({ date: '2026-04-31' });
+    expect(april31Res.status).toBe(400);
+
+    const malformedRes = await request(app.getHttpServer())
+      .get(`/api/booking/reschedule/nonexistent-token/slots`)
+      .query({ date: 'not-a-date' });
+    expect(malformedRes.status).toBe(400);
+
+    // 2. Strict validation on ordinary booking slots endpoint (/api/scheduling/slots)
+    const bookingFeb30Res = await request(app.getHttpServer())
+      .get('/api/scheduling/slots')
+      .query({ doctorId: testDoctorAId, date: '2026-02-30', serviceId: testServiceId });
+    expect(bookingFeb30Res.status).toBe(400);
+
+    // 3. Timezone validation: reject invalid timezone
+    const invalidTzRes = await request(app.getHttpServer())
+      .get('/api/scheduling/slots')
+      .query({ doctorId: testDoctorAId, date: '2026-10-25', serviceId: testServiceId, timezone: 'Invalid_Zone_123' });
+    expect(invalidTzRes.status).toBe(400);
+
+    // 4. Booking horizon consistency: dates beyond 60 days rejected with controlled 400
+    const farFutureDate = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const farFutureRes = await request(app.getHttpServer())
+      .get('/api/scheduling/slots')
+      .query({ doctorId: testDoctorAId, date: farFutureDate, serviceId: testServiceId });
+    expect(farFutureRes.status).toBe(400);
+    expect(farFutureRes.body.message).toContain('kundan keyingi muddatga');
+  });
+
+  it('Regression 41: Legacy classification without guessing, reconciliation, and transparent analytics', async () => {
+    // 1. Legitimate comma-containing single service name in catalog
+    const srvComma = await prisma.service.create({
+      data: {
+        nameUz: 'Konsultatsiya, birlamchi ko\'rik',
+        nameRu: 'Консультация, первичный осмотр',
+        slug: `konsult-comma-${runId}`,
+        durationMinutes: 30,
+        priceFrom: 15000000,
+      },
+    });
+
+    const patientHist = await prisma.patient.create({
+      data: { fullName: 'Historical Patient', phone: `${testPhonePrefix}96` },
+    });
+
+    const apptComma = await prisma.appointment.create({
+      data: {
+        id: `hist_appt_comma_${runId}`,
+        publicToken: `hist_comma_${runId}_${Date.now()}`,
+        patientId: patientHist.id,
+        doctorId: testDoctorAId,
+        serviceId: srvComma.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.COMPLETED,
+        startTime: new Date('2025-01-10T10:00:00.000Z'),
+        endTime: new Date('2025-01-10T10:35:00.000Z'),
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        serviceName: srvComma.nameUz,
+        consentGiven: true,
+      },
+    });
+
+    const itemComma = await prisma.appointmentServiceItem.create({
+      data: {
+        id: `hist_item_comma_${runId}`,
+        appointmentId: apptComma.id,
+        serviceId: srvComma.id,
+        serviceNameUz: srvComma.nameUz,
+        serviceNameRu: srvComma.nameRu,
+        durationMinutes: 30,
+        priceFrom: srvComma.priceFrom,
+        isLegacyBundle: false,
+        legacyProvenance: 'VERIFIED_SINGLE',
+        originalServiceId: srvComma.id,
+      },
+    });
+
+    // 2. Renamed historical service
+    const srvRenamed = await prisma.service.create({
+      data: {
+        nameUz: 'Karies davolash (yangi)',
+        nameRu: 'Лечение кариеса (новое)',
+        slug: `karies-renamed-${runId}`,
+        durationMinutes: 45,
+      },
+    });
+
+    const apptRenamed = await prisma.appointment.create({
+      data: {
+        id: `hist_appt_renamed_${runId}`,
+        publicToken: `hist_renamed_${runId}_${Date.now()}`,
+        patientId: patientHist.id,
+        doctorId: testDoctorAId,
+        serviceId: srvRenamed.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.COMPLETED,
+        startTime: new Date('2025-01-11T11:00:00.000Z'),
+        endTime: new Date('2025-01-11T11:50:00.000Z'),
+        durationMinutes: 45,
+        bufferMinutes: 5,
+        serviceName: 'Eski karies nomi',
+        consentGiven: true,
+      },
+    });
+
+    const itemRenamed = await prisma.appointmentServiceItem.create({
+      data: {
+        id: `hist_item_renamed_${runId}`,
+        appointmentId: apptRenamed.id,
+        serviceId: srvRenamed.id,
+        serviceNameUz: 'Eski karies nomi',
+        durationMinutes: 45,
+        isLegacyBundle: false,
+        legacyProvenance: 'VERIFIED_SINGLE',
+        originalServiceId: srvRenamed.id,
+      },
+    });
+
+    // 3. Actual legacy combined-service booking
+    const apptBundle = await prisma.appointment.create({
+      data: {
+        id: `hist_appt_bundle_${runId}`,
+        publicToken: `hist_bundle_${runId}_${Date.now()}`,
+        patientId: patientHist.id,
+        doctorId: testDoctorAId,
+        serviceId: srvComma.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.COMPLETED,
+        startTime: new Date('2025-01-12T12:00:00.000Z'),
+        endTime: new Date('2025-01-12T13:20:00.000Z'),
+        durationMinutes: 75,
+        bufferMinutes: 5,
+        serviceName: 'Konsultatsiya, Tish tozalash kompleksi',
+        consentGiven: true,
+      },
+    });
+
+    const itemBundle = await prisma.appointmentServiceItem.create({
+      data: {
+        id: `hist_item_bundle_${runId}`,
+        appointmentId: apptBundle.id,
+        serviceId: null,
+        serviceNameUz: 'Konsultatsiya, Tish tozalash kompleksi',
+        durationMinutes: 75,
+        isLegacyBundle: true,
+        legacyProvenance: 'AMBIGUOUS_BUNDLE',
+        originalServiceId: srvComma.id,
+      },
+    });
+
+    // 4. Verify Admin Legacy Review endpoint
+    const reviewRes = await request(app.getHttpServer())
+      .get('/api/services/admin/legacy-review')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(reviewRes.body.unresolvedCount).toBeGreaterThanOrEqual(1);
+    expect(reviewRes.body.records.some((r: any) => r.id === itemBundle.id)).toBe(true);
+
+    // 5. Reconcile ambiguous legacy record
+    const reconcileRes = await request(app.getHttpServer())
+      .post('/api/services/admin/reconcile-legacy')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        itemId: itemBundle.id,
+        serviceId: srvComma.id,
+      })
+      .expect(201);
+
+    expect(reconcileRes.body.isLegacyBundle).toBe(false);
+    expect(reconcileRes.body.legacyProvenance).toBe('RESOLVED_MANUAL');
+    expect(reconcileRes.body.serviceId).toBe(srvComma.id);
+
+    // 6. Transparent Analytics Overview
+    const analyticsRes = await request(app.getHttpServer())
+      .get('/api/admin/analytics/overview')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .query({ dateFrom: '2025-01-01', dateTo: '2025-01-31' })
+      .expect(200);
+
+    expect(analyticsRes.body).toHaveProperty('legacyBundlesCount');
+    expect(analyticsRes.body).toHaveProperty('unresolvedRecords');
+
+    // Cleanup
+    await prisma.appointmentServiceItem.deleteMany({
+      where: { id: { in: [itemComma.id, itemRenamed.id, itemBundle.id] } },
+    });
+    await prisma.appointment.deleteMany({
+      where: { id: { in: [apptComma.id, apptRenamed.id, apptBundle.id] } },
+    });
+    await prisma.patient.delete({ where: { id: patientHist.id } });
+    await prisma.service.deleteMany({ where: { id: { in: [srvComma.id, srvRenamed.id] } } });
   });
 });
 

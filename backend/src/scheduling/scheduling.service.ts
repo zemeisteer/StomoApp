@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException }
 import { PrismaService } from '../prisma/prisma.service';
 import { AppointmentStatus, DayOfWeek, ExceptionType, Prisma } from '@prisma/client';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
+import { registerDecorator, ValidationOptions, ValidationArguments } from 'class-validator';
 
 export const DAY_MAP: Record<number, DayOfWeek> = {
   0: DayOfWeek.SUNDAY,
@@ -58,6 +59,94 @@ export function mergeIntervals(intervals: TimeInterval[]): TimeInterval[] {
     }
   }
   return merged;
+}
+
+export function validateCalendarDate(dateStr: string): { year: number; month: number; day: number; localDay: Date } {
+  if (!dateStr || typeof dateStr !== 'string') {
+    throw new BadRequestException('Sana ko\'rsatilishi shart');
+  }
+  const trimmed = dateStr.trim();
+  const match = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.exec(trimmed);
+  if (!match) {
+    throw new BadRequestException('Sana YYYY-MM-DD formatida bo\'lishi kerak');
+  }
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+
+  const utcCheck = new Date(Date.UTC(year, month - 1, day));
+  if (
+    utcCheck.getUTCFullYear() !== year ||
+    utcCheck.getUTCMonth() !== month - 1 ||
+    utcCheck.getUTCDate() !== day
+  ) {
+    throw new BadRequestException('Mavjud bo\'lmagan sana kiritildi (masalan, 30-fevral)');
+  }
+
+  const localDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+  return { year, month, day, localDay };
+}
+
+export function validateTimezone(tz?: string, defaultTz = 'Asia/Tashkent'): string {
+  if (!tz || !tz.trim()) return defaultTz;
+  const trimmed = tz.trim();
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: trimmed });
+    return trimmed;
+  } catch {
+    throw new BadRequestException(`Noto'g'ri yoki qo'llab-quvvatlanmaydigan vaqt mintaqasi: ${tz}`);
+  }
+}
+
+export function IsStrictCalendarDate(validationOptions?: ValidationOptions) {
+  return function (object: Object, propertyName: string) {
+    registerDecorator({
+      name: 'isStrictCalendarDate',
+      target: object.constructor,
+      propertyName: propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, _args: ValidationArguments) {
+          if (typeof value !== 'string') return false;
+          try {
+            validateCalendarDate(value);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        defaultMessage(_args: ValidationArguments) {
+          return 'Noto\'g\'ri yoki mavjud bo\'lmagan sana (masalan, 30-fevral)';
+        },
+      },
+    });
+  };
+}
+
+export function IsValidTimezone(validationOptions?: ValidationOptions) {
+  return function (object: Object, propertyName: string) {
+    registerDecorator({
+      name: 'isValidTimezone',
+      target: object.constructor,
+      propertyName: propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, _args: ValidationArguments) {
+          if (value === undefined || value === null || value === '') return true;
+          if (typeof value !== 'string') return false;
+          try {
+            validateTimezone(value);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        defaultMessage(_args: ValidationArguments) {
+          return 'Noto\'g\'ri yoki qo\'llab-quvvatlanmaydigan vaqt mintaqasi';
+        },
+      },
+    });
+  };
 }
 
 export function resolveServiceIds(serviceId?: string, serviceIdsInput?: string[] | string): string[] {
@@ -468,22 +557,23 @@ export class SchedulingService {
 
     const authoritative = await this.calculateAuthoritativeServiceDuration(doctorId, effectiveServiceIds);
 
-    // Parse date in clinic timezone
-    const [year, month, day] = dateStr.split('-').map(Number);
-    if (!year || !month || !day) {
-      throw new BadRequestException('Noto\'g\'ri sana formati');
-    }
-
-    const localDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+    const { localDay } = validateCalendarDate(dateStr);
 
     const clinicSettings = await this.prisma.clinicSettings.findFirst();
-    const effectiveTimezone = clinicSettings?.timezone || timezone;
+    const effectiveTimezone = validateTimezone(timezone, clinicSettings?.timezone || 'Asia/Tashkent');
 
     const bufferMinutes = clinicSettings?.bufferMinutes ?? 5;
     const totalMinutes = authoritative.totalDurationMinutes + bufferMinutes;
     const minNoticeHours = clinicSettings?.minBookingNoticeHours ?? 2;
+    const maxHorizonDays = clinicSettings?.maxBookingHorizonDays ?? 60;
     const nowUtc = new Date();
     const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
+    const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
+
+    const startOfSelectedDayUtc = fromZonedTime(`${dateStr} 00:00:00`, effectiveTimezone);
+    if (startOfSelectedDayUtc > maxHorizonTime) {
+      throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga band qilib bo'lmaydi`);
+    }
 
     // Retrieve unified working intervals for this day (supporting weekly hours, overtime, holidays)
     const workingIntervals = await this.getDoctorWorkingIntervals(
@@ -516,7 +606,7 @@ export class SchedulingService {
         const slotStartUtc = fromZonedTime(slotStartStr, effectiveTimezone);
         const slotEndUtc = new Date(slotStartUtc.getTime() + totalMinutes * 60 * 1000);
 
-        if (slotStartUtc < minNoticeTime) {
+        if (slotStartUtc < minNoticeTime || slotStartUtc > maxHorizonTime) {
           continue;
         }
 
@@ -748,7 +838,7 @@ export class SchedulingService {
     const appointment = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
       include: {
-        doctor: { include: { branches: true } },
+        doctor: { include: { branches: true, services: true } },
         service: true,
         branch: true,
         serviceItems: { orderBy: { sortOrder: 'asc' } },
@@ -761,6 +851,18 @@ export class SchedulingService {
 
     if (([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(appointment.status)) {
       throw new BadRequestException('Tugallangan yoki bekor qilingan qabulni qayta rejalashtirib bo\'lmaydi');
+    }
+
+    // Explicit policy for unresolved legacy bundles: do not claim eligibility verified when component services are unknown
+    const hasUnresolvedBundle =
+      appointment.serviceItems.some(
+        (si: any) => si.isLegacyBundle || si.legacyProvenance === 'AMBIGUOUS_BUNDLE' || !si.serviceId,
+      ) || (!appointment.serviceId && appointment.serviceItems.length === 0);
+
+    if (hasUnresolvedBundle) {
+      throw new BadRequestException(
+        'Tarixiy ko\'p xizmatli qabul tarkibi noaniq bo\'lganligi sababli qayta rejalashtirish xodimlar ko\'rib chiqishini talab qiladi',
+      );
     }
 
     // Validate doctor eligibility
@@ -779,7 +881,7 @@ export class SchedulingService {
       }
     }
 
-    // Validate all services in serviceItems (or primary serviceId) are still active and not archived
+    // Validate all services in serviceItems (or primary serviceId) are still active and assigned to doctor
     const serviceIdsToCheck = appointment.serviceItems.length > 0
       ? (appointment.serviceItems.map((si) => si.serviceId).filter(Boolean) as string[])
       : [appointment.serviceId];
@@ -791,17 +893,20 @@ export class SchedulingService {
       if (activeServices.length !== serviceIdsToCheck.length || activeServices.some((s) => !s.isActive || s.isArchived)) {
         throw new BadRequestException('Tanlangan xizmatlardan biri faol emas yoki arxivlangan');
       }
+
+      const doctorServiceIds = (appointment.doctor as any).services?.map((s: any) => s.serviceId) || [];
+      for (const sId of serviceIdsToCheck) {
+        if (!doctorServiceIds.includes(sId)) {
+          throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatishga biriktirilmagan');
+        }
+      }
     }
 
-    // Parse date in clinic timezone
-    const [year, month, day] = dateStr.split('-').map(Number);
-    if (!year || !month || !day) {
-      throw new BadRequestException('Noto\'g\'ri sana formati');
-    }
-    const localDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+    // Parse and strictly validate date in calendar and timezone
+    const { localDay } = validateCalendarDate(dateStr);
 
     const clinicSettings = await this.prisma.clinicSettings.findFirst();
-    const effectiveTimezone = clinicSettings?.timezone || timezone;
+    const effectiveTimezone = validateTimezone(timezone, clinicSettings?.timezone || 'Asia/Tashkent');
 
     // USE STORED HISTORICAL SNAPSHOTS FROM APPOINTMENT ITSELF!
     const durationMinutes = appointment.durationMinutes;
@@ -813,6 +918,11 @@ export class SchedulingService {
     const nowUtc = new Date();
     const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
     const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
+
+    const startOfSelectedDayUtc = fromZonedTime(`${dateStr} 00:00:00`, effectiveTimezone);
+    if (startOfSelectedDayUtc > maxHorizonTime) {
+      throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga rejalashtirib bo'lmaydi`);
+    }
 
     const workingIntervals = await this.getDoctorWorkingIntervals(
       appointment.doctorId,
