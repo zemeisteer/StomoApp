@@ -383,7 +383,7 @@ export const api = {
       records: any[];
     }>(`/api/services/admin/legacy-review?${q.toString()}`);
   },
-  reconcileLegacyRecord: (payload: { itemId: string; action: string; serviceId?: string; reason: string }) =>
+  reconcileLegacyRecord: (payload: { itemId: string; action: string; serviceId?: string; reason: string; expectedAuditCount?: number }) =>
     fetcher<any>('/api/services/admin/reconcile-legacy', {
       method: 'POST',
       body: JSON.stringify(payload),

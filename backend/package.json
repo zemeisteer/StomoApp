@@ -12,7 +12,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "repair:reminders": "node -r ts-node/register scripts/repair-reminders.ts",
+    "repair:reminders:dry": "node -r ts-node/register scripts/repair-reminders.ts --dry-run"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.685.0",

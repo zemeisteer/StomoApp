@@ -217,6 +217,7 @@ export default function AdminServicesPage() {
         action: reconcileAction,
         serviceId: reconcileAction === 'RESOLVE_TO_SERVICE' ? targetServiceId : undefined,
         reason: reconcileReason.trim(),
+        expectedAuditCount: selectedItem.auditCount,
       });
 
       setReconcileSuccessMsg(`"${selectedItem.serviceNameUz}" muvaffaqiyatli muvofiqlashtirildi.`);
@@ -226,6 +227,8 @@ export default function AdminServicesPage() {
       await loadLegacyReview(legacyPage);
     } catch (err: any) {
       setReconcileError(err?.message || 'Muvofiqlashtirishda xatolik yuz berdi');
+      // Concurrency conflict or state mismatch: reload fresh state and fresh version
+      await loadLegacyReview(legacyPage);
     } finally {
       setIsSubmittingReconcile(false);
     }

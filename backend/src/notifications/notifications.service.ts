@@ -24,6 +24,40 @@ export interface EnqueueNotificationParams {
   deduplicationKey?: string;
 }
 
+export interface UpgradeLegacyRemindersOptions {
+  dryRun?: boolean;
+  batchSize?: number;
+  maxJobs?: number;
+}
+
+export interface UpgradeLegacyRemindersResult {
+  scanned: number;
+  upgraded: number;
+  quarantined: number;
+  cancelled: number;
+  newlyCreated: number;
+  skippedActiveLease: number;
+  errors: number;
+  details?: Array<{ jobId: string; action: string; reason: string }>;
+}
+
+function parseSafeIsoTimestamp(value: unknown): Date | null {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?:Z|([+-]\d{2}:?\d{2}))?$/);
+  if (!match) return null;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const parsed = new Date(value);
+  if (isNaN(parsed.getTime())) return null;
+  const dUtc = new Date(Date.UTC(year, month - 1, day));
+  if (dUtc.getUTCFullYear() !== year || dUtc.getUTCMonth() !== month - 1 || dUtc.getUTCDate() !== day) {
+    return null;
+  }
+  return parsed;
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -145,174 +179,494 @@ export class NotificationsService {
       patientEmail?: string | null;
       patientPhone: string;
       status: AppointmentStatus | string;
-      revision: number;
-      scheduleRevision: number;
+      revision?: number;
+      scheduleRevision?: number;
     },
     tx?: Prisma.TransactionClient | PrismaService,
-  ) {
-    const client = tx || this.prisma;
+  ): Promise<any> {
+    const isTx = tx && !('$connect' in tx);
+    if (isTx) {
+      return this.executeRecoverOrEnqueue(appointment, tx);
+    }
+
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.prisma.$transaction(
+          async (innerTx) => {
+            return this.executeRecoverOrEnqueue(appointment, innerTx);
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+            timeout: 10000,
+          },
+        );
+      } catch (err: any) {
+        const isConflict =
+          err?.code === 'P2002' ||
+          err?.code === 'P2034' ||
+          err?.message?.includes('could not serialize') ||
+          err?.message?.includes('deadlock');
+
+        if (isConflict && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 40 * attempt + Math.floor(Math.random() * 20)));
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  private async executeRecoverOrEnqueue(
+    appointment: {
+      id: string;
+      startTime: Date;
+      serviceName: string;
+      patientEmail?: string | null;
+      patientPhone: string;
+      status: AppointmentStatus | string;
+      revision?: number;
+      scheduleRevision?: number;
+    },
+    tx: Prisma.TransactionClient | PrismaService,
+  ): Promise<any> {
     const nowUtc = new Date();
 
-    // Eligibility check for appointment
+    // 1. Lock appointment row first with FOR UPDATE to serialize concurrent operations
+    const [lockedAppt] = await tx.$queryRaw<Array<{
+      id: string;
+      status: AppointmentStatus;
+      start_time: Date;
+      schedule_revision: number;
+      revision: number;
+      service_name: string;
+    }>>`
+      SELECT id, status, "start_time", "schedule_revision", "revision", "service_name"
+      FROM "appointments"
+      WHERE id = ${appointment.id}
+      FOR UPDATE;
+    `;
+
+    if (!lockedAppt) {
+      return null;
+    }
+
     const terminalStatuses: string[] = [
       AppointmentStatus.COMPLETED,
       AppointmentStatus.CANCELLED,
       AppointmentStatus.NO_SHOW,
     ];
-    if (terminalStatuses.includes(appointment.status) || appointment.startTime <= nowUtc) {
+    const effectiveStatus = (appointment.status as string) || lockedAppt.status;
+    if (
+      terminalStatuses.includes(effectiveStatus) ||
+      terminalStatuses.includes(lockedAppt.status) ||
+      lockedAppt.start_time <= nowUtc ||
+      appointment.startTime <= nowUtc
+    ) {
       return null; // Ineligible for reminder
     }
 
-    const currentScheduleRev = appointment.scheduleRevision ?? 1;
+    const currentScheduleRev = lockedAppt.schedule_revision ?? appointment.scheduleRevision ?? 1;
+    const currentApptRev = lockedAppt.revision ?? appointment.revision ?? 1;
     const canonicalKey = `reminder_${appointment.id}_s${currentScheduleRev}`;
 
-    // Look for existing reminder job with canonical key
-    const existing = await client.notificationJob.findUnique({
-      where: { deduplicationKey: canonicalKey },
-    });
+    // 2. Lock existing notification job for canonical key if present
+    const [lockedJob] = await tx.$queryRaw<Array<{
+      id: string;
+      status: NotificationStatus;
+      schedule_revision: number | null;
+      appointment_revision: number | null;
+      locked_at: Date | null;
+      lease_token: string | null;
+    }>>`
+      SELECT id, status, "schedule_revision", "appointment_revision", "locked_at", "lease_token"
+      FROM "notification_jobs"
+      WHERE "deduplication_key" = ${canonicalKey}
+      FOR UPDATE;
+    `;
 
-    if (existing) {
+    if (lockedJob) {
       // 1. Never revive stale generation
-      if (existing.scheduleRevision !== null && existing.scheduleRevision !== currentScheduleRev) {
+      if (lockedJob.schedule_revision !== null && lockedJob.schedule_revision !== currentScheduleRev) {
         return null;
       }
 
-      // 2. Active jobs: PENDING or active PROCESSING
-      if (existing.status === NotificationStatus.PENDING) {
-        if (existing.appointmentRevision !== appointment.revision) {
-          return await client.notificationJob.update({
-            where: { id: existing.id },
-            data: { appointmentRevision: appointment.revision },
+      // 2. Active jobs: PENDING
+      if (lockedJob.status === NotificationStatus.PENDING) {
+        if (lockedJob.appointment_revision !== currentApptRev) {
+          return await tx.notificationJob.update({
+            where: { id: lockedJob.id },
+            data: { appointmentRevision: currentApptRev },
           });
         }
-        return existing;
+        return await tx.notificationJob.findUnique({ where: { id: lockedJob.id } });
       }
 
-      if (existing.status === NotificationStatus.PROCESSING) {
-        // If lease is recent, do not steal or disrupt active worker!
-        const leaseAgeMs = existing.lockedAt ? nowUtc.getTime() - existing.lockedAt.getTime() : Infinity;
+      // 3. In-flight jobs: PROCESSING
+      if (lockedJob.status === NotificationStatus.PROCESSING) {
+        const leaseAgeMs = lockedJob.locked_at ? nowUtc.getTime() - new Date(lockedJob.locked_at).getTime() : Infinity;
         if (leaseAgeMs < 5 * 60 * 1000) {
-          return existing;
+          // Active worker lease: preserve it, do not steal or duplicate
+          return await tx.notificationJob.findUnique({ where: { id: lockedJob.id } });
         }
+        // Expired worker lease: archive stalled job and allow replacement
+        const expiredArchiveKey = `${canonicalKey}_expired_lease_${lockedJob.id}_${Date.now()}`;
+        await tx.notificationJob.update({
+          where: { id: lockedJob.id },
+          data: {
+            deduplicationKey: expiredArchiveKey,
+            status: NotificationStatus.FAILED,
+            lastError: 'Worker lease expired without completion',
+            leaseToken: null,
+            lockedAt: null,
+          },
+        });
       }
 
-      // 3. Delivered jobs: SENT or SIMULATED
+      // 4. Delivered jobs: SENT or SIMULATED
       if (
-        existing.status === NotificationStatus.SENT ||
-        existing.status === NotificationStatus.SIMULATED
+        lockedJob.status === NotificationStatus.SENT ||
+        lockedJob.status === NotificationStatus.SIMULATED
       ) {
-        return existing; // Delivered, do not duplicate
+        return await tx.notificationJob.findUnique({ where: { id: lockedJob.id } });
       }
 
-      // 4. Failed or Cancelled: Eligible for recovery while preserving history
+      // 5. Terminal jobs: FAILED or CANCELLED -> archive deduplication key atomically
       if (
-        existing.status === NotificationStatus.FAILED ||
-        existing.status === NotificationStatus.CANCELLED
+        lockedJob.status === NotificationStatus.FAILED ||
+        lockedJob.status === NotificationStatus.CANCELLED
       ) {
-        // Archive deduplication key so previous failure history is strictly preserved
-        const archivedKey = `${canonicalKey}_superseded_${existing.id}`;
-        await client.notificationJob.update({
-          where: { id: existing.id },
+        const archivedKey = `${canonicalKey}_superseded_${lockedJob.id}`;
+        await tx.notificationJob.update({
+          where: { id: lockedJob.id },
           data: { deduplicationKey: archivedKey },
         });
       }
     }
 
     // Schedule reminder time
-    const reminderTime = new Date(appointment.startTime.getTime() - 2 * 60 * 60 * 1000);
+    const reminderTime = new Date(lockedAppt.start_time.getTime() - 2 * 60 * 60 * 1000);
     const scheduledFor = reminderTime > nowUtc ? reminderTime : nowUtc;
-    const formattedTime = this.formatTashkentTime(appointment.startTime);
+    const formattedTime = this.formatTashkentTime(lockedAppt.start_time);
 
-    try {
-      return await client.notificationJob.create({
-        data: {
-          channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
-          templateKey: 'appointment_reminder',
-          recipient: appointment.patientEmail || appointment.patientPhone,
+    // Atomically create replacement job
+    return await tx.notificationJob.create({
+      data: {
+        channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: appointment.patientEmail || appointment.patientPhone,
+        appointmentId: appointment.id,
+        appointmentRevision: currentApptRev,
+        scheduleRevision: currentScheduleRev,
+        scheduledFor,
+        deduplicationKey: canonicalKey,
+        status: NotificationStatus.PENDING,
+        payload: {
           appointmentId: appointment.id,
-          appointmentRevision: appointment.revision,
+          serviceName: lockedAppt.service_name || appointment.serviceName,
+          startTime: lockedAppt.start_time.toISOString(),
           scheduleRevision: currentScheduleRev,
-          scheduledFor,
-          deduplicationKey: canonicalKey,
-          status: NotificationStatus.PENDING,
-          payload: {
-            appointmentId: appointment.id,
-            serviceName: appointment.serviceName,
-            startTime: appointment.startTime.toISOString(),
-            scheduleRevision: currentScheduleRev,
-            formattedTime,
-          },
+          formattedTime,
         },
-      });
-    } catch (err: any) {
-      if (err?.code === 'P2002') {
-        // Concurrent recovery race: return the concurrently created job
-        const raced = await client.notificationJob.findUnique({
-          where: { deduplicationKey: canonicalKey },
-        });
-        if (raced) return raced;
-      }
-      this.logger.error(`Unrecoverable persistence error recovering reminder for ${appointment.id}: ${err?.message}`);
-      throw err;
-    }
+      },
+    });
   }
 
   /**
    * Explicit Upgrade Policy for Legacy Reminder Jobs:
    *
    * Scans notification_jobs with templateKey = 'appointment_reminder' where scheduleRevision IS NULL:
-   * 1. Associable generation 1 jobs: where appointment scheduleRevision = 1 and payload startTime matches appointment start time.
-   * 2. Obsolete or unverifiable jobs: where appointment scheduleRevision > 1 or start time changed -> cancel and quarantine.
-   * 3. Ensures eligible upcoming appointments retain a valid current-generation reminder.
+   * 1. Safely parses ISO timestamps in JS without risky database SQL timestamptz casts.
+   * 2. Quarantines/cancels jobs with null or orphaned appointmentId, missing/malformed payloads.
+   * 3. Cancels obsolete pending/processing jobs for terminal or past appointments while preserving historical jobs.
+   * 4. Accurately matches startTime against current schedule (handles historical A -> B -> A rescheduling).
+   * 5. Detects and deduplicates multiple legacy jobs mapping to the same schedule.
+   * 6. Preserves active worker leases (< 5m).
+   * 7. Supports bounded batching, dry-run mode, and returns comprehensive metrics.
    */
-  async upgradeLegacyReminderJobs(tx?: Prisma.TransactionClient | PrismaService) {
-    const client = tx || this.prisma;
+  async upgradeLegacyReminderJobs(
+    txOrOptions?: Prisma.TransactionClient | PrismaService | UpgradeLegacyRemindersOptions,
+    maybeOptions?: UpgradeLegacyRemindersOptions,
+  ): Promise<UpgradeLegacyRemindersResult> {
+    let client: Prisma.TransactionClient | PrismaService = this.prisma;
+    let options: UpgradeLegacyRemindersOptions = {};
+
+    if (txOrOptions) {
+      if ('$queryRaw' in (txOrOptions as any) || '$executeRaw' in (txOrOptions as any)) {
+        client = txOrOptions as Prisma.TransactionClient | PrismaService;
+        if (maybeOptions) options = maybeOptions;
+      } else {
+        options = txOrOptions as UpgradeLegacyRemindersOptions;
+      }
+    }
+
+    const dryRun = options.dryRun ?? false;
+    const batchSize = Math.max(1, Math.min(options.batchSize ?? 100, 500));
+    const maxJobs = options.maxJobs ?? 10000;
     const nowUtc = new Date();
 
-    // 1. Associate verifiable generation 1 jobs where start time matches and scheduleRevision is 1
-    await client.$executeRaw`
-      UPDATE "notification_jobs" nj
-      SET "schedule_revision" = 1
-      FROM "appointments" a
-      WHERE nj."appointment_id" = a."id"
-        AND nj."template_key" = 'appointment_reminder'
-        AND nj."schedule_revision" IS NULL
-        AND a."schedule_revision" = 1
-        AND (nj."payload"->>'startTime') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
-        AND ABS(EXTRACT(EPOCH FROM (nj."payload"->>'startTime')::timestamptz) - EXTRACT(EPOCH FROM a."start_time")) < 1;
-    `;
+    const result: UpgradeLegacyRemindersResult = {
+      scanned: 0,
+      upgraded: 0,
+      quarantined: 0,
+      cancelled: 0,
+      newlyCreated: 0,
+      skippedActiveLease: 0,
+      errors: 0,
+      details: [],
+    };
 
-    // 2. Quarantine/Cancel obsolete un-migrated PENDING or PROCESSING jobs that do not match the current schedule
-    await client.$executeRaw`
-      UPDATE "notification_jobs" nj
-      SET "status" = 'CANCELLED'::"notification_status",
-          "last_error" = 'Eski yoki tasdiqlanmagan eslatma (migratsiya taftishi orqali bekor qilindi)',
-          "lease_token" = NULL
-      FROM "appointments" a
-      WHERE nj."appointment_id" = a."id"
-        AND nj."template_key" = 'appointment_reminder'
-        AND nj."schedule_revision" IS NULL
-        AND nj."status" IN ('PENDING'::"notification_status", 'PROCESSING'::"notification_status")
-        AND (
-          a."schedule_revision" > 1
-          OR (nj."payload"->>'startTime') IS NULL
-          OR (nj."payload"->>'startTime') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
-          OR ABS(EXTRACT(EPOCH FROM (nj."payload"->>'startTime')::timestamptz) - EXTRACT(EPOCH FROM a."start_time")) >= 1
-        );
-    `;
+    let lastCursorId: string | undefined = undefined;
 
-    // 3. For any remaining orphaned PENDING/PROCESSING reminder jobs without an appointment: cancel
-    await client.$executeRaw`
-      UPDATE "notification_jobs"
-      SET "status" = 'CANCELLED'::"notification_status",
-          "last_error" = 'Biriktirilgan qabuli mavjud bo''lmagan eslatma'
-      WHERE "template_key" = 'appointment_reminder'
-        AND "schedule_revision" IS NULL
-        AND "status" IN ('PENDING'::"notification_status", 'PROCESSING'::"notification_status")
-        AND "appointment_id" NOT IN (SELECT id FROM "appointments");
-    `;
+    while (result.scanned < maxJobs) {
+      const takeCount = Math.min(batchSize, maxJobs - result.scanned);
+      const jobs: any[] = await (client.notificationJob.findMany as any)({
+        where: {
+          templateKey: 'appointment_reminder',
+          scheduleRevision: null,
+        },
+        take: takeCount,
+        ...(lastCursorId ? { skip: 1, cursor: { id: lastCursorId } } : {}),
+        orderBy: { id: 'asc' },
+      });
 
-    // 4. Ensure eligible upcoming appointments have a valid current-generation reminder
+      if (jobs.length === 0) break;
+      lastCursorId = jobs[jobs.length - 1].id;
+
+      for (const job of jobs) {
+        result.scanned++;
+        try {
+          // 1. Missing or null appointmentId
+          if (!job.appointmentId) {
+            result.quarantined++;
+            result.cancelled++;
+            result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Missing appointmentId' });
+            if (!dryRun) {
+              await client.notificationJob.update({
+                where: { id: job.id },
+                data: {
+                  status: NotificationStatus.CANCELLED,
+                  lastError: 'Orphaned legacy reminder: missing appointmentId',
+                  scheduleRevision: 0,
+                },
+              });
+            }
+            continue;
+          }
+
+          // 2. Lookup appointment
+          const appt = await client.appointment.findUnique({
+            where: { id: job.appointmentId },
+            include: { patient: true },
+          });
+
+          if (!appt) {
+            result.quarantined++;
+            result.cancelled++;
+            result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: `Appointment ${job.appointmentId} not found` });
+            if (!dryRun) {
+              await client.notificationJob.update({
+                where: { id: job.id },
+                data: {
+                  status: NotificationStatus.CANCELLED,
+                  lastError: 'Orphaned legacy reminder: appointment not found',
+                  scheduleRevision: 0,
+                },
+              });
+            }
+            continue;
+          }
+
+          // 3. Active worker lease (< 5m)
+          if (job.status === NotificationStatus.PROCESSING) {
+            const leaseAgeMs = job.lockedAt ? nowUtc.getTime() - new Date(job.lockedAt).getTime() : Infinity;
+            if (leaseAgeMs < 5 * 60 * 1000) {
+              result.skippedActiveLease++;
+              result.details?.push({ jobId: job.id, action: 'SKIPPED', reason: 'Active worker lease' });
+              continue;
+            }
+          }
+
+          // 4. Terminal or past appointment
+          const terminalStatuses: string[] = [
+            AppointmentStatus.COMPLETED,
+            AppointmentStatus.CANCELLED,
+            AppointmentStatus.NO_SHOW,
+          ];
+          const isTerminal = terminalStatuses.includes(appt.status);
+          const isPast = appt.startTime <= nowUtc;
+
+          if (isTerminal || isPast) {
+            if (job.status === NotificationStatus.PENDING || job.status === NotificationStatus.PROCESSING) {
+              result.cancelled++;
+              result.details?.push({
+                jobId: job.id,
+                action: 'CANCELLED',
+                reason: isTerminal ? 'Appointment in terminal status' : 'Appointment is in the past',
+              });
+              if (!dryRun) {
+                await client.notificationJob.update({
+                  where: { id: job.id },
+                  data: {
+                    status: NotificationStatus.CANCELLED,
+                    lastError: isTerminal
+                      ? 'Obsolete legacy reminder for terminal appointment'
+                      : 'Obsolete legacy reminder for past appointment',
+                    scheduleRevision: 0,
+                    leaseToken: null,
+                  },
+                });
+              }
+            } else {
+              result.upgraded++;
+              result.details?.push({ jobId: job.id, action: 'UPGRADED', reason: 'Historical delivered/failed job archived' });
+              if (!dryRun) {
+                await client.notificationJob.update({
+                  where: { id: job.id },
+                  data: { scheduleRevision: 1 },
+                });
+              }
+            }
+            continue;
+          }
+
+          // 5. Payload and timestamp validation
+          const payload = job.payload as any;
+          if (!payload || typeof payload !== 'object') {
+            result.quarantined++;
+            result.cancelled++;
+            result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Missing or invalid payload' });
+            if (!dryRun) {
+              await client.notificationJob.update({
+                where: { id: job.id },
+                data: {
+                  status: NotificationStatus.CANCELLED,
+                  lastError: 'Quarantined: missing or invalid payload',
+                  scheduleRevision: 0,
+                },
+              });
+            }
+            continue;
+          }
+
+          const parsedStartTime = parseSafeIsoTimestamp(payload.startTime);
+          if (!parsedStartTime) {
+            result.quarantined++;
+            result.cancelled++;
+            result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Malformed or missing startTime in payload' });
+            if (!dryRun) {
+              await client.notificationJob.update({
+                where: { id: job.id },
+                data: {
+                  status: NotificationStatus.CANCELLED,
+                  lastError: 'Quarantined: malformed or missing startTime in payload',
+                  scheduleRevision: 0,
+                },
+              });
+            }
+            continue;
+          }
+
+          // 6. Time matching vs current appointment schedule (handles historical A -> B -> A)
+          const timeDiffMs = Math.abs(parsedStartTime.getTime() - appt.startTime.getTime());
+          const matchesCurrentSchedule = timeDiffMs < 1000;
+
+          if (!matchesCurrentSchedule) {
+            if (job.status === NotificationStatus.PENDING || job.status === NotificationStatus.PROCESSING) {
+              result.cancelled++;
+              result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'StartTime does not match current schedule' });
+              if (!dryRun) {
+                await client.notificationJob.update({
+                  where: { id: job.id },
+                  data: {
+                    status: NotificationStatus.CANCELLED,
+                    lastError: 'Eski yoki tasdiqlanmagan eslatma (migratsiya taftishi orqali bekor qilindi - schedule does not match current appointment)',
+                    scheduleRevision: 0,
+                    leaseToken: null,
+                  },
+                });
+              }
+            } else {
+              result.upgraded++;
+              result.details?.push({ jobId: job.id, action: 'UPGRADED', reason: 'Historical non-matching job archived' });
+              if (!dryRun) {
+                await client.notificationJob.update({
+                  where: { id: job.id },
+                  data: { scheduleRevision: 0 },
+                });
+              }
+            }
+            continue;
+          }
+
+          // 7. Time matches current schedule: check for duplicate legacy jobs
+          const targetScheduleRev = appt.scheduleRevision ?? 1;
+          const canonicalKey = `reminder_${appt.id}_s${targetScheduleRev}`;
+
+          const existingScheduleJob = await client.notificationJob.findFirst({
+            where: {
+              appointmentId: appt.id,
+              templateKey: 'appointment_reminder',
+              scheduleRevision: targetScheduleRev,
+              id: { not: job.id },
+            },
+          });
+
+          if (existingScheduleJob) {
+            if (job.status === NotificationStatus.PENDING || job.status === NotificationStatus.PROCESSING) {
+              result.cancelled++;
+              result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Duplicate legacy reminder for schedule' });
+              if (!dryRun) {
+                await client.notificationJob.update({
+                  where: { id: job.id },
+                  data: {
+                    status: NotificationStatus.CANCELLED,
+                    lastError: 'Duplicate legacy reminder for current schedule',
+                    scheduleRevision: 0,
+                    leaseToken: null,
+                  },
+                });
+              }
+            } else {
+              result.upgraded++;
+              result.details?.push({ jobId: job.id, action: 'UPGRADED', reason: 'Historical duplicate archived' });
+              if (!dryRun) {
+                await client.notificationJob.update({
+                  where: { id: job.id },
+                  data: { scheduleRevision: 0 },
+                });
+              }
+            }
+            continue;
+          }
+
+          // Unique matching job: Upgrade to target schedule revision!
+          result.upgraded++;
+          result.details?.push({ jobId: job.id, action: 'UPGRADED', reason: `Upgraded to schedule revision ${targetScheduleRev}` });
+          if (!dryRun) {
+            let updateData: any = { scheduleRevision: targetScheduleRev };
+            if (job.deduplicationKey !== canonicalKey) {
+              const existingByKey = await client.notificationJob.findUnique({
+                where: { deduplicationKey: canonicalKey },
+              });
+              if (!existingByKey) {
+                updateData.deduplicationKey = canonicalKey;
+              }
+            }
+            await client.notificationJob.update({
+              where: { id: job.id },
+              data: updateData,
+            });
+          }
+        } catch (jobErr: any) {
+          result.errors++;
+          result.details?.push({ jobId: job.id, action: 'ERROR', reason: jobErr?.message || 'Unexpected error' });
+          this.logger.error(`Error repairing legacy reminder job ${job.id}: ${jobErr?.message}`);
+        }
+      }
+    }
+
+    // 8. Ensure eligible upcoming appointments have a valid current-generation reminder
     const eligibleUpcoming = await client.appointment.findMany({
       where: {
         status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING] },
@@ -342,21 +696,31 @@ export class NotificationsService {
       });
 
       if (!hasActiveOrDelivered) {
-        await this.recoverOrEnqueueCurrentReminder(
-          {
-            id: appt.id,
-            startTime: appt.startTime,
-            serviceName: appt.serviceName,
-            patientEmail: appt.patient?.email,
-            patientPhone: appt.patient?.phone || '',
-            status: appt.status,
-            revision: appt.revision,
-            scheduleRevision: currentRev,
-          },
-          client,
-        );
+        result.newlyCreated++;
+        result.details?.push({
+          jobId: `new_reminder_${appt.id}`,
+          action: 'CREATED',
+          reason: `Created missing current-generation reminder for appointment ${appt.id}`,
+        });
+        if (!dryRun) {
+          await this.recoverOrEnqueueCurrentReminder(
+            {
+              id: appt.id,
+              startTime: appt.startTime,
+              serviceName: appt.serviceName,
+              patientEmail: appt.patient?.email,
+              patientPhone: appt.patient?.phone || '',
+              status: appt.status,
+              revision: appt.revision,
+              scheduleRevision: currentRev,
+            },
+            client,
+          );
+        }
       }
     }
+
+    return result;
   }
 
   /**

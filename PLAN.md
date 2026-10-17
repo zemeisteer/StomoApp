@@ -365,5 +365,38 @@
   - 44/44 backend regression & e2e tests passing (100% green).
   - Automated browser test script `backend/test/browser-workflow.js` validating all 5 assertions and responsive viewports with screenshots saved in artifacts directory. (**Verified**)
 
+---
+
+## Phase 12: Production Hardening, Database Isolation, Robust Legacy Upgrade, Atomic Reminder Recovery, and Progressive Legacy Review (COMPLETED & VERIFIED)
+- [x] **Enforce Actual Browser-Test Database Isolation**:
+  - `TEST_DATABASE_URL` strictly required by `backend/test/browser-workflow.js` and test harness `backend/test/run-browser-tests.js`.
+  - Ambient development (`dentacare`) or production (`postgres`) databases rejected before mutations.
+  - Verified backend server (`http://localhost:4000/api/health`) and direct Prisma client use the same `dentacare_test` database.
+  - Run-scoped isolated fixtures created for branch, services, doctor, schedules, and patient.
+  - Fixed phone fixture to 12-digit normalized Uzbekistan format (`+99890` + 7 digits), populated safely via masked input, and asserted normalized submitted value.
+  - Independent teardown cleaning up run's appointment audit records and all run-scoped fixtures without deleting unrelated records. (**Verified**)
+- [x] **Robust & Executable Legacy Reminder Upgrade**:
+  - Calendar-safe ISO timestamp parser (`parseSafeIsoTimestamp`) prevents database crashes on malformed dates (e.g. Feb 30).
+  - Handles missing payloads, null/orphaned appointments, terminal appointments, historical A → B → A rescheduling, duplicate legacy jobs, and active leases (< 5m).
+  - Provided executable repair tool `backend/scripts/repair-reminders.ts` and npm scripts `npm run repair:reminders` and `npm run repair:reminders:dry` with bounded batching and dry-run reporting. (**Verified**)
+- [x] **Atomic Reminder Recovery in All Call Paths**:
+  - Transaction-scoped atomic recovery in `recoverOrEnqueueCurrentReminder` with consistent lock ordering (`appointments` FOR UPDATE before `notification_jobs` FOR UPDATE).
+  - Preserves failure/cancellation history.
+  - Atomically archives expired leases (>= 5m) or terminal jobs and creates replacement canonical job.
+  - Conflict-safe handling avoiding continuing queries inside aborted PostgreSQL transactions. (**Verified**)
+- [x] **Progressive Review of Unresolved Legacy Records**:
+  - Optimistic concurrency control using `expectedAuditCount` in `reconcileLegacyRecord`.
+  - Allows staff to review records previously saved as `KEEP_AMBIGUOUS_BUNDLE` when new clinical evidence is available, keeping resolved records protected and audit logs append-only.
+  - Stale concurrent submissions rejected with 409 Conflict; admin interface reloads state and submits expected version. (**Verified**)
+- [x] **Reconciled Proxy Configuration**:
+  - Configured `backend/src/main.ts` with restricted `trust proxy` setting (`TRUST_PROXY` env or loopback in production; no unrestricted `true`).
+  - Production login throttling (5 attempts/min) verified active. (**Verified**)
+- [x] **Full Test Suite & Browser Verification**:
+  - All 51/51 backend e2e tests passing (`npm run test:e2e`).
+  - Backend lint & build passing with 0 errors.
+  - Frontend lint & build passing with 0 errors.
+  - Browser test suite passing all 7 workflows with screenshots saved in artifact directory. (**Verified**)
+
+
 
 

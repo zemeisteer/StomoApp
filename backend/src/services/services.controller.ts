@@ -122,6 +122,10 @@ export class ReconcileLegacyDto {
   @IsString()
   @Length(5, 500, { message: 'Ko\'rib chiqish sababi (reason) kamida 5 ta belgidan iborat bo\'lishi shart' })
   reason!: string;
+
+  @IsOptional()
+  @IsInt()
+  expectedAuditCount?: number;
 }
 
 @Controller('services')

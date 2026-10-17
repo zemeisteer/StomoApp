@@ -160,6 +160,23 @@ export class ServicesService {
       }),
     ]);
 
+    const recordIds = records.map((r) => r.id);
+    const auditCounts = recordIds.length > 0
+      ? await this.prisma.auditLog.groupBy({
+          by: ['entityId'],
+          where: {
+            entityId: { in: recordIds },
+            action: 'service_item.legacy_reconciled',
+          },
+          _count: { id: true },
+        })
+      : [];
+
+    const auditCountMap = new Map<string, number>();
+    for (const a of auditCounts) {
+      if (a.entityId) auditCountMap.set(a.entityId, a._count.id);
+    }
+
     return {
       unresolvedCount: total,
       verifiedHistoricalCount: verifiedCount,
@@ -177,6 +194,7 @@ export class ServicesService {
         priceFrom: r.priceFrom,
         legacyProvenance: r.legacyProvenance,
         isLegacyBundle: r.isLegacyBundle,
+        auditCount: auditCountMap.get(r.id) || 0,
         appointment: r.appointment,
       })),
     };
@@ -184,7 +202,7 @@ export class ServicesService {
 
   async reconcileLegacyRecord(
     itemId: string,
-    dto: { serviceId?: string; action?: string; reason?: string },
+    dto: { serviceId?: string; action?: string; reason?: string; expectedAuditCount?: number },
     userId?: string,
   ) {
     if (!dto.action || !['RESOLVE_TO_SERVICE', 'KEEP_AMBIGUOUS_BUNDLE'].includes(dto.action)) {
@@ -235,16 +253,17 @@ export class ServicesService {
               throw new BadRequestException('Faqat muvofiqlashtirilmagan noaniq tarixiy yozuvlarni ko\'rib chiqish mumkin');
             }
 
-            // Check if already reconciled by a concurrent request while waiting for lock
-            const existingAudit = await tx.auditLog.findFirst({
+            // Concurrency check: optimistic concurrency using expectedAuditCount
+            const currentAuditCount = await tx.auditLog.count({
               where: {
                 entityId: itemId,
                 action: 'service_item.legacy_reconciled',
               },
             });
 
-            if (existingAudit) {
-              throw new ConflictException('Bir vaqtning o\'zida boshqa xodim tomonidan ko\'rib chiqildi');
+            const expectedCount = dto.expectedAuditCount !== undefined ? dto.expectedAuditCount : 0;
+            if (expectedCount !== currentAuditCount) {
+              throw new ConflictException('Bir vaqtning o\'zida boshqa xodim tomonidan ko\'rib chiqildi (versiya nomutanosibligi)');
             }
 
             if (dto.action === 'RESOLVE_TO_SERVICE') {

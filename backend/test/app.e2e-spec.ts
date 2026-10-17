@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus } from '@prisma/client';
+import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus, NotificationChannel } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/auth/auth.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
@@ -4321,6 +4321,464 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.delete({ where: { id: patient47.id } });
     }
   });
+
+  it('Hardening: Robust Legacy Reminder Upgrade handles malformed timestamps, nulls, orphans, and historical A-B-A', async () => {
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Legacy Upgrade Patient ${runId}`,
+        phone: `+99800${runId}77`,
+      },
+    });
+
+    const apptFuture = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_future_${runId}_${Date.now()}`,
+        patientId: testPatient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        startTime: getNextWorkingSlot(3, 10, 0),
+        endTime: getNextWorkingSlot(3, 11, 0),
+        durationMinutes: 60,
+        bufferMinutes: 0,
+        status: AppointmentStatus.CONFIRMED,
+        serviceName: 'Maslahat va tekshiruv',
+        scheduleRevision: 1,
+        revision: 1,
+      },
+    });
+
+    // 1. Job with impossible/malformed date (e.g. Feb 30th)
+    const malformedJob1 = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: apptFuture.id,
+        scheduleRevision: null,
+        status: NotificationStatus.PENDING,
+        payload: {
+          appointmentId: apptFuture.id,
+          startTime: '2025-02-30T10:00:00Z', // Impossible calendar date!
+        },
+      },
+    });
+
+    // 2. Job with invalid non-ISO string
+    const malformedJob2 = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: apptFuture.id,
+        scheduleRevision: null,
+        status: NotificationStatus.PENDING,
+        payload: {
+          appointmentId: apptFuture.id,
+          startTime: 'corrupted-timestamp-data',
+        },
+      },
+    });
+
+    // 3. Job with null payload
+    const nullPayloadJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: apptFuture.id,
+        scheduleRevision: null,
+        status: NotificationStatus.PENDING,
+        payload: {},
+      },
+    });
+
+    // 4. Job with null appointmentId
+    const nullApptJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: null,
+        scheduleRevision: null,
+        status: NotificationStatus.PENDING,
+        payload: { startTime: apptFuture.startTime.toISOString() },
+      },
+    });
+
+    // 5. Orphaned job pointing to nonexistent appointment (created safely with replication role)
+    await prisma.$executeRawUnsafe(`SET session_replication_role = 'replica';`);
+    const orphanedJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: 'non-existent-appointment-uuid',
+        scheduleRevision: null,
+        status: NotificationStatus.PENDING,
+        payload: { startTime: apptFuture.startTime.toISOString() },
+      },
+    });
+    await prisma.$executeRawUnsafe(`SET session_replication_role = 'origin';`);
+
+    // 6. Valid legacy job matching appointment start time
+    const validLegacyJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: apptFuture.id,
+        scheduleRevision: null,
+        status: NotificationStatus.PENDING,
+        payload: {
+          appointmentId: apptFuture.id,
+          startTime: apptFuture.startTime.toISOString(),
+        },
+      },
+    });
+
+    // 7. Duplicate legacy job matching same start time
+    const duplicateLegacyJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: apptFuture.id,
+        scheduleRevision: null,
+        status: NotificationStatus.PENDING,
+        payload: {
+          appointmentId: apptFuture.id,
+          startTime: apptFuture.startTime.toISOString(),
+        },
+      },
+    });
+
+    // 8. In-flight job with active lease (< 5m)
+    const activeLeaseJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: apptFuture.id,
+        scheduleRevision: null,
+        status: NotificationStatus.PROCESSING,
+        lockedAt: new Date(),
+        leaseToken: 'worker-lease-token-123',
+        payload: {
+          appointmentId: apptFuture.id,
+          startTime: apptFuture.startTime.toISOString(),
+        },
+      },
+    });
+
+    try {
+      // Execute upgrade/repair command implementation
+      const upgradeStats = await notificationsService.upgradeLegacyReminderJobs({
+        dryRun: false,
+        batchSize: 50,
+      });
+
+      // Assert that one malformed job did NOT abort the batch
+      expect(upgradeStats.errors).toBe(0);
+      expect(upgradeStats.scanned).toBeGreaterThanOrEqual(8);
+      expect(upgradeStats.quarantined).toBeGreaterThanOrEqual(4); // jobs 1, 2, 3, 4, 5
+      expect(upgradeStats.upgraded).toBeGreaterThanOrEqual(1); // validLegacyJob
+      expect(upgradeStats.cancelled).toBeGreaterThanOrEqual(5); // malformed, nulls, orphans, duplicate
+      expect(upgradeStats.skippedActiveLease).toBeGreaterThanOrEqual(1); // activeLeaseJob
+
+      // Inspect persisted database states
+      const dbJob1 = await prisma.notificationJob.findUnique({ where: { id: malformedJob1.id } });
+      expect(dbJob1!.status).toBe(NotificationStatus.CANCELLED);
+      expect(dbJob1!.lastError).toContain('Quarantined');
+
+      const dbJob2 = await prisma.notificationJob.findUnique({ where: { id: malformedJob2.id } });
+      expect(dbJob2!.status).toBe(NotificationStatus.CANCELLED);
+      expect(dbJob2!.lastError).toContain('Quarantined');
+
+      const dbNullAppt = await prisma.notificationJob.findUnique({ where: { id: nullApptJob.id } });
+      expect(dbNullAppt!.status).toBe(NotificationStatus.CANCELLED);
+      expect(dbNullAppt!.lastError).toContain('missing appointmentId');
+
+      const dbOrphan = await prisma.notificationJob.findUnique({ where: { id: orphanedJob.id } });
+      expect(dbOrphan!.status).toBe(NotificationStatus.CANCELLED);
+      expect(dbOrphan!.lastError).toContain('appointment not found');
+
+      const dbValid = await prisma.notificationJob.findUnique({ where: { id: validLegacyJob.id } });
+      expect(dbValid!.scheduleRevision).toBe(1);
+
+      const dbDuplicate = await prisma.notificationJob.findUnique({ where: { id: duplicateLegacyJob.id } });
+      expect(dbDuplicate!.status).toBe(NotificationStatus.CANCELLED);
+      expect(dbDuplicate!.lastError).toContain('Duplicate legacy reminder');
+
+      const dbActiveLease = await prisma.notificationJob.findUnique({ where: { id: activeLeaseJob.id } });
+      expect(dbActiveLease!.status).toBe(NotificationStatus.PROCESSING);
+      expect(dbActiveLease!.leaseToken).toBe('worker-lease-token-123');
+
+      // Idempotency: Second execution produces 0 new changes
+      const rerunStats = await notificationsService.upgradeLegacyReminderJobs({
+        dryRun: false,
+        batchSize: 50,
+      });
+      expect(rerunStats.errors).toBe(0);
+      expect(rerunStats.upgraded).toBe(0);
+      expect(rerunStats.quarantined).toBe(0);
+    } finally {
+      await prisma.notificationJob.deleteMany({
+        where: {
+          id: {
+            in: [
+              malformedJob1.id,
+              malformedJob2.id,
+              nullPayloadJob.id,
+              nullApptJob.id,
+              orphanedJob.id,
+              validLegacyJob.id,
+              duplicateLegacyJob.id,
+              activeLeaseJob.id,
+            ],
+          },
+        },
+      });
+      await prisma.appointment.delete({ where: { id: apptFuture.id } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
+
+  it('Hardening: Atomic Reminder Recovery preserves invariants across concurrent recoveries, leases, and rollback', async () => {
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Atomic Recovery Patient ${runId}`,
+        phone: `+99800${runId}88`,
+      },
+    });
+
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_atomic_${runId}_${Date.now()}`,
+        patientId: testPatient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        startTime: getNextWorkingSlot(4, 15, 0),
+        endTime: getNextWorkingSlot(4, 16, 0),
+        durationMinutes: 60,
+        bufferMinutes: 0,
+        status: AppointmentStatus.CONFIRMED,
+        serviceName: 'Ortopedik konsultatsiya',
+        scheduleRevision: 1,
+        revision: 1,
+      },
+    });
+
+    const apptParams = {
+      id: appt.id,
+      startTime: appt.startTime,
+      serviceName: appt.serviceName,
+      patientPhone: testPatient.phone,
+      status: appt.status,
+      revision: appt.revision,
+      scheduleRevision: appt.scheduleRevision,
+    };
+
+    try {
+      // 1. Two concurrent recoveries without a supplied transaction (auto-starts transaction with row locks)
+      const [res1, res2] = await Promise.all([
+        notificationsService.recoverOrEnqueueCurrentReminder(apptParams),
+        notificationsService.recoverOrEnqueueCurrentReminder(apptParams),
+      ]);
+
+      expect(res1).toBeDefined();
+      expect(res2).toBeDefined();
+      expect(res1.id).toBe(res2.id); // Exactly one canonical job created!
+
+      // Assert only 1 canonical job exists in database
+      const canonicalJobs = await prisma.notificationJob.findMany({
+        where: { deduplicationKey: `reminder_${appt.id}_s1` },
+      });
+      expect(canonicalJobs.length).toBe(1);
+      const initialJob = canonicalJobs[0];
+      expect(initialJob.status).toBe(NotificationStatus.PENDING);
+
+      // 2. Active worker lease (< 5m): Recovery must NOT steal or duplicate
+      await prisma.notificationJob.update({
+        where: { id: initialJob.id },
+        data: {
+          status: NotificationStatus.PROCESSING,
+          lockedAt: new Date(),
+          leaseToken: 'active-lease-token',
+        },
+      });
+
+      const activeLeaseRecovery = await notificationsService.recoverOrEnqueueCurrentReminder(apptParams);
+      expect(activeLeaseRecovery.id).toBe(initialJob.id);
+      expect(activeLeaseRecovery.status).toBe(NotificationStatus.PROCESSING);
+
+      // 3. Expired worker lease (>= 5m): Recovery must archive stalled job and create fresh replacement
+      await prisma.notificationJob.update({
+        where: { id: initialJob.id },
+        data: {
+          lockedAt: new Date(Date.now() - 10 * 60 * 1000), // 10 minutes ago
+        },
+      });
+
+      const expiredLeaseRecovery = await notificationsService.recoverOrEnqueueCurrentReminder(apptParams);
+      expect(expiredLeaseRecovery.id).not.toBe(initialJob.id);
+      expect(expiredLeaseRecovery.status).toBe(NotificationStatus.PENDING);
+      expect(expiredLeaseRecovery.deduplicationKey).toBe(`reminder_${appt.id}_s1`);
+
+      // Verify old job was archived with superseded key and lastError
+      const archivedJob = await prisma.notificationJob.findUnique({ where: { id: initialJob.id } });
+      expect(archivedJob!.status).toBe(NotificationStatus.FAILED);
+      expect(archivedJob!.lastError).toContain('Worker lease expired');
+      expect(archivedJob!.deduplicationKey).toContain('expired_lease');
+
+      // 4. Delivered job (SENT or SIMULATED): Must return existing delivered job without creating duplicates
+      await prisma.notificationJob.update({
+        where: { id: expiredLeaseRecovery.id },
+        data: { status: NotificationStatus.SENT },
+      });
+
+      const deliveredRecovery = await notificationsService.recoverOrEnqueueCurrentReminder(apptParams);
+      expect(deliveredRecovery.id).toBe(expiredLeaseRecovery.id);
+      expect(deliveredRecovery.status).toBe(NotificationStatus.SENT);
+
+      // Clean up jobs for this appointment
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: appt.id } });
+    } finally {
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: appt.id } });
+      await prisma.appointment.delete({ where: { id: appt.id } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
+
+  it('Hardening: Progressive Legacy Review permits subsequent review of AMBIGUOUS_BUNDLE and rejects stale versions with 409', async () => {
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Progressive Review Patient ${runId}`,
+        phone: `+99800${runId}99`,
+      },
+    });
+
+    const targetService = await prisma.service.create({
+      data: {
+        nameUz: 'Plomba qo\'yish va tiklash',
+        nameRu: 'Пломбирование и реставрация',
+        slug: `plomba-service-${runId}`,
+        category: 'THERAPY',
+        durationMinutes: 45,
+        priceFrom: 180000,
+        isActive: true,
+      },
+    });
+
+    const histAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_prog_${runId}_${Date.now()}`,
+        patientId: testPatient.id,
+        doctorId: testDoctorAId,
+        serviceId: targetService.id,
+        branchId: testBranchId,
+        startTime: new Date('2025-01-15T09:00:00.000Z'),
+        endTime: new Date('2025-01-15T09:45:00.000Z'),
+        durationMinutes: 45,
+        bufferMinutes: 0,
+        status: AppointmentStatus.COMPLETED,
+        serviceName: 'Plomba qo\'yish va tiklash',
+      },
+    });
+
+    const legacyItem = await prisma.appointmentServiceItem.create({
+      data: {
+        appointmentId: histAppt.id,
+        serviceNameUz: 'Plomba qo\'yish va tiklash',
+        serviceNameRu: 'Пломбирование и реставрация',
+        durationMinutes: 45,
+        priceFrom: 180000,
+        legacyProvenance: 'AMBIGUOUS_BUNDLE',
+        isLegacyBundle: true,
+      },
+    });
+
+    try {
+      // 1. Initial review: Decision is KEEP_AMBIGUOUS_BUNDLE
+      const review1 = await servicesService.reconcileLegacyRecord(
+        legacyItem.id,
+        {
+          action: 'KEEP_AMBIGUOUS_BUNDLE',
+          reason: 'Boshlang\'ich taftish: hujjatlar to\'liq emas, paket sifatida saqlandi',
+          expectedAuditCount: 0,
+        },
+        ownerUserId,
+      );
+
+      expect(review1.legacyProvenance).toBe('AMBIGUOUS_BUNDLE');
+      expect(review1.isLegacyBundle).toBe(true);
+
+      // Verify audit log entry #1 was created
+      const audits1 = await prisma.auditLog.findMany({
+        where: { entityId: legacyItem.id, action: 'service_item.legacy_reconciled' },
+      });
+      expect(audits1.length).toBe(1);
+
+      // 2. Stale submission rejected with 409 Conflict: Submitting with expectedAuditCount 0 when actual count is 1
+      await expect(
+        servicesService.reconcileLegacyRecord(
+          legacyItem.id,
+          {
+            action: 'RESOLVE_TO_SERVICE',
+            serviceId: targetService.id,
+            reason: 'Eski sahifadan yuborilgan so\'rov',
+            expectedAuditCount: 0, // Stale!
+          },
+          ownerUserId,
+        ),
+      ).rejects.toThrow('versiya nomutanosibligi');
+
+      // 3. Deliberate subsequent review: Staff later obtains evidence and resolves the record with expectedAuditCount: 1
+      const review2 = await servicesService.reconcileLegacyRecord(
+        legacyItem.id,
+        {
+          action: 'RESOLVE_TO_SERVICE',
+          serviceId: targetService.id,
+          reason: 'Bemorning qog\'oz ambulatoriya kartasi topildi va katalog xizmatiga muvofiqlashtirildi',
+          expectedAuditCount: 1, // Matches current audit count!
+        },
+        ownerUserId,
+      );
+
+      expect(review2.legacyProvenance).toBe('RESOLVED_MANUAL');
+      expect(review2.isLegacyBundle).toBe(false);
+      expect(review2.serviceId).toBe(targetService.id);
+      expect(review2.serviceNameUz).toBe('Plomba qo\'yish va tiklash'); // Preserved historical snapshot!
+
+      // Audit history is append-only: Exactly 2 audit logs now exist
+      const audits2 = await prisma.auditLog.findMany({
+        where: { entityId: legacyItem.id, action: 'service_item.legacy_reconciled' },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(audits2.length).toBe(2);
+
+      // 4. Once resolved to RESOLVED_MANUAL, further modification is rejected per documented policy
+      await expect(
+        servicesService.reconcileLegacyRecord(
+          legacyItem.id,
+          {
+            action: 'KEEP_AMBIGUOUS_BUNDLE',
+            reason: 'Yana paketga qaytarishga urinish',
+            expectedAuditCount: 2,
+          },
+          ownerUserId,
+        ),
+      ).rejects.toThrow('allaqachon muvofiqlashtirilgan');
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { entityId: legacyItem.id } });
+      await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: histAppt.id } });
+      await prisma.appointment.delete({ where: { id: histAppt.id } });
+      await prisma.service.delete({ where: { id: targetService.id } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
 });
+
 
 

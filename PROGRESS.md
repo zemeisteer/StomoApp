@@ -1,6 +1,6 @@
 # StomoApp Implementation Progress & Verification Report
 
-## Overall Status: COMPLETED & VERIFIED (Phases 1 — 11)
+## Overall Status: COMPLETED & VERIFIED (Phases 1 — 12)
 
 Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force-push, no automated push/deployment).
 
@@ -292,23 +292,48 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
 | Frontend Build | `npm run build` | **PASS (code 0, 28/28 routes prerendered)** |
 | Frontend ESLint | `npm run lint` | **PASS (code 0, 0 errors)** |
 | Dedicated Test Database | `dentacare_test` (PostgreSQL 18) | **CONFIGURED & MIGRATED** |
-| Full E2E Test Suite | `npm run test:e2e` | **PASS (44/44 passed, 0 failed in 193s)** |
+| Full E2E Test Suite | `npm run test:e2e` | **PASS (51/51 passed, 0 failed in 17.5s)** |
 | Live Dev Servers | Backend (:4000) & Frontend (:3000) | **HEALTHY & RESPONDING (HTTP 200)** |
-| Reusable Browser Workflow Suite | `node test/browser-workflow.js` | **PASS (All 5 browser assertions verified, 10 screenshots captured)** |
+| Isolated Browser Workflow Suite | `node test/run-browser-tests.js` | **PASS (All 7 workflows & assertions passed, exit code 0)** |
 | Visual Browser Verification | Real Google Chrome (1440px Desktop, 768px Tablet, 390px Mobile) | **VERIFIED (High-resolution screenshots in artifacts)** |
 
-### Visual Browser Verification vs HTTP Tests
-- **HTTP Tests**: Validated via Jest E2E suite (`backend/test/app.e2e-spec.ts`, 41 regressions) executing HTTP requests against NestJS application controllers connected to isolated `dentacare_test` database.
-- **Visual Browser Verification**: Executed live against Next.js dev server (:3000) and NestJS backend (:4000) running with PostgreSQL database `dentacare` using real Google Chrome via Chrome DevTools Protocol (CDP). Captured full-page rendered screenshots:
-  - `desktop_homepage_verified.png`: 3D interactive molar tooth hero with orbit controls fallback, animated teal-and-white design tokens, header navigation, and UZ/RU switcher.
-  - `mobile_homepage_uz.png`: 390px mobile viewport in Uzbek showing responsive hero banner, hamburger navigation, and feature badges.
-  - `mobile_homepage_ru.png`: 390px mobile viewport in Russian showing localized hero copy ("Здоровая улыбка — надежное и безболезненное лечение").
-  - `browser_walkthrough_01_two_services.png`: Step 1 clinic branch selection with teal border highlight on active branch.
-  - `desktop_booking_doctor.png`: Step 2 service catalog showing individual durations and prices with 1-to-3 selection limit.
-  - `browser_08_mobile_390px_uz.png`: 390px mobile booking flow in Uzbek with branch list and primary CTA button.
-  - `browser_walkthrough_06_admin_dashboard.png`: Dark mode admin login portal with teal security badge, input validation, and password masking.
+### Phase 12: Production Hardening, Database Isolation, Robust Legacy Upgrade, Atomic Recovery, and Progressive Review (COMPLETED & VERIFIED)
+1. **Actual Browser-Test Database Isolation**:
+   - `backend/test/browser-workflow.js` and `backend/test/run-browser-tests.js` enforce explicit `TEST_DATABASE_URL`.
+   - Protects development and production databases (`dentacare`, `postgres`) by asserting the database name contains `"test"`.
+   - Synchronizes backend server identity via `/api/health` database name inspection.
+   - Generates fully isolated run-scoped fixtures (`Branch`, `Service`, `Doctor`, `DoctorSchedule`, `Patient`), removing reliance on development seeds.
+   - Corrected 12-digit normalized Uzbekistan phone format (`+99890` + 7 digits) and safe masked typing.
+   - Robust independent teardown ensures run's audit logs and fixtures are cleaned up while continuing across any individual step failure.
+2. **Robust Legacy Reminder Upgrade**:
+   - Calendar-safe ISO timestamp parser (`parseSafeIsoTimestamp`) safely handles leap years, month boundaries, and malformed strings without database cast crashes.
+   - Handles missing payloads, null/orphaned appointments, terminal appointments, historical A-B-A rescheduling, and active worker leases (< 5m).
+   - Documented executable CLI `backend/scripts/repair-reminders.ts` and npm scripts `npm run repair:reminders` and `npm run repair:reminders:dry`.
+3. **Atomic Reminder Recovery**:
+   - Transaction-scoped atomic recovery in `recoverOrEnqueueCurrentReminder` with consistent lock ordering (`appointments` FOR UPDATE before `notification_jobs` FOR UPDATE).
+   - Atomically replaces expired worker leases (>= 5m) or terminal jobs with replacement canonical jobs.
+   - Conflict-safe error handling avoiding queries inside aborted transactions.
+4. **Progressive Legacy Review**:
+   - Optimistic concurrency control via `expectedAuditCount` in `reconcileLegacyRecord`.
+   - Allows staff to later provide new evidence to resolve records previously saved as `KEEP_AMBIGUOUS_BUNDLE`, while protecting resolved records and rejecting stale concurrent submissions with 409 Conflict.
+   - Admin UI reloads state and passes `expectedAuditCount`.
+5. **Reconciled Express Proxy Configuration**:
+   - Configured `main.ts` with restricted `trust proxy` (`TRUST_PROXY` env or loopback in production; no unrestricted `true`).
+   - Production login rate limiting (5 attempts/min) verified active.
 
-### Remaining Limitations & Honest Blockers
+### Visual Browser Verification vs HTTP Tests
+- **HTTP Tests**: Validated via Jest E2E suite (`backend/test/app.e2e-spec.ts`, 51 regressions) executing HTTP requests against NestJS application controllers connected to isolated `dentacare_test` database.
+- **Visual Browser Verification**: Executed live against Next.js dev server (:3000) and NestJS backend (:4000) running with PostgreSQL database `dentacare_test` using real Google Chrome via Chrome DevTools Protocol (CDP). Captured full-page rendered screenshots:
+  - `desktop_homepage.png`: 3D interactive molar tooth hero with orbit controls fallback, animated teal-and-white design tokens, header navigation, and UZ/RU switcher.
+  - `desktop_booking_confirmation.png`: 2-service booking confirmation with isolated patient fixture.
+  - `desktop_admin_calendar_modal.png`: Admin calendar appointment detail modal with the 2-service appointment.
+  - `desktop_rescheduled.png`: Admin calendar view with updated rescheduled time (08:30).
+  - `desktop_legacy_review.png`: Admin Legacy Review tab showing historical unverified bundles.
+  - `desktop_legacy_action.png`: Admin Legacy Review modal showing action submission and audit reason input.
+  - `mobile_homepage.png`: 390px mobile viewport in Uzbek showing responsive hero banner, hamburger navigation, and feature badges.
+  - `tablet_homepage.png`: 768px tablet viewport.
+
+### Remaining Limitations & Operational Considerations
 1. **Third-Party External Notification Gateways (Eskiz SMS & Telegram Bot)**:
    - Real-world production SMS delivery requires valid Eskiz.uz credentials (`ESKIZ_EMAIL`, `ESKIZ_PASSWORD`).
    - Real-world Telegram broadcasting requires an active `TELEGRAM_BOT_TOKEN` and configured `TELEGRAM_ADMIN_CHAT_ID`.

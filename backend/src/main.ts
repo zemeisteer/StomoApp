@@ -18,6 +18,20 @@ async function bootstrap() {
   }));
   app.use(cookieParser());
 
+  // Reverse proxy configuration (restricted to real deployment topology)
+  const trustProxyEnv = configService.get<string>('TRUST_PROXY');
+  const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+  const expressApp = app.getHttpAdapter().getInstance();
+
+  if (trustProxyEnv) {
+    const parsedProxy = /^\d+$/.test(trustProxyEnv) ? parseInt(trustProxyEnv, 10) : trustProxyEnv;
+    expressApp.set('trust proxy', parsedProxy);
+  } else if (nodeEnv === 'production') {
+    expressApp.set('trust proxy', 'loopback');
+  } else {
+    expressApp.set('trust proxy', false);
+  }
+
   // Static files for uploads (fallback storage)
   const uploadsDir = path.resolve(process.cwd(), 'uploads');
   app.use('/uploads', express.static(uploadsDir));

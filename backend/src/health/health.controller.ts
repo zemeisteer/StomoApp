@@ -11,9 +11,11 @@ export class HealthController {
   async check() {
     let dbStatus = 'ok';
     let dbLatencyMs = 0;
+    let dbName = '';
     try {
       const start = Date.now();
-      await this.prisma.$queryRaw`SELECT 1`;
+      const [res] = await this.prisma.$queryRaw<Array<{ current_database: string }>>`SELECT current_database();`;
+      dbName = res?.current_database || '';
       dbLatencyMs = Date.now() - start;
     } catch {
       dbStatus = 'disconnected';
@@ -26,6 +28,7 @@ export class HealthController {
       uptimeSeconds: Math.floor(process.uptime()),
       database: {
         status: dbStatus,
+        name: dbName,
         latencyMs: dbLatencyMs,
       },
       clinicTimezone: 'Asia/Tashkent',
