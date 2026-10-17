@@ -25,11 +25,12 @@ async function main() {
     const dbName = dbInfo[0]?.current_database || '';
     console.log(`Connected Test DB : "${dbName}"`);
 
-    if (!dbName.toLowerCase().includes('test')) {
-      throw new Error(`Refusing to run tests against "${dbName}". Database name must contain "test"!`);
+    const EXPECTED_TEST_DB = process.env.TEST_DB_NAME || 'dentacare_test';
+    if (dbName !== EXPECTED_TEST_DB && !dbName.endsWith('_test')) {
+      throw new Error(`FAIL-CLOSED: Connected database "${dbName}" is not the expected isolated test database ("${EXPECTED_TEST_DB}"). A database-name substring alone is insufficient proof of isolation.`);
     }
-    if (dbName === 'dentacare' || dbName === 'postgres') {
-      throw new Error(`Refusing to run tests against development or production database "${dbName}"!`);
+    if (['dentacare', 'postgres', 'production', 'master', 'main'].includes(dbName.toLowerCase()) || dbName.toLowerCase().includes('prod')) {
+      throw new Error(`FAIL-CLOSED: Refusing to run tests against protected development/production database "${dbName}"!`);
     }
 
     // 2. Ensure base admin user exists in test database
@@ -71,7 +72,7 @@ async function main() {
     }
     console.log(`Verified: Backend and test runner share test database "${dbName}".`);
 
-    // 4. Verify frontend is responsive
+    // 4. Verify frontend is responsive and rewritten API route targets test database
     console.log(`Checking frontend application at ${BASE_URL} ...`);
     try {
       const frontRes = await fetch(BASE_URL);
@@ -83,6 +84,23 @@ async function main() {
     } catch (err) {
       throw new Error(`Frontend server is not running at ${BASE_URL}.\nError: ${err.message}`);
     }
+
+    console.log(`Verifying frontend rewritten API route at ${BASE_URL}/api/health ...`);
+    let frontHealth;
+    try {
+      frontHealth = await fetch(`${BASE_URL}/api/health`).then((r) => r.json());
+    } catch (err) {
+      throw new Error(
+        `Frontend rewritten API route at ${BASE_URL}/api/health is unreachable.\nError: ${err.message}`,
+      );
+    }
+
+    if (frontHealth?.database?.name !== dbName) {
+      throw new Error(
+        `Frontend API isolation failure!\nFrontend rewritten API route (${BASE_URL}/api/health) is connected to: "${frontHealth?.database?.name}"\nExpected test database: "${dbName}"\nThe frontend proxy is not routing to the isolated test database environment!`,
+      );
+    }
+    console.log(`Verified: Frontend rewritten API route connects to test database "${dbName}".`);
 
     // 5. Execute browser test workflow
     console.log('\nExecuting browser workflow test suite...');
@@ -96,9 +114,13 @@ async function main() {
       },
     });
 
-    testProcess.on('close', (code) => {
-      console.log(`\nBrowser test runner exited with code ${code}`);
-      process.exit(code || 0);
+    testProcess.on('close', (code, signal) => {
+      console.log(`\nBrowser test runner exited with code ${code}, signal: ${signal}`);
+      if (signal) {
+        console.error(`[FATAL] Browser test runner process terminated by signal ${signal}.`);
+        process.exit(1);
+      }
+      process.exit(code ?? 1);
     });
   } catch (err) {
     console.error('\n[FATAL] Test harness failed:', err.message);

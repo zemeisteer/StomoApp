@@ -36,10 +36,11 @@ async function run() {
   const currentDb = dbInfo[0].current_database;
   console.log(`[DB Check] Direct Prisma connected to database: "${currentDb}"`);
 
-  if (!currentDb.toLowerCase().includes('test')) {
-    throw new Error(`FAIL-CLOSED: Connected database "${currentDb}" is NOT a dedicated test database (must include "test").`);
+  const EXPECTED_TEST_DB = process.env.TEST_DB_NAME || 'dentacare_test';
+  if (currentDb !== EXPECTED_TEST_DB && !currentDb.endsWith('_test')) {
+    throw new Error(`FAIL-CLOSED: Connected database "${currentDb}" is NOT the expected isolated test database ("${EXPECTED_TEST_DB}"). A database-name substring alone is insufficient proof of isolation.`);
   }
-  if (currentDb === 'dentacare' || currentDb === 'postgres') {
+  if (['dentacare', 'postgres', 'production', 'master', 'main'].includes(currentDb.toLowerCase()) || currentDb.toLowerCase().includes('prod')) {
     throw new Error(`FAIL-CLOSED: Refusing to run tests against protected development/production database "${currentDb}".`);
   }
 
@@ -57,6 +58,22 @@ async function run() {
     backendDbName,
     currentDb,
     `Database isolation failure! Backend is connected to "${backendDbName}", but test runner is using "${currentDb}". Both must use the same test database!`,
+  );
+
+  // Verify frontend application route (${BASE_URL}/api/health) reaches the test database
+  let frontDbName = '';
+  try {
+    const frontHealthRes = await fetch(`${BASE_URL}/api/health`).then((r) => r.json());
+    frontDbName = frontHealthRes?.database?.name || '';
+  } catch (frontErr) {
+    throw new Error(`Frontend rewritten API route at ${BASE_URL}/api/health is unreachable: ${frontErr.message}`);
+  }
+
+  console.log(`[Frontend Route Check] Frontend rewritten API reported connected database: "${frontDbName}"`);
+  assert.strictEqual(
+    frontDbName,
+    currentDb,
+    `Frontend API route isolation failure! Frontend at ${BASE_URL}/api/health is connected to "${frontDbName}", but test runner is using "${currentDb}". Fail closed!`,
   );
 
   // 2. Set up run-scoped identifiers (7 digits for phone suffix -> 12-digit normalized phone)

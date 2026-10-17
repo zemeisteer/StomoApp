@@ -1,69 +1,117 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from '../src/app.module';
+import { PrismaModule } from '../src/prisma/prisma.module';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
- * CLI Command: Legacy Reminder Repair & Upgrade
- *
- * Usage:
- *   npx ts-node scripts/repair-reminders.ts [options]
- *
- * Options:
- *   --dry-run, -d           Report mode: inspect and classify without mutating database
- *   --batch-size=<N>, -b <N> Number of records per batch (default: 100, max: 500)
- *   --max-jobs=<N>          Safety limit on total jobs to process (default: 10000)
- *   --database-url=<URL>    Explicit target database connection URL
- *
- * Worker Coordination Strategy:
- *   1. Active Lease Protection: In-flight jobs currently locked by workers (< 5m lease)
- *      are automatically detected, preserved, and skipped.
- *   2. Bounded Batches: Database updates are applied in discrete bounded chunks, preventing
- *      prolonged table lock contention.
- *   3. Idempotent Reruns: Safe to run repeatedly; migrated records (scheduleRevision IS NOT NULL)
- *      are skipped on subsequent executions.
- *   4. Timing: Recommended to run during off-peak hours or maintenance windows.
+ * Dedicated Maintenance Module:
+ * Does NOT import ScheduleModule.forRoot(), BullModule, or AppointmentsModule.
+ * Guarantees zero cron job registration, zero queue consumers, and zero background worker intervals.
  */
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env', '../.env'],
+    }),
+    PrismaModule,
+  ],
+  providers: [NotificationsService],
+})
+export class MaintenanceModule {}
 
-function parseArgs() {
-  const args = process.argv.slice(2);
+export interface CliOptions {
+  dryRun: boolean;
+  batchSize: number;
+  maxJobs: number;
+  databaseUrl?: string;
+}
+
+export function sanitizeDatabaseUrl(url?: string): string {
+  if (!url) return 'undefined';
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '****';
+    }
+    return parsed.toString();
+  } catch {
+    return url.replace(/:[^:@]+@/, ':****@');
+  }
+}
+
+export function parseArgs(argv: string[]): CliOptions {
   let dryRun = false;
   let batchSize = 100;
   let maxJobs = 10000;
   let databaseUrl: string | undefined = undefined;
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
     if (arg === '--dry-run' || arg === '-d') {
       dryRun = true;
     } else if (arg.startsWith('--batch-size=')) {
-      batchSize = parseInt(arg.split('=')[1], 10) || 100;
-    } else if (arg === '-b' && args[i + 1]) {
-      batchSize = parseInt(args[++i], 10) || 100;
+      const valStr = arg.slice('--batch-size='.length);
+      const val = parseInt(valStr, 10);
+      if (isNaN(val) || val < 1 || val > 500) {
+        throw new Error(`Invalid --batch-size: must be an integer between 1 and 500 (received: "${valStr}")`);
+      }
+      batchSize = val;
+    } else if (arg === '-b') {
+      const next = argv[++i];
+      if (!next) {
+        throw new Error('Option -b requires an integer argument between 1 and 500');
+      }
+      const val = parseInt(next, 10);
+      if (isNaN(val) || val < 1 || val > 500) {
+        throw new Error(`Invalid -b value: must be an integer between 1 and 500 (received: "${next}")`);
+      }
+      batchSize = val;
     } else if (arg.startsWith('--max-jobs=')) {
-      maxJobs = parseInt(arg.split('=')[1], 10) || 10000;
+      const valStr = arg.slice('--max-jobs='.length);
+      const val = parseInt(valStr, 10);
+      if (isNaN(val) || val < 1) {
+        throw new Error(`Invalid --max-jobs: must be an integer >= 1 (received: "${valStr}")`);
+      }
+      maxJobs = val;
     } else if (arg.startsWith('--database-url=')) {
-      databaseUrl = arg.slice(arg.indexOf('=') + 1);
+      const val = arg.slice('--database-url='.length);
+      if (!val.trim()) {
+        throw new Error('Option --database-url cannot be empty');
+      }
+      databaseUrl = val.trim();
     } else if (arg === '--help' || arg === '-h') {
       console.log(`
 Usage: npx ts-node scripts/repair-reminders.ts [options]
 
 Options:
-  --dry-run, -d             Dry-run mode (read-only, no database mutations)
-  --batch-size=<N>, -b <N>  Batch size per iteration (default: 100)
-  --max-jobs=<N>            Max jobs to process (default: 10000)
-  --database-url=<URL>      Explicit database URL
+  --dry-run, -d             Dry-run mode (read-only report, no database mutations)
+  --batch-size=<N>, -b <N>  Batch size per iteration (1-500, default: 100)
+  --max-jobs=<N>            Max jobs to process (>= 1, default: 10000)
+  --database-url=<URL>      Explicit database URL (credentials sanitized in logs)
   --help, -h                Show this help message
       `);
       process.exit(0);
+    } else {
+      throw new Error(`Unknown option or argument: "${arg}". Use --help for usage details.`);
     }
   }
 
   return { dryRun, batchSize, maxJobs, databaseUrl };
 }
 
-async function main() {
-  const { dryRun, batchSize, maxJobs, databaseUrl } = parseArgs();
+export async function runMaintenanceCli(argv = process.argv.slice(2)): Promise<number> {
+  let options: CliOptions;
+  try {
+    options = parseArgs(argv);
+  } catch (err: any) {
+    console.error(`[ARGUMENT ERROR] ${err.message}`);
+    return 1;
+  }
+
+  const { dryRun, batchSize, maxJobs, databaseUrl } = options;
 
   if (databaseUrl) {
     process.env.DATABASE_URL = databaseUrl;
@@ -75,9 +123,12 @@ async function main() {
   console.log(`Execution Mode : ${dryRun ? 'DRY-RUN (REPORT ONLY, NO MUTATIONS)' : 'LIVE UPGRADE (COMMITTING CHANGES)'}`);
   console.log(`Batch Size     : ${batchSize}`);
   console.log(`Max Job Cap    : ${maxJobs}`);
+  if (databaseUrl) {
+    console.log(`Database Target: ${sanitizeDatabaseUrl(databaseUrl)}`);
+  }
 
-  // Bootstrap minimal NestJS context
-  const app = await NestFactory.createApplicationContext(AppModule, {
+  // Bootstrap dedicated MaintenanceModule without ScheduleModule or background workers
+  const app = await NestFactory.createApplicationContext(MaintenanceModule, {
     logger: ['error', 'warn'],
   });
 
@@ -89,8 +140,10 @@ async function main() {
     const targetDb = dbInfo?.current_database || 'unknown';
     console.log(`Connected DB   : "${targetDb}"`);
     console.log('---------------------------------------------------------------');
-    console.log('Notification Worker Coordination:');
-    console.log('  * In-flight worker leases (< 5m) will be preserved.');
+    console.log('Maintenance Context Safeguards:');
+    console.log('  * Zero scheduler timers or cron jobs registered.');
+    console.log('  * Zero queue consumers or background workers running.');
+    console.log('  * In-flight worker leases (< 5m) preserved.');
     console.log('  * Idempotent reruns guaranteed.');
     console.log('---------------------------------------------------------------');
 
@@ -125,16 +178,21 @@ async function main() {
 
     if (result.errors > 0) {
       console.warn(`\n[WARNING] Process completed with ${result.errors} error(s). Review logs above.`);
-      process.exitCode = 1;
+      return 1;
     } else {
       console.log(`\n[SUCCESS] Legacy reminder upgrade completed cleanly.`);
+      return 0;
     }
   } catch (err: any) {
     console.error('\n[FATAL] Upgrade script failed:', err?.message || err);
-    process.exitCode = 1;
+    return 1;
   } finally {
     await app.close();
   }
 }
 
-main();
+if (require.main === module) {
+  runMaintenanceCli().then((code) => {
+    process.exit(code);
+  });
+}
