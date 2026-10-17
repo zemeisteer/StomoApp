@@ -2,70 +2,85 @@
 
 ## 1. Branch and Starting Commit
 - **Branch**: `dev` (active, preserved clean, no modifications to `main`)
-- **Starting Commit**: `e49e99566f1a3fc11a40db62e599a2cda22d5053` (`feat(booking): eliminate reschedule stale reads, handle override reminder lifecycle, unify availability agreement, validate slot queries, and repair legacy provenance`)
+- **Starting Reviewed Commit**: `41c3f060946e2db37e8e854db2dac8306cac7143` (`feat(scheduling): reminder identity on reschedule, authoritative clinic timezone, safe legacy reconciliation, and forward repair`)
 - **Repository**: [https://github.com/zemeisteer/StomoApp](https://github.com/zemeisteer/StomoApp)
 - **Local Source of Truth**: `C:\Users\user\Documents\GitHub\StomoApp`
 
-## 2. Completed Changes Across All Subtasks
-1. **Reminder Identity & Rescheduling Lifecycle**:
-   - Added `scheduleRevision` column to `Appointment` (default 1) and `NotificationJob` (indexed) in `backend/prisma/schema.prisma`.
-   - Forward migration `20261016200000_schedule_revision_and_repair_matching` verified applied in both `dentacare` (dev) and `dentacare_test` (test) databases.
-   - Rescheduling increments `scheduleRevision`, invalidating obsolete reminders for previous times while preventing delivered reminders for time A from suppressing time B.
-   - Enqueued reminders carry matching `scheduleRevision`.
-   - Duration override preserves current `scheduleRevision`, ensuring valid in-flight reminders are not cancelled when appointment start time is unchanged.
-   - Worker delivery (`NotificationsService.deliverJob`) safely validates reminder payloads (gracefully handling missing or invalid `startTime`), validates worker lease tokens, cancels obsolete reminders whose revision or start time no longer matches, and verifies previous deliveries strictly within the same `scheduleRevision`.
-   - Rescheduling sequence A → B → A explicitly handled: each transition increments `scheduleRevision`, giving the return to time A a distinct revision so the previous reminder does not suppress the new reminder.
-   - Documented provider wire-level limitation when an SMS/Telegram HTTP request is already in flight across the network.
-2. **Authoritative Clinic Timezone**:
-   - Resolved scheduling timezone strictly from `clinicSettings` in `SchedulingService.resolveClinicTimezone(tx)`.
-   - `Asia/Tashkent` is used strictly as a fallback when no configured clinic timezone exists in the database.
-   - Public callers' requested display timezone no longer alters clinic working hours or slot boundaries; physical working hours are interpreted strictly in the clinic's authoritative timezone.
-   - Calendar dates constructed with pure UTC at noon UTC to eliminate UTC day boundary shifts.
-   - Booking slots, reschedule slots, booking mutations, and doctor exceptions tested with non-Tashkent timezone (`Europe/Samara`) and verified consistent.
-3. **Safe Legacy Reconciliation**:
-   - Validated explicit reconciliation contract in `ServicesService.reconcileLegacyRecord`:
-     - Only eligible unresolved records (`isLegacyBundle: true` or `legacyProvenance === 'AMBIGUOUS_BUNDLE'`) can be reconciled. Modern items (`MODERN`) and already verified records (`VERIFIED_SINGLE`, `RESOLVED_MANUAL`) are rejected with 400 Bad Request.
-     - Enforces supported actions: `RESOLVE_TO_SERVICE` and `KEEP_AMBIGUOUS_BUNDLE`.
-     - Anti-collapse protection: If the historical service name contains multiple services (comma-separated), collapsing into a single catalog service without an exact name match is rejected with 400 Bad Request.
-     - Review reason (min 5 characters) and audit action (`service.legacy_reconciled`) atomically saved inside a transaction with row-level concurrency locking (`FOR UPDATE`).
-     - Preserves original identity, historical names (`serviceNameUz`, `serviceNameRu`), duration, and price snapshots.
-   - Built and integrated an administrative review interface in `/admin/services` with tabs ("Xizmatlar katalogi" and "Tarixiy yozuvlar taftishi (Legacy Review)"), summary metrics, paginated table, and action modal.
-4. **Deterministic Historical Repair**:
-   - Forward migration `20261016200000_schedule_revision_and_repair_matching` preserves `original_service_id` and appointment snapshots.
-   - Disambiguates historical records by ensuring catalog name matches are unique (matching exactly one active catalog service across Uzbek and Russian names). Ambiguous or duplicate name matches are preserved as `AMBIGUOUS_BUNDLE`.
-   - Legitimate comma-containing catalog services remain `VERIFIED_SINGLE`.
-   - Applied cleanly to `dentacare` and `dentacare_test` without editing previous migrations.
-5. **Honest, Reproducible Verification & Concurrency Tests**:
-   - Renamed sequential race test to `Regression 38: Sequential duration override with leased reminder preserves valid reminder`.
-   - Added `Regression 38b: Truly synchronized concurrent worker and override test using controlled fake provider barrier` using a mock barrier promise to pause fake SMS provider while duration override runs concurrently.
-   - Added `Regression 42: Reminder identity across rescheduling (A delivered -> B delivered), A -> B -> A, and safe payload handling`.
-   - Added `Regression 43: Authoritative clinic timezone from settings with non-Tashkent timezone and UTC day boundaries`.
-   - Reusable browser test script in `backend/test/browser-workflow.js` validating all 5 browser assertions with high-resolution screenshots saved to artifacts directory.
+## 2. Completed Changes Across All Assigned Tasks
+
+1. **Browser Test Trustworthiness & Data Isolation (`backend/test/browser-workflow.js`)**:
+   - Replaced weak and false-positive assertions with strict, deterministic end-to-end checks:
+     - **Assertion 1 (Multi-Service Booking)**: Selects exactly two compatible services (`Birlamchi ko'rik va maslahat` + `Dental implantatsiya`) provided by Dr. Aziz Rahimov. Submits patient booking, captures exact created appointment ID from the response/status page, and asserts exactly 2 items in `AppointmentServiceItem` in PostgreSQL.
+     - **Assertion 2 (Authenticated Admin Access)**: Authenticates through the real `/admin/login` form with CSRF and session cookies; verifies dashboard redirection.
+     - **Assertion 3 (Admin Calendar Visibility)**: Navigates to `/admin/calendar`, synchronizes view mode to Month view (`Oylik`), locates the exact appointment card for the test run's patient name, opens the detail modal, and validates patient, doctor, and 2 service items.
+     - **Assertion 4 (Actual Reschedule Execution)**: Selects a distinct available time slot, clicks "Ko'chirishni saqlash", verifies the updated time appears in the calendar UI, and asserts both the updated `startTime` and incremented `scheduleRevision` in PostgreSQL.
+     - **Assertion 5 (Legacy Review Action & Audit Verification)**: Creates an isolated historical bundle fixture (`serviceId: null, isLegacyBundle: true, legacyProvenance: 'AMBIGUOUS_BUNDLE'`), navigates to `/admin/services`, switches to "Tarixiy yozuvlar taftishi", opens the action modal for "Paket deb saqlash", inputs a verified audit reason, submits the modal, and verifies the corresponding `AuditLog` entry in PostgreSQL.
+     - **Workflow 7 (Responsive Viewports)**: Captures full-page screenshots across Desktop (1440x900), Mobile (390x844), and Tablet (768x1024).
+     - **Data Isolation & Clean Teardown**: Operates with unique timestamp-based identifiers (`testRunId`). Scoped cleanup in `finally` removes strictly this run's records (status history, notification jobs, service items, appointment, patient, and audit logs).
+
+2. **Reminder Migration Compatibility (`backend/src/notifications/notifications.service.ts`)**:
+   - Implemented `upgradeLegacyReminderJobs(tx)` defining a safe upgrade policy for legacy notification jobs where `scheduleRevision` is null:
+     - `SENT` / `SIMULATED`: Retain null revision as historical delivery record; do not blindly attach to current appointment revision.
+     - `FAILED` / `CANCELLED`: Retain null revision; mark obsolete to prevent resurrecting historical failures.
+     - `PENDING` / `PROCESSING`: Upgraded to current appointment's `scheduleRevision` only if the job matches the appointment's current `startTime`. If the start time is mismatched, cancelled as obsolete.
+     - Verifies eligible upcoming appointments retain an active reminder job. Tested via `Regression 44`.
+
+3. **Reminder Recovery with Existing Deduplication Keys (`backend/src/notifications/notifications.service.ts`)**:
+   - In `NotificationsService.enqueue`, implemented concurrency-safe recovery for existing deduplication keys:
+     - If an existing job is in terminal `FAILED` or `CANCELLED` state but matches the current upcoming `scheduleRevision`, safely restores it to `PENDING` with reset attempts and refreshed schedule timestamp.
+     - Never revives stale reminders from prior revisions or duplicates an already delivered (`SENT`/`SIMULATED`) current reminder.
+     - Respects active worker leases (`PROCESSING`). Tested via `Regression 45`.
+
+4. **Production Authentication Throttling Review (`backend/src/auth/auth.controller.ts`)**:
+   - Restored intentional production rate limit on `POST /api/auth/login` to **5 attempts per minute** (`@Throttle({ default: { limit: 5, ttl: 60000 } })`).
+   - Configured Express with `trust proxy: true` to honor client IP headers behind proxies and Next.js rewrites.
+   - Tests configure isolated client IP headers (`X-Forwarded-For`), allowing test suites to verify rate limiting without compromising production security. Tested via `Regression 46`.
+
+5. **Legacy Review Edge Cases & Concurrency Conflicts (`backend/src/services/services.service.ts`)**:
+   - Concurrency resolution: Serializable isolation level with row-level locking (`SELECT id FROM appointment_service_items WHERE id = :id FOR UPDATE`) and controlled conflict retry with jitter. Concurrent resolutions return a controlled 409 Conflict.
+   - Renamed single-service handling: Punctuation (such as commas in legitimate single-service catalog names) does not permanently block reconciliation if the item represents a single catalog procedure.
+   - Anti-collapse protection: Genuine multi-procedure bundles cannot be collapsed into a partial single service without an exact match. Preserves historical snapshots (`serviceNameUz`, `serviceNameRu`, duration, price) without overwriting. Tested via `Regression 47`.
 
 ## 3. Database Migration Status
-- Total migrations: 8 migrations in `backend/prisma/migrations`.
+- Total applied migrations: 8 migrations in `backend/prisma/migrations`.
 - Current latest migration: `20261016200000_schedule_revision_and_repair_matching`.
 - Verified applied in both `dentacare` (development) and `dentacare_test` (test) PostgreSQL databases.
 - Prisma schema and client in complete synchronization.
 
 ## 4. Test & Build Results
-- **Backend E2E Suite**: 44/44 tests passed (100% green, 0 failures, 193s).
-- **Backend Build**: `nest build` passed with 0 errors.
-- **Backend Lint**: ESLint passed with 0 errors, 0 warnings.
-- **Frontend Build**: `next build` passed with all 28 routes compiled and optimized.
-- **Frontend Lint**: ESLint passed with 0 errors.
-- **Browser Workflow Suite** (`node test/browser-workflow.js`):
-  - [x] ASSERTION 1: Multi-service booking confirmation verified.
-  - [x] ASSERTION 2: Authenticated admin access verified.
-  - [x] ASSERTION 3: Appointment calendar visibility in admin verified.
-  - [x] ASSERTION 4: Successful rescheduling verified.
-  - [x] ASSERTION 5: Correct legacy review behavior verified.
-  - [x] Responsive layout verified across Desktop (1440x900), Mobile (390x844), and Tablet (768x1024).
+- **Backend E2E Regression Suite**: **48/48 tests passed (100% green, 0 failures, 28.87s)**.
+  - Regressions 1–43: All previous regression and concurrency tests passing.
+  - Regression 44: Upgrade legacy reminder identity for pre-scheduleRevision database fixtures.
+  - Regression 45: Deliberate current-generation reminder recovery with existing deduplication keys.
+  - Regression 46: Intentional production authentication throttling enforces 5 attempts per minute.
+  - Regression 47: Safe legacy review edge cases (concurrency conflict handling, renamed single services with commas, and anti-collapse).
+- **Backend Build & Lint**:
+  - `npm run build` (`nest build`): Exited with code 0.
+  - `npm run lint` (`eslint`): Exited with code 0 (0 errors, 0 warnings).
+- **Frontend Build & Lint**:
+  - `npm run build` (`next build`): Exited with code 0 (all 28 routes compiled and optimized).
+  - `npm run lint` (`next lint`): Exited with code 0.
+- **Browser Workflow Suite (`node test/browser-workflow.js`)**:
+  - [x] ASSERTION 1: Multi-service booking confirmed and verified in database with 2 items.
+  - [x] ASSERTION 2: Authenticated admin access verified via actual login form.
+  - [x] ASSERTION 3: Exact appointment located and details verified in admin calendar.
+  - [x] ASSERTION 4: Rescheduling succeeded with matching time in UI and database.
+  - [x] ASSERTION 5: Legacy review action completed and verified with audit log.
+  - [x] WORKFLOW 7: Responsive viewports verified across Desktop (1440x900), Mobile (390x844), and Tablet (768x1024).
+  - Full-page screenshots saved:
+    - `desktop_homepage.png`
+    - `desktop_booking_confirmation.png`
+    - `desktop_admin_calendar_modal.png`
+    - `desktop_rescheduled.png`
+    - `desktop_legacy_review.png`
+    - `desktop_legacy_action.png`
+    - `mobile_homepage.png`
+    - `tablet_homepage.png`
 
 ## 5. Running Processes
 - PostgreSQL 18: listening on `localhost:5432`.
-- Backend (NestJS): running on `http://localhost:4000/api` (PID 29264).
-- Frontend (Next.js): running on `http://localhost:3000` (PID 11872).
+- Backend (NestJS): running on `http://localhost:4000/api`.
+- Frontend (Next.js): running on `http://localhost:3000`.
 
 ## 6. Remaining Blockers / Incomplete Items
-- None. All tasks and requirements have been fully implemented, verified, and documented.
+- None. All tasks and requirements have been fully implemented, verified across backend regressions and real browser workflows, and documented.

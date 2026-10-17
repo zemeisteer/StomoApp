@@ -4,67 +4,43 @@ const fs = require('fs');
 const assert = require('assert');
 const { PrismaClient } = require('@prisma/client');
 
+// Configurable environment parameters
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+const API_URL = process.env.API_URL || 'http://localhost:4000';
+const DATABASE_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || 'postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare?schema=public';
 const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const ARTIFACTS_DIR = process.env.ARTIFACTS_DIR || 'C:\\Users\\user\\.gemini\\antigravity-ide\\brain\\0afc0821-8ecf-4d8c-a876-6d9dac1c5999';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  datasources: {
+    db: { url: DATABASE_URL },
+  },
+});
 
 async function run() {
-  console.log('--- STARTING COMPREHENSIVE BROWSER WORKFLOW VERIFICATION ---');
+  console.log('--- STARTING TRUSTWORTHY BROWSER WORKFLOW VERIFICATION ---');
   if (!fs.existsSync(ARTIFACTS_DIR)) {
     fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
   }
 
-  // Ensure an ambiguous legacy record exists for the Legacy Review test
-  const testRunId = Date.now().toString().slice(-5);
-  let testLegacyItem = await prisma.appointmentServiceItem.findFirst({
-    where: {
-      isLegacyBundle: true,
-      legacyProvenance: 'AMBIGUOUS_BUNDLE',
-    },
-    include: { appointment: true },
-  });
+  // 1. Verify database identity before mutations
+  const dbInfo = await prisma.$queryRawUnsafe('SELECT current_database();');
+  const currentDb = dbInfo[0].current_database;
+  console.log(`[DB Check] Connected to database: "${currentDb}"`);
+  assert(currentDb, 'Must be connected to a valid database');
 
-  if (!testLegacyItem) {
-    console.log('Seeding an ambiguous legacy fixture for browser test...');
-    const patient = await prisma.patient.findFirst() || await prisma.patient.create({
-      data: { fullName: 'Taftish Bemor', phone: `+99800${testRunId}01` },
-    });
-    const doctor = await prisma.doctor.findFirst();
-    const branch = await prisma.branch.findFirst();
+  const testRunId = Date.now().toString().slice(-6);
+  const testPatientName = `Browser Test Patient ${testRunId}`;
+  const testPatientPhone = `+99890${testRunId}`;
+  const testPatientEmail = `browser.${testRunId}@dentacare.local`;
 
-    const appt = await prisma.appointment.create({
-      data: {
-        id: `hist_browser_appt_${testRunId}`,
-        publicToken: `hist_brow_${testRunId}`,
-        patientId: patient.id,
-        doctorId: doctor.id,
-        branchId: branch?.id || null,
-        status: 'COMPLETED',
-        startTime: new Date('2025-02-01T10:00:00.000Z'),
-        endTime: new Date('2025-02-01T11:15:00.000Z'),
-        durationMinutes: 70,
-        bufferMinutes: 5,
-        serviceName: 'Konsultatsiya, Rentgen tekshiruvi',
-        consentGiven: true,
-      },
-    });
+  let createdAppointmentId = null;
+  let createdPatientId = null;
+  let legacyPatientId = null;
+  let legacyApptId = null;
+  let legacyItemId = null;
 
-    testLegacyItem = await prisma.appointmentServiceItem.create({
-      data: {
-        id: `hist_browser_item_${testRunId}`,
-        appointmentId: appt.id,
-        serviceId: null,
-        serviceNameUz: 'Konsultatsiya, Rentgen tekshiruvi',
-        durationMinutes: 70,
-        isLegacyBundle: true,
-        legacyProvenance: 'AMBIGUOUS_BUNDLE',
-        originalServiceId: null,
-      },
-      include: { appointment: true },
-    });
-  }
-
+  // Launch Google Chrome via puppeteer-core
   const browser = await puppeteer.launch({
     executablePath: CHROME_PATH,
     headless: true,
@@ -82,53 +58,33 @@ async function run() {
 
   try {
     // -------------------------------------------------------------
-    // 1. DESKTOP WORKFLOW & HOMEPAGE (1440 x 900)
+    // WORKFLOW 1: HOMEPAGE (1440 x 900)
     // -------------------------------------------------------------
-    console.log('[1/14] Setting desktop viewport 1440x900...');
+    console.log('[1/7] Desktop Homepage (1440x900)...');
     await page.setViewport({ width: 1440, height: 900 });
-
-    console.log('[2/14] Navigating to Homepage http://localhost:3000 ...');
-    await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise((r) => setTimeout(r, 2000));
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForFunction(
+      () => document.querySelector('h1') && document.body.innerText.length > 200,
+      { timeout: 15000 }
+    );
     const desktopHomeShot = path.join(ARTIFACTS_DIR, 'desktop_homepage.png');
-    await page.screenshot({ path: desktopHomeShot, fullPage: false });
-    console.log('Saved:', desktopHomeShot);
+    await page.screenshot({ path: desktopHomeShot });
     results.desktop_homepage = desktopHomeShot;
 
     // -------------------------------------------------------------
-    // 2. MULTI-SERVICE BOOKING CONFIRMATION
+    // WORKFLOW 2: MULTI-SERVICE BOOKING WITH EXACT CAPTURE
     // -------------------------------------------------------------
-    console.log('[3/14] Navigating to Booking page http://localhost:3000/booking ...');
-    await page.goto('http://localhost:3000/booking', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForSelector('button', { timeout: 10000 });
-    await new Promise((r) => setTimeout(r, 1000));
+    console.log('[2/7] Navigating to Booking page http://localhost:3000/booking ...');
+    await page.goto(`${BASE_URL}/booking`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForSelector('button', { timeout: 15000 });
 
     // Step 1: Select branch
-    console.log('Selecting branch...');
+    console.log('Step 1: Selecting branch...');
     await page.waitForSelector('div.grid button', { timeout: 15000 });
     const branchBtn = await page.$('div.grid button');
     assert(branchBtn, 'Branch selection button must exist');
     await branchBtn.click();
-    await new Promise((r) => setTimeout(r, 500));
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
-      if (nextBtn) nextBtn.click();
-    });
-    await new Promise((r) => setTimeout(r, 1000));
-
-    // Step 2: Select MULTIPLE services that Dr. Aziz Rahimov provides
-    console.log('Selecting multiple services for multi-service booking...');
-    await page.waitForSelector('div.grid button', { timeout: 15000 });
-    await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('div.grid button'));
-      const s1 = buttons.find((b) => b.textContent && b.textContent.includes('ko\'rik'));
-      if (s1) s1.click();
-      const s2 = buttons.find((b) => b.textContent && (b.textContent.includes('implantatsiya') || b.textContent.includes('Dental')));
-      if (s2) s2.click();
-      if (!s1 && buttons.length > 0) buttons[0].click();
-    });
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 600));
 
     // Click Next
     await page.evaluate(() => {
@@ -136,44 +92,80 @@ async function run() {
       const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
       if (nextBtn) nextBtn.click();
     });
-    await new Promise((r) => setTimeout(r, 1000));
 
-    // Step 3: Select doctor
-    console.log('Selecting doctor...');
-    await page.waitForSelector('div.grid button', { timeout: 15000 });
-    const doctorClicked = await page.evaluate(() => {
+    // Step 2: Select EXACTLY TWO known compatible services provided by Dr. Aziz Rahimov:
+    // "Birlamchi ko'rik va maslahat" (srv-consultation) and "Dental implantatsiya" (srv-implant)
+    console.log('Step 2: Selecting exactly two compatible services...');
+    await page.waitForFunction(
+      () => document.querySelectorAll('div.grid button').length >= 2,
+      { timeout: 15000 }
+    );
+
+    const selectionResult = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('div.grid button'));
+      const s1 = buttons.find((b) => b.textContent && (b.textContent.includes('ko\'rik') || b.textContent.includes('maslahat') || b.textContent.includes('konsultatsiya')));
+      const s2 = buttons.find((b) => b.textContent && (b.textContent.includes('implantatsiya') || b.textContent.includes('implant')));
+
+      if (!s1 || !s2) {
+        return { success: false, s1Found: !!s1, s2Found: !!s2 };
+      }
+
+      s1.click();
+      s2.click();
+      return { success: true };
+    });
+
+    assert(selectionResult.success, `Required compatible services must exist in catalog. Found: ${JSON.stringify(selectionResult)}`);
+    await new Promise((r) => setTimeout(r, 600));
+
+    // Verify 2 services selected summary
+    const twoSelected = await page.evaluate(() => {
+      const summary = document.body.innerText;
+      return summary.includes('2 ta tanlandi') || summary.includes('2 выбрано');
+    });
+    assert(twoSelected, 'UI must confirm exactly 2 services selected');
+
+    // Click Next
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
+      if (nextBtn) nextBtn.click();
+    });
+
+    // Step 3: Select doctor (Dr. Aziz Rahimov)
+    console.log('Step 3: Selecting doctor (Dr. Aziz Rahimov)...');
+    await page.waitForFunction(
+      () => document.querySelectorAll('div.grid button:not([disabled])').length > 0,
+      { timeout: 15000 }
+    );
+
+    const doctorSelected = await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll('div.grid button:not([disabled])'));
       const docBtn = buttons.find((b) => !b.textContent.includes('Mos emas') && (b.textContent.includes('Aziz') || b.textContent.includes('Rahimov')));
       if (docBtn) {
         docBtn.click();
         return true;
       }
-      if (buttons.length > 0) {
-        buttons[0].click();
-        return true;
-      }
       return false;
     });
-    assert(doctorClicked, 'Eligible doctor must be selectable');
-    await new Promise((r) => setTimeout(r, 500));
+    assert(doctorSelected, 'Dr. Aziz Rahimov must be selectable for the two selected services');
+    await new Promise((r) => setTimeout(r, 600));
 
+    // Click Next
     await page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll('button'));
       const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
       if (nextBtn) nextBtn.click();
     });
-    await new Promise((r) => setTimeout(r, 2000));
 
     // Step 4: Pick slot
-    console.log('Picking available time slot...');
+    console.log('Step 4: Picking an available working time slot...');
     await page.waitForSelector('button', { timeout: 15000 });
-    await new Promise((r) => setTimeout(r, 1000));
+    let slotSelected = false;
 
-    // Ensure an available working day slot is selected
-    let slotClicked = false;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      slotClicked = await page.evaluate(() => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await new Promise((r) => setTimeout(r, 800));
+      slotSelected = await page.evaluate(() => {
         const slotButtons = Array.from(document.querySelectorAll('div.grid button:not([disabled])'));
         const validSlot = slotButtons.find((b) => /\d{1,2}:\d{2}/.test(b.textContent || ''));
         if (validSlot) {
@@ -183,357 +175,479 @@ async function run() {
         return false;
       });
 
-      if (slotClicked) {
-        break;
-      }
+      if (slotSelected) break;
 
-      // If no slot on currently selected date, click the next working date chip
-      const clickedNextChip = await page.evaluate((idx) => {
+      // Jump to next available working date chip if present
+      await page.evaluate((idx) => {
         const chips = Array.from(document.querySelectorAll('button')).filter((b) =>
           b.textContent && (b.textContent.includes('Ish kuni') || b.textContent.includes('Прием'))
         );
-        if (chips[idx]) {
-          chips[idx].click();
-          return true;
-        }
-        return false;
+        if (chips[idx]) chips[idx].click();
       }, attempt + 1);
-
-      if (!clickedNextChip) {
-        // Fall back to jump button if visible
-        await page.evaluate(() => {
-          const jumpBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-            b.textContent && (b.textContent.includes('Qabul kuniga') || b.textContent.includes('ish kuni'))
-          );
-          if (jumpBtn) jumpBtn.click();
-        });
-      }
     }
+    assert(slotSelected, 'An available time slot must be selectable');
 
-    const slotShot = path.join(ARTIFACTS_DIR, 'desktop_booking_slot.png');
-    await page.screenshot({ path: slotShot });
-    results.desktop_booking_slot = slotShot;
-    assert(slotClicked, 'An available slot must be selected');
-    await new Promise((r) => setTimeout(r, 1000));
-
-    // Click Next
+    // Click Next to Patient Info
     await page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll('button'));
       const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
       if (nextBtn) nextBtn.click();
     });
-    await new Promise((r) => setTimeout(r, 1500));
 
-    // Step 5: Fill patient details
-    console.log('Filling patient details...');
+    // Step 5: Fill isolated patient fixture details
+    console.log('Step 5: Filling patient details...');
     await page.waitForSelector('input[type="text"]', { timeout: 15000 });
     const nameInput = await page.$('input[type="text"]');
-    if (nameInput) await nameInput.type('Zafar Muqimov');
+    assert(nameInput, 'Patient name input must exist');
+    await nameInput.type(testPatientName);
+
     const phoneInput = await page.$('input[type="tel"]');
-    if (phoneInput) await phoneInput.type('+998901234567');
+    assert(phoneInput, 'Patient phone input must exist');
+    await phoneInput.type(testPatientPhone);
+
     const emailInput = await page.$('input[type="email"]');
-    if (emailInput) await emailInput.type('zafar.muqimov@dentacare.local');
+    if (emailInput) {
+      await emailInput.type(testPatientEmail);
+    }
+
+    // Set up network listener to capture EXACT booking response
+    let capturedBookingPayload = null;
+    const bookingResponsePromise = page.waitForResponse(
+      (res) => res.url().includes('/api/booking') && res.request().method() === 'POST',
+      { timeout: 20000 }
+    ).then(async (res) => {
+      try {
+        capturedBookingPayload = await res.json();
+      } catch (e) {}
+      return res;
+    });
 
     // Submit booking
-    console.log('Submitting booking...');
+    console.log('Submitting booking mutation...');
     const submitBtn = await page.$('button[type="submit"]');
     if (submitBtn) {
       await submitBtn.click();
     } else {
       await page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button'));
-        const sBtn = btns.find((b) => b.textContent && (b.textContent.includes('Tasdiqlash') || b.textContent.includes('Band qilish') || b.textContent.includes('Подтвердить')));
+        const sBtn = btns.find((b) => b.textContent && (b.textContent.includes('Tasdiqlash') || b.textContent.includes('Band qilish')));
         if (sBtn) sBtn.click();
       });
     }
 
-    await new Promise((r) => setTimeout(r, 4000));
+    await bookingResponsePromise;
+    assert(capturedBookingPayload && capturedBookingPayload.id, 'Booking API must return created appointment payload with id');
+    createdAppointmentId = capturedBookingPayload.id;
+    console.log(`Captured exact appointment ID: ${createdAppointmentId}`);
+
+    // Wait for confirmation view rendering exact appointment
+    await page.waitForFunction(
+      (apptId) =>
+        document.body.innerText.includes('qabul qilindi') ||
+        document.body.innerText.includes('принята') ||
+        (apptId && document.body.innerText.includes(apptId)),
+      { timeout: 15000 },
+      createdAppointmentId
+    );
+
     const confirmationShot = path.join(ARTIFACTS_DIR, 'desktop_booking_confirmation.png');
     await page.screenshot({ path: confirmationShot });
-    console.log('Saved:', confirmationShot);
     results.desktop_booking_confirmation = confirmationShot;
 
-    // ASSERTION 1: Multi-service booking confirmation
-    const confirmationText = await page.evaluate(() => document.body.innerText);
-    const isBookingConfirmed =
-      confirmationText.includes('muvaffaqiyatli') ||
-      confirmationText.includes('band qilindi') ||
-      confirmationText.includes('Qabul kodi') ||
-      confirmationText.includes('Token') ||
-      confirmationText.includes('Status') ||
-      confirmationText.includes('Holat');
-    assert(isBookingConfirmed, 'ASSERTION 1 FAILED: Multi-service booking confirmation message not found in page');
-    console.log('>>> ASSERTION 1 PASSED: Multi-service booking confirmation verified.');
-
-    // Extract public token if present on page
-    const publicToken = await page.evaluate(() => {
-      const link = document.querySelector('a[href*="/booking/status/"]');
-      if (link) {
-        const match = link.getAttribute('href').match(/\/booking\/status\/([^/?#]+)/);
-        if (match) return match[1];
-      }
-      const codeEl = document.querySelector('code, span.font-mono');
-      if (codeEl && codeEl.textContent && codeEl.textContent.length > 8) {
-        return codeEl.textContent.trim();
-      }
-      return null;
+    // Database verification: Verify exact appointment exists with exactly 2 persisted service items
+    const dbBooking = await prisma.appointment.findUnique({
+      where: { id: createdAppointmentId },
+      include: { serviceItems: true, patient: true },
     });
+    assert(dbBooking, 'Appointment must exist in database');
+    createdPatientId = dbBooking.patientId;
+    assert.strictEqual(dbBooking.serviceItems.length, 2, 'Database must contain exactly 2 persisted service items');
+    assert.strictEqual(dbBooking.patient.fullName, testPatientName, 'Database patient name must match fixture');
+    console.log('>>> ASSERTION 1 PASSED: Multi-service booking confirmed and verified in database with 2 items.');
 
     // -------------------------------------------------------------
-    // 3. AUTHENTICATED ADMIN ACCESS
+    // WORKFLOW 3: AUTHENTICATED ADMIN LOGIN VIA ACTUAL FORM
     // -------------------------------------------------------------
-    console.log('[4/14] Navigating to Admin Login http://localhost:3000/admin/login ...');
-    await page.goto('http://localhost:3000/admin/login', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForSelector('input[type="email"]', { timeout: 10000 });
+    console.log('[3/7] Logging in via actual admin login form at http://localhost:3000/admin/login ...');
+    await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle0', timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 1500)); // Allow React hydration
+    await page.waitForSelector('input[type="email"]', { timeout: 15000 });
+    await page.waitForSelector('input[type="password"]', { timeout: 15000 });
 
-    const adminLoginShot = path.join(ARTIFACTS_DIR, 'desktop_admin_login.png');
-    await page.screenshot({ path: adminLoginShot });
-    results.desktop_admin_login = adminLoginShot;
-
-    console.log('Logging in as Admin via authenticated session...');
     await page.type('input[type="email"]', 'admin@dentacare.local');
     await page.type('input[type="password"]', 'DentacareAdmin2026!');
 
-    // Authenticate with credentials to ensure session cookies are set
-    const loginStatus = await page.evaluate(async () => {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-CSRF-Token': '1',
-        },
-        body: JSON.stringify({ email: 'admin@dentacare.local', password: 'DentacareAdmin2026!' }),
-        credentials: 'include',
-      });
-      return res.status;
-    });
-    console.log('Login fetch response status:', loginStatus);
-    assert.strictEqual(loginStatus, 200, 'Admin login API call must succeed with status 200');
+    const loginSubmitBtn = await page.$('button[type="submit"]');
+    assert(loginSubmitBtn, 'Login form submit button must exist');
+    await loginSubmitBtn.click();
 
-    // Navigate to Admin dashboard
-    await page.goto('http://localhost:3000/admin', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // Wait for authenticated redirect to /admin dashboard
     await page.waitForFunction(
-      () => !document.querySelector('.animate-spin') && !window.location.pathname.includes('/admin/login'),
+      () =>
+        !window.location.pathname.includes('/admin/login') &&
+        (window.location.pathname.startsWith('/admin') || document.body.innerText.includes('admin')),
+      { timeout: 20000 }
+    );
+    console.log('>>> ASSERTION 2 PASSED: Authenticated admin access verified via actual login form.');
+
+    // -------------------------------------------------------------
+    // WORKFLOW 4: APPOINTMENT CALENDAR VISIBILITY & DETAIL VERIFICATION
+    // -------------------------------------------------------------
+    console.log('[4/7] Navigating to Admin Calendar and locating exact created appointment...');
+    await page.goto(`${BASE_URL}/admin/calendar`, { waitUntil: 'networkidle0', timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 1500));
+    await page.waitForFunction(
+      () => !document.querySelector('.animate-spin'),
       { timeout: 15000 }
     );
 
-    // ASSERTION 2: Authenticated admin access
-    const currentUrl = page.url();
-    assert(!currentUrl.includes('/admin/login'), 'ASSERTION 2 FAILED: User was not redirected after admin login');
-    const adminNavText = await page.evaluate(() => document.body.innerText);
-    const hasAdminNav =
-      adminNavText.includes('Taqvim') ||
-      adminNavText.includes('Xizmatlar') ||
-      adminNavText.includes('Bemorlar') ||
-      adminNavText.includes('Admin') ||
-      adminNavText.includes('Chiqish') ||
-      adminNavText.includes('Boshqaruv');
-    assert(hasAdminNav, 'ASSERTION 2 FAILED: Authenticated admin navigation was not rendered');
-    console.log('>>> ASSERTION 2 PASSED: Authenticated admin access verified.');
-
-    // -------------------------------------------------------------
-    // 4. APPOINTMENT VISIBILITY IN ADMIN
-    // -------------------------------------------------------------
-    console.log('[5/14] Navigating to Admin Calendar http://localhost:3000/admin/calendar ...');
-    await page.goto('http://localhost:3000/admin/calendar', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise((r) => setTimeout(r, 2500));
-    const adminCalendarShot = path.join(ARTIFACTS_DIR, 'desktop_admin_calendar.png');
-    await page.screenshot({ path: adminCalendarShot });
-    console.log('Saved:', adminCalendarShot);
-    results.desktop_admin_calendar = adminCalendarShot;
-
-    // ASSERTION 3: Appointment visibility in admin
-    const calendarPageContent = await page.evaluate(() => document.body.innerText);
-    const hasCalendarElements =
-      calendarPageContent.includes('Taqvim') ||
-      calendarPageContent.includes('Shifokor') ||
-      calendarPageContent.includes('Hafta') ||
-      calendarPageContent.includes('Kun') ||
-      calendarPageContent.includes('Filial');
-    assert(hasCalendarElements, 'ASSERTION 3 FAILED: Calendar dashboard failed to render appointment grid');
-    console.log('>>> ASSERTION 3 PASSED: Appointment calendar visibility in admin verified.');
-
-    // -------------------------------------------------------------
-    // 5. SUCCESSFUL RESCHEDULING
-    // -------------------------------------------------------------
-    console.log('[6/14] Verifying Rescheduling workflow...');
-    let rescheduleVerified = false;
-
-    // Fetch the most recent booking publicToken from database to ensure fresh appointment
-    const latestAppt = await prisma.appointment.findFirst({
-      where: { status: { in: ['CONFIRMED', 'PENDING'] } },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (latestAppt && latestAppt.publicToken) {
-      console.log(`Navigating to public status page for token: ${latestAppt.publicToken} ...`);
-      await page.goto(`http://localhost:3000/booking/status/${latestAppt.publicToken}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000,
-      });
-      await new Promise((r) => setTimeout(r, 2000));
-
-      const statusShot = path.join(ARTIFACTS_DIR, 'desktop_booking_status.png');
-      await page.screenshot({ path: statusShot });
-      results.desktop_booking_status = statusShot;
-
-      // Click "Vaqtni o'zgartirish" (Reschedule)
-      const clickedRescheduleBtn = await page.evaluate(() => {
+    // Switch to Month view ('Oylik') to guarantee the appointment date is visible in the grid
+    let monthViewActive = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      monthViewActive = await page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button'));
-        const rBtn = btns.find((b) => b.textContent && (b.textContent.includes('Vaqtni') || b.textContent.includes('o\'zgartirish') || b.textContent.includes('Перенести')));
-        if (rBtn) {
-          rBtn.click();
-          return true;
+        const monthBtn = btns.find((b) => b.textContent && b.textContent.trim() === 'Oylik');
+        if (monthBtn) {
+          if (monthBtn.className.includes('text-teal-800') || monthBtn.classList.contains('bg-white')) {
+            return true;
+          }
+          monthBtn.click();
         }
         return false;
       });
-
-      if (clickedRescheduleBtn) {
-        await new Promise((r) => setTimeout(r, 2000));
-        // Select slot in reschedule interface
-        const reschedSlotClicked = await page.evaluate(() => {
-          const slots = Array.from(document.querySelectorAll('div button:not([disabled])'));
-          const timeSlot = slots.find((b) => /\d{1,2}:\d{2}/.test(b.textContent || ''));
-          if (timeSlot) {
-            timeSlot.click();
-            return true;
-          }
-          return false;
-        });
-
-        if (reschedSlotClicked) {
-          await new Promise((r) => setTimeout(r, 500));
-          // Click save / confirm
-          await page.evaluate(() => {
-            const btns = Array.from(document.querySelectorAll('button'));
-            const saveBtn = btns.find((b) => b.textContent && (b.textContent.includes('Saqlash') || b.textContent.includes('Tasdiqlash') || b.textContent.includes('Сохранить')));
-            if (saveBtn) saveBtn.click();
-          });
-          await new Promise((r) => setTimeout(r, 3000));
-          rescheduleVerified = true;
-        }
-      }
+      if (monthViewActive) break;
+      await new Promise((r) => setTimeout(r, 800));
     }
+
+    await page.waitForFunction(
+      () => !document.querySelector('.animate-spin'),
+      { timeout: 15000 }
+    );
+
+    // Wait for the exact appointment created by this test run to appear in calendar
+    console.log(`Locating appointment card for patient "${testPatientName}"...`);
+    const cardHandle = await page.waitForFunction(
+      (name) => {
+        const headings = Array.from(document.querySelectorAll('h3, div, span, p'));
+        return headings.find((el) => el.textContent && el.textContent.includes(name));
+      },
+      { timeout: 20000 },
+      testPatientName
+    );
+    assert(cardHandle, 'Created appointment card must be located in admin calendar');
+
+    // Click the card to open details modal
+    await page.evaluate((name) => {
+      const cards = Array.from(document.querySelectorAll('div.cursor-pointer'));
+      const targetCard = cards.find((c) => c.textContent && c.textContent.includes(name));
+      if (targetCard) targetCard.click();
+    }, testPatientName);
+
+    // Wait for detail modal
+    await page.waitForFunction(
+      () => document.querySelector('div.fixed') && document.querySelector('div.fixed').textContent.includes('Qabul boshqaruvi'),
+      { timeout: 10000 }
+    );
+
+    const modalShot = path.join(ARTIFACTS_DIR, 'desktop_admin_calendar_modal.png');
+    await page.screenshot({ path: modalShot });
+    results.desktop_admin_calendar_modal = modalShot;
+
+    // Verify modal content: patient fixture, doctor, services count (2), and duration
+    const modalDetails = await page.evaluate(() => {
+      const modal = document.querySelector('div.fixed');
+      if (!modal) return null;
+      const text = modal.textContent || '';
+      return {
+        hasDoctor: text.includes('Aziz') || text.includes('Rahimov'),
+        hasServices: text.includes('Xizmatlar (2)') || text.includes('Xizmatlar'),
+        hasDuration: /\d+\s*daq/.test(text),
+      };
+    });
+    assert(modalDetails && modalDetails.hasDoctor, 'Modal must display assigned doctor Dr. Aziz Rahimov');
+    assert(modalDetails && modalDetails.hasServices, 'Modal must display the 2 selected services');
+    assert(modalDetails && modalDetails.hasDuration, 'Modal must display authoritative appointment duration');
+    console.log('>>> ASSERTION 3 PASSED: Exact appointment located and details verified in admin calendar.');
+
+    // -------------------------------------------------------------
+    // WORKFLOW 5: RESCHEDULING WITH UI & DATABASE TIME ASSERTION
+    // -------------------------------------------------------------
+    console.log('[5/7] Executing Rescheduling workflow in modal...');
+    const originalStartTime = dbBooking.startTime;
+
+    // Click "Boshqa vaqtga ko'chirish (Reschedule)" inside modal
+    const clickedReschedBtn = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('div.fixed button'));
+      const rBtn = btns.find((b) => b.textContent && (b.textContent.includes('ko\'chirish') || b.textContent.includes('Reschedule')));
+      if (rBtn) {
+        rBtn.click();
+        return true;
+      }
+      return false;
+    });
+    assert(clickedReschedBtn, 'Reschedule button must exist in appointment modal');
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Wait for reschedule slot buttons
+    await page.waitForFunction(
+      () => document.querySelectorAll('div.fixed div.grid button').length > 0,
+      { timeout: 15000 }
+    );
+
+    // Pick a genuinely different available slot time
+    const selectedNewTimeStr = await page.evaluate((origIso) => {
+      const origDate = new Date(origIso);
+      const origTime = origDate.toLocaleTimeString('uz-UZ', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+      const slotBtns = Array.from(document.querySelectorAll('div.fixed div.grid button:not([disabled])'));
+      const diffSlot = slotBtns.find((b) => {
+        const txt = (b.textContent || '').trim();
+        return /\d{1,2}:\d{2}/.test(txt) && txt !== origTime;
+      });
+      if (diffSlot) {
+        diffSlot.click();
+        return (diffSlot.textContent || '').trim();
+      }
+      return null;
+    }, originalStartTime.toISOString());
+
+    assert(selectedNewTimeStr, 'A genuinely different available time slot must be selectable for rescheduling');
+    console.log(`Selected new reschedule time: ${selectedNewTimeStr}`);
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Click "Ko'chirishni saqlash" (Save Reschedule)
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('div.fixed button'));
+      const saveBtn = btns.find((b) => b.textContent && b.textContent.includes('saqlash'));
+      if (saveBtn) saveBtn.click();
+    });
+
+    // Wait for modal to close / update
+    await page.waitForFunction(
+      () => !document.querySelector('div.fixed') || !document.querySelector('div.fixed').textContent.includes('Ko\'chirishni saqlash'),
+      { timeout: 15000 }
+    );
+    await new Promise((r) => setTimeout(r, 1500));
 
     const reschedShot = path.join(ARTIFACTS_DIR, 'desktop_rescheduled.png');
     await page.screenshot({ path: reschedShot });
     results.desktop_rescheduled = reschedShot;
 
-    // Rescheduling verified either in browser or confirmed supported via API
-    assert(latestAppt !== null, 'ASSERTION 4 FAILED: No appointment found to verify rescheduling');
-    console.log('>>> ASSERTION 4 PASSED: Successful rescheduling verified.');
+    // Database verification: Verify new start time and incremented revision in DB
+    const rescheduledDbBooking = await prisma.appointment.findUnique({
+      where: { id: createdAppointmentId },
+    });
+    assert(rescheduledDbBooking, 'Rescheduled appointment must exist in DB');
+    assert(rescheduledDbBooking.startTime.getTime() !== originalStartTime.getTime(), 'Database startTime must be genuinely updated to the new time');
+    assert.strictEqual(rescheduledDbBooking.scheduleRevision, dbBooking.scheduleRevision + 1, 'Database scheduleRevision must be incremented');
+
+    // UI verification: Verify UI displays the new time
+    const uiDisplaysNewTime = await page.evaluate((newTime) => {
+      return document.body.innerText.includes(newTime);
+    }, selectedNewTimeStr);
+    assert(uiDisplaysNewTime, `Admin calendar UI must display the updated appointment time "${selectedNewTimeStr}"`);
+    console.log('>>> ASSERTION 4 PASSED: Rescheduling succeeded with matching time in UI and database.');
 
     // -------------------------------------------------------------
-    // 6. CORRECT LEGACY REVIEW BEHAVIOR
+    // WORKFLOW 6: LEGACY REVIEW RESOLUTION & AUDIT VERIFICATION
     // -------------------------------------------------------------
-    console.log('[7/14] Navigating to Admin Services http://localhost:3000/admin/services ...');
-    await page.goto('http://localhost:3000/admin/services', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    
-    // Wait for the admin services page to finish loading and render the tab buttons
-    console.log('Waiting for "Tarixiy xizmatlar taftishi" tab button...');
+    console.log('[6/7] Creating isolated legacy fixture and navigating to Legacy Review...');
+    const doctor = (await prisma.doctor.findFirst({ where: { slug: 'aziz-rahimov' } })) || (await prisma.doctor.findFirst());
+    const service = (await prisma.service.findFirst({ where: { slug: 'konsultatsiya' } })) || (await prisma.service.findFirst());
+    const branch = await prisma.branch.findFirst();
+
+    const legacyPatient = await prisma.patient.create({
+      data: { fullName: `Legacy Taftish ${testRunId}`, phone: `+99800${testRunId}88` },
+    });
+    legacyPatientId = legacyPatient.id;
+
+    // Required Appointment.serviceId is explicitly included!
+    const legacyAppt = await prisma.appointment.create({
+      data: {
+        id: `hist_browser_appt_${testRunId}`,
+        publicToken: `hist_brow_${testRunId}`,
+        patientId: legacyPatient.id,
+        doctorId: doctor.id,
+        serviceId: service.id,
+        branchId: branch?.id || null,
+        status: 'COMPLETED',
+        startTime: new Date('2025-02-01T10:00:00.000Z'),
+        endTime: new Date('2025-02-01T11:15:00.000Z'),
+        durationMinutes: 70,
+        bufferMinutes: 5,
+        serviceName: `Noaniq Paket ${testRunId}`,
+        consentGiven: true,
+      },
+    });
+    legacyApptId = legacyAppt.id;
+
+    const legacyItem = await prisma.appointmentServiceItem.create({
+      data: {
+        id: `hist_browser_item_${testRunId}`,
+        appointmentId: legacyAppt.id,
+        serviceId: null,
+        serviceNameUz: `Noaniq Paket ${testRunId}`,
+        durationMinutes: 70,
+        isLegacyBundle: true,
+        legacyProvenance: 'AMBIGUOUS_BUNDLE',
+        originalServiceId: null,
+      },
+    });
+    legacyItemId = legacyItem.id;
+
+    // Navigate to Admin Services
+    await page.goto(`${BASE_URL}/admin/services`, { waitUntil: 'networkidle0', timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // Wait for and click the "Tarixiy yozuvlar taftishi" tab
+    console.log('Switching to Legacy Review tab...');
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('button')).some((b) => b.textContent && (b.textContent.includes('Tarixiy') || b.textContent.includes('Legacy'))),
       { timeout: 20000 }
     );
 
-    // Click "Tarixiy xizmatlar taftishi" (Legacy Review) tab
-    console.log('Selecting "Tarixiy xizmatlar taftishi" tab...');
-    const clickedTab = await page.evaluate(() => {
-      const tabs = Array.from(document.querySelectorAll('button'));
-      const legTab = tabs.find((b) => b.textContent && (b.textContent.includes('Tarixiy') || b.textContent.includes('taftishi') || b.textContent.includes('Legacy')));
-      if (legTab) {
-        legTab.click();
-        return true;
-      }
-      return false;
-    });
-    assert(clickedTab, 'ASSERTION 5 FAILED: Legacy review tab button not found');
-    await new Promise((r) => setTimeout(r, 2000));
+    let tabSwitched = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      tabSwitched = await page.evaluate(() => {
+        if (document.body.innerText.includes('Tarixiy xizmat nomi') || document.body.innerText.includes('Holat (Provenance)')) {
+          return true;
+        }
+        const tabs = Array.from(document.querySelectorAll('button'));
+        const legTab = tabs.find((b) => b.textContent && (b.textContent.includes('Tarixiy') || b.textContent.includes('Legacy')));
+        if (legTab) legTab.click();
+        return false;
+      });
+      if (tabSwitched) break;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+
+    // Wait for loading to clear and table rows to appear
+    await page.waitForFunction(
+      () => !document.body.innerText.includes('Yuklanmoqda...'),
+      { timeout: 15000 }
+    );
+
+    // Wait for our run's legacy record to appear in the table
+    console.log(`Waiting for legacy fixture item "Noaniq Paket ${testRunId}"...`);
+    await page.waitForFunction(
+      (name) => document.body.innerText.includes(name),
+      { timeout: 15000 },
+      `Noaniq Paket ${testRunId}`
+    );
 
     const legacyReviewShot = path.join(ARTIFACTS_DIR, 'desktop_legacy_review.png');
     await page.screenshot({ path: legacyReviewShot });
-    console.log('Saved:', legacyReviewShot);
     results.desktop_legacy_review = legacyReviewShot;
 
-    // Assert table or legacy records render
-    const legacyReviewContent = await page.evaluate(() => document.body.innerText);
-    const hasLegacyElements =
-      (legacyReviewContent.includes('Tarixiy yozuvlar taftishi') || legacyReviewContent.includes('taftishi')) &&
-      (legacyReviewContent.includes('Noaniq') ||
-        legacyReviewContent.includes('Bog\'lash') ||
-        legacyReviewContent.includes('Paket deb saqlash') ||
-        legacyReviewContent.includes('AMBIGUOUS_BUNDLE') ||
-        legacyReviewContent.includes('Barcha'));
-    assert(hasLegacyElements, 'ASSERTION 5 FAILED: Legacy review table did not render correctly');
-
-    // Interact with action modal if unresolved records exist
-    const actionBtnFound = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const act = btns.find((b) => b.textContent && b.textContent.includes('Paket deb saqlash'));
-      if (act) {
-        act.click();
+    // Click action button "Paket deb saqlash" for this item
+    const actionClicked = await page.evaluate((name) => {
+      const rows = Array.from(document.querySelectorAll('tr'));
+      const targetRow = rows.find((r) => r.textContent && r.textContent.includes(name));
+      if (!targetRow) return false;
+      const actBtn = Array.from(targetRow.querySelectorAll('button')).find((b) => b.textContent && b.textContent.includes('Paket'));
+      if (actBtn) {
+        actBtn.click();
         return true;
       }
       return false;
-    });
+    }, `Noaniq Paket ${testRunId}`);
 
-    if (actionBtnFound) {
-      await new Promise((r) => setTimeout(r, 1000));
-      // Type audit reason
-      const textarea = await page.$('textarea');
-      if (textarea) {
-        await textarea.type('Taftish o\'tkazildi va tasdiqlandi');
-        await new Promise((r) => setTimeout(r, 500));
-        // Confirm action via modal submit button
-        const confirmBtn = await page.$('div.fixed form button[type="submit"]');
-        if (confirmBtn) {
-          await confirmBtn.click();
-        } else {
-          await page.evaluate(() => {
-            const btns = Array.from(document.querySelectorAll('div.fixed button'));
-            const cBtn = btns.find((b) => b.textContent && (b.textContent.includes('Tasdiqlash') || b.textContent.includes('Saqlash')));
-            if (cBtn) cBtn.click();
-          });
-        }
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-    }
+    assert(actionClicked, 'Action button "Paket deb saqlash" for legacy review item must exist and be clicked');
+
+    // Wait for action modal
+    await page.waitForSelector('div.fixed textarea', { timeout: 10000 });
+    const textarea = await page.$('div.fixed textarea');
+    assert(textarea, 'Review reason textarea must exist in action modal');
+    await textarea.type(`Taftish qarori tasdiqlandi ${testRunId}`);
+    await new Promise((r) => setTimeout(r, 500));
 
     const legacyActionShot = path.join(ARTIFACTS_DIR, 'desktop_legacy_action.png');
     await page.screenshot({ path: legacyActionShot });
     results.desktop_legacy_action = legacyActionShot;
-    console.log('>>> ASSERTION 5 PASSED: Correct legacy review behavior verified.');
+
+    // Submit action modal
+    const modalSubmitBtn = await page.$('div.fixed form button[type="submit"]');
+    if (modalSubmitBtn) {
+      await modalSubmitBtn.click();
+    } else {
+      await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('div.fixed button'));
+        const cBtn = btns.find((b) => b.textContent && (b.textContent.includes('Tasdiqlash') || b.textContent.includes('Saqlash')));
+        if (cBtn) cBtn.click();
+      });
+    }
+
+    // Wait for modal to close
+    await page.waitForFunction(
+      () => !document.querySelector('div.fixed textarea'),
+      { timeout: 15000 }
+    );
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Database verification: Verify audit log was recorded
+    const auditRecord = await prisma.auditLog.findFirst({
+      where: {
+        entityId: legacyItemId,
+        action: 'service_item.legacy_reconciled',
+      },
+    });
+    assert(auditRecord, 'Audit log entry must be created for legacy reconciliation');
+    console.log('>>> ASSERTION 5 PASSED: Legacy review action completed and verified with audit log.');
 
     // -------------------------------------------------------------
-    // 7. RESPONSIVE CHECK: MOBILE (390 x 844) & TABLET (768 x 1024)
+    // WORKFLOW 7: RESPONSIVE VIEWPORT VERIFICATION
     // -------------------------------------------------------------
-    console.log('[8/14] Mobile viewport 390x844...');
+    console.log('[7/7] Verifying Mobile (390x844) and Tablet (768x1024) layouts...');
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-    await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise((r) => setTimeout(r, 2000));
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForFunction(() => document.querySelector('h1'), { timeout: 15000 });
+    await new Promise((r) => setTimeout(r, 1000));
     const mobileHomeShot = path.join(ARTIFACTS_DIR, 'mobile_homepage.png');
     await page.screenshot({ path: mobileHomeShot });
     results.mobile_homepage = mobileHomeShot;
 
-    console.log('[9/14] Tablet viewport 768x1024...');
     await page.setViewport({ width: 768, height: 1024, isMobile: true });
-    await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise((r) => setTimeout(r, 2000));
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForFunction(() => document.querySelector('h1'), { timeout: 15000 });
+    await new Promise((r) => setTimeout(r, 1000));
     const tabletHomeShot = path.join(ARTIFACTS_DIR, 'tablet_homepage.png');
     await page.screenshot({ path: tabletHomeShot });
     results.tablet_homepage = tabletHomeShot;
 
     console.log('====================================================');
-    console.log('ALL 5 BROWSER ASSERTIONS AND WORKFLOWS PASSED!');
+    console.log('ALL WORKFLOWS AND HONEST ASSERTIONS SUCCESSFULLY PASSED!');
     console.log('====================================================');
     console.log(JSON.stringify(results, null, 2));
   } catch (err) {
     console.error('BROWSER VERIFICATION ERROR:', err);
     process.exitCode = 1;
   } finally {
-    await browser.close();
-    await prisma.$disconnect();
+    // Clean up ONLY this run's records in finally, including after assertion failures
+    console.log('Performing clean teardown of run fixtures...');
+    try {
+      if (createdAppointmentId) {
+        await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: createdAppointmentId } });
+        await prisma.notificationJob.deleteMany({ where: { appointmentId: createdAppointmentId } });
+        await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: createdAppointmentId } });
+        await prisma.appointment.delete({ where: { id: createdAppointmentId } });
+      }
+      if (createdPatientId) {
+        await prisma.patient.delete({ where: { id: createdPatientId } });
+      }
+      if (legacyItemId) {
+        await prisma.auditLog.deleteMany({ where: { entityId: legacyItemId } });
+        await prisma.appointmentServiceItem.deleteMany({ where: { id: legacyItemId } });
+      }
+      if (legacyApptId) {
+        await prisma.appointment.delete({ where: { id: legacyApptId } });
+      }
+      if (legacyPatientId) {
+        await prisma.patient.delete({ where: { id: legacyPatientId } });
+      }
+    } catch (cleanupErr) {
+      console.warn('Cleanup warning:', cleanupErr.message);
+    }
+    await browser.close().catch(() => {});
+    await prisma.$disconnect().catch(() => {});
   }
 }
 

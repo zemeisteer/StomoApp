@@ -113,7 +113,249 @@ export class NotificationsService {
       });
     } catch (e: any) {
       this.logger.error(`Failed to enqueue notification: ${e?.message}`);
-      return null;
+      throw e;
+    }
+  }
+
+  /**
+   * Deliberate Current-Generation Reminder Recovery Policy:
+   *
+   * 1. Absent: If no reminder job exists for this appointment and schedule revision, enqueue a fresh PENDING job.
+   * 2. Active: If a job exists in PENDING or active PROCESSING status:
+   *    - If PROCESSING and worker lease is still active (< 5 min), preserve active lease without stealing.
+   *    - If PENDING, update appointmentRevision and return.
+   * 3. Delivered: If a job is SENT or SIMULATED for this schedule, return it without duplicate delivery.
+   * 4. Failed / Cancelled:
+   *    - Validate eligibility: appointment must still be active (CONFIRMED or PENDING), upcoming (startTime > now),
+   *      and scheduleRevision must match current appointment schedule.
+   *    - Never revive a stale generation (scheduleRevision !== appointment.scheduleRevision).
+   *    - If eligible, archive previous job's deduplication key to preserve full failure/cancellation history.
+   *    - Create a clean new PENDING job with the canonical deduplication key.
+   * 5. Concurrency & Idempotency:
+   *    - If concurrent recovery requests race, the first one creates the replacement job.
+   *    - The second catches unique constraint P2002 on deduplicationKey and returns the winning active job.
+   * 6. Error Visibility:
+   *    - Unrecoverable persistence errors are thrown directly to the caller.
+   */
+  async recoverOrEnqueueCurrentReminder(
+    appointment: {
+      id: string;
+      startTime: Date;
+      serviceName: string;
+      patientEmail?: string | null;
+      patientPhone: string;
+      status: AppointmentStatus | string;
+      revision: number;
+      scheduleRevision: number;
+    },
+    tx?: Prisma.TransactionClient | PrismaService,
+  ) {
+    const client = tx || this.prisma;
+    const nowUtc = new Date();
+
+    // Eligibility check for appointment
+    const terminalStatuses: string[] = [
+      AppointmentStatus.COMPLETED,
+      AppointmentStatus.CANCELLED,
+      AppointmentStatus.NO_SHOW,
+    ];
+    if (terminalStatuses.includes(appointment.status) || appointment.startTime <= nowUtc) {
+      return null; // Ineligible for reminder
+    }
+
+    const currentScheduleRev = appointment.scheduleRevision ?? 1;
+    const canonicalKey = `reminder_${appointment.id}_s${currentScheduleRev}`;
+
+    // Look for existing reminder job with canonical key
+    const existing = await client.notificationJob.findUnique({
+      where: { deduplicationKey: canonicalKey },
+    });
+
+    if (existing) {
+      // 1. Never revive stale generation
+      if (existing.scheduleRevision !== null && existing.scheduleRevision !== currentScheduleRev) {
+        return null;
+      }
+
+      // 2. Active jobs: PENDING or active PROCESSING
+      if (existing.status === NotificationStatus.PENDING) {
+        if (existing.appointmentRevision !== appointment.revision) {
+          return await client.notificationJob.update({
+            where: { id: existing.id },
+            data: { appointmentRevision: appointment.revision },
+          });
+        }
+        return existing;
+      }
+
+      if (existing.status === NotificationStatus.PROCESSING) {
+        // If lease is recent, do not steal or disrupt active worker!
+        const leaseAgeMs = existing.lockedAt ? nowUtc.getTime() - existing.lockedAt.getTime() : Infinity;
+        if (leaseAgeMs < 5 * 60 * 1000) {
+          return existing;
+        }
+      }
+
+      // 3. Delivered jobs: SENT or SIMULATED
+      if (
+        existing.status === NotificationStatus.SENT ||
+        existing.status === NotificationStatus.SIMULATED
+      ) {
+        return existing; // Delivered, do not duplicate
+      }
+
+      // 4. Failed or Cancelled: Eligible for recovery while preserving history
+      if (
+        existing.status === NotificationStatus.FAILED ||
+        existing.status === NotificationStatus.CANCELLED
+      ) {
+        // Archive deduplication key so previous failure history is strictly preserved
+        const archivedKey = `${canonicalKey}_superseded_${existing.id}`;
+        await client.notificationJob.update({
+          where: { id: existing.id },
+          data: { deduplicationKey: archivedKey },
+        });
+      }
+    }
+
+    // Schedule reminder time
+    const reminderTime = new Date(appointment.startTime.getTime() - 2 * 60 * 60 * 1000);
+    const scheduledFor = reminderTime > nowUtc ? reminderTime : nowUtc;
+    const formattedTime = this.formatTashkentTime(appointment.startTime);
+
+    try {
+      return await client.notificationJob.create({
+        data: {
+          channel: appointment.patientEmail ? NotificationChannel.EMAIL : NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: appointment.patientEmail || appointment.patientPhone,
+          appointmentId: appointment.id,
+          appointmentRevision: appointment.revision,
+          scheduleRevision: currentScheduleRev,
+          scheduledFor,
+          deduplicationKey: canonicalKey,
+          status: NotificationStatus.PENDING,
+          payload: {
+            appointmentId: appointment.id,
+            serviceName: appointment.serviceName,
+            startTime: appointment.startTime.toISOString(),
+            scheduleRevision: currentScheduleRev,
+            formattedTime,
+          },
+        },
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        // Concurrent recovery race: return the concurrently created job
+        const raced = await client.notificationJob.findUnique({
+          where: { deduplicationKey: canonicalKey },
+        });
+        if (raced) return raced;
+      }
+      this.logger.error(`Unrecoverable persistence error recovering reminder for ${appointment.id}: ${err?.message}`);
+      throw err;
+    }
+  }
+
+  /**
+   * Explicit Upgrade Policy for Legacy Reminder Jobs:
+   *
+   * Scans notification_jobs with templateKey = 'appointment_reminder' where scheduleRevision IS NULL:
+   * 1. Associable generation 1 jobs: where appointment scheduleRevision = 1 and payload startTime matches appointment start time.
+   * 2. Obsolete or unverifiable jobs: where appointment scheduleRevision > 1 or start time changed -> cancel and quarantine.
+   * 3. Ensures eligible upcoming appointments retain a valid current-generation reminder.
+   */
+  async upgradeLegacyReminderJobs(tx?: Prisma.TransactionClient | PrismaService) {
+    const client = tx || this.prisma;
+    const nowUtc = new Date();
+
+    // 1. Associate verifiable generation 1 jobs where start time matches and scheduleRevision is 1
+    await client.$executeRaw`
+      UPDATE "notification_jobs" nj
+      SET "schedule_revision" = 1
+      FROM "appointments" a
+      WHERE nj."appointment_id" = a."id"
+        AND nj."template_key" = 'appointment_reminder'
+        AND nj."schedule_revision" IS NULL
+        AND a."schedule_revision" = 1
+        AND (nj."payload"->>'startTime') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+        AND ABS(EXTRACT(EPOCH FROM (nj."payload"->>'startTime')::timestamptz) - EXTRACT(EPOCH FROM a."start_time")) < 1;
+    `;
+
+    // 2. Quarantine/Cancel obsolete un-migrated PENDING or PROCESSING jobs that do not match the current schedule
+    await client.$executeRaw`
+      UPDATE "notification_jobs" nj
+      SET "status" = 'CANCELLED'::"notification_status",
+          "last_error" = 'Eski yoki tasdiqlanmagan eslatma (migratsiya taftishi orqali bekor qilindi)',
+          "lease_token" = NULL
+      FROM "appointments" a
+      WHERE nj."appointment_id" = a."id"
+        AND nj."template_key" = 'appointment_reminder'
+        AND nj."schedule_revision" IS NULL
+        AND nj."status" IN ('PENDING'::"notification_status", 'PROCESSING'::"notification_status")
+        AND (
+          a."schedule_revision" > 1
+          OR (nj."payload"->>'startTime') IS NULL
+          OR (nj."payload"->>'startTime') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+          OR ABS(EXTRACT(EPOCH FROM (nj."payload"->>'startTime')::timestamptz) - EXTRACT(EPOCH FROM a."start_time")) >= 1
+        );
+    `;
+
+    // 3. For any remaining orphaned PENDING/PROCESSING reminder jobs without an appointment: cancel
+    await client.$executeRaw`
+      UPDATE "notification_jobs"
+      SET "status" = 'CANCELLED'::"notification_status",
+          "last_error" = 'Biriktirilgan qabuli mavjud bo''lmagan eslatma'
+      WHERE "template_key" = 'appointment_reminder'
+        AND "schedule_revision" IS NULL
+        AND "status" IN ('PENDING'::"notification_status", 'PROCESSING'::"notification_status")
+        AND "appointment_id" NOT IN (SELECT id FROM "appointments");
+    `;
+
+    // 4. Ensure eligible upcoming appointments have a valid current-generation reminder
+    const eligibleUpcoming = await client.appointment.findMany({
+      where: {
+        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING] },
+        startTime: { gt: nowUtc },
+      },
+      include: {
+        patient: true,
+      },
+    });
+
+    for (const appt of eligibleUpcoming) {
+      const currentRev = appt.scheduleRevision ?? 1;
+      const hasActiveOrDelivered = await client.notificationJob.findFirst({
+        where: {
+          appointmentId: appt.id,
+          templateKey: 'appointment_reminder',
+          scheduleRevision: currentRev,
+          status: {
+            in: [
+              NotificationStatus.PENDING,
+              NotificationStatus.PROCESSING,
+              NotificationStatus.SENT,
+              NotificationStatus.SIMULATED,
+            ],
+          },
+        },
+      });
+
+      if (!hasActiveOrDelivered) {
+        await this.recoverOrEnqueueCurrentReminder(
+          {
+            id: appt.id,
+            startTime: appt.startTime,
+            serviceName: appt.serviceName,
+            patientEmail: appt.patient?.email,
+            patientPhone: appt.patient?.phone || '',
+            status: appt.status,
+            revision: appt.revision,
+            scheduleRevision: currentRev,
+          },
+          client,
+        );
+      }
     }
   }
 
@@ -491,12 +733,11 @@ export class NotificationsService {
 
       const apptStartTime = appt.startTime.getTime();
       const startTimeChanged = payloadStartTime !== apptStartTime;
+      const currentScheduleRev = appt.scheduleRevision ?? 1;
       const scheduleRevisionMismatch =
-        job.scheduleRevision !== null &&
-        job.scheduleRevision !== undefined &&
-        appt.scheduleRevision !== null &&
-        appt.scheduleRevision !== undefined &&
-        job.scheduleRevision !== appt.scheduleRevision;
+        job.scheduleRevision === null || job.scheduleRevision === undefined
+          ? (startTimeChanged || currentScheduleRev > 1)
+          : (job.scheduleRevision !== currentScheduleRev);
 
       // Obsolete reminder check:
       // If appointment was rescheduled to a different start time OR schedule revision has advanced,
@@ -515,13 +756,19 @@ export class NotificationsService {
 
       // Check if a reminder for THIS SPECIFIC SCHEDULE has already been delivered
       // (A delivered reminder for schedule A must NOT suppress reminder for rescheduled schedule B!)
-      const targetScheduleRevision = job.scheduleRevision ?? appt.scheduleRevision ?? 1;
+      const targetScheduleRevision = job.scheduleRevision ?? currentScheduleRev;
       const alreadyDeliveredForSchedule = await this.prisma.notificationJob.findFirst({
         where: {
           appointmentId: job.appointmentId,
           templateKey: 'appointment_reminder',
           id: { not: job.id },
-          scheduleRevision: targetScheduleRevision,
+          OR: [
+            { scheduleRevision: targetScheduleRevision },
+            {
+              scheduleRevision: null,
+              payload: { path: ['startTime'], equals: new Date(appt.startTime).toISOString() },
+            },
+          ],
           status: { in: [NotificationStatus.SENT, NotificationStatus.SIMULATED] },
         },
       });

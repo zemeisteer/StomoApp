@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/auth/auth.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { AppointmentsService } from '../src/appointments/appointments.service';
+import { ServicesService } from '../src/services/services.service';
 
 function parseAndValidateTestDatabaseUrl(rawUrl: string): string {
   try {
@@ -55,6 +56,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   let ownerUserId: string;
   let notificationsService: NotificationsService;
   let appointmentsService: AppointmentsService;
+  let servicesService: ServicesService;
 
   // Run-specific fixture prefix (does NOT delete broad phone prefixes)
   const runId = Date.now().toString().slice(-5);
@@ -76,6 +78,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    (app.getHttpAdapter().getInstance() as any).set('trust proxy', true);
     app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
@@ -94,6 +97,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     authService = app.get(AuthService);
     notificationsService = app.get(NotificationsService);
     appointmentsService = app.get(AppointmentsService);
+    servicesService = app.get(ServicesService);
 
     // Verify connected database identity before mutations
     const [{ current_database }] = await prisma.$queryRaw<[{ current_database: string }]>`SELECT current_database();`;
@@ -783,77 +787,86 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       idempotencyKey: testKey,
     };
 
-    // 1. Truly parallel identical submissions
-    const [res1, res2] = await Promise.all([
-      request(app.getHttpServer()).post('/api/booking').send(basePayload),
-      request(app.getHttpServer()).post('/api/booking').send(basePayload),
-    ]);
+    try {
+      // 1. Truly parallel identical submissions
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer()).post('/api/booking').send(basePayload),
+        request(app.getHttpServer()).post('/api/booking').send(basePayload),
+      ]);
 
-    expect(res1.status).toBeLessThan(300);
-    expect(res2.status).toBeLessThan(300);
-    const bookingId1 = res1.body.id || res1.body.appointmentId;
-    const bookingId2 = res2.body.id || res2.body.appointmentId;
-    expect(bookingId1).toBeDefined();
-    expect(bookingId1).toBe(bookingId2);
+      expect(res1.status).toBeLessThan(300);
+      expect(res2.status).toBeLessThan(300);
+      const bookingId1 = res1.body.id || res1.body.appointmentId;
+      const bookingId2 = res2.body.id || res2.body.appointmentId;
+      expect(bookingId1).toBeDefined();
+      expect(bookingId1).toBe(bookingId2);
 
-    // Verify database contains exactly ONE appointment with this key
-    const countInDb = await prisma.appointment.count({
-      where: { idempotencyKey: testKey },
-    });
-    expect(countInDb).toBe(1);
+      // Verify database contains exactly ONE appointment with this key
+      const countInDb = await prisma.appointment.count({
+        where: { idempotencyKey: testKey },
+      });
+      expect(countInDb).toBe(1);
 
-    // 2. Changed phone with reused key -> Rejected with 409 Conflict
-    await request(app.getHttpServer())
-      .post('/api/booking')
-      .send({ ...basePayload, patientPhone: '+998901234567' })
-      .expect(409);
+      // 2. Changed phone with reused key -> Rejected with 409 Conflict
+      await request(app.getHttpServer())
+        .post('/api/booking')
+        .send({ ...basePayload, patientPhone: '+998901234567' })
+        .expect(409);
 
-    // 3. Changed patient name with reused key -> Rejected with 409 Conflict
-    await request(app.getHttpServer())
-      .post('/api/booking')
-      .send({ ...basePayload, patientName: 'Different Name' })
-      .expect(409);
+      // 3. Changed patient name with reused key -> Rejected with 409 Conflict
+      await request(app.getHttpServer())
+        .post('/api/booking')
+        .send({ ...basePayload, patientName: 'Different Name' })
+        .expect(409);
 
-    // 4. Changed note with reused key -> Rejected with 409 Conflict
-    await request(app.getHttpServer())
-      .post('/api/booking')
-      .send({ ...basePayload, note: 'Tampered note' })
-      .expect(409);
+      // 4. Changed note with reused key -> Rejected with 409 Conflict
+      await request(app.getHttpServer())
+        .post('/api/booking')
+        .send({ ...basePayload, note: 'Tampered note' })
+        .expect(409);
 
-    // 5. Changed start time with reused key -> Rejected with 409 Conflict
-    const anotherTime = new Date(Date.now() + 85 * 60 * 60 * 1000).toISOString();
-    await request(app.getHttpServer())
-      .post('/api/booking')
-      .send({ ...basePayload, startTime: anotherTime })
-      .expect(409);
+      // 5. Changed start time with reused key -> Rejected with 409 Conflict
+      const anotherTime = new Date(Date.now() + 85 * 60 * 60 * 1000).toISOString();
+      await request(app.getHttpServer())
+        .post('/api/booking')
+        .send({ ...basePayload, startTime: anotherTime })
+        .expect(409);
 
-    // 6. Legacy idempotency key policy: key with missing fingerprint must be rejected with 409
-    const legacyKey = `legacy_${runId}_${Date.now()}`;
-    await prisma.appointment.create({
-      data: {
-        publicToken: `legacy_tok_${runId}_${Date.now()}`,
-        patientId: (await prisma.patient.findFirst())!.id,
-        doctorId: testDoctorBId,
-        serviceId: testServiceId,
-        branchId: testBranchId,
-        status: AppointmentStatus.CONFIRMED,
-        startTime: new Date(Date.now() + 120 * 60 * 60 * 1000),
-        endTime: new Date(Date.now() + 121 * 60 * 60 * 1000),
-        serviceName: 'Legacy Service',
-        durationMinutes: 30,
-        bufferMinutes: 5,
-        idempotencyKey: legacyKey,
-        requestFingerprint: null, // Legacy row lacking fingerprint
-        consentGiven: true,
-      },
-    });
+      // 6. Legacy idempotency key policy: key with missing fingerprint must be rejected with 409
+      const legacyKey = `legacy_${runId}_${Date.now()}`;
+      await prisma.appointment.create({
+        data: {
+          publicToken: `legacy_tok_${runId}_${Date.now()}`,
+          patientId: (await prisma.patient.findFirst())!.id,
+          doctorId: testDoctorBId,
+          serviceId: testServiceId,
+          branchId: testBranchId,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: new Date(Date.now() + 120 * 60 * 60 * 1000),
+          endTime: new Date(Date.now() + 121 * 60 * 60 * 1000),
+          serviceName: 'Legacy Service',
+          durationMinutes: 30,
+          bufferMinutes: 5,
+          idempotencyKey: legacyKey,
+          requestFingerprint: null, // Legacy row lacking fingerprint
+          consentGiven: true,
+        },
+      });
 
-    const legacyRes = await request(app.getHttpServer())
-      .post('/api/booking')
-      .send({ ...basePayload, idempotencyKey: legacyKey })
-      .expect(409);
+      const legacyRes = await request(app.getHttpServer())
+        .post('/api/booking')
+        .send({ ...basePayload, idempotencyKey: legacyKey })
+        .expect(409);
 
-    expect(legacyRes.body.message).toContain('idempotency');
+      expect(legacyRes.body.message).toContain('idempotency');
+    } finally {
+      await prisma.appointmentServiceItem.deleteMany({
+        where: { appointment: { idempotencyKey: { in: [testKey, `legacy_${runId}`] } } },
+      });
+      await prisma.appointment.deleteMany({
+        where: { OR: [{ idempotencyKey: testKey }, { idempotencyKey: { startsWith: `legacy_${runId}` } }] },
+      });
+    }
   });
 
   // -------------------------------------------------------------
@@ -1140,10 +1153,13 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 20: Historical Buffer Preservation Across Reschedule
   // -------------------------------------------------------------
   it('Regression 20: Rescheduling preserves original buffer and duration snapshot even when clinic settings buffer changes', async () => {
-    const patient = await prisma.patient.findFirst();
-    const origStart = new Date(Date.now() + 100 * 60 * 60 * 1000);
-    origStart.setUTCHours(6, 0, 0, 0); // 11:00 Tashkent
-    if (origStart.getUTCDay() === 0) origStart.setUTCDate(origStart.getUTCDate() + 1);
+    let patient = await prisma.patient.findFirst();
+    if (!patient) {
+      patient = await prisma.patient.create({
+        data: { fullName: 'Buffer Test Patient', phone: `${testPhonePrefix}20` },
+      });
+    }
+    const origStart = getNextWorkingSlot(4, 11, 0);
 
     const durationMinutes = 40;
     const originalBuffer = 10; // Explicit 10-minute historical buffer
@@ -1166,34 +1182,35 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       },
     });
 
-    // Mutate clinic settings buffer to 20 minutes
-    await prisma.clinicSettings.updateMany({
-      data: { bufferMinutes: 20 },
-    });
+    try {
+      // Mutate clinic settings buffer to 20 minutes
+      await prisma.clinicSettings.updateMany({
+        data: { bufferMinutes: 20 },
+      });
 
-    // Reschedule appointment to new slot
-    const newSlot = new Date(origStart.getTime() + 24 * 60 * 60 * 1000);
-    if (newSlot.getUTCDay() === 0) newSlot.setUTCDate(newSlot.getUTCDate() + 1);
+      // Reschedule appointment to new slot
+      const newSlot = getNextWorkingSlot(7, 11, 0);
 
-    const rescheduleRes = await request(app.getHttpServer())
-      .post(`/api/admin/appointments/${historicalAppt.id}/reschedule`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ startTime: newSlot.toISOString() })
-      .expect(200);
+      const rescheduleRes = await request(app.getHttpServer())
+        .post(`/api/admin/appointments/${historicalAppt.id}/reschedule`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ startTime: newSlot.toISOString() })
+        .expect(200);
 
-    const resAppt = rescheduleRes.body.appointment || rescheduleRes.body;
-    expect(resAppt.bufferMinutes).toBe(originalBuffer); // Preserved at 10, NOT changed to 20!
-    expect(resAppt.durationMinutes).toBe(durationMinutes);
-    const diffMin = Math.round(
-      (new Date(resAppt.endTime).getTime() - new Date(resAppt.startTime).getTime()) / 60000,
-    );
-    expect(diffMin).toBe(durationMinutes + originalBuffer); // Exactly 50 minutes total duration
-
-    // Cleanup
-    await prisma.clinicSettings.updateMany({
-      data: { bufferMinutes: 5 },
-    });
-    await prisma.appointment.delete({ where: { id: historicalAppt.id } });
+      const resAppt = rescheduleRes.body.appointment || rescheduleRes.body;
+      expect(resAppt.bufferMinutes).toBe(originalBuffer); // Preserved at 10, NOT changed to 20!
+      expect(resAppt.durationMinutes).toBe(durationMinutes);
+      const diffMin = Math.round(
+        (new Date(resAppt.endTime).getTime() - new Date(resAppt.startTime).getTime()) / 60000,
+      );
+      expect(diffMin).toBe(durationMinutes + originalBuffer); // Exactly 50 minutes total duration
+    } finally {
+      // Cleanup
+      await prisma.clinicSettings.updateMany({
+        data: { bufferMinutes: 5 },
+      });
+      await prisma.appointment.delete({ where: { id: historicalAppt.id } }).catch(() => {});
+    }
   });
 
   // -------------------------------------------------------------
@@ -3748,6 +3765,560 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
           data: { timezone: originalTimezone },
         });
       }
+    }
+  });
+
+  it('Regression 44: Upgrade legacy reminder identity for pre-scheduleRevision database fixtures', async () => {
+    const patient44 = await prisma.patient.create({
+      data: { fullName: 'Legacy Upgrade Patient', phone: `${testPhonePrefix}44` },
+    });
+
+    const nowUtc = new Date();
+    const apptFutureTime = new Date(nowUtc.getTime() + 48 * 60 * 60 * 1000); // 2 days ahead
+    const apptOldTime = new Date(nowUtc.getTime() + 24 * 60 * 60 * 1000);
+
+    // Appt 1: generation 1 appointment (scheduleRevision = 1)
+    const appt1 = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_upg1_${runId}`,
+        patientId: patient44.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: apptFutureTime,
+        endTime: new Date(apptFutureTime.getTime() + 30 * 60 * 1000),
+        durationMinutes: 30,
+        bufferMinutes: 0,
+        serviceName: 'Konsultatsiya',
+        consentGiven: true,
+        scheduleRevision: 1,
+        serviceItems: {
+          create: [{ serviceId: testServiceId, serviceNameUz: 'Konsultatsiya', durationMinutes: 30, sortOrder: 0 }],
+        },
+      },
+    });
+
+    // Appt 2: historical rescheduled appointment (scheduleRevision = 2, start time changed)
+    const appt2 = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_upg2_${runId}`,
+        patientId: patient44.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: apptFutureTime,
+        endTime: new Date(apptFutureTime.getTime() + 30 * 60 * 1000),
+        durationMinutes: 30,
+        bufferMinutes: 0,
+        serviceName: 'Konsultatsiya',
+        consentGiven: true,
+        scheduleRevision: 2,
+        serviceItems: {
+          create: [{ serviceId: testServiceId, serviceNameUz: 'Konsultatsiya', durationMinutes: 30, sortOrder: 0 }],
+        },
+      },
+    });
+
+    // Create pre-scheduleRevision notification jobs with scheduleRevision = null
+    // Job 1: Pending job for appt1 matching start time
+    const job1 = await prisma.notificationJob.create({
+      data: {
+        channel: 'SMS',
+        templateKey: 'appointment_reminder',
+        recipient: patient44.phone,
+        appointmentId: appt1.id,
+        scheduledFor: new Date(apptFutureTime.getTime() - 2 * 60 * 60 * 1000),
+        deduplicationKey: `test_pre_rev_j1_${runId}`,
+        status: NotificationStatus.PENDING,
+        scheduleRevision: null,
+        payload: {
+          appointmentId: appt1.id,
+          startTime: apptFutureTime.toISOString(),
+          serviceName: 'Konsultatsiya',
+        },
+      },
+    });
+
+    // Job 2: Obsolete pending job for appt2 with OLD start time
+    const job2 = await prisma.notificationJob.create({
+      data: {
+        channel: 'SMS',
+        templateKey: 'appointment_reminder',
+        recipient: patient44.phone,
+        appointmentId: appt2.id,
+        scheduledFor: new Date(apptOldTime.getTime() - 2 * 60 * 60 * 1000),
+        deduplicationKey: `test_pre_rev_j2_${runId}`,
+        status: NotificationStatus.PENDING,
+        scheduleRevision: null,
+        payload: {
+          appointmentId: appt2.id,
+          startTime: apptOldTime.toISOString(),
+          serviceName: 'Konsultatsiya',
+        },
+      },
+    });
+
+    // Job 3: Historical delivered (SENT) job
+    const job3 = await prisma.notificationJob.create({
+      data: {
+        channel: 'SMS',
+        templateKey: 'appointment_reminder',
+        recipient: patient44.phone,
+        appointmentId: appt1.id,
+        scheduledFor: new Date(nowUtc.getTime() - 10000),
+        deduplicationKey: `test_pre_rev_j3_${runId}`,
+        status: NotificationStatus.SENT,
+        scheduleRevision: null,
+        payload: {
+          appointmentId: appt1.id,
+          startTime: apptFutureTime.toISOString(),
+          serviceName: 'Konsultatsiya',
+        },
+      },
+    });
+
+    // Job 4: Historical FAILED job
+    const job4 = await prisma.notificationJob.create({
+      data: {
+        channel: 'SMS',
+        templateKey: 'appointment_reminder',
+        recipient: patient44.phone,
+        appointmentId: appt1.id,
+        scheduledFor: new Date(nowUtc.getTime() - 20000),
+        deduplicationKey: `test_pre_rev_j4_${runId}`,
+        status: NotificationStatus.FAILED,
+        lastError: 'Provider timeout (historical)',
+        scheduleRevision: null,
+        payload: {
+          appointmentId: appt1.id,
+          startTime: apptFutureTime.toISOString(),
+          serviceName: 'Konsultatsiya',
+        },
+      },
+    });
+
+    // Job 5: Historical CANCELLED job
+    const job5 = await prisma.notificationJob.create({
+      data: {
+        channel: 'SMS',
+        templateKey: 'appointment_reminder',
+        recipient: patient44.phone,
+        appointmentId: appt1.id,
+        scheduledFor: new Date(nowUtc.getTime() - 30000),
+        deduplicationKey: `test_pre_rev_j5_${runId}`,
+        status: NotificationStatus.CANCELLED,
+        lastError: 'Historical manual cancel',
+        scheduleRevision: null,
+        payload: {
+          appointmentId: appt1.id,
+          startTime: apptFutureTime.toISOString(),
+          serviceName: 'Konsultatsiya',
+        },
+      },
+    });
+
+    try {
+      // Execute explicit upgrade policy routine
+      await notificationsService.upgradeLegacyReminderJobs();
+
+      // Assertions:
+      // 1. Verifiable generation 1 job1 was associated with scheduleRevision = 1
+      const updatedJob1 = await prisma.notificationJob.findUnique({ where: { id: job1.id } });
+      expect(updatedJob1!.scheduleRevision).toBe(1);
+      expect(updatedJob1!.status).toBe(NotificationStatus.PENDING);
+
+      // 2. Obsolete job2 (start time was changed / revision > 1) was cancelled and quarantined
+      const updatedJob2 = await prisma.notificationJob.findUnique({ where: { id: job2.id } });
+      expect(updatedJob2!.status).toBe(NotificationStatus.CANCELLED);
+      expect(updatedJob2!.lastError).toContain('Eski yoki tasdiqlanmagan eslatma');
+
+      // 3. Historical SENT job3 delivery history preserved (remains SENT)
+      const updatedJob3 = await prisma.notificationJob.findUnique({ where: { id: job3.id } });
+      expect(updatedJob3!.status).toBe(NotificationStatus.SENT);
+
+      // 4. Historical FAILED job4 preserved
+      const updatedJob4 = await prisma.notificationJob.findUnique({ where: { id: job4.id } });
+      expect(updatedJob4!.status).toBe(NotificationStatus.FAILED);
+      expect(updatedJob4!.lastError).toBe('Provider timeout (historical)');
+
+      // 5. Historical CANCELLED job5 preserved
+      const updatedJob5 = await prisma.notificationJob.findUnique({ where: { id: job5.id } });
+      expect(updatedJob5!.status).toBe(NotificationStatus.CANCELLED);
+
+      // 6. Appt 2 is upcoming CONFIRMED with scheduleRevision = 2, so upgrade ensured a valid reminder exists
+      const appt2CurrentReminder = await prisma.notificationJob.findFirst({
+        where: {
+          appointmentId: appt2.id,
+          templateKey: 'appointment_reminder',
+          scheduleRevision: 2,
+          status: NotificationStatus.PENDING,
+        },
+      });
+      expect(appt2CurrentReminder).toBeDefined();
+      expect(appt2CurrentReminder!.deduplicationKey).toBe(`reminder_${appt2.id}_s2`);
+    } finally {
+      await prisma.notificationJob.deleteMany({
+        where: { appointmentId: { in: [appt1.id, appt2.id] } },
+      });
+      await prisma.appointmentServiceItem.deleteMany({
+        where: { appointmentId: { in: [appt1.id, appt2.id] } },
+      });
+      await prisma.appointment.deleteMany({
+        where: { id: { in: [appt1.id, appt2.id] } },
+      });
+      await prisma.patient.delete({ where: { id: patient44.id } });
+    }
+  });
+
+  it('Regression 45: Deliberate current-generation reminder recovery with existing deduplication keys', async () => {
+    const patient45 = await prisma.patient.create({
+      data: { fullName: 'Recovery Patient', phone: `${testPhonePrefix}45` },
+    });
+
+    const nowUtc = new Date();
+    const apptTime = new Date(nowUtc.getTime() + 36 * 60 * 60 * 1000);
+
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_recov_${runId}`,
+        patientId: patient45.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: apptTime,
+        endTime: new Date(apptTime.getTime() + 30 * 60 * 1000),
+        durationMinutes: 30,
+        bufferMinutes: 0,
+        serviceName: 'Konsultatsiya',
+        consentGiven: true,
+        scheduleRevision: 1,
+        revision: 1,
+        serviceItems: {
+          create: [{ serviceId: testServiceId, serviceNameUz: 'Konsultatsiya', durationMinutes: 30, sortOrder: 0 }],
+        },
+      },
+    });
+
+    const canonicalKey = `reminder_${appt.id}_s1`;
+
+    try {
+      // 1. Existing FAILED job sharing canonical key
+      const failedJob = await prisma.notificationJob.create({
+        data: {
+          channel: 'SMS',
+          templateKey: 'appointment_reminder',
+          recipient: patient45.phone,
+          appointmentId: appt.id,
+          appointmentRevision: 1,
+          scheduleRevision: 1,
+          scheduledFor: new Date(apptTime.getTime() - 2 * 60 * 60 * 1000),
+          deduplicationKey: canonicalKey,
+          status: NotificationStatus.FAILED,
+          lastError: 'Gateway connection failed 504',
+          payload: {
+            appointmentId: appt.id,
+            startTime: apptTime.toISOString(),
+            scheduleRevision: 1,
+          },
+        },
+      });
+
+      // Recover reminder:
+      const recoveredJob = await notificationsService.recoverOrEnqueueCurrentReminder({
+        id: appt.id,
+        startTime: appt.startTime,
+        serviceName: appt.serviceName,
+        patientEmail: null,
+        patientPhone: patient45.phone,
+        status: appt.status,
+        revision: appt.revision,
+        scheduleRevision: 1,
+      });
+
+      expect(recoveredJob).toBeDefined();
+      expect(recoveredJob!.id).not.toBe(failedJob.id);
+      expect(recoveredJob!.status).toBe(NotificationStatus.PENDING);
+      expect(recoveredJob!.deduplicationKey).toBe(canonicalKey);
+
+      // Verify the previous failed job's history was strictly preserved with archived key
+      const archivedJob = await prisma.notificationJob.findUnique({ where: { id: failedJob.id } });
+      expect(archivedJob!.deduplicationKey).toBe(`${canonicalKey}_superseded_${failedJob.id}`);
+      expect(archivedJob!.status).toBe(NotificationStatus.FAILED);
+      expect(archivedJob!.lastError).toBe('Gateway connection failed 504');
+
+      // 2. Concurrent recovery race:
+      await prisma.notificationJob.delete({ where: { id: recoveredJob!.id } });
+      await prisma.notificationJob.create({
+        data: {
+          channel: 'SMS',
+          templateKey: 'appointment_reminder',
+          recipient: patient45.phone,
+          appointmentId: appt.id,
+          appointmentRevision: 1,
+          scheduleRevision: 1,
+          scheduledFor: new Date(apptTime.getTime() - 2 * 60 * 60 * 1000),
+          deduplicationKey: canonicalKey,
+          status: NotificationStatus.CANCELLED,
+          lastError: 'Cancelled in test',
+          payload: { appointmentId: appt.id, startTime: apptTime.toISOString(), scheduleRevision: 1 },
+        },
+      });
+
+      // 5 concurrent recovery requests racing
+      const concurrentResults = await Promise.all([
+        notificationsService.recoverOrEnqueueCurrentReminder({
+          id: appt.id, startTime: appt.startTime, serviceName: appt.serviceName,
+          patientEmail: null, patientPhone: patient45.phone, status: appt.status,
+          revision: appt.revision, scheduleRevision: 1,
+        }),
+        notificationsService.recoverOrEnqueueCurrentReminder({
+          id: appt.id, startTime: appt.startTime, serviceName: appt.serviceName,
+          patientEmail: null, patientPhone: patient45.phone, status: appt.status,
+          revision: appt.revision, scheduleRevision: 1,
+        }),
+        notificationsService.recoverOrEnqueueCurrentReminder({
+          id: appt.id, startTime: appt.startTime, serviceName: appt.serviceName,
+          patientEmail: null, patientPhone: patient45.phone, status: appt.status,
+          revision: appt.revision, scheduleRevision: 1,
+        }),
+        notificationsService.recoverOrEnqueueCurrentReminder({
+          id: appt.id, startTime: appt.startTime, serviceName: appt.serviceName,
+          patientEmail: null, patientPhone: patient45.phone, status: appt.status,
+          revision: appt.revision, scheduleRevision: 1,
+        }),
+        notificationsService.recoverOrEnqueueCurrentReminder({
+          id: appt.id, startTime: appt.startTime, serviceName: appt.serviceName,
+          patientEmail: null, patientPhone: patient45.phone, status: appt.status,
+          revision: appt.revision, scheduleRevision: 1,
+        }),
+      ]);
+
+      for (const res of concurrentResults) {
+        expect(res).toBeDefined();
+        expect(res!.deduplicationKey).toBe(canonicalKey);
+      }
+
+      const activeJobs = await prisma.notificationJob.findMany({
+        where: { deduplicationKey: canonicalKey },
+      });
+      expect(activeJobs.length).toBe(1);
+
+      // 3. Delivered reminder check
+      await prisma.notificationJob.update({
+        where: { id: activeJobs[0].id },
+        data: { status: NotificationStatus.SENT },
+      });
+
+      const recoveryOnDelivered = await notificationsService.recoverOrEnqueueCurrentReminder({
+        id: appt.id, startTime: appt.startTime, serviceName: appt.serviceName,
+        patientEmail: null, patientPhone: patient45.phone, status: appt.status,
+        revision: appt.revision, scheduleRevision: 1,
+      });
+
+      expect(recoveryOnDelivered!.id).toBe(activeJobs[0].id);
+      expect(recoveryOnDelivered!.status).toBe(NotificationStatus.SENT);
+
+      // 4. Ineligible appointment: cancelled appointment returns null
+      const cancelledApptRecovery = await notificationsService.recoverOrEnqueueCurrentReminder({
+        id: appt.id, startTime: appt.startTime, serviceName: appt.serviceName,
+        patientEmail: null, patientPhone: patient45.phone, status: AppointmentStatus.CANCELLED,
+        revision: appt.revision, scheduleRevision: 1,
+      });
+      expect(cancelledApptRecovery).toBeNull();
+    } finally {
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: appt.id } });
+      await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: appt.id } });
+      await prisma.appointment.delete({ where: { id: appt.id } });
+      await prisma.patient.delete({ where: { id: patient45.id } });
+    }
+  });
+
+  it('Regression 46: Intentional production authentication throttling enforces 5 attempts per minute', async () => {
+    const testEmail = `throttle_${runId}@dentacare.local`;
+    const testIp = `198.51.100.${runId.slice(-2) || '46'}`;
+
+    // Send 5 failed attempts (within the 5-attempt limit)
+    for (let i = 0; i < 5; i++) {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', testIp)
+        .send({ email: testEmail, password: 'WrongPassword123!' });
+      expect(res.status).toBe(401);
+    }
+
+    // The 6th attempt from the same IP must be rejected with 429 Too Many Requests
+    const throttledRes = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .set('X-Forwarded-For', testIp)
+      .send({ email: testEmail, password: 'WrongPassword123!' });
+
+    expect(throttledRes.status).toBe(429);
+  });
+
+  it('Regression 47: Safe legacy review edge cases (concurrency conflict handling, renamed single services with commas, and anti-collapse)', async () => {
+    const patient47 = await prisma.patient.create({
+      data: { fullName: 'Legacy Review Patient', phone: `${testPhonePrefix}47` },
+    });
+
+    const nowUtc = new Date();
+    const apptTime = new Date(nowUtc.getTime() + 24 * 60 * 60 * 1000);
+
+    // Create single service in catalog
+    const singleCatalogService = await prisma.service.create({
+      data: {
+        nameUz: 'Professional tish profilaktikasi',
+        nameRu: 'Профессиональная профилактика зубов',
+        slug: `prof-profilaktika-${runId}`,
+        category: 'THERAPY',
+        durationMinutes: 45,
+        priceFrom: 18000000,
+        isActive: true,
+      },
+    });
+
+    // Create multi-service catalog targets
+    const multiService1 = await prisma.service.create({
+      data: {
+        nameUz: `Muolaja A ${runId}`,
+        nameRu: `Процедура A ${runId}`,
+        slug: `muolaja-a-${runId}`,
+        category: 'THERAPY',
+        durationMinutes: 30,
+        isActive: true,
+      },
+    });
+    const multiService2 = await prisma.service.create({
+      data: {
+        nameUz: `Muolaja B ${runId}`,
+        nameRu: `Процедура B ${runId}`,
+        slug: `muolaja-b-${runId}`,
+        category: 'THERAPY',
+        durationMinutes: 30,
+        isActive: true,
+      },
+    });
+
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_leg_${runId}`,
+        patientId: patient47.id,
+        doctorId: testDoctorAId,
+        serviceId: singleCatalogService.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.COMPLETED,
+        startTime: apptTime,
+        endTime: new Date(apptTime.getTime() + 45 * 60 * 1000),
+        durationMinutes: 45,
+        bufferMinutes: 0,
+        serviceName: 'Tish tozalash, sayqallash',
+        consentGiven: true,
+      },
+    });
+
+    // 1. Renamed single service with a comma: historical snapshot "Tish tozalash, sayqallash"
+    const legacyItemComma = await prisma.appointmentServiceItem.create({
+      data: {
+        appointmentId: appt.id,
+        serviceId: null,
+        serviceNameUz: 'Tish tozalash, sayqallash',
+        durationMinutes: 45,
+        priceFrom: 18000000,
+        isLegacyBundle: true,
+        legacyProvenance: 'AMBIGUOUS_BUNDLE',
+      },
+    });
+
+    // 2. Genuinely uncertain bundle: snapshot contains both Muolaja A and Muolaja B
+    const genuineBundleItem = await prisma.appointmentServiceItem.create({
+      data: {
+        appointmentId: appt.id,
+        serviceId: null,
+        serviceNameUz: `${multiService1.nameUz}, ${multiService2.nameUz}`,
+        durationMinutes: 60,
+        isLegacyBundle: true,
+        legacyProvenance: 'AMBIGUOUS_BUNDLE',
+      },
+    });
+
+    try {
+      // Test 1: Reconcile renamed single service with a comma to the new catalog service
+      // Must NOT fail solely because of the comma!
+      const reconciledSingle = await servicesService.reconcileLegacyRecord(
+        legacyItemComma.id,
+        {
+          action: 'RESOLVE_TO_SERVICE',
+          serviceId: singleCatalogService.id,
+          reason: 'Katalog nomi o\'zgargan bitta xizmat (muvofiqlashtirildi)',
+        },
+        ownerUserId,
+      );
+
+      expect(reconciledSingle!.serviceId).toBe(singleCatalogService.id);
+      expect(reconciledSingle!.isLegacyBundle).toBe(false);
+      expect(reconciledSingle!.legacyProvenance).toBe('RESOLVED_MANUAL');
+      expect(reconciledSingle!.serviceNameUz).toBe('Tish tozalash, sayqallash'); // Preserves snapshot!
+
+      // Audit log was created
+      const auditEntry = await prisma.auditLog.findFirst({
+        where: { entityId: legacyItemComma.id, action: 'service_item.legacy_reconciled' },
+      });
+      expect(auditEntry).toBeDefined();
+
+      // Test 2: Genuinely uncertain bundle cannot be collapsed into single service
+      await expect(
+        servicesService.reconcileLegacyRecord(
+          genuineBundleItem.id,
+          {
+            action: 'RESOLVE_TO_SERVICE',
+            serviceId: multiService1.id,
+            reason: 'Bitta xizmatga bog\'lashga urinish',
+          },
+          ownerUserId,
+        ),
+      ).rejects.toThrow('Haqiqiy ko\'p xizmatli paketni (bundle) bitta xizmatga majburan bog\'lash mumkin emas');
+
+      // Test 3: Concurrent resolution race on genuineBundleItem
+      const [res1, res2] = await Promise.allSettled([
+        servicesService.reconcileLegacyRecord(
+          genuineBundleItem.id,
+          { action: 'KEEP_AMBIGUOUS_BUNDLE', reason: 'Birinchi qaror tasdiqlandi' },
+          ownerUserId,
+        ),
+        servicesService.reconcileLegacyRecord(
+          genuineBundleItem.id,
+          { action: 'KEEP_AMBIGUOUS_BUNDLE', reason: 'Ikkinchi parallel qaror' },
+          ownerUserId,
+        ),
+      ]);
+
+      const fulfilled = [res1, res2].filter((r) => r.status === 'fulfilled');
+      const rejected = [res1, res2].filter((r) => r.status === 'rejected');
+
+      // Exactly one succeeds, the other gets controlled conflict rejection (no 500 unhandled serialization crash)
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      const rejectedError = (rejected[0] as PromiseRejectedResult).reason;
+      expect(rejectedError.status).toBe(409); // Controlled ConflictException!
+
+      // Test 4: Report filter agreement:
+      const report = await servicesService.getLegacyReviewReport(1, 20);
+      const hasResolvedItem = report.records.some((r) => r.id === legacyItemComma.id);
+      expect(hasResolvedItem).toBe(false);
+    } finally {
+      await prisma.auditLog.deleteMany({
+        where: { entityId: { in: [legacyItemComma.id, genuineBundleItem.id] } },
+      });
+      await prisma.appointmentServiceItem.deleteMany({
+        where: { appointmentId: appt.id },
+      });
+      await prisma.appointment.delete({ where: { id: appt.id } });
+      await prisma.service.deleteMany({
+        where: { id: { in: [singleCatalogService.id, multiService1.id, multiService2.id] } },
+      });
+      await prisma.patient.delete({ where: { id: patient47.id } });
     }
   });
 });

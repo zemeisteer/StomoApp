@@ -1116,50 +1116,21 @@ export class AppointmentsService {
             });
 
             // Ensure an eligible upcoming appointment retains a valid reminder for its current schedule.
-            // Check if there is an active (PENDING or PROCESSING) or delivered (SENT or SIMULATED) reminder for this schedule.
+            // Uses deliberate recovery policy distinguishing active, delivered, retryable-failed, and deliberately-cancelled jobs.
             const currentScheduleRev = currentAppt.scheduleRevision ?? 1;
-            const existingActiveOrDelivered = await tx.notificationJob.findFirst({
-              where: {
-                appointmentId: currentAppt.id,
-                templateKey: 'appointment_reminder',
+            await this.notificationsService.recoverOrEnqueueCurrentReminder(
+              {
+                id: currentAppt.id,
+                startTime: currentAppt.startTime,
+                serviceName: currentAppt.serviceName,
+                patientEmail: currentAppt.patient?.email,
+                patientPhone: currentAppt.patient?.phone || '',
+                status: currentAppt.status,
+                revision: newRevision,
                 scheduleRevision: currentScheduleRev,
-                status: {
-                  in: [
-                    NotificationStatus.PENDING,
-                    NotificationStatus.PROCESSING,
-                    NotificationStatus.SENT,
-                    NotificationStatus.SIMULATED,
-                  ],
-                },
               },
-            });
-
-            const nowUtc = new Date();
-            if (!existingActiveOrDelivered && currentAppt.startTime > nowUtc) {
-              const reminderTime = new Date(currentAppt.startTime.getTime() - 2 * 60 * 60 * 1000);
-              // Defined behavior: If scheduled reminder time has already arrived, schedule for immediate dispatch
-              const scheduledFor = reminderTime > nowUtc ? reminderTime : nowUtc;
-              await this.notificationsService.enqueue(
-                {
-                  channel: currentAppt.patient?.email ? NotificationChannel.EMAIL : NotificationChannel.SMS,
-                  templateKey: 'appointment_reminder',
-                  recipient: currentAppt.patient?.email || currentAppt.patient?.phone || '',
-                  appointmentId: currentAppt.id,
-                  appointmentRevision: newRevision,
-                  scheduleRevision: currentScheduleRev,
-                  scheduledFor,
-                  deduplicationKey: `reminder_${currentAppt.id}_s${currentScheduleRev}`,
-                  payload: {
-                    appointmentId: currentAppt.id,
-                    serviceName: currentAppt.serviceName,
-                    startTime: currentAppt.startTime.toISOString(),
-                    scheduleRevision: currentScheduleRev,
-                    formattedTime: this.notificationsService.formatTashkentTime(currentAppt.startTime),
-                  },
-                },
-                tx,
-              );
-            }
+              tx,
+            );
 
             // 9. Record previous values, adjustments, and reason in audit log
             const serviceItemsTotal = currentAppt.serviceItems.reduce((acc, i) => acc + i.durationMinutes, 0);

@@ -18,6 +18,13 @@ class LoginDto {
 
 const REFRESH_COOKIE_PATH = '/api/auth/refresh';
 
+/**
+ * Strict production login rate limiting:
+ * Limits login attempts to 5 per minute per IP to protect against credential stuffing and brute-force attacks.
+ * Test environments can independently override AUTH_LOGIN_THROTTLE_LIMIT without weakening production defaults.
+ */
+const LOGIN_THROTTLE_LIMIT = parseInt(process.env.AUTH_LOGIN_THROTTLE_LIMIT || '5', 10);
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -25,7 +32,7 @@ export class AuthController {
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Throttle({ default: { limit: LOGIN_THROTTLE_LIMIT, ttl: 60000 } })
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
