@@ -19,6 +19,7 @@ export interface EnqueueNotificationParams {
   payload: Record<string, any>;
   appointmentId?: string;
   appointmentRevision?: number;
+  scheduleRevision?: number;
   scheduledFor?: Date;
   deduplicationKey?: string;
 }
@@ -104,6 +105,7 @@ export class NotificationsService {
           payload: params.payload as Prisma.InputJsonValue,
           appointmentId: params.appointmentId || null,
           appointmentRevision: params.appointmentRevision ?? null,
+          scheduleRevision: params.scheduleRevision ?? null,
           scheduledFor: params.scheduledFor || new Date(),
           deduplicationKey: params.deduplicationKey || null,
           status: NotificationStatus.PENDING,
@@ -126,11 +128,13 @@ export class NotificationsService {
       patientEmail?: string | null;
       patientPhone: string;
       revision?: number;
+      scheduleRevision?: number;
     },
     tx?: Prisma.TransactionClient | PrismaService,
   ) {
     const formattedTime = this.formatTashkentTime(appointment.startTime);
     const revision = appointment.revision ?? 1;
+    const scheduleRevision = appointment.scheduleRevision ?? 1;
 
     // 1. Patient Confirmation / Received (Email or SMS)
     if (appointment.patientEmail) {
@@ -141,11 +145,13 @@ export class NotificationsService {
           recipient: appointment.patientEmail,
           appointmentId: appointment.id,
           appointmentRevision: revision,
+          scheduleRevision,
           deduplicationKey: `booking_email_${appointment.id}`,
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
             startTime: appointment.startTime.toISOString(),
+            scheduleRevision,
             formattedTime,
           },
         },
@@ -159,11 +165,13 @@ export class NotificationsService {
           recipient: appointment.patientPhone,
           appointmentId: appointment.id,
           appointmentRevision: revision,
+          scheduleRevision,
           deduplicationKey: `booking_sms_${appointment.id}`,
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
             startTime: appointment.startTime.toISOString(),
+            scheduleRevision,
             formattedTime,
           },
         },
@@ -203,12 +211,14 @@ export class NotificationsService {
           recipient: appointment.patientEmail || appointment.patientPhone,
           appointmentId: appointment.id,
           appointmentRevision: revision,
+          scheduleRevision,
           scheduledFor: reminderTime,
-          deduplicationKey: `reminder_${appointment.id}_rev${revision}`,
+          deduplicationKey: `reminder_${appointment.id}_s${scheduleRevision}`,
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
             startTime: appointment.startTime.toISOString(),
+            scheduleRevision,
             formattedTime,
           },
         },
@@ -305,6 +315,7 @@ export class NotificationsService {
       patientEmail?: string | null;
       patientPhone: string;
       revision: number;
+      scheduleRevision?: number;
     },
     tx?: Prisma.TransactionClient | PrismaService,
   ) {
@@ -312,6 +323,7 @@ export class NotificationsService {
     await this.cancelAppointmentReminders(appointment.id, tx);
 
     const formattedTime = this.formatTashkentTime(appointment.startTime);
+    const scheduleRevision = appointment.scheduleRevision ?? appointment.revision;
 
     // 2. Queue reschedule notification
     await this.enqueue(
@@ -321,11 +333,13 @@ export class NotificationsService {
         recipient: appointment.patientEmail || appointment.patientPhone,
         appointmentId: appointment.id,
         appointmentRevision: appointment.revision,
+        scheduleRevision,
         deduplicationKey: `rescheduled_${appointment.id}_rev${appointment.revision}`,
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
           startTime: appointment.startTime.toISOString(),
+          scheduleRevision,
           formattedTime,
         },
       },
@@ -342,12 +356,14 @@ export class NotificationsService {
           recipient: appointment.patientEmail || appointment.patientPhone,
           appointmentId: appointment.id,
           appointmentRevision: appointment.revision,
+          scheduleRevision,
           scheduledFor: reminderTime,
-          deduplicationKey: `reminder_${appointment.id}_rev${appointment.revision}`,
+          deduplicationKey: `reminder_${appointment.id}_s${scheduleRevision}`,
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
             startTime: appointment.startTime.toISOString(),
+            scheduleRevision,
             formattedTime,
           },
         },
@@ -428,7 +444,7 @@ export class NotificationsService {
     if (job.appointmentId && job.templateKey === 'appointment_reminder') {
       const appt = await this.prisma.appointment.findUnique({
         where: { id: job.appointmentId },
-        select: { status: true, startTime: true, revision: true },
+        select: { status: true, startTime: true, revision: true, scheduleRevision: true },
       });
 
       // Cancel reminder if appointment is cancelled, completed, or no-show
@@ -458,12 +474,35 @@ export class NotificationsService {
        * (WHERE id = :id AND lease_token = :token) so expired or revoked workers cannot corrupt state.
        */
 
-      // Check if appointment was rescheduled to a DIFFERENT start time
-      const payloadStartTime = job.payload?.startTime ? new Date(job.payload.startTime).getTime() : null;
-      const apptStartTime = appt.startTime.getTime();
-      const startTimeChanged = payloadStartTime !== null && payloadStartTime !== apptStartTime;
+      // Safely validate reminder payload fields instead of silently treating missing startTime as valid
+      const rawStartTime = job.payload?.startTime;
+      const payloadStartTime = rawStartTime ? new Date(rawStartTime).getTime() : NaN;
+      if (!rawStartTime || isNaN(payloadStartTime)) {
+        const payloadError = "Eslatma ma'lumotlarida qabul boshlanish vaqti (startTime) mavjud emas yoki noto'g'ri formatda";
+        await this.prisma.$executeRaw`
+          UPDATE "notification_jobs"
+          SET status = 'FAILED'::"notification_status",
+              "last_error" = ${payloadError},
+              "lease_token" = NULL
+          WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+        `;
+        return;
+      }
 
-      if (startTimeChanged) {
+      const apptStartTime = appt.startTime.getTime();
+      const startTimeChanged = payloadStartTime !== apptStartTime;
+      const scheduleRevisionMismatch =
+        job.scheduleRevision !== null &&
+        job.scheduleRevision !== undefined &&
+        appt.scheduleRevision !== null &&
+        appt.scheduleRevision !== undefined &&
+        job.scheduleRevision !== appt.scheduleRevision;
+
+      // Obsolete reminder check:
+      // If appointment was rescheduled to a different start time OR schedule revision has advanced,
+      // this reminder job is obsolete and must not initiate delivery.
+      // Explicitly handles A -> B -> A: even if startTime equals A, scheduleRevision has incremented (1 -> 2 -> 3).
+      if (startTimeChanged || scheduleRevisionMismatch) {
         await this.prisma.$executeRaw`
           UPDATE "notification_jobs"
           SET status = 'CANCELLED'::"notification_status",
@@ -474,20 +513,23 @@ export class NotificationsService {
         return;
       }
 
-      // Check if a newer reminder for this appointment has already been sent
-      const newerDelivered = await this.prisma.notificationJob.findFirst({
+      // Check if a reminder for THIS SPECIFIC SCHEDULE has already been delivered
+      // (A delivered reminder for schedule A must NOT suppress reminder for rescheduled schedule B!)
+      const targetScheduleRevision = job.scheduleRevision ?? appt.scheduleRevision ?? 1;
+      const alreadyDeliveredForSchedule = await this.prisma.notificationJob.findFirst({
         where: {
           appointmentId: job.appointmentId,
           templateKey: 'appointment_reminder',
           id: { not: job.id },
+          scheduleRevision: targetScheduleRevision,
           status: { in: [NotificationStatus.SENT, NotificationStatus.SIMULATED] },
         },
       });
-      if (newerDelivered) {
+      if (alreadyDeliveredForSchedule) {
         await this.prisma.$executeRaw`
           UPDATE "notification_jobs"
           SET status = 'CANCELLED'::"notification_status",
-              "last_error" = 'Ushbu qabul uchun yangi eslatma allaqachon yuborilgan',
+              "last_error" = 'Ushbu qabul vaqti uchun eslatma allaqachon yuborilgan',
               "lease_token" = NULL
           WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
         `;
@@ -495,7 +537,7 @@ export class NotificationsService {
       }
 
       // If duration changed without rescheduling start time, the appointment revision incremented
-      // but the reminder time is still valid! Worker proceeds with delivery without cancelling.
+      // but scheduleRevision and start time are preserved! Worker proceeds with delivery without cancelling.
     }
 
     // 2. Verify worker STILL holds the lease before initiating delivery!

@@ -83,7 +83,7 @@ export function validateCalendarDate(dateStr: string): { year: number; month: nu
     throw new BadRequestException('Mavjud bo\'lmagan sana kiritildi (masalan, 30-fevral)');
   }
 
-  const localDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+  const localDay = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
   return { year, month, day, localDay };
 }
 
@@ -225,12 +225,22 @@ export class SchedulingService {
   async getDoctorWorkingIntervals(
     doctorId: string,
     dateOnlyZoned: Date,
-    timezone: string = 'Asia/Tashkent',
+    timezone?: string,
     branchId?: string,
     tx?: Prisma.TransactionClient | PrismaService,
   ): Promise<TimeInterval[]> {
     const client = tx || this.prisma;
-    const dayOfWeek = DAY_MAP[dateOnlyZoned.getDay()];
+    let effectiveTz = timezone;
+    if (!effectiveTz) {
+      const settings = await client.clinicSettings.findFirst();
+      effectiveTz = settings?.timezone?.trim() || 'Asia/Tashkent';
+    }
+
+    const y = dateOnlyZoned.getUTCFullYear();
+    const m = dateOnlyZoned.getUTCMonth();
+    const d = dateOnlyZoned.getUTCDate();
+    const dayIndex = new Date(Date.UTC(y, m, d)).getUTCDay();
+    const dayOfWeek = DAY_MAP[dayIndex];
 
     const scheduleWhere: any = {
       doctorId,
@@ -266,13 +276,13 @@ export class SchedulingService {
     }
 
     // Query exceptions on this calendar date (handling UTC midnight, local midnight, and zoned day bounds)
-    const y = dateOnlyZoned.getFullYear();
-    const m = String(dateOnlyZoned.getMonth() + 1).padStart(2, '0');
-    const d = String(dateOnlyZoned.getDate()).padStart(2, '0');
-    const dateStr = `${y}-${m}-${d}`;
+    const exY = dateOnlyZoned.getUTCFullYear();
+    const exM = String(dateOnlyZoned.getUTCMonth() + 1).padStart(2, '0');
+    const exD = String(dateOnlyZoned.getUTCDate()).padStart(2, '0');
+    const dateStr = `${exY}-${exM}-${exD}`;
 
-    const startOfZonedDay = fromZonedTime(`${dateStr} 00:00:00`, timezone);
-    const endOfZonedDay = fromZonedTime(`${dateStr} 23:59:59.999`, timezone);
+    const startOfZonedDay = fromZonedTime(`${dateStr} 00:00:00`, effectiveTz);
+    const endOfZonedDay = fromZonedTime(`${dateStr} 23:59:59.999`, effectiveTz);
     const utcMidnight = new Date(`${dateStr}T00:00:00.000Z`);
 
     const dateQuery = new Date(dateOnlyZoned);
@@ -351,24 +361,33 @@ export class SchedulingService {
     doctorId: string,
     startTimeUtc: Date,
     endTimeUtc: Date,
-    timezone: string = 'Asia/Tashkent',
+    timezone?: string,
     branchId?: string,
     tx?: Prisma.TransactionClient | PrismaService,
   ): Promise<boolean> {
-    const startZoned = toZonedTime(startTimeUtc, timezone);
-    const endZoned = toZonedTime(endTimeUtc, timezone);
+    const client = tx || this.prisma;
+    let effectiveTz = timezone;
+    if (!effectiveTz) {
+      const settings = await client.clinicSettings.findFirst();
+      effectiveTz = settings?.timezone?.trim() || 'Asia/Tashkent';
+    }
+
+    const startZoned = toZonedTime(startTimeUtc, effectiveTz);
+    const endZoned = toZonedTime(endTimeUtc, effectiveTz);
 
     if (startZoned.toDateString() !== endZoned.toDateString()) {
       return false; // crosses midnight or multiple calendar days
     }
 
-    const dateOnlyZoned = new Date(startZoned);
-    dateOnlyZoned.setHours(0, 0, 0, 0);
+    const y = startZoned.getFullYear();
+    const m = startZoned.getMonth();
+    const d = startZoned.getDate();
+    const dateOnlyZoned = new Date(Date.UTC(y, m, d, 12, 0, 0));
 
     const intervals = await this.getDoctorWorkingIntervals(
       doctorId,
       dateOnlyZoned,
-      timezone,
+      effectiveTz,
       branchId,
       tx,
     );
@@ -388,17 +407,22 @@ export class SchedulingService {
     doctorId: string,
     startTimeUtc: Date,
     endTimeUtc: Date,
-    timezone: string = 'Asia/Tashkent',
+    timezone?: string,
     excludeAppointmentId?: string,
     branchId?: string,
     tx?: Prisma.TransactionClient | PrismaService,
   ): Promise<boolean> {
     const client = tx || this.prisma;
+    let effectiveTz = timezone;
+    if (!effectiveTz) {
+      const settings = await client.clinicSettings.findFirst();
+      effectiveTz = settings?.timezone?.trim() || 'Asia/Tashkent';
+    }
     const isWorking = await this.isDoctorWorkingAt(
       doctorId,
       startTimeUtc,
       endTimeUtc,
-      timezone,
+      effectiveTz,
       branchId,
       client,
     );
@@ -526,7 +550,7 @@ export class SchedulingService {
     dateStr: string, // YYYY-MM-DD
     serviceId?: string,
     branchId?: string,
-    timezone: string = 'Asia/Tashkent',
+    timezone?: string,
     serviceIds?: string[],
   ): Promise<{
     slots: TimeSlot[];
@@ -560,7 +584,12 @@ export class SchedulingService {
     const { localDay } = validateCalendarDate(dateStr);
 
     const clinicSettings = await this.prisma.clinicSettings.findFirst();
-    const effectiveTimezone = validateTimezone(timezone, clinicSettings?.timezone || 'Asia/Tashkent');
+    const clinicTimezone = clinicSettings?.timezone?.trim() || 'Asia/Tashkent';
+
+    // Validate display timezone if provided by caller; working hours must not be reinterpreted
+    if (timezone) {
+      validateTimezone(timezone, clinicTimezone);
+    }
 
     const bufferMinutes = clinicSettings?.bufferMinutes ?? 5;
     const totalMinutes = authoritative.totalDurationMinutes + bufferMinutes;
@@ -570,7 +599,7 @@ export class SchedulingService {
     const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
     const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
 
-    const startOfSelectedDayUtc = fromZonedTime(`${dateStr} 00:00:00`, effectiveTimezone);
+    const startOfSelectedDayUtc = fromZonedTime(`${dateStr} 00:00:00`, clinicTimezone);
     if (startOfSelectedDayUtc > maxHorizonTime) {
       throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga band qilib bo'lmaydi`);
     }
@@ -579,7 +608,7 @@ export class SchedulingService {
     const workingIntervals = await this.getDoctorWorkingIntervals(
       doctorId,
       localDay,
-      effectiveTimezone,
+      clinicTimezone,
       branchId,
     );
 
@@ -603,7 +632,7 @@ export class SchedulingService {
         const slotStartHour = Math.floor(minutes / 60);
         const slotStartMinute = minutes % 60;
         const slotStartStr = `${dateStr} ${String(slotStartHour).padStart(2, '0')}:${String(slotStartMinute).padStart(2, '0')}:00`;
-        const slotStartUtc = fromZonedTime(slotStartStr, effectiveTimezone);
+        const slotStartUtc = fromZonedTime(slotStartStr, clinicTimezone);
         const slotEndUtc = new Date(slotStartUtc.getTime() + totalMinutes * 60 * 1000);
 
         if (slotStartUtc < minNoticeTime || slotStartUtc > maxHorizonTime) {
@@ -614,7 +643,7 @@ export class SchedulingService {
           doctorId,
           slotStartUtc,
           slotEndUtc,
-          effectiveTimezone,
+          clinicTimezone,
           undefined,
           branchId,
         );
@@ -825,7 +854,7 @@ export class SchedulingService {
   async getRescheduleSlotsForAppointment(
     appointmentId: string,
     dateStr: string,
-    timezone: string = 'Asia/Tashkent',
+    timezone?: string,
   ): Promise<{
     slots: TimeSlot[];
     durationMinutes: number;
@@ -906,7 +935,12 @@ export class SchedulingService {
     const { localDay } = validateCalendarDate(dateStr);
 
     const clinicSettings = await this.prisma.clinicSettings.findFirst();
-    const effectiveTimezone = validateTimezone(timezone, clinicSettings?.timezone || 'Asia/Tashkent');
+    const clinicTimezone = clinicSettings?.timezone?.trim() || 'Asia/Tashkent';
+
+    // Validate display timezone if provided by caller; working hours must not be reinterpreted
+    if (timezone) {
+      validateTimezone(timezone, clinicTimezone);
+    }
 
     // USE STORED HISTORICAL SNAPSHOTS FROM APPOINTMENT ITSELF!
     const durationMinutes = appointment.durationMinutes;
@@ -919,7 +953,7 @@ export class SchedulingService {
     const minNoticeTime = new Date(nowUtc.getTime() + minNoticeHours * 60 * 60 * 1000);
     const maxHorizonTime = new Date(nowUtc.getTime() + maxHorizonDays * 24 * 60 * 60 * 1000);
 
-    const startOfSelectedDayUtc = fromZonedTime(`${dateStr} 00:00:00`, effectiveTimezone);
+    const startOfSelectedDayUtc = fromZonedTime(`${dateStr} 00:00:00`, clinicTimezone);
     if (startOfSelectedDayUtc > maxHorizonTime) {
       throw new BadRequestException(`${maxHorizonDays} kundan keyingi muddatga rejalashtirib bo'lmaydi`);
     }
@@ -927,7 +961,7 @@ export class SchedulingService {
     const workingIntervals = await this.getDoctorWorkingIntervals(
       appointment.doctorId,
       localDay,
-      effectiveTimezone,
+      clinicTimezone,
       appointment.branchId || undefined,
     );
 
@@ -951,7 +985,7 @@ export class SchedulingService {
         const slotStartHour = Math.floor(minutes / 60);
         const slotStartMinute = minutes % 60;
         const slotStartStr = `${dateStr} ${String(slotStartHour).padStart(2, '0')}:${String(slotStartMinute).padStart(2, '0')}:00`;
-        const slotStartUtc = fromZonedTime(slotStartStr, effectiveTimezone);
+        const slotStartUtc = fromZonedTime(slotStartStr, clinicTimezone);
         const slotEndUtc = new Date(slotStartUtc.getTime() + totalMinutes * 60 * 1000);
 
         if (slotStartUtc < minNoticeTime || slotStartUtc > maxHorizonTime) {
@@ -963,7 +997,7 @@ export class SchedulingService {
           appointment.doctorId,
           slotStartUtc,
           slotEndUtc,
-          effectiveTimezone,
+          clinicTimezone,
           appointment.id, // Exclude appointment!
           appointment.branchId || undefined,
         );

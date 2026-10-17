@@ -371,6 +371,23 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  getLegacyReviewReport: (page = 1, limit = 20) => {
+    const q = new URLSearchParams({ page: String(page), limit: String(limit) });
+    return fetcher<{
+      unresolvedCount: number;
+      verifiedHistoricalCount: number;
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+      records: any[];
+    }>(`/api/services/admin/legacy-review?${q.toString()}`);
+  },
+  reconcileLegacyRecord: (payload: { itemId: string; action: string; serviceId?: string; reason: string }) =>
+    fetcher<any>('/api/services/admin/reconcile-legacy', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // Admin CMS & Content Management
   getAdminArticles: (status?: string, search?: string, page = 1, limit = 50) => {

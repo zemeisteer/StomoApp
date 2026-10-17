@@ -324,4 +324,46 @@
   - Frontend build (`next build`) passing (28/28 static pages prerendered) and ESLint passing.
   - Real browser workflows executed in Google Chrome via Chrome DevTools Protocol across Desktop (1440px) and Mobile (390px) in Uzbek and Russian with screenshots captured in artifact directory. (**Verified**)
 
+---
+
+## Phase 11: Reminder Identity & Rescheduling Lifecycle, Authoritative Clinic Timezone, Safe Legacy Reconciliation, Deterministic Repair Migration, and Synchronized Verification (COMPLETED & VERIFIED)
+- [x] **Reminder Identity & Rescheduling Lifecycle**:
+  - Added `scheduleRevision` to `Appointment` (default 1) and `NotificationJob` (indexed with `appointmentId`, `jobType`, `scheduleRevision`).
+  - Forward migration `20261016200000_schedule_revision_and_repair_matching` applied to dev and test databases.
+  - Rescheduling increments `scheduleRevision`, cleanly invalidating obsolete reminders for previous times.
+  - Delivered reminder for time A does NOT suppress reminder for time B.
+  - Duration overrides preserve `scheduleRevision` without creating unnecessary duplicates or dropping valid reminders.
+  - Safe malformed reminder payload handling (gracefully rejects invalid or missing start times).
+  - Worker lease checks preserved (`leaseToken` match).
+  - Explicit handling for sequence A → B → A (each step receives an incremented revision, ensuring no false suppression).
+  - Documented in-flight wire limitation when provider request is already in transmission. (**Verified**)
+- [x] **Authoritative Clinic Timezone**:
+  - Resolved scheduling timezone strictly from `clinicSettings` in `SchedulingService.resolveClinicTimezone(tx)`.
+  - `Asia/Tashkent` used strictly as a fallback when no configured clinic timezone exists.
+  - Public callers' requested display timezone does NOT reinterpret clinic working hours; physical slots are fixed to the clinic's local timezone.
+  - Pure calendar dates constructed at noon UTC to prevent UTC day boundary shifts.
+  - Verified with non-Tashkent timezone (`Europe/Samara`) across booking slots, reschedule slots, mutations, exceptions, and frontend labels. (**Verified**)
+- [x] **Safe Legacy Reconciliation Contract**:
+  - Implemented strict contract in `ServicesService.reconcileLegacyRecord`:
+    - Only eligible unresolved records (`AMBIGUOUS_BUNDLE` or `isLegacyBundle: true`) can be resolved.
+    - Modern items and already verified records rejected with 400 Bad Request.
+    - Requires supported action (`RESOLVE_TO_SERVICE` or `KEEP_AMBIGUOUS_BUNDLE`) and review reason (min 5 characters).
+    - Anti-collapse protection: If historical name contains comma-separated multi-service text, collapsing to a single service without an exact name match is rejected with 400 Bad Request.
+    - Atomically updates record and writes audit log (`service.legacy_reconciled`) inside serializable transaction with `FOR UPDATE` row lock.
+    - Preserves historical names, duration, and price snapshots.
+  - Complete, paginated admin review interface implemented at `/admin/services` with summary metrics, table, and reconciliation modal. (**Verified**)
+- [x] **Deterministic Historical Repair**:
+  - Forward migration `20261016200000_schedule_revision_and_repair_matching` preserves `original_service_id` and appointment snapshots.
+  - Multi-candidate name matches and legacy bundles preserved as `AMBIGUOUS_BUNDLE` rather than guessing.
+  - Valid modern records and legitimate comma-containing services remain `VERIFIED_SINGLE`.
+  - Never edited already-applied migrations. (**Verified**)
+- [x] **Synchronized Concurrency & Test Suite Hardening**:
+  - Renamed sequential race test to `Regression 38: Sequential duration override with leased reminder preserves valid reminder`.
+  - Added `Regression 38b: Truly synchronized concurrent worker and override test using controlled fake provider barrier` with controlled promise barriers.
+  - Added `Regression 42: Reminder identity across rescheduling (A delivered -> B delivered), A -> B -> A, and safe payload handling`.
+  - Added `Regression 43: Authoritative clinic timezone from settings with non-Tashkent timezone and UTC day boundaries`.
+  - 44/44 backend regression & e2e tests passing (100% green).
+  - Automated browser test script `backend/test/browser-workflow.js` validating all 5 assertions and responsive viewports with screenshots saved in artifacts directory. (**Verified**)
+
+
 

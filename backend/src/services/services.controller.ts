@@ -98,19 +98,30 @@ export class CreateServiceDto {
   sortOrder?: number;
 }
 
+import { CurrentUser } from '../auth/current-user.decorator';
+import { JwtPayload } from '../auth/auth.service';
+
 export class UpdateServiceDto extends PartialType(CreateServiceDto) {}
+
+export enum LegacyReconcileAction {
+  RESOLVE_TO_SERVICE = 'RESOLVE_TO_SERVICE',
+  KEEP_AMBIGUOUS_BUNDLE = 'KEEP_AMBIGUOUS_BUNDLE',
+}
 
 export class ReconcileLegacyDto {
   @IsString()
   itemId!: string;
 
+  @IsEnum(LegacyReconcileAction, { message: 'Qo\'llab-quvvatlanadigan amal: RESOLVE_TO_SERVICE yoki KEEP_AMBIGUOUS_BUNDLE' })
+  action!: LegacyReconcileAction;
+
   @IsOptional()
   @IsString()
   serviceId?: string;
 
-  @IsOptional()
   @IsString()
-  action?: string;
+  @Length(5, 500, { message: 'Ko\'rib chiqish sababi (reason) kamida 5 ta belgidan iborat bo\'lishi shart' })
+  reason!: string;
 }
 
 @Controller('services')
@@ -151,15 +162,23 @@ export class ServicesController {
   @Get('admin/legacy-review')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  getLegacyReview() {
-    return this.servicesService.getLegacyReviewReport();
+  getLegacyReview(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = page ? parseInt(page, 10) : 1;
+    const limitNum = limit ? parseInt(limit, 10) : 20;
+    return this.servicesService.getLegacyReviewReport(pageNum, limitNum);
   }
 
   @Post('admin/reconcile-legacy')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  reconcileLegacy(@Body() dto: ReconcileLegacyDto) {
-    return this.servicesService.reconcileLegacyRecord(dto.itemId, dto);
+  reconcileLegacy(
+    @Body() dto: ReconcileLegacyDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.servicesService.reconcileLegacyRecord(dto.itemId, dto, user.sub);
   }
 
   @Get('admin/all')

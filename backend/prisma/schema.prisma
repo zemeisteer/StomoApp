@@ -411,7 +411,8 @@ model Appointment {
   requestFingerprint String?      @map("request_fingerprint")
   
   // Revision tracking for rescheduling/reminders
-  revision  Int               @default(1) @map("revision")
+  revision         Int               @default(1) @map("revision")
+  scheduleRevision Int               @default(1) @map("schedule_revision")
   
   // Consent
   consentGiven Boolean        @default(false) @map("consent_given")
@@ -725,6 +726,7 @@ model NotificationJob {
   
   // Revision pinning (preflight check)
   appointmentRevision Int?         @map("appointment_revision")
+  scheduleRevision    Int?         @map("schedule_revision")
   
   // Delivery tracking
   attempts      Int                @default(0)

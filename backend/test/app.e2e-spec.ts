@@ -2742,7 +2742,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     await prisma.service.delete({ where: { id: srvConc.id } });
   });
 
-  it('Regression 38: Controlled fake provider race test for duration override reminder lifecycle', async () => {
+  it('Regression 38: Sequential duration override with leased reminder preserves valid reminder', async () => {
     const docReminder = await prisma.doctor.create({
       data: {
         firstNameUz: 'Reminder',
@@ -2785,6 +2785,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         serviceName: srvReminder.nameUz,
         consentGiven: true,
         revision: 1,
+        scheduleRevision: 1,
         serviceItems: {
           create: [{
             serviceId: srvReminder.id,
@@ -2805,6 +2806,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         channel: 'SMS',
         recipient: patientRem.phone,
         appointmentRevision: 1,
+        scheduleRevision: 1,
         status: NotificationStatus.PROCESSING,
         leaseToken: workerLease,
         lockedAt: new Date(),
@@ -2812,6 +2814,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         payload: {
           appointmentId: apptRem.id,
           startTime: apptRem.startTime.toISOString(),
+          scheduleRevision: 1,
           formattedTime: 'Bugun soat 10:00',
         },
       },
@@ -2843,6 +2846,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         channel: 'SMS',
         recipient: patientRem.phone,
         appointmentRevision: 2,
+        scheduleRevision: 1,
         status: NotificationStatus.PROCESSING,
         leaseToken: `worker-lease-resched-${runId}`,
         lockedAt: new Date(),
@@ -2850,6 +2854,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         payload: {
           appointmentId: apptRem.id,
           startTime: apptRem.startTime.toISOString(),
+          scheduleRevision: 1,
         },
       },
     });
@@ -2879,6 +2884,140 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     await prisma.doctorBranch.deleteMany({ where: { doctorId: docReminder.id } });
     await prisma.doctor.delete({ where: { id: docReminder.id } });
     await prisma.service.delete({ where: { id: srvReminder.id } });
+  });
+
+  it('Regression 38b: Truly synchronized concurrent worker and override test using controlled fake provider boundary', async () => {
+    const docSync = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Sync',
+        lastNameUz: 'Doctor',
+        firstNameRu: 'Синх',
+        lastNameRu: 'Доктор',
+        slug: `sync-doc-${runId}`,
+        isActive: true,
+      },
+    });
+    const srvSync = await prisma.service.create({
+      data: { nameUz: 'Sync Srv', nameRu: 'Синхронизация', slug: `sync-srv-${runId}`, durationMinutes: 30 },
+    });
+    await prisma.doctorService.create({ data: { doctorId: docSync.id, serviceId: srvSync.id } });
+    await prisma.doctorBranch.create({ data: { doctorId: docSync.id, branchId: testBranchId } });
+
+    for (const d of [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]) {
+      await prisma.doctorSchedule.create({
+        data: { doctorId: docSync.id, dayOfWeek: d, branchId: testBranchId, startTime: '08:00', endTime: '20:00', isActive: true },
+      });
+    }
+
+    const futureSlot = getNextWorkingSlot(4, 10, 0);
+    const patientSync = await prisma.patient.create({
+      data: { fullName: 'Sync Patient', phone: `${testPhonePrefix}93` },
+    });
+
+    const apptSync = await prisma.appointment.create({
+      data: {
+        publicToken: `sync_tok_${runId}_${Date.now()}`,
+        patientId: patientSync.id,
+        doctorId: docSync.id,
+        serviceId: srvSync.id,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: futureSlot,
+        endTime: new Date(futureSlot.getTime() + 35 * 60 * 1000),
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        serviceName: srvSync.nameUz,
+        consentGiven: true,
+        revision: 1,
+        scheduleRevision: 1,
+        serviceItems: {
+          create: [{
+            serviceId: srvSync.id,
+            serviceNameUz: srvSync.nameUz,
+            durationMinutes: 30,
+            sortOrder: 0,
+          }],
+        },
+      },
+    });
+
+    const workerLease = `worker-lease-sync-token-${runId}`;
+    const job = await prisma.notificationJob.create({
+      data: {
+        appointmentId: apptSync.id,
+        templateKey: 'appointment_reminder',
+        channel: 'SMS',
+        recipient: patientSync.phone,
+        appointmentRevision: 1,
+        scheduleRevision: 1,
+        status: NotificationStatus.PROCESSING,
+        leaseToken: workerLease,
+        lockedAt: new Date(),
+        scheduledFor: new Date(Date.now() - 5000),
+        payload: {
+          appointmentId: apptSync.id,
+          startTime: apptSync.startTime.toISOString(),
+          scheduleRevision: 1,
+          formattedTime: 'Bugun soat 10:00',
+        },
+      },
+    });
+
+    // Explicit barrier synchronization:
+    // Fake SMS provider pauses execution while physically in flight
+    let providerStartedResolve!: () => void;
+    const providerStartedPromise = new Promise<void>((res) => { providerStartedResolve = res; });
+    let providerProceedResolve!: () => void;
+    const providerProceedPromise = new Promise<void>((res) => { providerProceedResolve = res; });
+
+    const deliverSmsSpy = jest.spyOn(notificationsService as any, 'deliverSms').mockImplementation(async () => {
+      providerStartedResolve();
+      await providerProceedPromise;
+      return false; // Simulated delivery
+    });
+
+    // 1. Worker begins deliverJob asynchronously
+    const workerDeliveryPromise = (notificationsService as any).deliverJob(job, workerLease);
+
+    // 2. Wait until provider is physically inside the network boundary
+    await providerStartedPromise;
+
+    // 3. Concurrently execute overrideDuration while provider call is in flight
+    await request(app.getHttpServer())
+      .patch(`/api/admin/appointments/${apptSync.id}/duration`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ durationMinutes: 60 })
+      .expect(200);
+
+    const apptAfterOverride = await prisma.appointment.findUnique({ where: { id: apptSync.id } });
+    expect(apptAfterOverride!.revision).toBe(2);
+    expect(apptAfterOverride!.scheduleRevision).toBe(1); // Schedule revision preserved!
+
+    // 4. Release external provider
+    providerProceedResolve();
+
+    // 5. Worker completes delivery
+    await workerDeliveryPromise;
+
+    // 6. Assert conditional completion succeeded
+    const jobAfterDelivery = await prisma.notificationJob.findUnique({ where: { id: job.id } });
+    expect(jobAfterDelivery!.status).toBe(NotificationStatus.SIMULATED);
+    expect(jobAfterDelivery!.leaseToken).toBeNull();
+
+    deliverSmsSpy.mockRestore();
+
+    // Cleanup
+    await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: apptSync.id } });
+    await prisma.notificationJob.deleteMany({ where: { appointmentId: apptSync.id } });
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptSync.id } });
+    await prisma.auditLog.deleteMany({ where: { entityId: apptSync.id } });
+    await prisma.appointment.delete({ where: { id: apptSync.id } });
+    await prisma.patient.delete({ where: { id: patientSync.id } });
+    await prisma.doctorSchedule.deleteMany({ where: { doctorId: docSync.id } });
+    await prisma.doctorService.deleteMany({ where: { doctorId: docSync.id } });
+    await prisma.doctorBranch.deleteMany({ where: { doctorId: docSync.id } });
+    await prisma.doctor.delete({ where: { id: docSync.id } });
+    await prisma.service.delete({ where: { id: srvSync.id } });
   });
 
   it('Regression 39: Reschedule availability agrees with reschedule execution', async () => {
@@ -3126,11 +3265,11 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       data: {
         id: `hist_item_renamed_${runId}`,
         appointmentId: apptRenamed.id,
-        serviceId: srvRenamed.id,
+        serviceId: null,
         serviceNameUz: 'Eski karies nomi',
         durationMinutes: 45,
         isLegacyBundle: false,
-        legacyProvenance: 'VERIFIED_SINGLE',
+        legacyProvenance: 'AMBIGUOUS_BUNDLE',
         originalServiceId: srvRenamed.id,
       },
     });
@@ -3167,30 +3306,95 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       },
     });
 
-    // 4. Verify Admin Legacy Review endpoint
+    // 4. Verify Admin Legacy Review endpoint with pagination
     const reviewRes = await request(app.getHttpServer())
-      .get('/api/services/admin/legacy-review')
+      .get('/api/services/admin/legacy-review?page=1&limit=10')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
     expect(reviewRes.body.unresolvedCount).toBeGreaterThanOrEqual(1);
+    expect(reviewRes.body.page).toBe(1);
+    expect(reviewRes.body.limit).toBe(10);
     expect(reviewRes.body.records.some((r: any) => r.id === itemBundle.id)).toBe(true);
 
-    // 5. Reconcile ambiguous legacy record
-    const reconcileRes = await request(app.getHttpServer())
+    // 5. Ineligible record rejection: cannot reconcile verified single record
+    await request(app.getHttpServer())
+      .post('/api/services/admin/reconcile-legacy')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        itemId: itemComma.id,
+        action: 'RESOLVE_TO_SERVICE',
+        serviceId: srvComma.id,
+        reason: 'Bu xizmat allaqachon tekshirilgan',
+      })
+      .expect(400);
+
+    // 6. Anti-collapse check: cannot force a genuine multi-service bundle into one service
+    await request(app.getHttpServer())
       .post('/api/services/admin/reconcile-legacy')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
         itemId: itemBundle.id,
+        action: 'RESOLVE_TO_SERVICE',
         serviceId: srvComma.id,
+        reason: 'Bitta xizmatga majburan bog\'lash urinishi',
+      })
+      .expect(400);
+
+    // 7. Reconcile bundle using KEEP_AMBIGUOUS_BUNDLE with required reason
+    const keepBundleRes = await request(app.getHttpServer())
+      .post('/api/services/admin/reconcile-legacy')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        itemId: itemBundle.id,
+        action: 'KEEP_AMBIGUOUS_BUNDLE',
+        reason: 'Tasdiqlangan ko\'p xizmatli tarixiy paket',
       })
       .expect(201);
 
-    expect(reconcileRes.body.isLegacyBundle).toBe(false);
-    expect(reconcileRes.body.legacyProvenance).toBe('RESOLVED_MANUAL');
-    expect(reconcileRes.body.serviceId).toBe(srvComma.id);
+    expect(keepBundleRes.body.isLegacyBundle).toBe(true);
+    expect(keepBundleRes.body.legacyProvenance).toBe('AMBIGUOUS_BUNDLE');
+    expect(keepBundleRes.body.serviceId).toBeNull();
 
-    // 6. Transparent Analytics Overview
+    // 8. Reconcile renamed single service using RESOLVE_TO_SERVICE
+    const resolveRenamedRes = await request(app.getHttpServer())
+      .post('/api/services/admin/reconcile-legacy')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        itemId: itemRenamed.id,
+        action: 'RESOLVE_TO_SERVICE',
+        serviceId: srvRenamed.id,
+        reason: 'Tarixiy karies xizmati yangi katalog nomiga biriktirildi',
+      })
+      .expect(201);
+
+    expect(resolveRenamedRes.body.isLegacyBundle).toBe(false);
+    expect(resolveRenamedRes.body.legacyProvenance).toBe('RESOLVED_MANUAL');
+    expect(resolveRenamedRes.body.serviceId).toBe(srvRenamed.id);
+    expect(resolveRenamedRes.body.serviceNameUz).toBe('Eski karies nomi'); // Historical snapshot preserved!
+    expect(resolveRenamedRes.body.durationMinutes).toBe(45); // Historical duration preserved!
+
+    // 9. Verify AuditLog created atomically with actor and details
+    const auditLogs = await prisma.auditLog.findMany({
+      where: { entityId: { in: [itemBundle.id, itemRenamed.id] } },
+    });
+    expect(auditLogs.length).toBe(2);
+    expect(auditLogs.some((l) => (l.details as any)?.action === 'KEEP_AMBIGUOUS_BUNDLE')).toBe(true);
+    expect(auditLogs.some((l) => (l.details as any)?.action === 'RESOLVE_TO_SERVICE')).toBe(true);
+
+    // 10. Cannot reconcile already resolved record again
+    await request(app.getHttpServer())
+      .post('/api/services/admin/reconcile-legacy')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        itemId: itemRenamed.id,
+        action: 'RESOLVE_TO_SERVICE',
+        serviceId: srvRenamed.id,
+        reason: 'Ikkinchi bor qayta muvofiqlashtirish',
+      })
+      .expect(400);
+
+    // 11. Transparent Analytics Overview
     const analyticsRes = await request(app.getHttpServer())
       .get('/api/admin/analytics/overview')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -3201,6 +3405,9 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(analyticsRes.body).toHaveProperty('unresolvedRecords');
 
     // Cleanup
+    await prisma.auditLog.deleteMany({
+      where: { entityId: { in: [itemBundle.id, itemRenamed.id] } },
+    });
     await prisma.appointmentServiceItem.deleteMany({
       where: { id: { in: [itemComma.id, itemRenamed.id, itemBundle.id] } },
     });
@@ -3209,6 +3416,339 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     });
     await prisma.patient.delete({ where: { id: patientHist.id } });
     await prisma.service.deleteMany({ where: { id: { in: [srvComma.id, srvRenamed.id] } } });
+  });
+
+  it('Regression 42: Reminder identity across rescheduling (A delivered -> B delivered), A -> B -> A, and safe payload handling', async () => {
+    const srvRem = await prisma.service.create({
+      data: {
+        nameUz: 'Eslatma Xizmati',
+        nameRu: 'Услуга Напоминания',
+        slug: `eslatma-${runId}`,
+        durationMinutes: 30,
+        priceFrom: 10000000,
+      },
+    });
+
+    const docRem = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Eslatma',
+        lastNameUz: 'Shifokor',
+        firstNameRu: 'Напоминание',
+        lastNameRu: 'Врач',
+        slug: `doc-eslatma-${runId}`,
+        isActive: true,
+      },
+    });
+
+    await prisma.doctorService.create({ data: { doctorId: docRem.id, serviceId: srvRem.id } });
+    await prisma.doctorBranch.create({ data: { doctorId: docRem.id, branchId: testBranchId } });
+
+    for (const d of [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]) {
+      await prisma.doctorSchedule.create({
+        data: { doctorId: docRem.id, dayOfWeek: d, branchId: testBranchId, startTime: '08:00', endTime: '20:00', isActive: true },
+      });
+    }
+
+    const slotA = getNextWorkingSlot(5, 10, 0);
+    const patientRem = await prisma.patient.create({
+      data: { fullName: 'Reminder Patient', phone: `${testPhonePrefix}97` },
+    });
+
+    // 1. Book appointment for Slot A
+    const bookRes = await request(app.getHttpServer())
+      .post('/api/booking')
+      .send({
+        serviceId: srvRem.id,
+        doctorId: docRem.id,
+        branchId: testBranchId,
+        startTime: slotA.toISOString(),
+        patientName: patientRem.fullName,
+        patientPhone: patientRem.phone,
+        consentGiven: true,
+      })
+      .expect(201);
+
+    const apptId = bookRes.body.appointmentId;
+    const publicToken = bookRes.body.publicToken;
+
+    const apptAfterBook = await prisma.appointment.findUnique({ where: { id: apptId } });
+    expect(apptAfterBook!.scheduleRevision).toBe(1);
+
+    // 2. Deliver reminder for Slot A
+    const jobA = await prisma.notificationJob.findFirst({
+      where: { appointmentId: apptId, scheduleRevision: 1, templateKey: 'appointment_reminder' },
+    });
+    expect(jobA).toBeDefined();
+
+    const leaseA = `lease-a-${runId}`;
+    await prisma.notificationJob.update({
+      where: { id: jobA!.id },
+      data: { status: NotificationStatus.PROCESSING, leaseToken: leaseA, lockedAt: new Date() },
+    });
+    await (notificationsService as any).deliverJob(jobA, leaseA);
+
+    const jobAAfter = await prisma.notificationJob.findUnique({ where: { id: jobA!.id } });
+    expect([NotificationStatus.SENT, NotificationStatus.SIMULATED]).toContain(jobAAfter!.status);
+
+    // 3. Reschedule appointment to Slot B
+    const slotB = getNextWorkingSlot(6, 14, 0);
+    await request(app.getHttpServer())
+      .post(`/api/booking/reschedule/${publicToken}`)
+      .send({ startTime: slotB.toISOString() })
+      .expect(200);
+
+    const apptAfterReschedB = await prisma.appointment.findUnique({ where: { id: apptId } });
+    expect(apptAfterReschedB!.scheduleRevision).toBe(2);
+
+    // 4. Verify reminder for Slot B is enqueued and NOT suppressed by already delivered Slot A!
+    const jobB = await prisma.notificationJob.findFirst({
+      where: { appointmentId: apptId, scheduleRevision: 2, templateKey: 'appointment_reminder', status: NotificationStatus.PENDING },
+    });
+    expect(jobB).toBeDefined();
+
+    const leaseB = `lease-b-${runId}`;
+    await prisma.notificationJob.update({
+      where: { id: jobB!.id },
+      data: { status: NotificationStatus.PROCESSING, leaseToken: leaseB, lockedAt: new Date() },
+    });
+    await (notificationsService as any).deliverJob(jobB, leaseB);
+
+    const jobBAfter = await prisma.notificationJob.findUnique({ where: { id: jobB!.id } });
+    // MUST be delivered (SIMULATED or SENT), NOT cancelled as duplicate!
+    expect([NotificationStatus.SENT, NotificationStatus.SIMULATED]).toContain(jobBAfter!.status);
+
+    // 5. Reschedule BACK to Slot A: A -> B -> A
+    await request(app.getHttpServer())
+      .post(`/api/booking/reschedule/${publicToken}`)
+      .send({ startTime: slotA.toISOString() })
+      .expect(200);
+
+    const apptAfterReschedA = await prisma.appointment.findUnique({ where: { id: apptId } });
+    expect(apptAfterReschedA!.scheduleRevision).toBe(3);
+
+    // 6. Simulate an obsolete in-flight reminder from revision 2 attempting delivery
+    const obsoleteJob = await prisma.notificationJob.create({
+      data: {
+        appointmentId: apptId,
+        templateKey: 'appointment_reminder',
+        channel: 'SMS',
+        recipient: patientRem.phone,
+        appointmentRevision: 2,
+        scheduleRevision: 2,
+        status: NotificationStatus.PROCESSING,
+        leaseToken: `lease-obs-${runId}`,
+        lockedAt: new Date(),
+        scheduledFor: new Date(),
+        payload: {
+          appointmentId: apptId,
+          startTime: slotB.toISOString(),
+          scheduleRevision: 2,
+        },
+      },
+    });
+
+    await (notificationsService as any).deliverJob(obsoleteJob, `lease-obs-${runId}`);
+
+    const obsoleteAfter = await prisma.notificationJob.findUnique({ where: { id: obsoleteJob.id } });
+    expect(obsoleteAfter!.status).toBe(NotificationStatus.CANCELLED);
+    expect(obsoleteAfter!.lastError).toContain('Qabul qayta rejalashtirilganligi sababli');
+
+    // 7. Verify replacement reminder for revision 3 delivers cleanly
+    const jobRev3 = await prisma.notificationJob.findFirst({
+      where: { appointmentId: apptId, scheduleRevision: 3, templateKey: 'appointment_reminder', status: NotificationStatus.PENDING },
+    });
+    expect(jobRev3).toBeDefined();
+
+    const leaseRev3 = `lease-rev3-${runId}`;
+    await prisma.notificationJob.update({
+      where: { id: jobRev3!.id },
+      data: { status: NotificationStatus.PROCESSING, leaseToken: leaseRev3, lockedAt: new Date() },
+    });
+    await (notificationsService as any).deliverJob(jobRev3, leaseRev3);
+
+    const jobRev3After = await prisma.notificationJob.findUnique({ where: { id: jobRev3!.id } });
+    expect([NotificationStatus.SENT, NotificationStatus.SIMULATED]).toContain(jobRev3After!.status);
+
+    // 8. Safe handling of missing or malformed payload
+    const malformedJob = await prisma.notificationJob.create({
+      data: {
+        appointmentId: apptId,
+        templateKey: 'appointment_reminder',
+        channel: 'SMS',
+        recipient: patientRem.phone,
+        appointmentRevision: 3,
+        scheduleRevision: 3,
+        status: NotificationStatus.PROCESSING,
+        leaseToken: `lease-malform-${runId}`,
+        lockedAt: new Date(),
+        scheduledFor: new Date(),
+        payload: {
+          foo: 'bar',
+        },
+      },
+    });
+
+    await (notificationsService as any).deliverJob(malformedJob, `lease-malform-${runId}`);
+
+    const malformedAfter = await prisma.notificationJob.findUnique({ where: { id: malformedJob.id } });
+    expect(malformedAfter!.status).toBe(NotificationStatus.FAILED);
+    expect(malformedAfter!.lastError).toContain('mavjud emas yoki noto\'g\'ri formatda');
+
+    // Cleanup
+    await prisma.notificationJob.deleteMany({ where: { appointmentId: apptId } });
+    await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: apptId } });
+    await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptId } });
+    await prisma.auditLog.deleteMany({ where: { entityId: apptId } });
+    await prisma.appointment.delete({ where: { id: apptId } });
+    await prisma.patient.delete({ where: { id: patientRem.id } });
+    await prisma.doctorSchedule.deleteMany({ where: { doctorId: docRem.id } });
+    await prisma.doctorService.deleteMany({ where: { doctorId: docRem.id } });
+    await prisma.doctorBranch.deleteMany({ where: { doctorId: docRem.id } });
+    await prisma.doctor.delete({ where: { id: docRem.id } });
+    await prisma.service.delete({ where: { id: srvRem.id } });
+  });
+
+  it('Regression 43: Authoritative clinic timezone from settings with non-Tashkent timezone and UTC day boundaries', async () => {
+    // 1. Get or create clinic settings and backup original timezone
+    const initialSettings = await prisma.clinicSettings.findFirst();
+    const originalTimezone = initialSettings?.timezone || 'Asia/Tashkent';
+
+    // 2. Set clinic timezone to Europe/Samara (UTC+4, 1 hour behind Tashkent UTC+5)
+    if (initialSettings) {
+      await prisma.clinicSettings.update({
+        where: { id: initialSettings.id },
+        data: { timezone: 'Europe/Samara' },
+      });
+    } else {
+      await prisma.clinicSettings.create({
+        data: { id: 'default', timezone: 'Europe/Samara' },
+      });
+    }
+
+    try {
+      const srvTz = await prisma.service.create({
+        data: {
+          nameUz: 'Vaqt Mintaqasi Xizmati',
+          nameRu: 'Услуга Часового Пояса',
+          slug: `tz-srv-${runId}`,
+          durationMinutes: 30,
+          priceFrom: 10000000,
+        },
+      });
+
+      const docTz = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Samara',
+          lastNameUz: 'Doktor',
+          firstNameRu: 'Самара',
+          lastNameRu: 'Доктор',
+          slug: `doc-samara-${runId}`,
+          isActive: true,
+        },
+      });
+
+      await prisma.doctorService.create({ data: { doctorId: docTz.id, serviceId: srvTz.id } });
+      await prisma.doctorBranch.create({ data: { doctorId: docTz.id, branchId: testBranchId } });
+
+      // Working hours: Wednesday 09:00 to 18:00 Samara time (UTC+4)
+      // 09:00 Samara is 05:00 UTC.
+      await prisma.doctorSchedule.create({
+        data: {
+          doctorId: docTz.id,
+          dayOfWeek: DayOfWeek.WEDNESDAY,
+          branchId: testBranchId,
+          startTime: '09:00',
+          endTime: '18:00',
+          isActive: true,
+        },
+      });
+
+      // Target future Wednesday
+      const targetDate = '2026-11-18'; // Known Wednesday
+
+      // 3. Query slots without display timezone:
+      // Authoritative clinic timezone Europe/Samara must produce first slot at 09:00 Samara = 05:00 UTC!
+      const slotRes = await request(app.getHttpServer())
+        .get('/api/scheduling/slots')
+        .query({
+          doctorId: docTz.id,
+          date: targetDate,
+          serviceId: srvTz.id,
+          branchId: testBranchId,
+        })
+        .expect(200);
+
+      expect(slotRes.body.slots.length).toBeGreaterThan(0);
+      expect(slotRes.body.slots[0].startTime).toBe('2026-11-18T05:00:00.000Z');
+
+      // 4. Query slots WITH display timezone parameter (e.g. timezone: 'Asia/Tashkent'):
+      // Display timezone must NOT shift physical clinic working hours!
+      const slotResDisplay = await request(app.getHttpServer())
+        .get('/api/scheduling/slots')
+        .query({
+          doctorId: docTz.id,
+          date: targetDate,
+          serviceId: srvTz.id,
+          branchId: testBranchId,
+          timezone: 'Asia/Tashkent',
+        })
+        .expect(200);
+
+      expect(slotResDisplay.body.slots.length).toBeGreaterThan(0);
+      // Working slot is STILL 05:00 UTC (which corresponds to 09:00 Samara clinic physical time)
+      expect(slotResDisplay.body.slots[0].startTime).toBe('2026-11-18T05:00:00.000Z');
+
+      // 5. Test reschedule slots also honors authoritative clinic timezone
+      const patientTz = await prisma.patient.create({
+        data: { fullName: 'Tz Patient', phone: `${testPhonePrefix}98` },
+      });
+
+      const apptTz = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_tz_${runId}`,
+          patientId: patientTz.id,
+          doctorId: docTz.id,
+          serviceId: srvTz.id,
+          branchId: testBranchId,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: new Date('2026-11-18T05:00:00.000Z'),
+          endTime: new Date('2026-11-18T05:35:00.000Z'),
+          durationMinutes: 30,
+          bufferMinutes: 5,
+          serviceName: srvTz.nameUz,
+          consentGiven: true,
+          serviceItems: {
+            create: [{ serviceId: srvTz.id, serviceNameUz: srvTz.nameUz, durationMinutes: 30, sortOrder: 0 }],
+          },
+        },
+      });
+
+      const reschedSlotRes = await request(app.getHttpServer())
+        .get(`/api/booking/reschedule/${apptTz.publicToken}/slots`)
+        .query({ date: targetDate })
+        .expect(200);
+
+      expect(reschedSlotRes.body.slots.length).toBeGreaterThan(0);
+      expect(reschedSlotRes.body.slots[0].startTime).toBe('2026-11-18T05:00:00.000Z');
+
+      // Cleanup fixtures
+      await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptTz.id } });
+      await prisma.appointment.delete({ where: { id: apptTz.id } });
+      await prisma.patient.delete({ where: { id: patientTz.id } });
+      await prisma.doctorSchedule.deleteMany({ where: { doctorId: docTz.id } });
+      await prisma.doctorService.deleteMany({ where: { doctorId: docTz.id } });
+      await prisma.doctorBranch.deleteMany({ where: { doctorId: docTz.id } });
+      await prisma.doctor.delete({ where: { id: docTz.id } });
+      await prisma.service.delete({ where: { id: srvTz.id } });
+    } finally {
+      // Restore clinic settings timezone
+      if (initialSettings) {
+        await prisma.clinicSettings.update({
+          where: { id: initialSettings.id },
+          data: { timezone: originalTimezone },
+        });
+      }
+    }
   });
 });
 

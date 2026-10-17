@@ -893,6 +893,7 @@ export class AppointmentsService {
           // 12. Adjust management token expiry when moving appointment into future
           const newExtendedExpiry = new Date(txNewEndTime.getTime() + 7 * 24 * 60 * 60 * 1000);
           const newRevision = currentAppt.revision + 1;
+          const newScheduleRevision = (currentAppt.scheduleRevision ?? 1) + 1;
 
           const appt = await tx.appointment.update({
             where: { id: appointmentId },
@@ -901,6 +902,7 @@ export class AppointmentsService {
               endTime: txNewEndTime,
               bufferMinutes: txBufferMinutes,
               revision: newRevision,
+              scheduleRevision: newScheduleRevision,
               tokenExpiresAt: newExtendedExpiry,
             },
             include: {
@@ -936,6 +938,7 @@ export class AppointmentsService {
                 bufferMinutes: txBufferMinutes,
                 newEndTime: txNewEndTime,
                 revision: appt.revision,
+                scheduleRevision: newScheduleRevision,
               } as Prisma.InputJsonValue,
             },
           });
@@ -949,6 +952,7 @@ export class AppointmentsService {
               patientEmail: appt.patient?.email || undefined,
               patientPhone: appt.patient?.phone || '',
               revision: appt.revision,
+              scheduleRevision: appt.scheduleRevision,
             },
             tx,
           );
@@ -1111,12 +1115,14 @@ export class AppointmentsService {
               },
             });
 
-            // Ensure an eligible upcoming appointment retains a valid reminder.
-            // Check if there is an active (PENDING or PROCESSING) or delivered (SENT or SIMULATED) reminder.
+            // Ensure an eligible upcoming appointment retains a valid reminder for its current schedule.
+            // Check if there is an active (PENDING or PROCESSING) or delivered (SENT or SIMULATED) reminder for this schedule.
+            const currentScheduleRev = currentAppt.scheduleRevision ?? 1;
             const existingActiveOrDelivered = await tx.notificationJob.findFirst({
               where: {
                 appointmentId: currentAppt.id,
                 templateKey: 'appointment_reminder',
+                scheduleRevision: currentScheduleRev,
                 status: {
                   in: [
                     NotificationStatus.PENDING,
@@ -1140,12 +1146,14 @@ export class AppointmentsService {
                   recipient: currentAppt.patient?.email || currentAppt.patient?.phone || '',
                   appointmentId: currentAppt.id,
                   appointmentRevision: newRevision,
+                  scheduleRevision: currentScheduleRev,
                   scheduledFor,
-                  deduplicationKey: `reminder_${currentAppt.id}_rev${newRevision}`,
+                  deduplicationKey: `reminder_${currentAppt.id}_s${currentScheduleRev}`,
                   payload: {
                     appointmentId: currentAppt.id,
                     serviceName: currentAppt.serviceName,
                     startTime: currentAppt.startTime.toISOString(),
+                    scheduleRevision: currentScheduleRev,
                     formattedTime: this.notificationsService.formatTashkentTime(currentAppt.startTime),
                   },
                 },
@@ -1411,17 +1419,25 @@ export class AppointmentsService {
   /**
    * Doctor-scoped Today's Appointments with clinic timezone boundaries
    */
-  async getToday(timezone: string = 'Asia/Tashkent', user?: { role: StaffRole; doctorId?: string | null }) {
+  async getToday(timezone?: string, user?: { role: StaffRole; doctorId?: string | null }) {
+    let effectiveTz = timezone;
+    if (!effectiveTz) {
+      const settings = await this.prisma.clinicSettings.findFirst();
+      effectiveTz = settings?.timezone?.trim() || 'Asia/Tashkent';
+    }
+
     // Current time in clinic timezone
     const nowUtc = new Date();
-    const zonedNow = toZonedTime(nowUtc, timezone);
+    const zonedNow = toZonedTime(nowUtc, effectiveTz);
 
-    // Compute start and end of day in Tashkent
-    const localStart = new Date(zonedNow.getFullYear(), zonedNow.getMonth(), zonedNow.getDate(), 0, 0, 0, 0);
-    const localEnd = new Date(zonedNow.getFullYear(), zonedNow.getMonth(), zonedNow.getDate(), 23, 59, 59, 999);
+    // Compute start and end of day in clinic timezone
+    const y = zonedNow.getFullYear();
+    const m = String(zonedNow.getMonth() + 1).padStart(2, '0');
+    const d = String(zonedNow.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
 
-    const startUtc = fromZonedTime(localStart, timezone);
-    const endUtc = fromZonedTime(localEnd, timezone);
+    const startUtc = fromZonedTime(`${dateStr} 00:00:00`, effectiveTz);
+    const endUtc = fromZonedTime(`${dateStr} 23:59:59.999`, effectiveTz);
 
     const where: Prisma.AppointmentWhereInput = {
       startTime: { gte: startUtc, lte: endUtc },

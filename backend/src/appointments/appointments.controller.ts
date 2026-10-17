@@ -265,7 +265,7 @@ export class AppointmentsController {
   @Get('today')
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   getToday(@CurrentUser() user: JwtPayload) {
-    return this.service.getToday('Asia/Tashkent', user);
+    return this.service.getToday(undefined, user);
   }
 
   @Get(':id')

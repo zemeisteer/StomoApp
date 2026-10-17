@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ServiceCategory } from '@prisma/client';
+import { ServiceCategory, Prisma } from '@prisma/client';
 
 @Injectable()
 export class ServicesService {
@@ -113,41 +113,59 @@ export class ServicesService {
     });
   }
 
-  async getLegacyReviewReport() {
-    const records = await this.prisma.appointmentServiceItem.findMany({
-      where: {
-        OR: [
-          { legacyProvenance: 'AMBIGUOUS_BUNDLE' },
-          { isLegacyBundle: true },
-          { serviceId: null },
-        ],
-      },
-      include: {
-        appointment: {
-          select: {
-            id: true,
-            status: true,
-            startTime: true,
-            serviceName: true,
-            patient: { select: { fullName: true, phone: true } },
-            doctor: { select: { firstNameUz: true, lastNameUz: true } },
+  async getLegacyReviewReport(page = 1, limit = 20) {
+    const pageNum = Math.max(1, page);
+    const limitNum = Math.max(1, Math.min(100, limit));
+    const skip = (pageNum - 1) * limitNum;
+
+    const where: Prisma.AppointmentServiceItemWhereInput = {
+      OR: [
+        { legacyProvenance: 'AMBIGUOUS_BUNDLE' },
+        { isLegacyBundle: true },
+        { serviceId: null },
+      ],
+      // Exclude modern records
+      id: { startsWith: 'hist_' },
+      legacyProvenance: { not: 'RESOLVED_MANUAL' },
+    };
+
+    const [total, records, verifiedCount] = await Promise.all([
+      this.prisma.appointmentServiceItem.count({ where }),
+      this.prisma.appointmentServiceItem.findMany({
+        where,
+        include: {
+          appointment: {
+            select: {
+              id: true,
+              status: true,
+              startTime: true,
+              serviceName: true,
+              patient: { select: { fullName: true, phone: true } },
+              doctor: { select: { firstNameUz: true, lastNameUz: true } },
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const verifiedCount = await this.prisma.appointmentServiceItem.count({
-      where: { legacyProvenance: 'VERIFIED_SINGLE' },
-    });
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+      this.prisma.appointmentServiceItem.count({
+        where: { legacyProvenance: 'VERIFIED_SINGLE' },
+      }),
+    ]);
 
     return {
-      unresolvedCount: records.length,
+      unresolvedCount: total,
       verifiedHistoricalCount: verifiedCount,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum) || 1,
       records: records.map((r) => ({
         id: r.id,
         appointmentId: r.appointmentId,
         serviceNameUz: r.serviceNameUz,
+        serviceNameRu: r.serviceNameRu,
         originalServiceId: r.originalServiceId,
         durationMinutes: r.durationMinutes,
         priceFrom: r.priceFrom,
@@ -158,30 +176,155 @@ export class ServicesService {
     };
   }
 
-  async reconcileLegacyRecord(itemId: string, dto: { serviceId?: string; action?: string }) {
-    const item = await this.prisma.appointmentServiceItem.findUnique({
-      where: { id: itemId },
-    });
-    if (!item) throw new NotFoundException('Xizmat bandi topilmadi');
-
-    const targetServiceId = dto.serviceId || item.originalServiceId;
-    if (!targetServiceId) {
-      throw new BadRequestException('Bog\'lash uchun xizmat tanlanishi lozim');
+  async reconcileLegacyRecord(
+    itemId: string,
+    dto: { serviceId?: string; action?: string; reason?: string },
+    userId?: string,
+  ) {
+    if (!dto.action || !['RESOLVE_TO_SERVICE', 'KEEP_AMBIGUOUS_BUNDLE'].includes(dto.action)) {
+      throw new BadRequestException('Qo\'llab-quvvatlanmaydigan amal. RESOLVE_TO_SERVICE yoki KEEP_AMBIGUOUS_BUNDLE kiritilishi shart');
     }
 
-    const service = await this.prisma.service.findUnique({
-      where: { id: targetServiceId },
-    });
-    if (!service) throw new NotFoundException('Katalog xizmati topilmadi');
+    if (!dto.reason || dto.reason.trim().length < 5) {
+      throw new BadRequestException('Muvofiqlashtirish qarorining sababi (reason) kamida 5 ta belgidan iborat bo\'lishi shart');
+    }
 
-    return this.prisma.appointmentServiceItem.update({
-      where: { id: itemId },
-      data: {
-        serviceId: service.id,
-        serviceNameRu: service.nameRu,
-        isLegacyBundle: false,
-        legacyProvenance: 'RESOLVED_MANUAL',
+    const reviewReason = dto.reason.trim();
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Concurrency-safe row locking
+        const [locked] = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM "appointment_service_items" WHERE id = ${itemId} FOR UPDATE
+        `;
+        if (!locked) {
+          throw new NotFoundException('Xizmat bandi topilmadi');
+        }
+
+        const item = await tx.appointmentServiceItem.findUnique({
+          where: { id: itemId },
+          include: { appointment: true },
+        });
+        if (!item) {
+          throw new NotFoundException('Xizmat bandi topilmadi');
+        }
+
+        // Eligibility check: Only unresolved legacy records may be resolved!
+        const isEligibleUnresolved =
+          (item.legacyProvenance === 'AMBIGUOUS_BUNDLE' ||
+            item.isLegacyBundle === true ||
+            item.serviceId === null ||
+            item.legacyProvenance === null) &&
+          item.legacyProvenance !== 'VERIFIED_SINGLE' &&
+          item.legacyProvenance !== 'MODERN';
+
+        if (!isEligibleUnresolved) {
+          throw new BadRequestException('Faqat muvofiqlashtirilmagan noaniq tarixiy yozuvlarni ko\'rib chiqish mumkin');
+        }
+
+        if (item.legacyProvenance === 'RESOLVED_MANUAL') {
+          throw new BadRequestException('Ushbu yozuv allaqachon qo\'lda muvofiqlashtirilgan');
+        }
+
+        if (dto.action === 'RESOLVE_TO_SERVICE') {
+          if (!dto.serviceId) {
+            throw new BadRequestException('Bog\'lash uchun aniq katalog xizmati (serviceId) ko\'rsatilishi lozim');
+          }
+
+          const service = await tx.service.findUnique({
+            where: { id: dto.serviceId },
+          });
+          if (!service || !service.isActive || service.isArchived) {
+            throw new BadRequestException('Tanlangan katalog xizmati topilmadi yoki faol emas');
+          }
+
+          // Anti-collapse check: Do not silently convert a genuine multi-service bundle into one service!
+          // If the snapshot has multiple procedures (e.g., contains comma ',') and target service is not that exact named service:
+          const snapshotName = (item.serviceNameUz || item.appointment?.serviceName || '').trim();
+          const targetNameUz = (service.nameUz || '').trim();
+          const targetNameRu = (service.nameRu || '').trim();
+
+          const isExactNameMatch =
+            snapshotName.toLowerCase() === targetNameUz.toLowerCase() ||
+            snapshotName.toLowerCase() === targetNameRu.toLowerCase();
+
+          if (snapshotName.includes(',') && !isExactNameMatch) {
+            throw new BadRequestException(
+              'Haqiqiy ko\'p xizmatli paketni (bundle) bitta xizmatga majburan bog\'lash mumkin emas. Ko\'p xizmatli paket deb qoldiring (KEEP_AMBIGUOUS_BUNDLE)',
+            );
+          }
+
+          // Atomically update item:
+          // PRESERVE original identity, historical names, duration, and price snapshots!
+          // DO NOT overwrite serviceNameUz or serviceNameRu with current catalog names!
+          const updated = await tx.appointmentServiceItem.update({
+            where: { id: itemId },
+            data: {
+              serviceId: service.id,
+              isLegacyBundle: false,
+              legacyProvenance: 'RESOLVED_MANUAL',
+            },
+          });
+
+          // Atomically create audit log
+          await tx.auditLog.create({
+            data: {
+              userId: userId || null,
+              action: 'service_item.legacy_reconciled',
+              entity: 'AppointmentServiceItem',
+              entityId: itemId,
+              details: {
+                action: dto.action,
+                reason: reviewReason,
+                previousProvenance: item.legacyProvenance,
+                previousServiceId: item.serviceId,
+                resolvedServiceId: service.id,
+                targetServiceName: service.nameUz,
+                originalServiceId: item.originalServiceId,
+                snapshotNameUz: item.serviceNameUz,
+                durationMinutes: item.durationMinutes,
+                priceFrom: item.priceFrom,
+              } as Prisma.InputJsonValue,
+            },
+          });
+
+          return updated;
+        } else {
+          // KEEP_AMBIGUOUS_BUNDLE
+          const updated = await tx.appointmentServiceItem.update({
+            where: { id: itemId },
+            data: {
+              serviceId: null,
+              isLegacyBundle: true,
+              legacyProvenance: 'AMBIGUOUS_BUNDLE',
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              userId: userId || null,
+              action: 'service_item.legacy_reconciled',
+              entity: 'AppointmentServiceItem',
+              entityId: itemId,
+              details: {
+                action: dto.action,
+                reason: reviewReason,
+                previousProvenance: item.legacyProvenance,
+                previousServiceId: item.serviceId,
+                resolvedServiceId: null,
+                originalServiceId: item.originalServiceId,
+                snapshotNameUz: item.serviceNameUz,
+              } as Prisma.InputJsonValue,
+            },
+          });
+
+          return updated;
+        }
       },
-    });
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 10000,
+      },
+    );
   }
 }
