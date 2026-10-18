@@ -46,6 +46,13 @@ export default function AdminReviewsPage() {
     ARCHIVED: 'bg-slate-100 text-slate-700 border-slate-300',
   };
 
+  const statusLabels: Record<string, string> = {
+    PENDING: 'Kutilmoqda',
+    APPROVED: 'Tasdiqlangan',
+    REJECTED: 'Rad etilgan',
+    ARCHIVED: 'Arxivlangan',
+  };
+
   return (
     <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'EDITOR']}>
       <div className="space-y-6">
@@ -66,9 +73,9 @@ export default function AdminReviewsPage() {
               className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-medium focus:ring-2 focus:ring-teal-600"
             >
               <option value="">Barcha sharhlar</option>
-              <option value="PENDING">Kutilmoqda (PENDING)</option>
-              <option value="APPROVED">Tasdiqlangan (APPROVED)</option>
-              <option value="REJECTED">Rad etilgan (REJECTED)</option>
+              <option value="PENDING">Kutilmoqda</option>
+              <option value="APPROVED">Tasdiqlangan</option>
+              <option value="REJECTED">Rad etilgan</option>
             </select>
 
             <button
@@ -106,7 +113,7 @@ export default function AdminReviewsPage() {
                           statusColors[r.status] || 'bg-slate-100'
                         }`}
                       >
-                        {r.status}
+                        {statusLabels[r.status] || r.status}
                       </span>
                     </div>
 

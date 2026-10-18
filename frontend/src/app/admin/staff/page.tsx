@@ -100,6 +100,13 @@ export default function AdminStaffPage() {
     EDITOR: 'bg-slate-100 text-slate-800 border-slate-300',
   };
 
+  const roleLabels: Record<string, string> = {
+    OWNER: 'Klinika rahbari',
+    ADMIN: 'Administrator',
+    DOCTOR: 'Shifokor',
+    EDITOR: 'Muharrir',
+  };
+
   return (
     <AdminLayout allowedRoles={['OWNER']}>
       <div className="space-y-6">
@@ -173,7 +180,7 @@ export default function AdminStaffPage() {
                               roleColors[member.role] || 'bg-slate-100'
                             }`}
                           >
-                            {member.role}
+                            {roleLabels[member.role] || member.role}
                           </span>
                         </td>
                         <td className="py-4 px-6 text-slate-600">

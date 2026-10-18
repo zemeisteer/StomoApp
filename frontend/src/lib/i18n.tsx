@@ -46,6 +46,7 @@ export interface Translations {
   nav: {
     home: string;
     about: string;
+    clinic: string;
     services: string;
     doctors: string;
     prices: string;
@@ -70,6 +71,16 @@ export interface Translations {
     pause3d: string;
     resume3d: string;
     rotateHint: string;
+    toothStaticFallback: string;
+    toothAriaLabel: string;
+  };
+  statuses: {
+    PENDING: string;
+    CONFIRMED: string;
+    CHECKED_IN: string;
+    COMPLETED: string;
+    CANCELLED: string;
+    NO_SHOW: string;
   };
   booking: {
     title: string;
@@ -149,6 +160,25 @@ export interface Translations {
     audit: string;
     logout: string;
     role: string;
+    pendingWebsiteBookings: string;
+    pendingWebsiteBookingsSubtitle: string;
+    confirmAction: string;
+    cancelAction: string;
+    confirming: string;
+    cancelling: string;
+    cancelConfirmTitle: string;
+    cancelConfirmDesc: string;
+    appointmentDetails: string;
+    viewAll: string;
+    pageText: string;
+    prevPage: string;
+    nextPage: string;
+    totalRecords: string;
+    noPendingBookings: string;
+    allPendingReviewed: string;
+    newLeadsCard: string;
+    pendingLeadsSubtitle: string;
+    noNewLeads: string;
   };
 }
 
@@ -195,13 +225,14 @@ const translations: Record<Language, Translations> = {
     nav: {
       home: 'Bosh sahifa',
       about: 'Klinika haqida',
+      clinic: 'Klinika',
       services: 'Xizmatlar',
       doctors: 'Shifokorlar',
       prices: 'Narxlar',
       reviews: 'Fikrlar',
       faq: 'Ko\'p so\'raladigan savollar',
       articles: 'Maqolalar',
-      contacts: 'Bog\'lanish',
+      contacts: 'Aloqa',
       admin: 'Boshqaruv paneli',
     },
     hero: {
@@ -219,6 +250,16 @@ const translations: Record<Language, Translations> = {
       pause3d: '3D animatsiyani to\'xtatish',
       resume3d: '3D animatsiyani davom ettirish',
       rotateHint: 'Tish modelini aylantirish uchun sichqoncha yoki barmoq bilan suring',
+      toothStaticFallback: '3D modeli statik rejimda ko\'rsatilmoqda',
+      toothAriaLabel: 'Anatomik inson tishi 3D modeli',
+    },
+    statuses: {
+      PENDING: 'Kutilmoqda',
+      CONFIRMED: 'Tasdiqlangan',
+      CHECKED_IN: 'Keldi',
+      COMPLETED: 'Yakunlandi',
+      CANCELLED: 'Bekor qilindi',
+      NO_SHOW: 'Kelmadi',
     },
     booking: {
       title: 'Online qabulga yozilish',
@@ -242,7 +283,7 @@ const translations: Record<Language, Translations> = {
       consentText: 'Shaxsiy ma\'lumotlarimni qayta ishlashga va klinikadan SMS xabarnoma olishga roziman',
       consentError: 'Davom etish uchun shaxsiy ma\'lumotlar qayta ishlanishiga rozilik berishingiz kerak',
       bookingSuccess: 'Qabulga so\'rov qabul qilindi!',
-      requestReceivedNotice: 'Sizning qabul so\'rovingiz qabul qilindi va administrator ko\'rib chiqmoqda. Tez orada telefon orqali tasdiqlash uchun bog\'lanamiz.',
+      requestReceivedNotice: 'Sizning qabul so\'rovingiz qabul qilindi va tanlangan vaqt siz uchun vaqtincha band qilindi. Administrator qabulni tasdiqlash uchun tez orada bog\'lanadi.',
       appointmentId: 'Qabul ID raqami',
       managementTokenNotice: 'Qabul holatini kuzatish yoki vaqtini o\'zgartirish uchun havolani saqlab qo\'ying.',
       trackBooking: 'Qabul holatini ko\'rish',
@@ -289,7 +330,7 @@ const translations: Record<Language, Translations> = {
       calendar: 'Qabul taqvimi',
       appointments: 'Barcha qabullar',
       patients: 'Bemorlar bazasi',
-      leads: 'Qayta qo\'ng\'iroqlar (Lidlar)',
+      leads: 'Murojaatlar',
       doctorsManage: 'Shifokorlar va jadvallar',
       servicesManage: 'Xizmatlar va narxlar',
       reviewsModerate: 'Fikrlarni moderatsiya qilish',
@@ -298,6 +339,25 @@ const translations: Record<Language, Translations> = {
       audit: 'Xavfsizlik jurnali',
       logout: 'Chiqish',
       role: 'Roli',
+      pendingWebsiteBookings: 'Saytdan kelgan yangi qabullar (Kutilmoqda)',
+      pendingWebsiteBookingsSubtitle: 'Sayt orqali yuborilgan yangi arizalarni tasdiqlash yoki bekor qilish',
+      confirmAction: 'Tasdiqlash',
+      cancelAction: 'Bekor qilish',
+      confirming: 'Tasdiqlanmoqda...',
+      cancelling: 'Bekor qilinmoqda...',
+      cancelConfirmTitle: 'Qabulni bekor qilishni tasdiqlaysizmi?',
+      cancelConfirmDesc: 'Ushbu qabul bekor qilinadi va band qilingan vaqt bo\'shatiladi.',
+      appointmentDetails: 'Tafsilotlar',
+      viewAll: 'Barchasini ko\'rish',
+      pageText: 'Sahifa',
+      prevPage: 'Oldingi',
+      nextPage: 'Keyingi',
+      totalRecords: 'Jami',
+      noPendingBookings: 'Hozircha yangi kutilayotgan arizalar yo\'q',
+      allPendingReviewed: 'Barcha arizalar ko\'rib chiqilgan',
+      newLeadsCard: 'Yangi murojaatlar',
+      pendingLeadsSubtitle: 'Qayta qo\'ng\'iroq kutayotgan murojaatlar',
+      noNewLeads: 'Yangi murojaatlar yo\'q.',
     },
   },
   ru: {
@@ -342,6 +402,7 @@ const translations: Record<Language, Translations> = {
     nav: {
       home: 'Главная',
       about: 'О клинике',
+      clinic: 'Клиника',
       services: 'Услуги',
       doctors: 'Врачи',
       prices: 'Цены',
@@ -366,6 +427,16 @@ const translations: Record<Language, Translations> = {
       pause3d: 'Остановить 3D-анимацию',
       resume3d: 'Возобновить 3D-анимацию',
       rotateHint: 'Вращайте модель зуба с помощью мыши или пальца на сенсорном экране',
+      toothStaticFallback: '3D-модель отображается в статичном режиме',
+      toothAriaLabel: '3D-модель анатомического зуба человека',
+    },
+    statuses: {
+      PENDING: 'В ожидании',
+      CONFIRMED: 'Подтверждено',
+      CHECKED_IN: 'Прибыл',
+      COMPLETED: 'Завершено',
+      CANCELLED: 'Отменено',
+      NO_SHOW: 'Не явился',
     },
     booking: {
       title: 'Онлайн запись на прием',
@@ -389,7 +460,7 @@ const translations: Record<Language, Translations> = {
       consentText: 'Согласен на обработку персональных данных и получение сервисных уведомлений от клиники',
       consentError: 'Необходимо подтвердить согласие на обработку персональных данных',
       bookingSuccess: 'Заявка на прием успешно принята!',
-      requestReceivedNotice: 'Ваша заявка зарегистрирована в системе и ожидает подтверждения администратором клиники. Мы свяжемся с вами в ближайшее время.',
+      requestReceivedNotice: 'Ваша заявка зарегистрирована в системе и выбранное время предварительно забронировано за вами. Администратор свяжется с вами для подтверждения.',
       appointmentId: 'Номер бронирования',
       managementTokenNotice: 'Сохраните эту ссылку для проверки статуса или переноса времени приема.',
       trackBooking: 'Проверить статус записи',
@@ -436,7 +507,7 @@ const translations: Record<Language, Translations> = {
       calendar: 'Календарь приемов',
       appointments: 'Все записи',
       patients: 'База пациентов',
-      leads: 'Заявки на звонок (Лиды)',
+      leads: 'Заявки на звонок',
       doctorsManage: 'Врачи и расписания',
       servicesManage: 'Услуги и прейскурант',
       reviewsModerate: 'Модерация отзывов',
@@ -445,6 +516,25 @@ const translations: Record<Language, Translations> = {
       audit: 'Журнал безопасности',
       logout: 'Выйти',
       role: 'Роль',
+      pendingWebsiteBookings: 'Новые онлайн-заявки с сайта (Ожидают)',
+      pendingWebsiteBookingsSubtitle: 'Подтверждение или отмена новых онлайн-записей пациентов',
+      confirmAction: 'Подтвердить',
+      cancelAction: 'Отменить',
+      confirming: 'Подтверждение...',
+      cancelling: 'Отмена...',
+      cancelConfirmTitle: 'Подтвердите отмену записи',
+      cancelConfirmDesc: 'Данная запись будет отменена, и забронированное время освободится.',
+      appointmentDetails: 'Детали',
+      viewAll: 'Смотреть все',
+      pageText: 'Страница',
+      prevPage: 'Назад',
+      nextPage: 'Вперед',
+      totalRecords: 'Всего',
+      noPendingBookings: 'На данный момент новых ожидающих заявок нет',
+      allPendingReviewed: 'Все заявки обработаны',
+      newLeadsCard: 'Новые заявки',
+      pendingLeadsSubtitle: 'Заявки, ожидающие звонка администратора',
+      noNewLeads: 'Новых заявок на звонок нет.',
     },
   },
 };

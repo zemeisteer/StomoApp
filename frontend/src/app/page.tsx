@@ -16,6 +16,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import { Tooth3D } from '../components/Tooth3D';
+import { ScrollReveal } from '../components/ScrollReveal';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
 
@@ -160,7 +161,7 @@ export default function HomePage() {
       {/* ============================================================ */}
       {/* POPULAR SERVICES */}
       {/* ============================================================ */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <ScrollReveal className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-12 text-center sm:text-left">
           <div>
             <span className="text-xs font-bold uppercase tracking-widest text-teal-700">
@@ -180,7 +181,7 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {services.map((service) => {
+          {services.map((service, idx) => {
             const name = language === 'ru' && service.nameRu ? service.nameRu : service.nameUz;
             const desc =
               language === 'ru' && service.descriptionRu
@@ -189,57 +190,56 @@ export default function HomePage() {
             const priceFromFormatted = (service.priceFrom / 100).toLocaleString('uz-UZ');
 
             return (
-              <div
-                key={service.id}
-                className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-slate-100 hover:shadow-xl hover:border-teal-200 transition-all flex flex-col justify-between group"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="px-3 py-1 rounded-full bg-teal-50 text-teal-800 text-xs font-bold">
-                      {service.durationMinutes} daqiqa
-                    </span>
-                    <span className="text-xs font-bold text-teal-700 uppercase tracking-wider">
-                      {service.category}
-                    </span>
-                  </div>
-
-                  <Link href={`/services/${service.slug}`}>
-                    <h3 className="text-lg font-bold text-slate-900 group-hover:text-teal-700 transition-colors mb-2">
-                      {name}
-                    </h3>
-                  </Link>
-
-                  <p className="text-sm text-slate-500 line-clamp-3 mb-6 leading-relaxed">
-                    {desc || 'Klinikamizning ilg\'or mutaxassislari tomonidan xavfsiz va og\'riqsiz muolaja.'}
-                  </p>
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+              <ScrollReveal key={service.id} delayMs={idx * 60} distancePx={12}>
+                <div className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-slate-100 hover:shadow-xl hover:border-teal-200 transition-all flex flex-col justify-between group h-full">
                   <div>
-                    <span className="text-xs text-slate-400 block">{t.common.price}</span>
-                    <span className="text-base font-extrabold text-slate-900">
-                      {priceFromFormatted} {t.common.uzs}
-                    </span>
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="px-3 py-1 rounded-full bg-teal-50 text-teal-800 text-xs font-bold">
+                        {service.durationMinutes} daqiqa
+                      </span>
+                      <span className="text-xs font-bold text-teal-700 uppercase tracking-wider">
+                        {service.category}
+                      </span>
+                    </div>
+
+                    <Link href={`/services/${service.slug}`}>
+                      <h3 className="text-lg font-bold text-slate-900 group-hover:text-teal-700 transition-colors mb-2">
+                        {name}
+                      </h3>
+                    </Link>
+
+                    <p className="text-sm text-slate-500 line-clamp-3 mb-6 leading-relaxed">
+                      {desc || 'Klinikamizning ilg\'or mutaxassislari tomonidan xavfsiz va og\'riqsiz muolaja.'}
+                    </p>
                   </div>
 
-                  <Link
-                    href={`/booking?serviceId=${service.id}`}
-                    className="p-3 bg-teal-50 text-teal-700 hover:bg-teal-700 hover:text-white rounded-xl transition-all shadow-sm"
-                    title={t.common.bookAppointment}
-                  >
-                    <Calendar className="w-4 h-4" />
-                  </Link>
+                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-400 block">{t.common.price}</span>
+                      <span className="text-base font-extrabold text-slate-900">
+                        {priceFromFormatted} {t.common.uzs}
+                      </span>
+                    </div>
+
+                    <Link
+                      href={`/booking?serviceId=${service.id}`}
+                      className="p-3 bg-teal-50 text-teal-700 hover:bg-teal-700 hover:text-white rounded-xl transition-all shadow-sm"
+                      title={t.common.bookAppointment}
+                    >
+                      <Calendar className="w-4 h-4" />
+                    </Link>
+                  </div>
                 </div>
-              </div>
+              </ScrollReveal>
             );
           })}
         </div>
-      </section>
+      </ScrollReveal>
 
       {/* ============================================================ */}
       {/* DOCTOR SPOTLIGHTS */}
       {/* ============================================================ */}
-      <section className="bg-slate-900 text-white py-20 rounded-3xl max-w-7xl mx-auto px-4 sm:px-8 relative overflow-hidden">
+      <ScrollReveal className="bg-slate-900 text-white py-20 rounded-3xl max-w-7xl mx-auto px-4 sm:px-8 relative overflow-hidden">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-12 text-center sm:text-left">
           <div>
             <span className="text-xs font-bold uppercase tracking-widest text-teal-400">
@@ -303,12 +303,12 @@ export default function HomePage() {
             );
           })}
         </div>
-      </section>
+      </ScrollReveal>
 
       {/* ============================================================ */}
       {/* REAL REVIEWS */}
       {/* ============================================================ */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <ScrollReveal className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-12 text-center sm:text-left">
           <div>
             <span className="text-xs font-bold uppercase tracking-widest text-teal-700">
@@ -332,7 +332,7 @@ export default function HomePage() {
             reviews.map((r) => (
               <div
                 key={r.id}
-                className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-slate-100 flex flex-col justify-between"
+                className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-lg transition-all"
               >
                 <div>
                   <div className="flex items-center gap-1 text-amber-400 mb-3">
@@ -358,12 +358,12 @@ export default function HomePage() {
             </div>
           )}
         </div>
-      </section>
+      </ScrollReveal>
 
       {/* ============================================================ */}
       {/* BRANCHES & LOCATION */}
       {/* ============================================================ */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <ScrollReveal className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-2xl mx-auto mb-12">
           <span className="text-xs font-bold uppercase tracking-widest text-teal-700">
             {t.common.branches}
@@ -413,7 +413,7 @@ export default function HomePage() {
             );
           })}
         </div>
-      </section>
+      </ScrollReveal>
     </div>
   );
 }

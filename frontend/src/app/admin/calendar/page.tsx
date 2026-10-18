@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -17,10 +17,19 @@ import {
   Phone,
   Building2,
   Stethoscope,
+  Inbox,
+  AlertTriangle,
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
+import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
+import {
+  formatClinicDate,
+  formatClinicTime,
+  formatRangeTitle,
+  formatMonthYear,
+} from '../../../lib/dateFormat';
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['CONFIRMED', 'CANCELLED'],
@@ -43,28 +52,83 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 export default function AdminCalendarPage() {
   const { user } = useAuth();
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
 
-  // Filters & Navigation
-  const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
-  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
-  const [selectedServiceId, setSelectedServiceId] = useState<string>('');
+  // Navigation & Filter states initialized from URL params
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('doctorId') || '';
+    }
+    return '';
+  });
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('branchId') || '';
+    }
+    return '';
+  });
+  const [selectedServiceId, setSelectedServiceId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('serviceId') || '';
+    }
+    return '';
+  });
   const [selectedStatus, setSelectedStatus] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return new URLSearchParams(window.location.search).get('status') || '';
     }
     return '';
   });
-  const [pendingCount, setPendingCount] = useState<number>(0);
-  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
-  const [currentDate, setCurrentDate] = useState<Date>(new Date());
+
+  // Inbox Mode: When true, views all pending website applications across all dates
+  const [isInboxMode, setIsInboxMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const s = new URLSearchParams(window.location.search).get('status');
+      const mode = new URLSearchParams(window.location.search).get('mode');
+      return s === 'PENDING' || mode === 'inbox';
+    }
+    return false;
+  });
+
+  const [pendingTotal, setPendingTotal] = useState<number>(0);
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>(() => {
+    if (typeof window !== 'undefined') {
+      const v = new URLSearchParams(window.location.search).get('view');
+      if (v === 'day' || v === 'week' || v === 'month') return v;
+    }
+    return 'week';
+  });
+
+  const [currentDate, setCurrentDate] = useState<Date>(() => {
+    if (typeof window !== 'undefined') {
+      const dParam = new URLSearchParams(window.location.search).get('date');
+      if (dParam) {
+        const parsed = new Date(dParam);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
+    }
+    return new Date();
+  });
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 25;
 
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Selected appointment modal & action states
   const [selectedAppt, setSelectedAppt] = useState<any | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [mutatingStatus, setMutatingStatus] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Accessible Cancellation Confirmation Modal
+  const [cancelModalAppt, setCancelModalAppt] = useState<any | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>('');
 
   // Reschedule state
   const [rescheduleDate, setRescheduleDate] = useState<string>('');
@@ -84,10 +148,27 @@ export default function AdminCalendarPage() {
     doctorId: '',
     serviceId: '',
     branchId: '',
-    date: new Date().toISOString().split('T')[0],
+    date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()),
     time: '09:00',
     note: '',
   });
+
+  // Synchronize state with URL search params
+  const updateUrlParams = useCallback(
+    (params: Record<string, string | null | undefined>) => {
+      if (typeof window === 'undefined') return;
+      const url = new URL(window.location.href);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          url.searchParams.set(k, v);
+        } else {
+          url.searchParams.delete(k);
+        }
+      });
+      window.history.replaceState({}, '', url.toString());
+    },
+    []
+  );
 
   // Load fixtures
   useEffect(() => {
@@ -118,7 +199,7 @@ export default function AdminCalendarPage() {
   }, [user]);
 
   // Compute date range for viewMode
-  const getDateRange = () => {
+  const getDateRange = useCallback(() => {
     const d = new Date(currentDate);
     let start = new Date(d);
     let end = new Date(d);
@@ -142,25 +223,21 @@ export default function AdminCalendarPage() {
     return {
       dateFrom: start.toISOString(),
       dateTo: end.toISOString(),
+      startDate: start,
+      endDate: end,
     };
-  };
+  }, [currentDate, viewMode]);
 
-  const loadAppointments = async () => {
+  // Load appointments
+  const loadAppointments = useCallback(async () => {
     try {
       setIsLoading(true);
-      const params: Record<string, any> = {
-        limit: 200,
-      };
+      setFetchError(null);
 
-      // If filtering explicitly by PENDING, show all pending bookings across all dates
-      if (selectedStatus === 'PENDING') {
-        params.status = 'PENDING';
-      } else {
-        const { dateFrom, dateTo } = getDateRange();
-        params.dateFrom = dateFrom;
-        params.dateTo = dateTo;
-        if (selectedStatus) params.status = selectedStatus;
-      }
+      const params: Record<string, any> = {
+        page: currentPage,
+        limit: pageSize,
+      };
 
       if (user?.role === 'DOCTOR') {
         params.doctorId = user.doctorId;
@@ -171,24 +248,105 @@ export default function AdminCalendarPage() {
       if (selectedBranchId) params.branchId = selectedBranchId;
       if (selectedServiceId) params.serviceId = selectedServiceId;
 
+      if (isInboxMode) {
+        // Inbox Mode: all pending bookings across all dates
+        params.status = 'PENDING';
+      } else {
+        const { dateFrom, dateTo } = getDateRange();
+        params.dateFrom = dateFrom;
+        params.dateTo = dateTo;
+        if (selectedStatus) params.status = selectedStatus;
+      }
+
+      // Pending count params respecting doctor scoping
+      const pendingParams: Record<string, any> = { status: 'PENDING', limit: 1 };
+      if (user?.role === 'DOCTOR') {
+        pendingParams.doctorId = user.doctorId;
+      }
+
       const [res, pendingRes] = await Promise.all([
         api.getAdminAppointments(params),
-        api.getAdminAppointments({ status: 'PENDING', limit: 1 }).catch(() => ({ total: 0 })),
+        api.getAdminAppointments(pendingParams).catch(() => ({ total: 0 })),
       ]);
 
       setAppointments(res?.items || []);
-      setPendingCount(pendingRes?.total || 0);
-    } catch (e) {
+      setTotalCount(res?.total || 0);
+      setPendingTotal(pendingRes?.total || 0);
+
+      // Sync URL
+      const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(currentDate);
+      updateUrlParams({
+        mode: isInboxMode ? 'inbox' : null,
+        status: isInboxMode ? 'PENDING' : selectedStatus || null,
+        doctorId: selectedDoctorId || null,
+        branchId: selectedBranchId || null,
+        serviceId: selectedServiceId || null,
+        view: isInboxMode ? null : viewMode,
+        date: isInboxMode ? null : dateStr,
+      });
+    } catch (e: any) {
       console.error('Failed to load appointments', e);
+      setFetchError(e?.message || 'Qabullar ro\'yxatini yuklashda xatolik yuz berdi');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [
+    currentPage,
+    pageSize,
+    user,
+    selectedDoctorId,
+    selectedBranchId,
+    selectedServiceId,
+    isInboxMode,
+    selectedStatus,
+    getDateRange,
+    currentDate,
+    viewMode,
+    updateUrlParams,
+  ]);
 
   useEffect(() => {
     loadAppointments();
-  }, [selectedDoctorId, selectedBranchId, selectedServiceId, selectedStatus, viewMode, currentDate]);
+  }, [loadAppointments]);
 
+  // Support opening exact appointment by ID from URL query
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const targetId = searchParams.get('appointmentId');
+    if (!targetId) return;
+    const resolvedId: string = targetId;
+
+    let isMounted = true;
+    async function loadTargetAppointment() {
+      try {
+        const appt = await api.getAppointmentDetail(resolvedId);
+        if (isMounted && appt) {
+          setSelectedAppt(appt);
+          setActionError(null);
+          setIsRescheduling(false);
+          const d = new Date(appt.startTime);
+          setRescheduleDate(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(d));
+          setRescheduleTime(
+            new Intl.DateTimeFormat('en-GB', {
+              timeZone: 'Asia/Tashkent',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }).format(d)
+          );
+        }
+      } catch (err: any) {
+        console.error('Failed to fetch specific appointment by ID', err);
+      }
+    }
+    loadTargetAppointment();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Fetch reschedule slots when date/appointment changes
   useEffect(() => {
     async function loadAdminSlots() {
       if (!isRescheduling || !selectedAppt || !rescheduleDate) {
@@ -215,6 +373,7 @@ export default function AdminCalendarPage() {
     else if (viewMode === 'week') d.setDate(d.getDate() - 7);
     else if (viewMode === 'month') d.setMonth(d.getMonth() - 1);
     setCurrentDate(d);
+    setCurrentPage(1);
   };
 
   const handleNextDate = () => {
@@ -223,24 +382,66 @@ export default function AdminCalendarPage() {
     else if (viewMode === 'week') d.setDate(d.getDate() + 7);
     else if (viewMode === 'month') d.setMonth(d.getMonth() + 1);
     setCurrentDate(d);
+    setCurrentPage(1);
   };
 
   const handleToday = () => {
     setCurrentDate(new Date());
+    setCurrentPage(1);
+  };
+
+  const handleTomorrow = () => {
+    const tmr = new Date();
+    tmr.setDate(tmr.getDate() + 1);
+    setCurrentDate(tmr);
+    setCurrentPage(1);
   };
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!selectedAppt) return;
+    if (newStatus === 'CANCELLED') {
+      // Open accessible confirmation dialog instead of immediate cancellation
+      setCancelModalAppt(selectedAppt);
+      setCancelReason('');
+      return;
+    }
+
     try {
       setIsUpdating(true);
+      setMutatingStatus(newStatus);
       setActionError(null);
       await api.updateAppointmentStatus(selectedAppt.id, newStatus);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('pendingCountChanged'));
+      }
       setSelectedAppt(null);
       await loadAppointments();
     } catch (err: any) {
       setActionError(err?.message || 'Holatni yangilashda xatolik yuz berdi');
     } finally {
       setIsUpdating(false);
+      setMutatingStatus(null);
+    }
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!cancelModalAppt) return;
+    try {
+      setIsUpdating(true);
+      setMutatingStatus('CANCELLED');
+      setActionError(null);
+      await api.updateAppointmentStatus(cancelModalAppt.id, 'CANCELLED', cancelReason.trim() || undefined);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('pendingCountChanged'));
+      }
+      setCancelModalAppt(null);
+      setSelectedAppt(null);
+      await loadAppointments();
+    } catch (err: any) {
+      setActionError(err?.message || 'Qabulni bekor qilishda xatolik yuz berdi');
+    } finally {
+      setIsUpdating(false);
+      setMutatingStatus(null);
     }
   };
 
@@ -254,6 +455,9 @@ export default function AdminCalendarPage() {
       setActionError(null);
       const newStartTime = new Date(`${rescheduleDate}T${rescheduleTime}:00+05:00`).toISOString();
       await api.adminRescheduleAppointment(selectedAppt.id, newStartTime);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('pendingCountChanged'));
+      }
       setIsRescheduling(false);
       setSelectedAppt(null);
       await loadAppointments();
@@ -283,6 +487,10 @@ export default function AdminCalendarPage() {
         consentGiven: true,
       });
 
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('pendingCountChanged'));
+      }
+
       setIsCreateOpen(false);
       setCreateForm({
         patientName: '',
@@ -291,7 +499,7 @@ export default function AdminCalendarPage() {
         doctorId: doctors[0]?.id || '',
         serviceId: services[0]?.id || '',
         branchId: branches[0]?.id || '',
-        date: new Date().toISOString().split('T')[0],
+        date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()),
         time: '09:00',
         note: '',
       });
@@ -303,26 +511,59 @@ export default function AdminCalendarPage() {
     }
   };
 
+  // Human-readable date range label without Windows ICU tokens
   const currentRangeLabel = () => {
-    const d = new Date(currentDate);
     if (viewMode === 'day') {
-      return d.toLocaleDateString('uz-UZ', {
-        timeZone: 'Asia/Tashkent',
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      });
+      return formatClinicDate(currentDate, 'uz', { includeWeekday: true, includeYear: true });
     }
     if (viewMode === 'week') {
-      const { dateFrom, dateTo } = getDateRange();
-      const s = new Date(dateFrom).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' });
-      const e = new Date(dateTo).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric', year: 'numeric' });
-      return `${s} — ${e}`;
+      const { startDate, endDate } = getDateRange();
+      return formatRangeTitle(startDate, endDate, 'uz');
     }
-    return d.toLocaleDateString('uz-UZ', { month: 'long', year: 'numeric' });
+    return formatMonthYear(currentDate, 'uz');
   };
 
   const validTransitions = selectedAppt ? ALLOWED_TRANSITIONS[selectedAppt.status] || [] : [];
+
+  // Options for CustomSelect filters
+  const doctorOptions: SelectOption[] = [
+    { value: '', label: 'Barcha shifokorlar' },
+    ...doctors.map((d) => ({
+      value: d.id,
+      label: `Dr. ${d.firstNameUz} ${d.lastNameUz}`,
+      badge: d.specialtyUz || undefined,
+    })),
+  ];
+
+  const serviceOptions: SelectOption[] = [
+    { value: '', label: 'Barcha xizmatlar' },
+    ...services.map((s) => ({
+      value: s.id,
+      label: s.nameUz,
+    })),
+  ];
+
+  const branchOptions: SelectOption[] = [
+    { value: '', label: 'Barcha filiallar' },
+    ...branches.map((b) => ({
+      value: b.id,
+      label: b.nameUz,
+    })),
+  ];
+
+  const statusOptions: SelectOption[] = [
+    { value: '', label: 'Barcha holatlar' },
+    { value: 'PENDING', label: 'Kutilmoqda' },
+    { value: 'CONFIRMED', label: 'Tasdiqlangan' },
+    { value: 'CHECKED_IN', label: 'Klinikada' },
+    { value: 'COMPLETED', label: 'Yakunlangan' },
+    { value: 'CANCELLED', label: 'Bekor qilingan' },
+    { value: 'NO_SHOW', label: 'Kelmadi' },
+  ];
+
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const startIndex = (currentPage - 1) * pageSize + 1;
+  const endIndex = Math.min(currentPage * pageSize, totalCount);
 
   return (
     <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'DOCTOR']}>
@@ -332,7 +573,7 @@ export default function AdminCalendarPage() {
           <div>
             <h1 className="text-2xl font-extrabold text-slate-900">Qabullar taqvimi</h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Kunlik, haftalik va oylik qabullar monitoringi hamda boshqaruvi
+              Kunlik, haftalik jadval monitoringi va yangi arizalarni tasdiqlash
             </p>
           </div>
 
@@ -355,196 +596,267 @@ export default function AdminCalendarPage() {
           </div>
         </div>
 
-        {/* View Mode & Date Navigation Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrevDate}
-              className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600"
-              title="Oldingi"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleToday}
-              className="px-3 py-1.5 border border-slate-200 rounded-xl hover:bg-slate-50 text-xs font-bold text-slate-700"
-            >
-              Bugun
-            </button>
-            <button
-              onClick={() => {
-                const tmr = new Date();
-                tmr.setDate(tmr.getDate() + 1);
-                setCurrentDate(tmr);
-              }}
-              className="px-3 py-1.5 border border-teal-200 bg-teal-50/50 hover:bg-teal-100/50 text-xs font-bold text-teal-800 rounded-xl transition-colors"
-              title="Ertangi kun jadvaliga o'tish"
-            >
-              Ertaga
-            </button>
-            <button
-              onClick={handleNextDate}
-              className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600"
-              title="Keyingi"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-
-            <span className="text-sm font-extrabold text-slate-800 ml-2">
-              {currentRangeLabel()}
-            </span>
-          </div>
-
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl">
-            {(['day', 'week', 'month'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`px-3 py-1 rounded-lg text-xs font-bold capitalize transition-all ${
-                  viewMode === mode
-                    ? 'bg-white text-teal-800 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {mode === 'day' ? 'Kunlik' : mode === 'week' ? 'Haftalik' : 'Oylik'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Filters Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-            <Filter className="w-4 h-4 text-teal-700" />
-            <span>Filtrlar:</span>
-          </div>
-
-          {/* Doctor filter (hidden if DOCTOR) */}
-          {user?.role !== 'DOCTOR' ? (
-            <select
-              value={selectedDoctorId}
-              onChange={(e) => setSelectedDoctorId(e.target.value)}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-600 font-medium"
-            >
-              <option value="">Barcha shifokorlar</option>
-              {doctors.map((d) => (
-                <option key={d.id} value={d.id}>
-                  Dr. {d.firstNameUz} {d.lastNameUz}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="px-3 py-1 bg-teal-50 text-teal-800 rounded-xl text-xs font-bold border border-teal-200">
-              Shaxsiy qabullaringiz
-            </span>
-          )}
-
-          {/* Service filter */}
-          <select
-            value={selectedServiceId}
-            onChange={(e) => setSelectedServiceId(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-600 font-medium"
-          >
-            <option value="">Barcha xizmatlar</option>
-            {services.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nameUz}
-              </option>
-            ))}
-          </select>
-
-          {/* Branch filter */}
-          <select
-            value={selectedBranchId}
-            onChange={(e) => setSelectedBranchId(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-600 font-medium"
-          >
-            <option value="">Barcha filiallar</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.nameUz}
-              </option>
-            ))}
-          </select>
-
-          {/* Status filter */}
-          <select
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-600 font-medium"
-          >
-            <option value="">Barcha holatlar</option>
-            <option value="PENDING">Kutilmoqda</option>
-            <option value="CONFIRMED">Tasdiqlangan</option>
-            <option value="CHECKED_IN">Klinikada</option>
-            <option value="COMPLETED">Yakunlangan</option>
-            <option value="CANCELLED">Bekor qilingan</option>
-            <option value="NO_SHOW">Kelmadi</option>
-          </select>
-
-          {/* Quick Pending Filter Button */}
+        {/* Mode Selector: Inbox vs Calendar View */}
+        <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-fit">
           <button
             type="button"
-            onClick={() => setSelectedStatus(selectedStatus === 'PENDING' ? '' : 'PENDING')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-              selectedStatus === 'PENDING'
-                ? 'bg-amber-500 text-white shadow-md'
-                : 'bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-300'
+            onClick={() => {
+              setIsInboxMode(false);
+              setCurrentPage(1);
+            }}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              !isInboxMode
+                ? 'bg-white text-teal-800 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <AlertCircle className="w-3.5 h-3.5" />
-            <span>Kutilayotgan arizalar ({pendingCount})</span>
+            <CalendarIcon className="w-4 h-4" />
+            <span>Taqvim jadvali</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setIsInboxMode(true);
+              setSelectedStatus('PENDING');
+              setCurrentPage(1);
+            }}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              isInboxMode
+                ? 'bg-amber-500 text-white shadow-sm'
+                : 'text-slate-700 hover:text-slate-900 hover:bg-white/50'
+            }`}
+          >
+            <Inbox className="w-4 h-4" />
+            <span>Kutilayotgan arizalar inboxi</span>
+            {pendingTotal > 0 && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
+                  isInboxMode ? 'bg-white text-amber-700' : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {pendingTotal}
+              </span>
+            )}
           </button>
         </div>
 
-        {/* Pending Website Bookings Notice Banner */}
-        {pendingCount > 0 && selectedStatus !== 'PENDING' && (
+        {/* Date Navigation Bar (Visible only in Calendar Mode) */}
+        {!isInboxMode ? (
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={handlePrevDate}
+                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600"
+                title="Oldingi"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleToday}
+                className="px-3 py-1.5 border border-slate-200 rounded-xl hover:bg-slate-50 text-xs font-bold text-slate-700"
+              >
+                Bugun
+              </button>
+              <button
+                onClick={handleTomorrow}
+                className="px-3 py-1.5 border border-teal-200 bg-teal-50/50 hover:bg-teal-100/50 text-xs font-bold text-teal-800 rounded-xl transition-colors"
+                title="Ertangi kun jadvaliga o'tish"
+              >
+                Ertaga
+              </button>
+              <button
+                onClick={handleNextDate}
+                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600"
+                title="Keyingi"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <span className="text-sm font-extrabold text-slate-800 ml-2">
+                {currentRangeLabel()}
+              </span>
+            </div>
+
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+              {(['day', 'week', 'month'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setViewMode(mode);
+                    setCurrentPage(1);
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold capitalize transition-all ${
+                    viewMode === mode
+                      ? 'bg-white text-teal-800 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {mode === 'day' ? 'Kunlik' : mode === 'week' ? 'Haftalik' : 'Oylik'}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
           <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 shadow-sm">
             <div className="flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
-                Saytdan kelgan <strong>{pendingCount} ta</strong> tasdiqlash kutilayotgan ariza mavjud (ular joriy sana oralig&apos;idan tashqarida bo&apos;lishi mumkin).
+                <strong>Barcha sanalardagi kutilayotgan arizalar inboxi:</strong> Saytdan bemorlar tomonidan yuborilgan barcha tasdiqlash kutayotgan arizalar sanasi bo&apos;yicha saralangan.
               </span>
             </div>
             <button
               type="button"
-              onClick={() => setSelectedStatus('PENDING')}
-              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold shadow-sm transition-colors self-start sm:self-auto shrink-0"
+              onClick={() => {
+                setIsInboxMode(false);
+                setSelectedStatus('');
+                setCurrentPage(1);
+              }}
+              className="text-xs font-bold text-amber-800 underline hover:text-amber-950 shrink-0"
             >
-              Arizalarni ko&apos;rish
+              Taqvim jadvaliga qaytish
+            </button>
+          </div>
+        )}
+
+        {/* Filters Bar with CustomSelect */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+            <Filter className="w-4 h-4 text-teal-700" />
+            <span>Filtrlash parametrlari:</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Doctor filter */}
+            {user?.role !== 'DOCTOR' ? (
+              <CustomSelect
+                options={doctorOptions}
+                value={selectedDoctorId}
+                onChange={(val) => {
+                  setSelectedDoctorId(val);
+                  setCurrentPage(1);
+                }}
+                placeholder="Shifokor..."
+              />
+            ) : (
+              <div className="flex items-center px-3 py-2 bg-teal-50 text-teal-800 rounded-xl text-xs font-bold border border-teal-200 min-h-[44px]">
+                Shaxsiy qabullaringiz
+              </div>
+            )}
+
+            {/* Service filter */}
+            <CustomSelect
+              options={serviceOptions}
+              value={selectedServiceId}
+              onChange={(val) => {
+                setSelectedServiceId(val);
+                setCurrentPage(1);
+              }}
+              placeholder="Xizmat..."
+            />
+
+            {/* Branch filter */}
+            <CustomSelect
+              options={branchOptions}
+              value={selectedBranchId}
+              onChange={(val) => {
+                setSelectedBranchId(val);
+                setCurrentPage(1);
+              }}
+              placeholder="Filial..."
+            />
+
+            {/* Status filter (hidden when in inbox mode) */}
+            {!isInboxMode ? (
+              <CustomSelect
+                options={statusOptions}
+                value={selectedStatus}
+                onChange={(val) => {
+                  setSelectedStatus(val);
+                  setCurrentPage(1);
+                }}
+                placeholder="Holat..."
+              />
+            ) : (
+              <div className="flex items-center px-3 py-2 bg-amber-50 text-amber-900 rounded-xl text-xs font-bold border border-amber-200 min-h-[44px]">
+                Faqat tasdiqlash kutilayotganlar ({pendingTotal})
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Error Banner with Retry */}
+        {fetchError && (
+          <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{fetchError}</span>
+            </div>
+            <button
+              onClick={loadAppointments}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold shrink-0 text-xs"
+            >
+              Qayta urinish
             </button>
           </div>
         )}
 
         {/* Appointments List / Grid */}
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-            <h2 className="text-base font-bold text-slate-800">
-              Qabullar ({appointments.length})
-            </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 mb-4 gap-2">
+            <div>
+              <h2 className="text-base font-bold text-slate-800">
+                {isInboxMode ? 'Kutilayotgan arizalar ro\'yxati' : 'Qabullar jadvali'}
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {totalCount > 0
+                  ? `Jami ${totalCount} ta yozuvdan ${startIndex}-${endIndex} ko'rsatilmoqda`
+                  : 'Yozuvlar topilmadi'}
+              </p>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1 || isLoading}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+                >
+                  Oldingi
+                </button>
+                <span className="text-xs font-semibold text-slate-600">
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages || isLoading}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+                >
+                  Keyingi
+                </button>
+              </div>
+            )}
           </div>
 
           {isLoading ? (
-            <div className="p-16 text-center text-slate-400 text-sm">Yuklanmoqda...</div>
+            <div className="p-16 text-center text-slate-400 text-sm">Qabullar yuklanmoqda...</div>
           ) : appointments.length === 0 ? (
             <div className="p-16 text-center text-slate-500 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-              Ushbu parametrlar bo&apos;yicha qabullar topilmadi.
+              {isInboxMode
+                ? 'Tasdiqlash kutilayotgan yangi arizalar mavjud emas.'
+                : 'Ushbu sana va parametrlar bo\'yicha qabullar topilmadi.'}
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
               {appointments.map((appt) => {
-                const dateObj = new Date(appt.startTime);
-                const dateFormatted = dateObj.toLocaleDateString('uz-UZ', {
-                  timeZone: 'Asia/Tashkent',
-                  month: 'short',
-                  day: 'numeric',
-                  weekday: 'short',
+                const dateFormatted = formatClinicDate(appt.startTime, 'uz', {
+                  includeWeekday: true,
+                  includeYear: false,
                 });
-                const timeFormatted = dateObj.toLocaleTimeString('uz-UZ', {
-                  timeZone: 'Asia/Tashkent',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                });
+                const timeFormatted = formatClinicTime(appt.startTime);
 
                 const badge = STATUS_LABELS[appt.status] || {
                   label: appt.status,
@@ -559,13 +871,20 @@ export default function AdminCalendarPage() {
                       setActionError(null);
                       setIsRescheduling(false);
                       const d = new Date(appt.startTime);
-                      setRescheduleDate(d.toISOString().split('T')[0]);
-                      setRescheduleTime(d.toTimeString().slice(0, 5));
+                      setRescheduleDate(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(d));
+                      setRescheduleTime(
+                        new Intl.DateTimeFormat('en-GB', {
+                          timeZone: 'Asia/Tashkent',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        }).format(d)
+                      );
                     }}
                     className="py-4 px-3 hover:bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer transition-colors"
                   >
                     <div className="flex items-start gap-4">
-                      <div className="w-20 text-center shrink-0">
+                      <div className="w-24 text-center shrink-0">
                         <span className="block text-xs font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-lg">
                           {dateFormatted}
                         </span>
@@ -602,13 +921,43 @@ export default function AdminCalendarPage() {
               })}
             </div>
           )}
+
+          {/* Bottom Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-4 text-xs text-slate-500">
+              <span>
+                {startIndex}-{endIndex} / {totalCount} ta qabul
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1 || isLoading}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 border border-slate-200 rounded-xl font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Oldingi
+                </button>
+                <span>
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages || isLoading}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1.5 border border-slate-200 rounded-xl font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Keyingi
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Appointment Detail & Status Transition Modal */}
       {selectedAppt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="relative w-full max-w-lg bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div className="relative w-full max-w-lg bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between border-b border-slate-100 pb-4">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700">
@@ -620,7 +969,7 @@ export default function AdminCalendarPage() {
               </div>
               <button
                 onClick={() => setSelectedAppt(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 text-lg"
               >
                 ✕
               </button>
@@ -643,23 +992,29 @@ export default function AdminCalendarPage() {
                   {selectedAppt.patient?.phone || selectedAppt.patientPhone}
                 </a>
               </div>
+
               <div className="p-2.5 bg-slate-50 rounded-xl space-y-2">
                 <div className="flex justify-between items-center text-slate-500 font-medium">
                   <span>Xizmatlar ({selectedAppt.serviceItems?.length || 1}):</span>
                   {selectedAppt.durationMinutes && (
                     <span className="text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md flex items-center gap-1.5">
                       {selectedAppt.durationMinutes} daq
-                      {selectedAppt.durationAdjustmentMinutes !== undefined && selectedAppt.durationAdjustmentMinutes !== 0 && (
-                        <span
-                          className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold"
-                          title="Administrator tomonidan kiritilgan davomiylik tuzatmasi"
-                        >
-                          {selectedAppt.durationAdjustmentMinutes > 0 ? `+${selectedAppt.durationAdjustmentMinutes}` : selectedAppt.durationAdjustmentMinutes} daq tuzatish
-                        </span>
-                      )}
+                      {selectedAppt.durationAdjustmentMinutes !== undefined &&
+                        selectedAppt.durationAdjustmentMinutes !== 0 && (
+                          <span
+                            className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold"
+                            title="Administrator tomonidan kiritilgan davomiylik tuzatmasi"
+                          >
+                            {selectedAppt.durationAdjustmentMinutes > 0
+                              ? `+${selectedAppt.durationAdjustmentMinutes}`
+                              : selectedAppt.durationAdjustmentMinutes}{' '}
+                            daq tuzatish
+                          </span>
+                        )}
                     </span>
                   )}
                 </div>
+
                 {selectedAppt.serviceItems && selectedAppt.serviceItems.length > 0 ? (
                   <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
                     {selectedAppt.serviceItems.map((item: any, idx: number) => (
@@ -670,14 +1025,18 @@ export default function AdminCalendarPage() {
                         <div className="flex items-center gap-2 text-slate-600 font-medium">
                           <span>{item.durationMinutes} daq</span>
                           <span>•</span>
-                          <span className="font-bold text-teal-700">{item.price?.toLocaleString('uz-UZ')} so&apos;m</span>
+                          <span className="font-bold text-teal-700">
+                            {item.price?.toLocaleString('uz-UZ')} so&apos;m
+                          </span>
                         </div>
                       </div>
                     ))}
                     {selectedAppt.price && (
                       <div className="flex justify-between items-center pt-1 border-t border-slate-200/60 text-xs font-bold text-slate-900">
                         <span>Jami summa:</span>
-                        <span className="text-teal-800">{Number(selectedAppt.price).toLocaleString('uz-UZ')} so&apos;m</span>
+                        <span className="text-teal-800">
+                          {Number(selectedAppt.price).toLocaleString('uz-UZ')} so&apos;m
+                        </span>
                       </div>
                     )}
                   </div>
@@ -694,31 +1053,39 @@ export default function AdminCalendarPage() {
                   </div>
                 )}
               </div>
+
               <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
                 <span className="text-slate-500">Shifokor:</span>
                 <span className="font-bold text-slate-800">
                   Dr. {selectedAppt.doctor?.firstNameUz} {selectedAppt.doctor?.lastNameUz}
                 </span>
               </div>
+
               <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
                 <span className="text-slate-500">Filial:</span>
                 <span className="font-bold text-slate-800">
                   {selectedAppt.branch?.nameUz || 'Asosiy filial'}
                 </span>
               </div>
+
               <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
                 <span className="text-slate-500">Vaqt:</span>
                 <span className="font-bold text-slate-800">
-                  {new Date(selectedAppt.startTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' })}
+                  {formatClinicDate(selectedAppt.startTime, 'uz', { includeWeekday: true, includeYear: true })}{' '}
+                  • {formatClinicTime(selectedAppt.startTime)}
                 </span>
               </div>
+
               <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
                 <span className="text-slate-500">Joriy holat:</span>
-                <span className="font-bold text-teal-800 uppercase">{selectedAppt.status}</span>
+                <span className="font-bold text-teal-800">
+                  {STATUS_LABELS[selectedAppt.status]?.label || selectedAppt.status}
+                </span>
               </div>
+
               {selectedAppt.note && (
                 <div className="p-2.5 bg-slate-50 rounded-xl">
-                  <span className="text-slate-500 block mb-1">Izoh:</span>
+                  <span className="text-slate-500 block mb-1">Izoh / shikoyat:</span>
                   <p className="text-slate-700 italic">{selectedAppt.note}</p>
                 </div>
               )}
@@ -727,7 +1094,7 @@ export default function AdminCalendarPage() {
             {/* Valid Status Transitions */}
             {validTransitions.length > 0 ? (
               <div className="pt-2 border-t border-slate-100">
-                <p className="text-xs font-bold text-slate-700 mb-2">Ruxsat etilgan o&apos;tishlar:</p>
+                <p className="text-xs font-bold text-slate-700 mb-2">Holatni o&apos;zgartirish:</p>
                 <div className="flex flex-wrap gap-2">
                   {validTransitions.includes('CONFIRMED') && (
                     <button
@@ -736,7 +1103,9 @@ export default function AdminCalendarPage() {
                       onClick={() => handleStatusUpdate('CONFIRMED')}
                       className="py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
                     >
-                      Tasdiqlash
+                      {isUpdating && mutatingStatus === 'CONFIRMED'
+                        ? 'Tasdiqlanmoqda...'
+                        : 'Tasdiqlash'}
                     </button>
                   )}
                   {validTransitions.includes('CHECKED_IN') && (
@@ -746,7 +1115,9 @@ export default function AdminCalendarPage() {
                       onClick={() => handleStatusUpdate('CHECKED_IN')}
                       className="py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
                     >
-                      Klinikaga keldi
+                      {isUpdating && mutatingStatus === 'CHECKED_IN'
+                        ? 'Kiritilmoqda...'
+                        : 'Klinikaga keldi'}
                     </button>
                   )}
                   {validTransitions.includes('COMPLETED') && (
@@ -756,7 +1127,9 @@ export default function AdminCalendarPage() {
                       onClick={() => handleStatusUpdate('COMPLETED')}
                       className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
                     >
-                      Yakunlash
+                      {isUpdating && mutatingStatus === 'COMPLETED'
+                        ? 'Yakunlanmoqda...'
+                        : 'Yakunlash'}
                     </button>
                   )}
                   {validTransitions.includes('NO_SHOW') && (
@@ -766,7 +1139,7 @@ export default function AdminCalendarPage() {
                       onClick={() => handleStatusUpdate('NO_SHOW')}
                       className="py-2 px-3 bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
                     >
-                      Kelmadi (No-show)
+                      {isUpdating && mutatingStatus === 'NO_SHOW' ? 'Saqlanmoqda...' : 'Kelmadi'}
                     </button>
                   )}
                   {validTransitions.includes('CANCELLED') && (
@@ -776,14 +1149,14 @@ export default function AdminCalendarPage() {
                       onClick={() => handleStatusUpdate('CANCELLED')}
                       className="py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
                     >
-                      Bekor qilish
+                      Bekor qilish...
                     </button>
                   )}
                 </div>
               </div>
             ) : (
               <div className="pt-2 border-t border-slate-100 text-center text-xs text-slate-400">
-                Ushbu qabul yakuniy holatda ({selectedAppt.status}).
+                Ushbu qabul yakuniy holatda ({STATUS_LABELS[selectedAppt.status]?.label || selectedAppt.status}).
               </div>
             )}
 
@@ -840,11 +1213,7 @@ export default function AdminCalendarPage() {
                       ) : adminSlots.length > 0 ? (
                         <div className="grid grid-cols-4 gap-1.5 max-h-32 overflow-y-auto">
                           {adminSlots.map((slot: any) => {
-                            const timeStr = new Date(slot.startTime).toLocaleTimeString('uz-UZ', {
-                              timeZone: 'Asia/Tashkent',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            });
+                            const timeStr = formatClinicTime(slot.startTime);
                             const isSelected = rescheduleTime === timeStr;
                             return (
                               <button
@@ -891,6 +1260,63 @@ export default function AdminCalendarPage() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Accessible Cancellation Confirmation Modal */}
+      {cancelModalAppt && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in"
+        >
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Qabulni bekor qilishni tasdiqlaysizmi?
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Bemor: <strong>{cancelModalAppt.patient?.fullName || cancelModalAppt.patientName}</strong>{' '}
+                  ({cancelModalAppt.patient?.phone || cancelModalAppt.patientPhone})
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Bekor qilish sababi (ixtiyoriy):
+              </label>
+              <textarea
+                rows={2}
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Masalan: Bemor kelishini bekor qildi yoki boshqa kunga ko'chirishni so'radi"
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setCancelModalAppt(null)}
+                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Ortga
+              </button>
+              <button
+                type="button"
+                disabled={isUpdating}
+                onClick={handleConfirmCancel}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md transition-all disabled:opacity-50"
+              >
+                {isUpdating ? 'Bekor qilinmoqda...' : 'Bekor qilishni tasdiqlash'}
+              </button>
+            </div>
           </div>
         </div>
       )}

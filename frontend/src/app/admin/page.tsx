@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Calendar,
@@ -18,72 +18,152 @@ import {
   X,
   ExternalLink,
   CalendarCheck,
+  ChevronLeft,
+  ChevronRight,
+  AlertTriangle,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
+import { useI18n } from '../../lib/i18n';
+import { formatClinicDate, formatClinicTime } from '../../lib/dateFormat';
 
 export default function AdminOverviewPage() {
   const { user } = useAuth();
+  const { t, language } = useI18n();
+
   const [todayAppointments, setTodayAppointments] = useState<any[]>([]);
   const [pendingAppointments, setPendingAppointments] = useState<any[]>([]);
+  const [pendingTotal, setPendingTotal] = useState<number>(0);
+  const [pendingPage, setPendingPage] = useState<number>(1);
+  const pendingPageSize = 6;
+
   const [upcomingAppointments, setUpcomingAppointments] = useState<any[]>([]);
   const [scheduleTab, setScheduleTab] = useState<'today' | 'upcoming'>('today');
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<any | null>(null);
   const [recentLeads, setRecentLeads] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isUpdatingStatus, setIsUpdatingStatus] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const loadData = async () => {
+  // Per-appointment mutation state
+  const [mutatingId, setMutatingId] = useState<string | null>(null);
+  const [mutationType, setMutationType] = useState<'CONFIRMED' | 'CANCELLED' | 'CHECKED_IN' | 'COMPLETED' | null>(null);
+
+  // Cancellation confirmation modal state
+  const [cancellationTarget, setCancellationTarget] = useState<any | null>(null);
+
+  const getStatusLabel = (status: string) => {
+    const key = status as keyof typeof t.statuses;
+    return t.statuses[key] || status;
+  };
+
+  const getLeadStatusLabel = (status: string) => {
+    switch (status) {
+      case 'NEW':
+        return language === 'ru' ? 'Новая' : 'Yangi';
+      case 'CONTACTED':
+        return language === 'ru' ? 'В обработке' : 'Bog\'lanildi';
+      case 'BOOKED':
+        return language === 'ru' ? 'Записан' : 'Qabulga yozildi';
+      case 'CLOSED':
+        return language === 'ru' ? 'Закрыта' : 'Yopilgan';
+      default:
+        return status;
+    }
+  };
+
+  const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
+      setFetchError(null);
+
       const nowIso = new Date().toISOString();
+      const scopedDoctorId = user?.role === 'DOCTOR' ? user.doctorId : undefined;
+
+      const pendingParams: Record<string, any> = {
+        status: 'PENDING',
+        page: pendingPage,
+        limit: pendingPageSize,
+      };
+      if (scopedDoctorId) pendingParams.doctorId = scopedDoctorId;
+
+      const upcomingParams: Record<string, any> = {
+        status: 'CONFIRMED',
+        limit: 20,
+        dateFrom: nowIso,
+      };
+      if (scopedDoctorId) upcomingParams.doctorId = scopedDoctorId;
+
       const [todayRes, pendingRes, upcomingRes, analyticsRes, leadsRes] = await Promise.all([
-        api.getTodayAppointments().catch(() => []),
-        api.getAdminAppointments({ status: 'PENDING', limit: 50 }).catch(() => ({ items: [] })),
-        api.getAdminAppointments({ status: 'CONFIRMED', limit: 20, dateFrom: nowIso }).catch(() => ({ items: [] })),
-        api.getAnalyticsOverview().catch(() => null),
-        api.getAdminLeads('NEW', 1, 5).catch(() => ({ items: [] })),
+        api.getTodayAppointments(),
+        api.getAdminAppointments(pendingParams),
+        api.getAdminAppointments(upcomingParams),
+        api.getAnalyticsOverview(),
+        api.getAdminLeads('NEW', 1, 5),
       ]);
 
-      const today = todayRes || [];
+      const today = Array.isArray(todayRes) ? todayRes : [];
       const upcoming = upcomingRes?.items || [];
+
       setTodayAppointments(today);
       setPendingAppointments(pendingRes?.items || []);
+      setPendingTotal(pendingRes?.total || 0);
       setUpcomingAppointments(upcoming);
       setAnalytics(analyticsRes);
       setRecentLeads(leadsRes?.items || []);
 
-      // If today has no appointments, but upcoming has appointments, default to upcoming
       if (today.length === 0 && upcoming.length > 0) {
         setScheduleTab('upcoming');
       }
-    } catch (e) {
-      console.error('Failed to load admin overview', e);
+    } catch (err: any) {
+      console.error('Failed to load admin overview', err);
+      setFetchError(err?.message || 'Ma\'lumotlarni yuklashda server xatoligi yuz berdi');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [pendingPage, user]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
-  const handleStatusChange = async (appointmentId: string, newStatus: string) => {
+  const handleStatusChange = async (appointmentId: string, newStatus: 'CONFIRMED' | 'CANCELLED' | 'CHECKED_IN' | 'COMPLETED') => {
     try {
-      setIsUpdatingStatus(appointmentId);
+      setMutatingId(appointmentId);
+      setMutationType(newStatus);
+
       await api.updateAppointmentStatus(appointmentId, newStatus);
-      if (newStatus === 'CONFIRMED') {
-        setStatusFeedback("Qabul muvaffaqiyatli tasdiqlandi! U shifokorning rasmiy ish jadvaliga (Taqvimga) kiritildi.");
-        setScheduleTab('upcoming');
-        setTimeout(() => setStatusFeedback(null), 8000);
+
+      // Instantly synchronize sidebar badge across app
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('pendingCountChanged'));
       }
+
+      if (newStatus === 'CONFIRMED') {
+        setStatusFeedback(
+          language === 'ru'
+            ? 'Запись успешно подтверждена и добавлена в официальное расписание врача.'
+            : 'Qabul muvaffaqiyatli tasdiqlandi va shifokorning rasmiy ish jadvaliga kiritildi.'
+        );
+        setScheduleTab('upcoming');
+        setTimeout(() => setStatusFeedback(null), 6000);
+      } else if (newStatus === 'CANCELLED') {
+        setStatusFeedback(
+          language === 'ru'
+            ? 'Запись отменена, забронированное время освобождено.'
+            : 'Qabul bekor qilindi, band qilingan vaqt bo\'shatildi.'
+        );
+        setTimeout(() => setStatusFeedback(null), 6000);
+      }
+
+      setCancellationTarget(null);
       await loadData();
     } catch (err: any) {
-      alert(err?.message || 'Holatni o\'zgartirishda xatolik yuz berdi');
+      alert(err?.message || 'Holatni yangilashda xatolik yuz berdi');
     } finally {
-      setIsUpdatingStatus(null);
+      setMutatingId(null);
+      setMutationType(null);
     }
   };
 
@@ -94,37 +174,60 @@ export default function AdminOverviewPage() {
     completionRate: 0,
   };
 
+  const totalPendingPages = Math.max(1, Math.ceil(pendingTotal / pendingPageSize));
+
   return (
     <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'DOCTOR']}>
       <div className="space-y-8">
-        {/* Page Topbar */}
+        {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
               Assalomu alaykum, {user?.email.split('@')[0]}!
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Klinika boshqaruv paneli, yangi buyurtmalar va tasdiqlangan qabullar jadvali
+              {t.admin.pendingWebsiteBookingsSubtitle}
             </p>
           </div>
 
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={loadData}
               className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 flex items-center gap-1.5 shadow-sm"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Yangilash</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-teal-700' : ''}`} />
+              <span>{t.common.retry}</span>
             </button>
             <Link
               href="/admin/calendar"
               className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 transition-colors"
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span>Taqvimga o&apos;tish</span>
+              <span>{t.admin.calendar}</span>
             </Link>
           </div>
         </div>
+
+        {/* Explicit Server Error Alert */}
+        {fetchError && (
+          <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs text-rose-900 shadow-sm animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+              <div>
+                <strong className="block font-bold">Xatolik: Ma&apos;lumotlarni yuklab bo&apos;lmadi</strong>
+                <span>{fetchError}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={loadData}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shrink-0 transition-colors"
+            >
+              Qayta urinish
+            </button>
+          </div>
+        )}
 
         {/* Action Status Feedback Banner */}
         {statusFeedback && (
@@ -134,6 +237,7 @@ export default function AdminOverviewPage() {
               <span className="font-bold">{statusFeedback}</span>
             </div>
             <button
+              type="button"
               onClick={() => setStatusFeedback(null)}
               className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-700"
             >
@@ -142,12 +246,12 @@ export default function AdminOverviewPage() {
           </div>
         )}
 
-        {/* KPI Cards */}
+        {/* KPI Cards (Accurate Total Count from API) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* Card 1: Kutilayotgan arizalar (Website Bookings) */}
+          {/* Card 1: Yangi arizalar (Uses pendingTotal, not items.length) */}
           <div
             className={`rounded-3xl p-6 shadow-sm border transition-all ${
-              pendingAppointments.length > 0
+              pendingTotal > 0
                 ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/20'
                 : 'bg-white border-slate-200/80'
             }`}
@@ -159,19 +263,19 @@ export default function AdminOverviewPage() {
               </span>
               <div
                 className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
-                  pendingAppointments.length > 0
+                  pendingTotal > 0
                     ? 'bg-amber-500 text-white animate-pulse'
                     : 'bg-slate-100 text-slate-500'
                 }`}
               >
-                {pendingAppointments.length}
+                {pendingTotal}
               </div>
             </div>
-            <p className="text-2xl font-black text-slate-900">{pendingAppointments.length}</p>
+            <p className="text-2xl font-black text-slate-900">{pendingTotal}</p>
             <span className="text-[11px] text-amber-800 font-semibold mt-1 block">
-              {pendingAppointments.length > 0
+              {pendingTotal > 0
                 ? 'Tasdiqlash kutilayotgan yangi qabullar'
-                : 'Barcha arizalar ko\'rib chiqilgan'}
+                : t.admin.allPendingReviewed}
             </span>
           </div>
 
@@ -191,7 +295,7 @@ export default function AdminOverviewPage() {
             </span>
           </div>
 
-          {/* Card 3: Rejalashtirilgan yaqin qabullar */}
+          {/* Card 3: Yaqin qabullar */}
           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -224,8 +328,8 @@ export default function AdminOverviewPage() {
           </div>
         </div>
 
-        {/* PROMINENT SECTION: Saytdan kelgan yangi arizalar (Pending Bookings) */}
-        {pendingAppointments.length > 0 && (
+        {/* PROMINENT SECTION: Saytdan kelgan yangi arizalar (With Pagination & Exact ID Details) */}
+        {pendingTotal > 0 && (
           <div className="bg-gradient-to-br from-amber-50 via-white to-orange-50 border-2 border-amber-300 rounded-3xl p-6 sm:p-7 shadow-sm space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-amber-200/80 pb-4">
               <div className="flex items-center gap-3">
@@ -234,13 +338,13 @@ export default function AdminOverviewPage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                    Saytdan kelgan yangi qabullar
+                    {t.admin.pendingWebsiteBookings}
                     <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-xs font-black">
-                      {pendingAppointments.length} ta kutilmoqda
+                      {pendingTotal} {t.admin.totalRecords.toLowerCase()}
                     </span>
                   </h2>
                   <p className="text-xs text-slate-600 mt-0.5">
-                    Ushbu arizalarni tasdiqlaganingizdan so&apos;ng, ular avtomatik tarzda shifokorning rasmiy ish jadvaliga (Taqvimga) biriktiriladi.
+                    {t.admin.pendingWebsiteBookingsSubtitle}
                   </p>
                 </div>
               </div>
@@ -249,26 +353,16 @@ export default function AdminOverviewPage() {
                 href="/admin/calendar?status=PENDING"
                 className="text-xs font-bold text-amber-900 hover:text-amber-950 flex items-center gap-1.5 self-start sm:self-center px-3.5 py-2 bg-white rounded-xl border border-amber-300 shadow-sm transition-all"
               >
-                <span>Taqvimda ko&apos;rish</span>
+                <span>{t.admin.viewAll} (Taqvimda)</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {pendingAppointments.map((appt) => {
-                const dateObj = new Date(appt.startTime);
-                const dateFormatted = dateObj.toLocaleDateString('uz-UZ', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                  timeZone: 'Asia/Tashkent',
-                });
-                const timeFormatted = dateObj.toLocaleTimeString('uz-UZ', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  timeZone: 'Asia/Tashkent',
-                });
+                const dateFormatted = formatClinicDate(appt.startTime, language, { includeWeekday: true });
+                const timeFormatted = formatClinicTime(appt.startTime);
+                const isMutatingThis = mutatingId === appt.id;
 
                 return (
                   <div
@@ -331,32 +425,45 @@ export default function AdminOverviewPage() {
                     </div>
 
                     <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                      {/* Exact ID link to calendar details */}
                       <Link
-                        href={`/admin/calendar?status=PENDING`}
-                        className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                        href={`/admin/calendar?status=PENDING&appointmentId=${appt.id}`}
+                        className="text-xs font-semibold text-slate-500 hover:text-teal-700 flex items-center gap-1"
+                        title="Ushbu qabul tafsilotlarini taqvimda ko'rish"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Tafsilotlar</span>
+                        <span>{t.admin.appointmentDetails}</span>
                       </Link>
 
                       <div className="flex items-center gap-2">
+                        {/* Cancellation Button opens accessible confirmation modal */}
                         <button
                           type="button"
-                          disabled={isUpdatingStatus === appt.id}
-                          onClick={() => handleStatusChange(appt.id, 'CANCELLED')}
-                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1"
+                          disabled={isMutatingThis}
+                          onClick={() => setCancellationTarget(appt)}
+                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 disabled:opacity-50"
                         >
                           <X className="w-3.5 h-3.5" />
-                          <span>Bekor qilish</span>
+                          <span>
+                            {isMutatingThis && mutationType === 'CANCELLED'
+                              ? t.admin.cancelling
+                              : t.admin.cancelAction}
+                          </span>
                         </button>
+
+                        {/* Confirmation Button */}
                         <button
                           type="button"
-                          disabled={isUpdatingStatus === appt.id}
+                          disabled={isMutatingThis}
                           onClick={() => handleStatusChange(appt.id, 'CONFIRMED')}
-                          className="px-4 py-1.5 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
+                          className="px-4 py-1.5 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50"
                         >
                           <Check className="w-3.5 h-3.5" />
-                          <span>{isUpdatingStatus === appt.id ? 'Tasdiqlanmoqda...' : 'Tasdiqlash'}</span>
+                          <span>
+                            {isMutatingThis && mutationType === 'CONFIRMED'
+                              ? t.admin.confirming
+                              : t.admin.confirmAction}
+                          </span>
                         </button>
                       </div>
                     </div>
@@ -364,6 +471,37 @@ export default function AdminOverviewPage() {
                 );
               })}
             </div>
+
+            {/* Pagination Controls for Pending Bookings */}
+            {totalPendingPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-amber-200/80 text-xs">
+                <span className="text-slate-600 font-medium">
+                  {t.admin.pageText} {pendingPage} / {totalPendingPages} ({t.admin.totalRecords}: {pendingTotal} ta)
+                </span>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={pendingPage <= 1 || isLoading}
+                    onClick={() => setPendingPage((p) => Math.max(1, p - 1))}
+                    className="px-3 py-1.5 bg-white border border-amber-300 text-amber-900 rounded-xl font-bold flex items-center gap-1 disabled:opacity-40 hover:bg-amber-50"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>{t.admin.prevPage}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={pendingPage >= totalPendingPages || isLoading}
+                    onClick={() => setPendingPage((p) => p + 1)}
+                    className="px-3 py-1.5 bg-white border border-amber-300 text-amber-900 rounded-xl font-bold flex items-center gap-1 disabled:opacity-40 hover:bg-amber-50"
+                  >
+                    <span>{t.admin.nextPage}</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -425,11 +563,8 @@ export default function AdminOverviewPage() {
               ) : (
                 <div className="space-y-3">
                   {todayAppointments.map((appt) => {
-                    const timeStr = new Date(appt.startTime).toLocaleTimeString('uz-UZ', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      timeZone: 'Asia/Tashkent',
-                    });
+                    const timeStr = formatClinicTime(appt.startTime);
+                    const isMutatingThis = mutatingId === appt.id;
 
                     return (
                       <div
@@ -451,31 +586,31 @@ export default function AdminOverviewPage() {
                           </div>
                         </div>
 
-                        {/* Action buttons based on status */}
+                        {/* Action buttons based on status with translated status labels */}
                         <div className="flex items-center gap-2 self-end sm:self-center">
                           <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-700">
-                            {appt.status}
+                            {getStatusLabel(appt.status)}
                           </span>
 
                           {appt.status === 'CONFIRMED' && (
                             <button
                               type="button"
-                              disabled={isUpdatingStatus === appt.id}
+                              disabled={isMutatingThis}
                               onClick={() => handleStatusChange(appt.id, 'CHECKED_IN')}
-                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm"
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm disabled:opacity-50"
                             >
-                              Keldi
+                              {isMutatingThis && mutationType === 'CHECKED_IN' ? 'Klinikaga keldi...' : 'Keldi'}
                             </button>
                           )}
 
                           {appt.status === 'CHECKED_IN' && (
                             <button
                               type="button"
-                              disabled={isUpdatingStatus === appt.id}
+                              disabled={isMutatingThis}
                               onClick={() => handleStatusChange(appt.id, 'COMPLETED')}
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm"
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm disabled:opacity-50"
                             >
-                              Yakunlash
+                              {isMutatingThis && mutationType === 'COMPLETED' ? 'Yakunlanmoqda...' : 'Yakunlash'}
                             </button>
                           )}
                         </div>
@@ -493,18 +628,9 @@ export default function AdminOverviewPage() {
               ) : (
                 <div className="space-y-3">
                   {upcomingAppointments.map((appt) => {
-                    const dateObj = new Date(appt.startTime);
-                    const dateFormatted = dateObj.toLocaleDateString('uz-UZ', {
-                      weekday: 'short',
-                      day: 'numeric',
-                      month: 'long',
-                      timeZone: 'Asia/Tashkent',
-                    });
-                    const timeStr = dateObj.toLocaleTimeString('uz-UZ', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      timeZone: 'Asia/Tashkent',
-                    });
+                    const dateFormatted = formatClinicDate(appt.startTime, language, { includeWeekday: true });
+                    const timeStr = formatClinicTime(appt.startTime);
+                    const isMutatingThis = mutatingId === appt.id;
 
                     return (
                       <div
@@ -522,7 +648,7 @@ export default function AdminOverviewPage() {
                                 {appt.patient?.fullName || appt.patientName}
                               </p>
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                Tasdiqlangan
+                                {getStatusLabel(appt.status)}
                               </span>
                             </div>
                             <p className="text-xs text-slate-600 mt-0.5">
@@ -540,18 +666,18 @@ export default function AdminOverviewPage() {
 
                         <div className="flex items-center gap-2 self-end sm:self-center">
                           <Link
-                            href={`/admin/calendar`}
+                            href={`/admin/calendar?appointmentId=${appt.id}`}
                             className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold shadow-sm"
                           >
-                            Taqvimda ko&apos;rish
+                            {t.admin.appointmentDetails}
                           </Link>
                           <button
                             type="button"
-                            disabled={isUpdatingStatus === appt.id}
-                            onClick={() => handleStatusChange(appt.id, 'CANCELLED')}
-                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold"
+                            disabled={isMutatingThis}
+                            onClick={() => setCancellationTarget(appt)}
+                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold disabled:opacity-50"
                           >
-                            Bekor qilish
+                            {t.admin.cancelAction}
                           </button>
                         </div>
                       </div>
@@ -562,24 +688,24 @@ export default function AdminOverviewPage() {
             )}
           </div>
 
-          {/* Callback Leads Needing Attention */}
+          {/* Callback Leads (Murojaatlar) */}
           <div className="lg:col-span-4 bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-slate-200/80 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Yangi murojaatlar</h2>
-                <p className="text-xs text-slate-400">Qayta qo&apos;ng&apos;iroq kutayotgan lidlar</p>
+                <h2 className="text-lg font-bold text-slate-900">{t.admin.newLeadsCard}</h2>
+                <p className="text-xs text-slate-400">{t.admin.pendingLeadsSubtitle}</p>
               </div>
               <Link
                 href="/admin/leads"
                 className="text-xs font-bold text-teal-700 hover:text-teal-800"
               >
-                Barchasi
+                {t.common.all}
               </Link>
             </div>
 
             {recentLeads.length === 0 ? (
               <div className="p-8 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl">
-                Yangi murojaatlar yo&apos;q.
+                {t.admin.noNewLeads}
               </div>
             ) : (
               <div className="space-y-3">
@@ -591,7 +717,7 @@ export default function AdminOverviewPage() {
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-bold text-slate-900">{lead.fullName}</p>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                        {lead.status}
+                        {getLeadStatusLabel(lead.status)}
                       </span>
                     </div>
                     <a
@@ -610,6 +736,72 @@ export default function AdminOverviewPage() {
           </div>
         </div>
       </div>
+
+      {/* Accessible Cancellation Confirmation Dialog */}
+      {cancellationTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cancel-modal-title"
+          aria-describedby="cancel-modal-desc"
+        >
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 id="cancel-modal-title" className="text-lg font-extrabold text-slate-900">
+                  {t.admin.cancelConfirmTitle}
+                </h3>
+                <p id="cancel-modal-desc" className="text-xs text-slate-500 mt-0.5">
+                  {t.admin.cancelConfirmDesc}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 text-xs space-y-1.5 text-slate-700">
+              <div>
+                <span className="text-slate-400 font-semibold mr-1">Bemor:</span>
+                <strong>{cancellationTarget.patient?.fullName || cancellationTarget.patientName}</strong>
+              </div>
+              <div>
+                <span className="text-slate-400 font-semibold mr-1">Vaqti:</span>
+                <span>
+                  {formatClinicDate(cancellationTarget.startTime, language, { includeWeekday: true })} — {formatClinicTime(cancellationTarget.startTime)}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 font-semibold mr-1">Xizmat:</span>
+                <span>{cancellationTarget.serviceName || cancellationTarget.service?.nameUz}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={mutatingId === cancellationTarget.id}
+                onClick={() => setCancellationTarget(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={mutatingId === cancellationTarget.id}
+                onClick={() => handleStatusChange(cancellationTarget.id, 'CANCELLED')}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition-all flex items-center gap-1.5"
+              >
+                <X className="w-4 h-4" />
+                <span>
+                  {mutatingId === cancellationTarget.id ? t.admin.cancelling : t.admin.cancelAction}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   );
 }

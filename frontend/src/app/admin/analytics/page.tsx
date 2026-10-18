@@ -175,7 +175,7 @@ export default function AdminAnalyticsPage() {
           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Lid konversiyasi
+                Murojaatlar konversiyasi
               </span>
               <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center">
                 <TrendingUp className="w-4 h-4" />
@@ -183,7 +183,7 @@ export default function AdminAnalyticsPage() {
             </div>
             <p className="text-3xl font-black text-purple-700">{leadConversion.conversionRate}%</p>
             <span className="text-[11px] text-slate-500 font-medium mt-1 block">
-              {leadConversion.convertedLeads} / {leadConversion.totalLeads} lidlar qabulga aylandi
+              {leadConversion.convertedLeads} / {leadConversion.totalLeads} murojaat qabulga aylandi
             </span>
           </div>
         </div>
@@ -195,12 +195,12 @@ export default function AdminAnalyticsPage() {
             <h2 className="text-base font-bold text-slate-900">Qabullar holati taqsimoti</h2>
             <div className="space-y-3 pt-2">
               {[
-                { label: 'Tasdiqlangan (CONFIRMED)', count: statusMap.CONFIRMED || 0, color: 'bg-teal-600' },
-                { label: 'Muvaffaqiyatli yakunlangan (COMPLETED)', count: statusMap.COMPLETED || 0, color: 'bg-emerald-600' },
-                { label: 'Kutilmoqda (PENDING)', count: statusMap.PENDING || 0, color: 'bg-amber-500' },
-                { label: 'Klinikada qabulda (CHECKED_IN)', count: statusMap.CHECKED_IN || 0, color: 'bg-blue-600' },
-                { label: 'Bekor qilingan (CANCELLED)', count: statusMap.CANCELLED || 0, color: 'bg-rose-500' },
-                { label: 'Kelmadi (NO_SHOW)', count: statusMap.NO_SHOW || 0, color: 'bg-slate-400' },
+                { label: 'Tasdiqlangan', count: statusMap.CONFIRMED || 0, color: 'bg-teal-600' },
+                { label: 'Yakunlangan', count: statusMap.COMPLETED || 0, color: 'bg-emerald-600' },
+                { label: 'Kutilmoqda', count: statusMap.PENDING || 0, color: 'bg-amber-500' },
+                { label: 'Klinikada qabulda', count: statusMap.CHECKED_IN || 0, color: 'bg-blue-600' },
+                { label: 'Bekor qilingan', count: statusMap.CANCELLED || 0, color: 'bg-rose-500' },
+                { label: 'Kelmadi', count: statusMap.NO_SHOW || 0, color: 'bg-slate-400' },
               ].map((item, idx) => {
                 const total = summary.totalAppointments || 1;
                 const pct = Math.round((item.count / total) * 100);

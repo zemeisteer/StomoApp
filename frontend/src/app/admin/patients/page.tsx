@@ -328,22 +328,37 @@ export default function AdminPatientsPage() {
                 <p className="text-xs text-slate-500 italic">Qabullar tarixi mavjud emas.</p>
               ) : (
                 <div className="space-y-2.5">
-                  {patientDetail.appointments.map((appt: any) => (
-                    <div
-                      key={appt.id}
-                      className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="font-bold text-slate-900">{appt.serviceName}</p>
-                        <p className="text-slate-500 text-[11px] mt-0.5">
-                          {new Date(appt.startTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' })} • Dr. {appt.doctor?.firstNameUz} {appt.doctor?.lastNameUz}
-                        </p>
+                  {patientDetail.appointments.map((appt: any) => {
+                    const statusConfig: Record<string, { label: string; color: string }> = {
+                      PENDING: { label: 'Kutilmoqda', color: 'bg-amber-100 text-amber-900 border-amber-300' },
+                      CONFIRMED: { label: 'Tasdiqlangan', color: 'bg-teal-100 text-teal-900 border-teal-300' },
+                      CHECKED_IN: { label: 'Klinikada', color: 'bg-blue-100 text-blue-900 border-blue-300' },
+                      COMPLETED: { label: 'Yakunlangan', color: 'bg-emerald-100 text-emerald-900 border-emerald-300' },
+                      CANCELLED: { label: 'Bekor qilingan', color: 'bg-rose-100 text-rose-900 border-rose-300' },
+                      NO_SHOW: { label: 'Kelmadi', color: 'bg-slate-200 text-slate-800 border-slate-300' },
+                    };
+                    const badge = statusConfig[appt.status] || {
+                      label: appt.status,
+                      color: 'bg-white border-slate-200 text-slate-700',
+                    };
+
+                    return (
+                      <div
+                        key={appt.id}
+                        className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-bold text-slate-900">{appt.serviceName}</p>
+                          <p className="text-slate-500 text-[11px] mt-0.5">
+                            {new Date(appt.startTime).toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' })} • Dr. {appt.doctor?.firstNameUz} {appt.doctor?.lastNameUz}
+                          </p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full font-bold border text-[10px] ${badge.color}`}>
+                          {badge.label}
+                        </span>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full font-bold bg-white border border-slate-200 text-slate-700 text-[10px]">
-                        {appt.status}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

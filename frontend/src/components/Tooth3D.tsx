@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Play, Pause, Rotate3d, AlertCircle } from 'lucide-react';
@@ -19,39 +19,150 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
   const [hasError, setHasError] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
 
-  const isPausedRef = useRef(isPaused);
-  isPausedRef.current = isPaused;
+  // References for live rendering state without triggering effect re-binds
+  const isPausedRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const isIntersectingRef = useRef(true);
+  const isTabVisibleRef = useRef(true);
+  const prefersReducedMotionRef = useRef(false);
+  const modelLoadedRef = useRef(false);
+  const animationFrameIdRef = useRef<number | null>(null);
 
-  const isDraggingRef = useRef(isDragging);
-  isDraggingRef.current = isDragging;
+  // Synchronize state to refs
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
 
   // Three.js instances ref
-  const instancesRef = useRef<{
+  const engineRef = useRef<{
     scene: THREE.Scene;
     camera: THREE.PerspectiveCamera;
     renderer: THREE.WebGLRenderer;
     toothGroup: THREE.Group;
-    animationId?: number;
     clock: THREE.Clock;
-    isIntersecting: boolean;
-    isTabVisible: boolean;
     targetRotationY: number;
     targetRotationX: number;
     currentRotationY: number;
     currentRotationX: number;
+    gltfScene?: THREE.Group;
   } | null>(null);
 
   const prevPointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Helper: check if continuous 60fps loop should be running
+  const shouldAnimateContinuous = useCallback(() => {
+    return (
+      !isPausedRef.current &&
+      isIntersectingRef.current &&
+      isTabVisibleRef.current &&
+      !prefersReducedMotionRef.current &&
+      modelLoadedRef.current
+    );
+  }, []);
+
+  // On-demand single frame render
+  const renderSingleFrame = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    // Apply damping
+    engine.currentRotationY += (engine.targetRotationY - engine.currentRotationY) * 0.2;
+    engine.currentRotationX += (engine.targetRotationX - engine.currentRotationX) * 0.2;
+
+    engine.toothGroup.rotation.y = engine.currentRotationY;
+    engine.toothGroup.rotation.x = engine.currentRotationX;
+
+    engine.renderer.render(engine.scene, engine.camera);
+    if (typeof window !== 'undefined') {
+      (window as any).__toothRenderCount = ((window as any).__toothRenderCount || 0) + 1;
+    }
+  }, []);
+
+  // Stop loop cleanly
+  const stopAnimationLoop = useCallback(() => {
+    if (animationFrameIdRef.current !== null) {
+      cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
+  }, []);
+
+  // Start loop cleanly (idempotent: never spawns duplicate loops)
+  const startAnimationLoop = useCallback(() => {
+    if (animationFrameIdRef.current !== null) return; // already running
+    if (!shouldAnimateContinuous()) {
+      renderSingleFrame();
+      return;
+    }
+
+    const loop = () => {
+      const engine = engineRef.current;
+      if (!engine) {
+        animationFrameIdRef.current = null;
+        return;
+      }
+
+      if (!shouldAnimateContinuous()) {
+        renderSingleFrame();
+        animationFrameIdRef.current = null;
+        return;
+      }
+
+      const delta = engine.clock.getDelta();
+      const elapsedTime = engine.clock.getElapsedTime();
+
+      // Idle rotation and gentle floating when not dragged
+      if (!isDraggingRef.current) {
+        engine.targetRotationY += delta * 0.35;
+        engine.toothGroup.position.y = 0.08 + Math.sin(elapsedTime * 1.5) * 0.06;
+      }
+
+      // Smooth damping interpolation
+      engine.currentRotationY += (engine.targetRotationY - engine.currentRotationY) * 0.08;
+      engine.currentRotationX += (engine.targetRotationX - engine.currentRotationX) * 0.08;
+
+      engine.toothGroup.rotation.y = engine.currentRotationY;
+      engine.toothGroup.rotation.x = engine.currentRotationX;
+
+      engine.renderer.render(engine.scene, engine.camera);
+
+      if (typeof window !== 'undefined') {
+        (window as any).__toothFrameCount = ((window as any).__toothFrameCount || 0) + 1;
+      }
+
+      animationFrameIdRef.current = requestAnimationFrame(loop);
+    };
+
+    animationFrameIdRef.current = requestAnimationFrame(loop);
+  }, [shouldAnimateContinuous, renderSingleFrame]);
+
+  // Handle pause toggle button
+  const togglePause = () => {
+    const nextPaused = !isPaused;
+    setIsPaused(nextPaused);
+    isPausedRef.current = nextPaused;
+
+    if (nextPaused) {
+      stopAnimationLoop();
+      renderSingleFrame();
+    } else {
+      startAnimationLoop();
+    }
+  };
 
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
 
-    let isCancelled = false;
+    let isDisposed = false;
 
-    // Detect WebGL support
+    // 1. Detect WebGL support
     try {
       const testCanvas = document.createElement('canvas');
       const gl = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
@@ -69,83 +180,121 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
     const width = container.clientWidth || 400;
     const height = container.clientHeight || 450;
 
-    // 1. Scene
+    // 2. Scene
     const scene = new THREE.Scene();
 
-    // 2. Camera
-    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 100);
-    camera.position.set(0, 0.2, 6.2);
+    // 3. Camera with comfortable anatomical dental framing
+    const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 100);
+    camera.position.set(0, 0.1, 5.8);
 
-    // 3. Renderer with power efficiency settings (cap pixel ratio to 1.5 to prevent GPU bottleneck)
+    // 4. Renderer with evaluated powerPreference:
+    // 'default' delivers smooth 60fps without forcing high-drain dedicated GPUs on laptops
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
         canvas,
         antialias: true,
         alpha: true,
-        powerPreference: 'high-performance',
+        powerPreference: 'default',
       });
       renderer.setSize(width, height);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.15;
+      renderer.toneMappingExposure = 1.05;
     } catch {
       setHasError(true);
       setIsLoading(false);
       return;
     }
 
-    // 4. Realistic Dental Studio Lighting Setup
-    // Key light (warm overhead soft illumination)
-    const keyLight = new THREE.DirectionalLight(0xfff8ee, 2.2);
-    keyLight.position.set(4, 5, 4);
+    // 5. Realistic Dental Studio Lighting Setup (Organic Warm Ivory Enamel, no artificial green tints)
+    // Key Light (warm soft overhead clinical spotlight)
+    const keyLight = new THREE.DirectionalLight(0xfffaed, 2.2);
+    keyLight.position.set(3, 4, 4);
     scene.add(keyLight);
 
-    // Fill light (diffuse soft cool illumination)
-    const fillLight = new THREE.DirectionalLight(0xdbeafe, 1.3);
-    fillLight.position.set(-4, 2, 3);
+    // Fill Light (soft diffused daylight)
+    const fillLight = new THREE.DirectionalLight(0xf1f5f9, 1.2);
+    fillLight.position.set(-3, 2, 3);
     scene.add(fillLight);
 
-    // Rim light (accents tooth silhouette and clinic brand teal)
-    const rimLight = new THREE.DirectionalLight(0x5eead4, 1.5);
-    rimLight.position.set(0, -3, -4);
-    scene.add(rimLight);
+    // Top Rim Light (accents anatomical crown fissures and enamel translucency)
+    const topRimLight = new THREE.DirectionalLight(0xfffef7, 1.1);
+    topRimLight.position.set(0, 4, -3);
+    scene.add(topRimLight);
 
-    // Soft ambient illumination
-    const ambientLight = new THREE.AmbientLight(0xf8fafc, 0.9);
+    // Ambient Illumination (soft balanced foundation)
+    const ambientLight = new THREE.AmbientLight(0xf8fafc, 0.85);
     scene.add(ambientLight);
 
-    // 5. Add Tooth Group
+    // 6. Tooth Group for rotation & centering
     const toothGroup = new THREE.Group();
+    toothGroup.position.set(0, 0.08, 0);
+    toothGroup.rotation.x = 0.18;
+    toothGroup.rotation.y = -0.3;
     scene.add(toothGroup);
 
-    // Initial anatomical presentation angle
-    toothGroup.rotation.x = 0.22;
-    toothGroup.rotation.y = -0.35;
-    toothGroup.position.y = 0.1;
+    const clock = new THREE.Clock();
 
-    // 6. Load Authentic 3D Anatomical Tooth Model (tooth.glb)
+    engineRef.current = {
+      scene,
+      camera,
+      renderer,
+      toothGroup,
+      clock,
+      targetRotationY: -0.3,
+      targetRotationX: 0.18,
+      currentRotationY: -0.3,
+      currentRotationX: 0.18,
+    };
+
+    // 7. Load Authentic 3D Anatomical Tooth Model
     const loader = new GLTFLoader();
     loader.load(
       '/models/tooth.glb',
       (gltf) => {
-        if (isCancelled) return;
+        if (isDisposed) {
+          // Dispose late-loaded GLTF immediately if component already unmounted
+          gltf.scene.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+              const m = child as THREE.Mesh;
+              m.geometry?.dispose();
+              if (Array.isArray(m.material)) {
+                m.material.forEach((mat) => mat.dispose());
+              } else {
+                m.material?.dispose();
+              }
+            }
+          });
+          return;
+        }
+
         const root = gltf.scene;
 
-        // Realistic, high-performance dental enamel material
-        // Single-pass forward rendering (NO heavy transmission pass)
+        // Auto-center model at origin (0, 0, 0)
+        const box = new THREE.Box3().setFromObject(root);
+        const center = box.getCenter(new THREE.Vector3());
+        root.position.sub(center);
+
+        // Realistic Dental Enamel Material (Physical PBR shader with biological refractive index)
         const enamelMaterial = new THREE.MeshPhysicalMaterial({
-          color: new THREE.Color(0xfcfbf8), // Natural warm enamel ivory
-          roughness: 0.18,
-          metalness: 0.04,
-          clearcoat: 0.9,
-          clearcoatRoughness: 0.1,
-          ior: 1.52,
+          color: new THREE.Color(0xfcfbf7), // Natural organic warm ivory
+          roughness: 0.22,                  // Natural tooth surface micro-texture
+          metalness: 0.0,                   // 0% metallic (biological tissue)
+          clearcoat: 0.6,                   // Subtle moist enamel sheen
+          clearcoatRoughness: 0.18,
+          ior: 1.62,                        // Anatomical human tooth enamel IOR
         });
 
         root.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             const mesh = child as THREE.Mesh;
+            // Dispose default material from GLTF file before replacing
+            if (Array.isArray(mesh.material)) {
+              mesh.material.forEach((mat) => mat.dispose());
+            } else {
+              mesh.material?.dispose();
+            }
             mesh.material = enamelMaterial;
             mesh.castShadow = false;
             mesh.receiveShadow = false;
@@ -153,111 +302,120 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         });
 
         toothGroup.add(root);
+        if (engineRef.current) {
+          engineRef.current.gltfScene = root;
+        }
+
+        modelLoadedRef.current = true;
         setIsLoading(false);
+
+        // Render first frame immediately
+        renderSingleFrame();
+
+        // Start continuous loop only if allowed
+        if (shouldAnimateContinuous()) {
+          startAnimationLoop();
+        }
       },
       undefined,
       (err) => {
-        if (isCancelled) return;
-        console.error('Failed to load 3D tooth model', err);
+        if (isDisposed) return;
+        console.error('Failed to load 3D tooth model, falling back to static visual', err);
         setHasError(true);
         setIsLoading(false);
       }
     );
 
-    const clock = new THREE.Clock();
-
-    // Store references
-    instancesRef.current = {
-      scene,
-      camera,
-      renderer,
-      toothGroup,
-      clock,
-      isIntersecting: true,
-      isTabVisible: document.visibilityState === 'visible',
-      targetRotationY: -0.35,
-      targetRotationX: 0.22,
-      currentRotationY: -0.35,
-      currentRotationX: 0.22,
-    };
-
-    // 7. Animation loop
-    const animate = () => {
-      const inst = instancesRef.current;
-      if (!inst) return;
-
-      const delta = inst.clock.getDelta();
-      const elapsedTime = inst.clock.getElapsedTime();
-
-      // Only render if visible and tab active
-      if (inst.isIntersecting && inst.isTabVisible) {
-        // Idle floating & rotation if not paused or dragged
-        if (!isPausedRef.current && !isDraggingRef.current) {
-          inst.targetRotationY += delta * 0.35; // gentle idle rotation
-          inst.toothGroup.position.y = 0.1 + Math.sin(elapsedTime * 1.5) * 0.08; // subtle floating
-        }
-
-        // Smooth damping interpolation
-        inst.currentRotationY += (inst.targetRotationY - inst.currentRotationY) * 0.08;
-        inst.currentRotationX += (inst.targetRotationX - inst.currentRotationX) * 0.08;
-
-        inst.toothGroup.rotation.y = inst.currentRotationY;
-        inst.toothGroup.rotation.x = inst.currentRotationX;
-
-        inst.renderer.render(inst.scene, inst.camera);
-      }
-
-      inst.animationId = requestAnimationFrame(animate);
-    };
-
-    animate();
-
-    // 8. Resize Observer
+    // 8. Resize Observer with on-demand render
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width: newW, height: newH } = entry.contentRect;
-        if (newW > 0 && newH > 0 && instancesRef.current) {
-          instancesRef.current.camera.aspect = newW / newH;
-          instancesRef.current.camera.updateProjectionMatrix();
-          instancesRef.current.renderer.setSize(newW, newH);
+        if (newW > 0 && newH > 0 && engineRef.current) {
+          engineRef.current.camera.aspect = newW / newH;
+          engineRef.current.camera.updateProjectionMatrix();
+          engineRef.current.renderer.setSize(newW, newH);
+          renderSingleFrame();
         }
       }
     });
     resizeObserver.observe(container);
 
-    // 9. Intersection Observer (pause when off-screen)
+    // 9. Intersection Observer (stops animation when offscreen)
     const intersectionObserver = new IntersectionObserver(
       (entries) => {
-        if (entries[0] && instancesRef.current) {
-          instancesRef.current.isIntersecting = entries[0].isIntersecting;
+        if (!entries[0]) return;
+        const intersecting = entries[0].isIntersecting;
+        isIntersectingRef.current = intersecting;
+
+        if (intersecting) {
+          if (shouldAnimateContinuous()) {
+            startAnimationLoop();
+          } else {
+            renderSingleFrame();
+          }
+        } else {
+          stopAnimationLoop();
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0.05 }
     );
     intersectionObserver.observe(container);
 
-    // 10. Tab visibility
+    // 10. Tab visibility (stops animation when tab is hidden)
     const handleVisibilityChange = () => {
-      if (instancesRef.current) {
-        instancesRef.current.isTabVisible = document.visibilityState === 'visible';
+      const visible = document.visibilityState === 'visible';
+      isTabVisibleRef.current = visible;
+
+      if (visible) {
+        if (shouldAnimateContinuous()) {
+          startAnimationLoop();
+        } else {
+          renderSingleFrame();
+        }
+      } else {
+        stopAnimationLoop();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // 11. Check reduced-motion preference
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (mediaQuery.matches) {
-      setIsPaused(true);
+    // 11. Reduced-motion preference: responds dynamically to live preference changes
+    const motionMediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const handleMotionChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      const prefersReduced = e.matches;
+      prefersReducedMotionRef.current = prefersReduced;
+      setReducedMotion(prefersReduced);
+
+      if (prefersReduced) {
+        setIsPaused(true);
+        isPausedRef.current = true;
+        stopAnimationLoop();
+        renderSingleFrame();
+      }
+    };
+
+    handleMotionChange(motionMediaQuery);
+
+    if (motionMediaQuery.addEventListener) {
+      motionMediaQuery.addEventListener('change', handleMotionChange);
+    } else if ((motionMediaQuery as any).addListener) {
+      (motionMediaQuery as any).addListener(handleMotionChange);
     }
 
+    // 12. Cleanup on unmount
     return () => {
-      isCancelled = true;
+      isDisposed = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (motionMediaQuery.removeEventListener) {
+        motionMediaQuery.removeEventListener('change', handleMotionChange);
+      } else if ((motionMediaQuery as any).removeListener) {
+        (motionMediaQuery as any).removeListener(handleMotionChange);
+      }
+
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
-      if (instancesRef.current?.animationId) {
-        cancelAnimationFrame(instancesRef.current.animationId);
-      }
+      stopAnimationLoop();
+
+      // Deep disposal of Three.js objects
       try {
         toothGroup.traverse((obj) => {
           if ((obj as THREE.Mesh).isMesh) {
@@ -271,41 +429,61 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
           }
         });
       } catch {}
-      renderer.dispose();
-      instancesRef.current = null;
+
+      try {
+        renderer.dispose();
+      } catch {}
+
+      engineRef.current = null;
+      modelLoadedRef.current = false;
     };
   }, []);
 
-  // Pointer & Touch interactions:
-  // Preserves native vertical page scrolling while enabling horizontal drag rotation
+  // Pointer interaction:
+  // Designed so mobile vertical page scrolling remains completely smooth (touch-action: pan-y)
   const handlePointerDown = (e: React.PointerEvent) => {
+    // Only capture primary button / touch
+    if (e.button !== 0) return;
     setIsDragging(true);
+    isDraggingRef.current = true;
     prevPointerRef.current = { x: e.clientX, y: e.clientY };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging || !prevPointerRef.current || !instancesRef.current) return;
+    if (!isDraggingRef.current || !prevPointerRef.current || !engineRef.current) return;
 
     const dx = e.clientX - prevPointerRef.current.x;
     const dy = e.clientY - prevPointerRef.current.y;
 
-    instancesRef.current.targetRotationY += dx * 0.008;
-    instancesRef.current.targetRotationX = THREE.MathUtils.clamp(
-      instancesRef.current.targetRotationX + dy * 0.005,
-      -0.4,
-      0.6
+    // Apply rotation
+    engineRef.current.targetRotationY += dx * 0.008;
+    engineRef.current.targetRotationX = THREE.MathUtils.clamp(
+      engineRef.current.targetRotationX + dy * 0.005,
+      -0.35,
+      0.45
     );
 
     prevPointerRef.current = { x: e.clientX, y: e.clientY };
+
+    // On-demand render while dragging
+    renderSingleFrame();
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
     setIsDragging(false);
+    isDraggingRef.current = false;
     prevPointerRef.current = null;
     try {
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
+
+    // Resume loop if continuous animation is enabled
+    if (shouldAnimateContinuous()) {
+      startAnimationLoop();
+    }
   };
 
   return (
@@ -315,14 +493,20 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
     >
       {/* Fallback & Loading Poster */}
       {(isLoading || hasError) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-teal-50/40 via-white to-mint/20 rounded-3xl p-6 text-center">
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-teal-50/40 via-white to-slate-50/30 rounded-3xl p-6 text-center"
+          role="img"
+          aria-label={t.hero.toothAriaLabel || 'Anatomik inson tishi 3D modeli'}
+        >
           <svg
-            className="w-40 h-48 text-teal-700/80 animate-pulse drop-shadow-md"
+            className={`w-36 h-44 text-teal-800/80 drop-shadow-md ${
+              reducedMotion ? '' : 'motion-safe:animate-pulse'
+            }`}
             viewBox="0 0 120 150"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
           >
-            {/* Anatomical Molar Silhouette */}
+            {/* Anatomical Molar Crown & Root Silhouette */}
             <path
               d="M 25 35 C 20 18, 40 10, 50 18 C 55 22, 65 22, 70 18 C 80 10, 100 18, 95 35 C 92 48, 94 65, 88 78 C 82 92, 85 110, 80 140 C 76 142, 68 135, 68 120 C 68 100, 66 85, 60 85 C 54 85, 52 100, 52 120 C 52 135, 44 142, 40 140 C 35 110, 38 92, 32 78 C 26 65, 28 48, 25 35 Z"
               fill="url(#toothGrad)"
@@ -332,18 +516,18 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
             <defs>
               <linearGradient id="toothGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stopColor="#ffffff" />
-                <stop offset="50%" stopColor="#f8fafc" />
+                <stop offset="50%" stopColor="#fbfbfa" />
                 <stop offset="100%" stopColor="#e2e8f0" />
               </linearGradient>
             </defs>
           </svg>
           {hasError ? (
-            <div className="mt-4 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-200">
-              <AlertCircle className="w-4 h-4" />
-              <span>3D modeli statik rejimda ko&apos;rsatilmoqda</span>
+            <div className="mt-4 flex items-center gap-2 text-sm text-slate-700 bg-slate-100/90 px-3.5 py-1.5 rounded-full border border-slate-200">
+              <AlertCircle className="w-4 h-4 text-teal-700" />
+              <span>{t.hero.toothStaticFallback || "3D modeli statik rejimda ko'rsatilmoqda"}</span>
             </div>
           ) : (
-            <p className="mt-4 text-xs font-medium text-teal-800 tracking-wider uppercase">
+            <p className="mt-4 text-xs font-semibold text-teal-800 tracking-wider uppercase">
               {t.common.loading}
             </p>
           )}
@@ -357,27 +541,32 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        className={`w-full h-full cursor-grab active:cursor-grabbing touch-pan-y transition-opacity duration-700 ${
+        style={{ touchAction: 'pan-y' }}
+        className={`w-full h-full cursor-grab active:cursor-grabbing transition-opacity duration-700 ${
           isLoading || hasError ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
-        aria-label="3D Tish modeli - haqiqiy anatomik model"
+        aria-label={t.hero.toothAriaLabel || 'Anatomik inson tishi 3D modeli'}
       />
 
       {/* Floating 3D Controls Bar */}
       {!isLoading && !hasError && (
-        <div className="absolute bottom-3 right-4 flex items-center gap-2 z-10 bg-white/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-teal-100 shadow-sm text-xs text-teal-900">
-          <Rotate3d className="w-3.5 h-3.5 text-teal-600 animate-spin-slow" />
-          <span className="hidden sm:inline font-medium text-[11px] text-teal-700">
+        <div className="absolute bottom-3 right-4 flex items-center gap-2 z-10 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-200/80 shadow-sm text-xs text-slate-800">
+          <Rotate3d
+            className={`w-3.5 h-3.5 text-teal-700 ${
+              isPaused || reducedMotion ? '' : 'animate-spin-slow'
+            }`}
+          />
+          <span className="hidden sm:inline font-medium text-[11px] text-slate-700">
             {t.hero.rotateHint}
           </span>
           <button
             type="button"
-            onClick={() => setIsPaused(!isPaused)}
+            onClick={togglePause}
             aria-label={isPaused ? t.hero.resume3d : t.hero.pause3d}
-            className="ml-1 p-1 hover:bg-teal-50 rounded-full text-teal-700 transition-colors"
+            className="ml-1 p-1 hover:bg-slate-100 rounded-full text-teal-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700"
             title={isPaused ? t.hero.resume3d : t.hero.pause3d}
           >
-            {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+            {isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5 fill-current" />}
           </button>
         </div>
       )}

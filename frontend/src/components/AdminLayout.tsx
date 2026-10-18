@@ -49,14 +49,26 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
     let isMounted = true;
     const fetchPendingCount = async () => {
       try {
-        const res = await api.getAdminAppointments({ status: 'PENDING', limit: 1 });
+        const params: Record<string, any> = { status: 'PENDING', limit: 1 };
+        if (user.role === 'DOCTOR' && user.doctorId) {
+          params.doctorId = user.doctorId;
+        }
+        const res = await api.getAdminAppointments(params);
         if (isMounted) setPendingCount(res?.total || 0);
       } catch {}
     };
     fetchPendingCount();
+
+    const handleCountChange = () => {
+      fetchPendingCount();
+    };
+
+    window.addEventListener('pendingCountChanged', handleCountChange);
     const interval = setInterval(fetchPendingCount, 25000);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('pendingCountChanged', handleCountChange);
       clearInterval(interval);
     };
   }, [user]);

@@ -26,6 +26,12 @@ const DAYS_OF_WEEK = [
   { value: 'SUNDAY', label: 'Yakshanba' },
 ];
 
+const EXCEPTION_TYPE_LABELS: Record<string, string> = {
+  LEAVE: "Ta'til",
+  HOLIDAY: 'Bayram kuni',
+  BLOCKED: 'Band soat',
+};
+
 export default function AdminDoctorsManagePage() {
   const [doctors, setDoctors] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
@@ -444,7 +450,7 @@ export default function AdminDoctorsManagePage() {
                   >
                     <div>
                       <span className="font-bold text-amber-950 block">
-                        {new Date(exc.date).toLocaleDateString()} — {exc.type}
+                        {new Date(exc.date).toLocaleDateString()} — {EXCEPTION_TYPE_LABELS[exc.type] || exc.type}
                       </span>
                       {exc.startTime && exc.endTime && (
                         <span className="text-[11px] text-amber-900 block font-mono">

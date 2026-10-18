@@ -67,7 +67,7 @@ export default function AdminLeadsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-900">
-              Qayta qo&apos;ng&apos;iroq murojaatlari (Lidlar)
+              Qayta qo&apos;ng&apos;iroq murojaatlari
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
               Saytdan yuborilgan murojaatlar monitoringi va aloqa holatini boshqarish
@@ -81,10 +81,10 @@ export default function AdminLeadsPage() {
               className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-medium focus:ring-2 focus:ring-teal-600"
             >
               <option value="">Barcha holatlar</option>
-              <option value="NEW">Yangi (NEW)</option>
-              <option value="CONTACTED">Bog&apos;lanildi (CONTACTED)</option>
-              <option value="BOOKED">Qabulga yozildi (BOOKED)</option>
-              <option value="CLOSED">Yopilgan (CLOSED)</option>
+              <option value="NEW">Yangi</option>
+              <option value="CONTACTED">Bog&apos;lanildi</option>
+              <option value="BOOKED">Qabulga yozildi</option>
+              <option value="CLOSED">Yopilgan</option>
             </select>
 
             <button
@@ -220,7 +220,7 @@ export default function AdminLeadsPage() {
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
               <h3 className="text-base font-bold text-slate-900">
-                Lid holati va xodim qaydi: {selectedLead.fullName}
+                Murojaat holati va xodim qaydi: {selectedLead.fullName}
               </h3>
               <p className="text-xs text-slate-500">
                 Telefon: <span className="font-semibold text-teal-700">{selectedLead.phone}</span>
@@ -235,16 +235,16 @@ export default function AdminLeadsPage() {
                   onChange={(e) => setNoteStatus(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
                 >
-                  <option value="NEW">Yangi (NEW)</option>
-                  <option value="CONTACTED">Bog&apos;lanildi (CONTACTED)</option>
-                  <option value="BOOKED">Qabulga yozildi (BOOKED)</option>
-                  <option value="CLOSED">Yopildi (CLOSED)</option>
+                  <option value="NEW">Yangi</option>
+                  <option value="CONTACTED">Bog&apos;lanildi</option>
+                  <option value="BOOKED">Qabulga yozildi</option>
+                  <option value="CLOSED">Yopildi</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Ichki xodim qaydlari (Internal Notes)
+                  Ichki xodim qaydlari
                 </label>
                 <textarea
                   rows={3}

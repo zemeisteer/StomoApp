@@ -71,7 +71,14 @@ export default function AdminLoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form
+          action="#"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit(e);
+          }}
+          className="space-y-4"
+        >
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">
               Elektron pochta
