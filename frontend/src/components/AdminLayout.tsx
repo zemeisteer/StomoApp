@@ -119,7 +119,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       href: '/admin',
       label: t.admin.dashboard,
       icon: LayoutDashboard,
-      roles: ['OWNER', 'ADMIN'],
+      roles: ['OWNER', 'ADMIN', 'DOCTOR'],
     },
     {
       href: '/admin/calendar',

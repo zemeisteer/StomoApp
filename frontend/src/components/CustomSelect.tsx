@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useId } from 'react';
+import React, { useState, useRef, useEffect, useId, useCallback } from 'react';
 import { ChevronDown, Check, Search, Loader2 } from 'lucide-react';
 
 export interface SelectOption {
@@ -22,6 +22,7 @@ interface CustomSelectProps {
   searchable?: boolean;
   className?: string;
   id?: string;
+  locale?: 'uz' | 'ru';
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -36,22 +37,32 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   searchable,
   className = '',
   id,
+  locale = 'uz',
 }) => {
   const generatedId = useId();
   const selectId = id || generatedId;
+  const listboxId = `${selectId}-listbox`;
+  const labelId = `${selectId}-label`;
+  const errorId = `${selectId}-error`;
 
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [openUpward, setOpenUpward] = useState(false);
+  const [maxListHeight, setMaxListHeight] = useState(240);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listboxRef = useRef<HTMLUListElement>(null);
 
-  // Automatically enable search if more than 7 options unless explicitly disabled
-  const isSearchable = searchable !== undefined ? searchable : options.length > 7;
+  const isRu = locale === 'ru';
+  const searchPlaceholderText = isRu ? 'Поиск...' : 'Qidirish...';
+  const noResultsText = isRu ? 'Ничего не найдено' : 'Hech narsa topilmadi';
+  const loadingText = isRu ? 'Загрузка...' : 'Yuklanmoqda...';
+
+  // Automatically enable search if more than 6 options unless explicitly specified
+  const isSearchable = searchable !== undefined ? searchable : options.length > 6;
 
   // Filtered options based on search query
   const filteredOptions = options.filter((opt) =>
@@ -60,36 +71,63 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
   const selectedOption = options.find((opt) => opt.value === value);
 
-  // Viewport-safe positioning check
-  useEffect(() => {
-    if (isOpen && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
+  // Calculate viewport-safe drop direction and height
+  const updatePosition = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
 
-      // If space below is less than 240px and space above is greater, open upward
-      if (spaceBelow < 240 && spaceAbove > 240) {
-        setOpenUpward(true);
-      } else {
-        setOpenUpward(false);
-      }
+    if (spaceBelow < 200 && spaceAbove > spaceBelow) {
+      setOpenUpward(true);
+      setMaxListHeight(Math.max(120, Math.min(260, spaceAbove - 50)));
+    } else {
+      setOpenUpward(false);
+      setMaxListHeight(Math.max(120, Math.min(260, spaceBelow - 50)));
     }
-  }, [isOpen]);
+  }, []);
 
-  // Focus search input when opened
+  useEffect(() => {
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener('resize', updatePosition);
+      window.addEventListener('scroll', updatePosition, true);
+      return () => {
+        window.removeEventListener('resize', updatePosition);
+        window.removeEventListener('scroll', updatePosition, true);
+      };
+    }
+  }, [isOpen, updatePosition]);
+
+  // Set initial highlight when opened or when search query changes
   useEffect(() => {
     if (isOpen) {
       if (isSearchable && searchInputRef.current) {
         searchInputRef.current.focus();
       }
-      // Set initial highlighted index to selected item
-      const idx = filteredOptions.findIndex((opt) => opt.value === value);
-      setHighlightedIndex(idx >= 0 ? idx : 0);
+      // Highlight selected option or first non-disabled option
+      const selectedIdx = filteredOptions.findIndex((opt) => opt.value === value);
+      if (selectedIdx >= 0 && !filteredOptions[selectedIdx].disabled) {
+        setHighlightedIndex(selectedIdx);
+      } else {
+        const firstActiveIdx = filteredOptions.findIndex((opt) => !opt.disabled);
+        setHighlightedIndex(firstActiveIdx >= 0 ? firstActiveIdx : 0);
+      }
     } else {
       setSearchQuery('');
       setHighlightedIndex(-1);
     }
-  }, [isOpen, isSearchable, value]);
+  }, [isOpen, searchQuery, isSearchable, value, filteredOptions.length]);
+
+  // Scroll active option into view
+  useEffect(() => {
+    if (isOpen && highlightedIndex >= 0 && listboxRef.current) {
+      const activeElement = listboxRef.current.children[highlightedIndex] as HTMLElement;
+      if (activeElement && typeof activeElement.scrollIntoView === 'function') {
+        activeElement.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedIndex, isOpen]);
 
   // Close on outside click
   useEffect(() => {
@@ -102,9 +140,24 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  // Keyboard navigation
+  // Keyboard navigation helpers: skip disabled options
+  const getNextActiveIndex = (startIndex: number, direction: 1 | -1): number => {
+    const total = filteredOptions.length;
+    if (total === 0) return -1;
+    let curr = startIndex;
+    for (let i = 0; i < total; i++) {
+      curr = (curr + direction + total) % total;
+      if (!filteredOptions[curr].disabled) {
+        return curr;
+      }
+    }
+    return startIndex;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (disabled || loading) return;
+
+    const isSearchFocused = document.activeElement === searchInputRef.current;
 
     if (!isOpen) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
@@ -120,20 +173,39 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         setIsOpen(false);
         triggerRef.current?.focus();
         break;
+
       case 'ArrowDown':
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev < filteredOptions.length - 1 ? prev + 1 : 0
-        );
+        setHighlightedIndex((prev) => getNextActiveIndex(prev, 1));
         break;
+
       case 'ArrowUp':
         e.preventDefault();
-        setHighlightedIndex((prev) =>
-          prev > 0 ? prev - 1 : filteredOptions.length - 1
-        );
+        setHighlightedIndex((prev) => getNextActiveIndex(prev, -1));
         break;
+
+      case 'Home':
+        if (!isSearchFocused) {
+          e.preventDefault();
+          const firstIdx = filteredOptions.findIndex((opt) => !opt.disabled);
+          if (firstIdx >= 0) setHighlightedIndex(firstIdx);
+        }
+        break;
+
+      case 'End':
+        if (!isSearchFocused) {
+          e.preventDefault();
+          for (let i = filteredOptions.length - 1; i >= 0; i--) {
+            if (!filteredOptions[i].disabled) {
+              setHighlightedIndex(i);
+              break;
+            }
+          }
+        }
+        break;
+
       case 'Enter':
-      case ' ':
+        // Select highlighted option
         if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
           e.preventDefault();
           const targetOpt = filteredOptions[highlightedIndex];
@@ -144,6 +216,22 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
           }
         }
         break;
+
+      case ' ':
+        // IMPORTANT: Do NOT intercept Space when search input is focused! Multiword typing must work.
+        if (!isSearchFocused) {
+          e.preventDefault();
+          if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
+            const targetOpt = filteredOptions[highlightedIndex];
+            if (!targetOpt.disabled) {
+              onChange(targetOpt.value);
+              setIsOpen(false);
+              triggerRef.current?.focus();
+            }
+          }
+        }
+        break;
+
       case 'Tab':
         setIsOpen(false);
         break;
@@ -157,13 +245,18 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     triggerRef.current?.focus();
   };
 
+  const activeOptionId =
+    highlightedIndex >= 0 && highlightedIndex < filteredOptions.length
+      ? `${selectId}-opt-${highlightedIndex}`
+      : undefined;
+
   return (
     <div ref={containerRef} className={`relative flex flex-col ${className}`}>
       {label && (
         <label
-          id={`${selectId}-label`}
+          id={labelId}
           htmlFor={selectId}
-          className="text-xs font-semibold text-slate-700 mb-1.5 block"
+          className="text-xs font-semibold text-slate-700 mb-1.5 block cursor-pointer"
         >
           {label}
         </label>
@@ -177,7 +270,9 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         disabled={disabled || loading}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        aria-labelledby={label ? `${selectId}-label ${selectId}` : selectId}
+        aria-controls={isOpen ? listboxId : undefined}
+        aria-labelledby={label ? `${labelId} ${selectId}` : selectId}
+        aria-describedby={error ? errorId : undefined}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={handleKeyDown}
         className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border text-sm text-left flex items-center justify-between gap-2.5 transition-all outline-none ${
@@ -194,7 +289,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
           {loading ? (
             <span className="flex items-center gap-2 text-slate-400">
               <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
-              <span>Yuklanmoqda...</span>
+              <span>{loadingText}</span>
             </span>
           ) : selectedOption ? (
             <span className="font-medium text-slate-900 truncate">
@@ -220,12 +315,16 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
       </button>
 
       {/* Error state hint */}
-      {error && <p className="text-[11px] text-red-600 mt-1 font-medium">{error}</p>}
+      {error && (
+        <p id={errorId} className="text-[11px] text-red-600 mt-1 font-medium">
+          {error}
+        </p>
+      )}
 
       {/* Dropdown Popover */}
       {isOpen && (
         <div
-          className={`absolute left-0 right-0 z-50 w-full min-w-[200px] bg-white rounded-2xl shadow-xl border border-slate-100 py-1.5 overflow-hidden animate-fade-in ${
+          className={`absolute left-0 right-0 z-50 w-full min-w-[220px] bg-white rounded-2xl shadow-xl border border-slate-100 py-1.5 overflow-hidden animate-fade-in ${
             openUpward ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
           }`}
           onKeyDown={handleKeyDown}
@@ -234,13 +333,14 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
           {isSearchable && (
             <div className="p-2 border-b border-slate-100">
               <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Qidirish..."
+                  placeholder={searchPlaceholderText}
+                  aria-label={searchPlaceholderText}
                   className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:bg-white"
                 />
               </div>
@@ -249,31 +349,37 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
           {/* Options List */}
           <ul
+            id={listboxId}
             ref={listboxRef}
             role="listbox"
             tabIndex={-1}
-            className="max-h-60 overflow-y-auto py-1 divide-y divide-slate-50 scrollbar-thin"
+            aria-activedescendant={activeOptionId}
+            aria-labelledby={label ? labelId : selectId}
+            style={{ maxHeight: `${maxListHeight}px` }}
+            className="overflow-y-auto py-1 divide-y divide-slate-50 scrollbar-thin"
           >
             {filteredOptions.length > 0 ? (
               filteredOptions.map((opt, index) => {
                 const isSelected = opt.value === value;
                 const isHighlighted = index === highlightedIndex;
+                const optionId = `${selectId}-opt-${index}`;
 
                 return (
                   <li
-                    key={opt.value}
+                    id={optionId}
+                    key={opt.value || `empty-${index}`}
                     role="option"
                     aria-selected={isSelected}
                     aria-disabled={opt.disabled}
                     onClick={() => handleSelect(opt.value, opt.disabled)}
-                    onMouseEnter={() => setHighlightedIndex(index)}
-                    className={`min-h-[40px] px-3.5 py-2 text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                    onMouseEnter={() => !opt.disabled && setHighlightedIndex(index)}
+                    className={`min-h-[42px] px-3.5 py-2 text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
                       opt.disabled
-                        ? 'opacity-40 cursor-not-allowed bg-slate-50'
+                        ? 'opacity-40 cursor-not-allowed bg-slate-50 text-slate-400'
                         : isSelected
-                        ? 'bg-teal-50/80 font-bold text-teal-900'
+                        ? 'bg-teal-50 font-bold text-teal-900'
                         : isHighlighted
-                        ? 'bg-slate-50 text-slate-900'
+                        ? 'bg-slate-100 text-slate-900'
                         : 'text-slate-700 hover:bg-slate-50'
                     }`}
                   >
@@ -294,7 +400,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
               })
             ) : (
               <li className="p-4 text-center text-xs text-slate-400">
-                Natija topilmadi
+                {noResultsText}
               </li>
             )}
           </ul>

@@ -483,10 +483,29 @@ export const api = {
   },
 
   // Analytics & Audit
-  getAnalyticsOverview: (startDate?: string, endDate?: string) => {
+  getAnalyticsOverview: (
+    paramsOrStart?:
+      | string
+      | {
+          startDate?: string;
+          endDate?: string;
+          branchId?: string;
+          doctorId?: string;
+          serviceId?: string;
+        },
+    legacyEnd?: string
+  ) => {
     const q = new URLSearchParams();
-    if (startDate) q.set('startDate', startDate);
-    if (endDate) q.set('endDate', endDate);
+    if (typeof paramsOrStart === 'string') {
+      if (paramsOrStart) q.set('startDate', paramsOrStart);
+      if (legacyEnd) q.set('endDate', legacyEnd);
+    } else if (paramsOrStart) {
+      if (paramsOrStart.startDate) q.set('startDate', paramsOrStart.startDate);
+      if (paramsOrStart.endDate) q.set('endDate', paramsOrStart.endDate);
+      if (paramsOrStart.branchId) q.set('branchId', paramsOrStart.branchId);
+      if (paramsOrStart.doctorId) q.set('doctorId', paramsOrStart.doctorId);
+      if (paramsOrStart.serviceId) q.set('serviceId', paramsOrStart.serviceId);
+    }
     return fetcher<any>(`/api/admin/analytics/overview?${q.toString()}`);
   },
   getAuditLogs: (page = 1, limit = 50) =>

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
+import { ModalDialog } from '../../../components/ModalDialog';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
 import {
@@ -29,6 +30,13 @@ import {
   formatClinicTime,
   formatRangeTitle,
   formatMonthYear,
+  getClinicTodayDateString,
+  getClinicTomorrowDateString,
+  toClinicDateString,
+  getClinicDayBoundaries,
+  getClinicWeekBoundaries,
+  getClinicMonthBoundaries,
+  parseClinicDateTimeToUtcIso,
 } from '../../../lib/dateFormat';
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -114,7 +122,13 @@ export default function AdminCalendarPage() {
   });
 
   // Pagination
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [currentPage, setCurrentPage] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const p = parseInt(new URLSearchParams(window.location.search).get('page') || '1', 10);
+      return !isNaN(p) && p > 0 ? p : 1;
+    }
+    return 1;
+  });
   const pageSize = 25;
 
   const [isLoading, setIsLoading] = useState(true);
@@ -148,10 +162,12 @@ export default function AdminCalendarPage() {
     doctorId: '',
     serviceId: '',
     branchId: '',
-    date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()),
+    date: getClinicTodayDateString(),
     time: '09:00',
     note: '',
   });
+
+  const [targetApptError, setTargetApptError] = useState<string | null>(null);
 
   // Synchronize state with URL search params
   const updateUrlParams = useCallback(
@@ -169,6 +185,28 @@ export default function AdminCalendarPage() {
     },
     []
   );
+
+  const openAppointment = useCallback(
+    (appt: any) => {
+      setSelectedAppt(appt);
+      setActionError(null);
+      setTargetApptError(null);
+      setIsRescheduling(false);
+      const dStr = toClinicDateString(appt.startTime);
+      setRescheduleDate(dStr);
+      setRescheduleTime(formatClinicTime(appt.startTime));
+      updateUrlParams({ appointmentId: appt.id });
+    },
+    [updateUrlParams]
+  );
+
+  const closeAppointment = useCallback(() => {
+    setSelectedAppt(null);
+    setActionError(null);
+    setTargetApptError(null);
+    setIsRescheduling(false);
+    updateUrlParams({ appointmentId: null });
+  }, [updateUrlParams]);
 
   // Load fixtures
   useEffect(() => {
@@ -198,34 +236,35 @@ export default function AdminCalendarPage() {
     loadFixtures();
   }, [user]);
 
-  // Compute date range for viewMode
+  // Compute timezone-authoritative date range for viewMode
   const getDateRange = useCallback(() => {
-    const d = new Date(currentDate);
-    let start = new Date(d);
-    let end = new Date(d);
+    const dateStr = toClinicDateString(currentDate);
 
     if (viewMode === 'day') {
-      start.setHours(0, 0, 0, 0);
-      end.setHours(23, 59, 59, 999);
+      const bounds = getClinicDayBoundaries(dateStr);
+      return {
+        dateFrom: bounds.dateFrom,
+        dateTo: bounds.dateTo,
+        startDate: new Date(bounds.dateFrom),
+        endDate: new Date(bounds.dateTo),
+      };
     } else if (viewMode === 'week') {
-      const day = d.getDay();
-      const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday as first day
-      start = new Date(d.setDate(diff));
-      start.setHours(0, 0, 0, 0);
-      end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
-    } else if (viewMode === 'month') {
-      start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-      end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+      const bounds = getClinicWeekBoundaries(dateStr);
+      return {
+        dateFrom: bounds.dateFrom,
+        dateTo: bounds.dateTo,
+        startDate: new Date(bounds.dateFrom),
+        endDate: new Date(bounds.dateTo),
+      };
+    } else {
+      const bounds = getClinicMonthBoundaries(dateStr);
+      return {
+        dateFrom: bounds.dateFrom,
+        dateTo: bounds.dateTo,
+        startDate: new Date(bounds.dateFrom),
+        endDate: new Date(bounds.dateTo),
+      };
     }
-
-    return {
-      dateFrom: start.toISOString(),
-      dateTo: end.toISOString(),
-      startDate: start,
-      endDate: end,
-    };
   }, [currentDate, viewMode]);
 
   // Load appointments
@@ -249,7 +288,6 @@ export default function AdminCalendarPage() {
       if (selectedServiceId) params.serviceId = selectedServiceId;
 
       if (isInboxMode) {
-        // Inbox Mode: all pending bookings across all dates
         params.status = 'PENDING';
       } else {
         const { dateFrom, dateTo } = getDateRange();
@@ -258,7 +296,6 @@ export default function AdminCalendarPage() {
         if (selectedStatus) params.status = selectedStatus;
       }
 
-      // Pending count params respecting doctor scoping
       const pendingParams: Record<string, any> = { status: 'PENDING', limit: 1 };
       if (user?.role === 'DOCTOR') {
         pendingParams.doctorId = user.doctorId;
@@ -274,7 +311,7 @@ export default function AdminCalendarPage() {
       setPendingTotal(pendingRes?.total || 0);
 
       // Sync URL
-      const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(currentDate);
+      const dateStr = toClinicDateString(currentDate);
       updateUrlParams({
         mode: isInboxMode ? 'inbox' : null,
         status: isInboxMode ? 'PENDING' : selectedStatus || null,
@@ -283,6 +320,7 @@ export default function AdminCalendarPage() {
         serviceId: selectedServiceId || null,
         view: isInboxMode ? null : viewMode,
         date: isInboxMode ? null : dateStr,
+        page: currentPage > 1 ? String(currentPage) : null,
       });
     } catch (e: any) {
       console.error('Failed to load appointments', e);
@@ -309,42 +347,75 @@ export default function AdminCalendarPage() {
     loadAppointments();
   }, [loadAppointments]);
 
-  // Support opening exact appointment by ID from URL query
-  useEffect(() => {
+  // URL appointmentId synchronization & popstate handling
+  const syncFromUrl = useCallback(async () => {
     if (typeof window === 'undefined') return;
     const searchParams = new URLSearchParams(window.location.search);
     const targetId = searchParams.get('appointmentId');
-    if (!targetId) return;
-    const resolvedId: string = targetId;
-
-    let isMounted = true;
-    async function loadTargetAppointment() {
+    if (targetId) {
       try {
-        const appt = await api.getAppointmentDetail(resolvedId);
-        if (isMounted && appt) {
+        const appt = await api.getAppointmentDetail(targetId);
+        if (appt) {
           setSelectedAppt(appt);
           setActionError(null);
+          setTargetApptError(null);
           setIsRescheduling(false);
-          const d = new Date(appt.startTime);
-          setRescheduleDate(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(d));
-          setRescheduleTime(
-            new Intl.DateTimeFormat('en-GB', {
-              timeZone: 'Asia/Tashkent',
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false,
-            }).format(d)
-          );
+          const dStr = toClinicDateString(appt.startTime);
+          setRescheduleDate(dStr);
+          setRescheduleTime(formatClinicTime(appt.startTime));
+        } else {
+          setSelectedAppt(null);
+          setTargetApptError('Qabul topilmadi yoki ko\'rish uchun ruxsat yo\'q');
         }
       } catch (err: any) {
-        console.error('Failed to fetch specific appointment by ID', err);
+        setSelectedAppt(null);
+        setTargetApptError(err?.message || 'Qabul topilmadi yoki ko\'rish uchun ruxsat yo\'q');
       }
+    } else {
+      setSelectedAppt(null);
+      setTargetApptError(null);
     }
-    loadTargetAppointment();
-    return () => {
-      isMounted = false;
-    };
   }, []);
+
+  useEffect(() => {
+    syncFromUrl();
+  }, [syncFromUrl]);
+
+  // Handle browser popstate (back/forward)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      syncFromUrl();
+      const params = new URLSearchParams(window.location.search);
+      setSelectedDoctorId(params.get('doctorId') || '');
+      setSelectedBranchId(params.get('branchId') || '');
+      setSelectedServiceId(params.get('serviceId') || '');
+      const st = params.get('status') || '';
+      const mode = params.get('mode') || '';
+      setSelectedStatus(st);
+      setIsInboxMode(st === 'PENDING' || mode === 'inbox');
+      const v = params.get('view');
+      if (v === 'day' || v === 'week' || v === 'month') setViewMode(v);
+      const dParam = params.get('date');
+      if (dParam) {
+        const parsed = new Date(dParam);
+        if (!isNaN(parsed.getTime())) setCurrentDate(parsed);
+      }
+      const pageNum = parseInt(params.get('page') || '1', 10);
+      if (!isNaN(pageNum) && pageNum > 0) setCurrentPage(pageNum);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [syncFromUrl]);
+
+  // Automatically keep pagination valid
+  useEffect(() => {
+    const totalPages = Math.ceil(totalCount / pageSize) || 1;
+    if (currentPage > totalPages && totalPages >= 1) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalCount, pageSize]);
 
   // Fetch reschedule slots when date/appointment changes
   useEffect(() => {
@@ -386,21 +457,20 @@ export default function AdminCalendarPage() {
   };
 
   const handleToday = () => {
-    setCurrentDate(new Date());
+    const todayStr = getClinicTodayDateString();
+    setCurrentDate(new Date(`${todayStr}T00:00:00+05:00`));
     setCurrentPage(1);
   };
 
   const handleTomorrow = () => {
-    const tmr = new Date();
-    tmr.setDate(tmr.getDate() + 1);
-    setCurrentDate(tmr);
+    const tmrStr = getClinicTomorrowDateString();
+    setCurrentDate(new Date(`${tmrStr}T00:00:00+05:00`));
     setCurrentPage(1);
   };
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!selectedAppt) return;
     if (newStatus === 'CANCELLED') {
-      // Open accessible confirmation dialog instead of immediate cancellation
       setCancelModalAppt(selectedAppt);
       setCancelReason('');
       return;
@@ -414,8 +484,12 @@ export default function AdminCalendarPage() {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('pendingCountChanged'));
       }
-      setSelectedAppt(null);
-      await loadAppointments();
+      closeAppointment();
+      if (appointments.length === 1 && currentPage > 1) {
+        setCurrentPage((prev) => Math.max(1, prev - 1));
+      } else {
+        await loadAppointments();
+      }
     } catch (err: any) {
       setActionError(err?.message || 'Holatni yangilashda xatolik yuz berdi');
     } finally {
@@ -435,8 +509,12 @@ export default function AdminCalendarPage() {
         window.dispatchEvent(new CustomEvent('pendingCountChanged'));
       }
       setCancelModalAppt(null);
-      setSelectedAppt(null);
-      await loadAppointments();
+      closeAppointment();
+      if (appointments.length === 1 && currentPage > 1) {
+        setCurrentPage((prev) => Math.max(1, prev - 1));
+      } else {
+        await loadAppointments();
+      }
     } catch (err: any) {
       setActionError(err?.message || 'Qabulni bekor qilishda xatolik yuz berdi');
     } finally {
@@ -453,13 +531,13 @@ export default function AdminCalendarPage() {
     try {
       setIsUpdating(true);
       setActionError(null);
-      const newStartTime = new Date(`${rescheduleDate}T${rescheduleTime}:00+05:00`).toISOString();
+      const newStartTime = parseClinicDateTimeToUtcIso(rescheduleDate, rescheduleTime);
       await api.adminRescheduleAppointment(selectedAppt.id, newStartTime);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('pendingCountChanged'));
       }
       setIsRescheduling(false);
-      setSelectedAppt(null);
+      closeAppointment();
       await loadAppointments();
     } catch (err: any) {
       setActionError(err?.message || 'Qayta rejalashtirishda xatolik yuz berdi');
@@ -474,7 +552,7 @@ export default function AdminCalendarPage() {
       setIsSubmittingCreate(true);
       setCreateError(null);
 
-      const startTime = new Date(`${createForm.date}T${createForm.time}:00+05:00`).toISOString();
+      const startTime = parseClinicDateTimeToUtcIso(createForm.date, createForm.time);
       await api.createAppointmentAdmin({
         patientName: createForm.patientName.trim(),
         patientPhone: createForm.patientPhone.trim(),
@@ -866,21 +944,8 @@ export default function AdminCalendarPage() {
                 return (
                   <div
                     key={appt.id}
-                    onClick={() => {
-                      setSelectedAppt(appt);
-                      setActionError(null);
-                      setIsRescheduling(false);
-                      const d = new Date(appt.startTime);
-                      setRescheduleDate(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(d));
-                      setRescheduleTime(
-                        new Intl.DateTimeFormat('en-GB', {
-                          timeZone: 'Asia/Tashkent',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: false,
-                        }).format(d)
-                      );
-                    }}
+                    data-testid="appointment-row"
+                    onClick={() => openAppointment(appt)}
                     className="py-4 px-3 hover:bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer transition-colors"
                   >
                     <div className="flex items-start gap-4">
@@ -956,24 +1021,14 @@ export default function AdminCalendarPage() {
 
       {/* Appointment Detail & Status Transition Modal */}
       {selectedAppt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="relative w-full max-w-lg bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700">
-                  Qabul boshqaruvi
-                </span>
-                <h3 className="text-xl font-extrabold text-slate-900 mt-0.5">
-                  {selectedAppt.patient?.fullName || selectedAppt.patientName}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedAppt(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 text-lg"
-              >
-                ✕
-              </button>
-            </div>
+        <ModalDialog
+          isOpen={!!selectedAppt}
+          onClose={closeAppointment}
+          title={selectedAppt.patient?.fullName || selectedAppt.patientName || 'Qabul boshqaruvi'}
+          description="Qabul ma'lumotlari va holatni boshqarish"
+          size="lg"
+        >
+          <div className="space-y-6">
 
             {actionError && (
               <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
@@ -1261,29 +1316,24 @@ export default function AdminCalendarPage() {
               </div>
             )}
           </div>
-        </div>
+        </ModalDialog>
       )}
 
       {/* Accessible Cancellation Confirmation Modal */}
       {cancelModalAppt && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in"
+        <ModalDialog
+          isOpen={!!cancelModalAppt}
+          onClose={() => setCancelModalAppt(null)}
+          title="Qabulni bekor qilishni tasdiqlaysizmi?"
+          description={`Bemor: ${cancelModalAppt.patient?.fullName || cancelModalAppt.patientName} (${cancelModalAppt.patient?.phone || cancelModalAppt.patientPhone})`}
+          size="md"
         >
-          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">
-                  Qabulni bekor qilishni tasdiqlaysizmi?
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Bemor: <strong>{cancelModalAppt.patient?.fullName || cancelModalAppt.patientName}</strong>{' '}
-                  ({cancelModalAppt.patient?.phone || cancelModalAppt.patientPhone})
-                </p>
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 p-3 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <p className="font-bold">Bekor qilingan qabulni qayta tiklab bo&apos;lmaydi.</p>
+                <p className="text-rose-600 mt-0.5">Bemorga bekor qilinganligi haqida ma&apos;lumot beriladi.</p>
               </div>
             </div>
 
@@ -1318,29 +1368,18 @@ export default function AdminCalendarPage() {
               </button>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
 
       {/* New Appointment Modal */}
-      {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="relative w-full max-w-lg bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
-            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700">
-                  Administrator
-                </span>
-                <h3 className="text-xl font-extrabold text-slate-900 mt-0.5">
-                  Yangi qabul yaratish
-                </h3>
-              </div>
-              <button
-                onClick={() => setIsCreateOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
-              >
-                ✕
-              </button>
-            </div>
+      <ModalDialog
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        title="Yangi qabul yaratish"
+        description="Administrator tomonidan yangi bemor qabulini kiritish"
+        size="lg"
+      >
+        <div className="space-y-4">
 
             {createError && (
               <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
@@ -1491,7 +1530,38 @@ export default function AdminCalendarPage() {
               </div>
             </form>
           </div>
-        </div>
+      </ModalDialog>
+
+      {/* Target Appointment Not Found or Forbidden Modal */}
+      {targetApptError && (
+        <ModalDialog
+          isOpen={!!targetApptError}
+          onClose={() => {
+            setTargetApptError(null);
+            updateUrlParams({ appointmentId: null });
+          }}
+          title="Qabul topilmadi"
+          size="sm"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span>{targetApptError}</span>
+            </div>
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetApptError(null);
+                  updateUrlParams({ appointmentId: null });
+                }}
+                className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold"
+              >
+                Tushunarli
+              </button>
+            </div>
+          </div>
+        </ModalDialog>
       )}
     </AdminLayout>
   );

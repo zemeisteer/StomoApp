@@ -9,6 +9,7 @@ export type StaffRole = 'OWNER' | 'ADMIN' | 'DOCTOR' | 'EDITOR';
 export interface StaffUserProfile {
   id: string;
   email: string;
+  fullName?: string | null;
   role: StaffRole;
   doctorId?: string | null;
 }

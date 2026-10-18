@@ -179,6 +179,8 @@ export interface Translations {
     newLeadsCard: string;
     pendingLeadsSubtitle: string;
     noNewLeads: string;
+    noAppointmentsToday: string;
+    noUpcomingAppointments: string;
   };
 }
 
@@ -358,6 +360,8 @@ const translations: Record<Language, Translations> = {
       newLeadsCard: 'Yangi murojaatlar',
       pendingLeadsSubtitle: 'Qayta qo\'ng\'iroq kutayotgan murojaatlar',
       noNewLeads: 'Yangi murojaatlar yo\'q.',
+      noAppointmentsToday: 'Bugun uchun rejalashtirilgan qabullar yo\'q.',
+      noUpcomingAppointments: 'Yaqin orada tasdiqlangan qabullar mavjud emas.',
     },
   },
   ru: {
@@ -535,6 +539,8 @@ const translations: Record<Language, Translations> = {
       newLeadsCard: 'Новые заявки',
       pendingLeadsSubtitle: 'Заявки, ожидающие звонка администратора',
       noNewLeads: 'Новых заявок на звонок нет.',
+      noAppointmentsToday: 'На сегодня запланированных приёмов нет.',
+      noUpcomingAppointments: 'Подтверждённых предстоящих приёмов нет.',
     },
   },
 };

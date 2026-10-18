@@ -100,9 +100,19 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
       return;
     }
 
-    const loop = () => {
-      const engine = engineRef.current;
-      if (!engine) {
+    const engine = engineRef.current;
+    if (engine) {
+      // Flush clock delta before starting loop to eliminate rotation jumps after long pauses
+      engine.clock.getDelta();
+    }
+
+    const TARGET_FPS = 60;
+    const FRAME_INTERVAL_MS = 1000 / TARGET_FPS; // ~16.6ms
+    let lastFrameTimestamp = performance.now();
+
+    const loop = (timestamp: number) => {
+      const currentEngine = engineRef.current;
+      if (!currentEngine) {
         animationFrameIdRef.current = null;
         return;
       }
@@ -113,23 +123,33 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         return;
       }
 
-      const delta = engine.clock.getDelta();
-      const elapsedTime = engine.clock.getElapsedTime();
+      // Frame budget cap: throttle to target 60 FPS on 120Hz/144Hz monitors
+      const elapsedSinceLast = timestamp - lastFrameTimestamp;
+      if (elapsedSinceLast < FRAME_INTERVAL_MS) {
+        animationFrameIdRef.current = requestAnimationFrame(loop);
+        return;
+      }
+      lastFrameTimestamp = timestamp - (elapsedSinceLast % FRAME_INTERVAL_MS);
+
+      // Clamp delta to at most 0.05s (20 FPS equivalent) to prevent large jumps on resume
+      const rawDelta = currentEngine.clock.getDelta();
+      const delta = Math.min(rawDelta, 0.05);
+      const elapsedTime = currentEngine.clock.getElapsedTime();
 
       // Idle rotation and gentle floating when not dragged
       if (!isDraggingRef.current) {
-        engine.targetRotationY += delta * 0.35;
-        engine.toothGroup.position.y = 0.08 + Math.sin(elapsedTime * 1.5) * 0.06;
+        currentEngine.targetRotationY += delta * 0.35;
+        currentEngine.toothGroup.position.y = 0.08 + Math.sin(elapsedTime * 1.5) * 0.06;
       }
 
       // Smooth damping interpolation
-      engine.currentRotationY += (engine.targetRotationY - engine.currentRotationY) * 0.08;
-      engine.currentRotationX += (engine.targetRotationX - engine.currentRotationX) * 0.08;
+      currentEngine.currentRotationY += (currentEngine.targetRotationY - currentEngine.currentRotationY) * 0.08;
+      currentEngine.currentRotationX += (currentEngine.targetRotationX - currentEngine.currentRotationX) * 0.08;
 
-      engine.toothGroup.rotation.y = engine.currentRotationY;
-      engine.toothGroup.rotation.x = engine.currentRotationX;
+      currentEngine.toothGroup.rotation.y = currentEngine.currentRotationY;
+      currentEngine.toothGroup.rotation.x = currentEngine.currentRotationX;
 
-      engine.renderer.render(engine.scene, engine.camera);
+      currentEngine.renderer.render(currentEngine.scene, currentEngine.camera);
 
       if (typeof window !== 'undefined') {
         (window as any).__toothFrameCount = ((window as any).__toothFrameCount || 0) + 1;

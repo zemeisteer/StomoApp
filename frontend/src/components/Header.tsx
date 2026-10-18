@@ -29,19 +29,7 @@ export const Header: React.FC = () => {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-
-  // Close menus on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setMobileMenuOpen(false);
-        setClinicDropdownOpen(false);
-        menuButtonRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  const clinicButtonRef = useRef<HTMLButtonElement>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -223,6 +211,7 @@ export const Header: React.FC = () => {
             {/* 3. Klinika (Dropdown with Prices, Reviews, Articles, FAQ) */}
             <div className="relative" ref={dropdownRef}>
               <button
+                ref={clinicButtonRef}
                 type="button"
                 onClick={() => setClinicDropdownOpen(!clinicDropdownOpen)}
                 aria-expanded={clinicDropdownOpen}
