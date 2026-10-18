@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAuth, StaffRole } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
+import { api } from '../lib/api';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -35,12 +36,30 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState<number>(0);
 
   useEffect(() => {
     if (!isLoading && !user) {
       router.push('/admin/login');
     }
   }, [user, isLoading, router]);
+
+  useEffect(() => {
+    if (!user) return;
+    let isMounted = true;
+    const fetchPendingCount = async () => {
+      try {
+        const res = await api.getAdminAppointments({ status: 'PENDING', limit: 1 });
+        if (isMounted) setPendingCount(res?.total || 0);
+      } catch {}
+    };
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 25000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [user]);
 
   if (isLoading) {
     return (
@@ -222,6 +241,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
               >
                 <Icon className="w-4 h-4 shrink-0" />
                 <span>{item.label}</span>
+                {item.href === '/admin/calendar' && pendingCount > 0 && (
+                  <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[10px] shadow-sm animate-pulse">
+                    {pendingCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -285,6 +309,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
                     >
                       <Icon className="w-5 h-5" />
                       <span>{item.label}</span>
+                      {item.href === '/admin/calendar' && pendingCount > 0 && (
+                        <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[10px] shadow-sm animate-pulse">
+                          {pendingCount}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

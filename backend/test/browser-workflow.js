@@ -37,8 +37,8 @@ async function run() {
   console.log(`[DB Check] Direct Prisma connected to database: "${currentDb}"`);
 
   const EXPECTED_TEST_DB = process.env.TEST_DB_NAME || 'dentacare_test';
-  if (currentDb !== EXPECTED_TEST_DB && !currentDb.endsWith('_test')) {
-    throw new Error(`FAIL-CLOSED: Connected database "${currentDb}" is NOT the expected isolated test database ("${EXPECTED_TEST_DB}"). A database-name substring alone is insufficient proof of isolation.`);
+  if (currentDb !== EXPECTED_TEST_DB) {
+    throw new Error(`FAIL-CLOSED: Connected database "${currentDb}" does not match exact configured test database "${EXPECTED_TEST_DB}". A database-name substring or suffix match is rejected.`);
   }
   if (['dentacare', 'postgres', 'production', 'master', 'main'].includes(currentDb.toLowerCase()) || currentDb.toLowerCase().includes('prod')) {
     throw new Error(`FAIL-CLOSED: Refusing to run tests against protected development/production database "${currentDb}".`);

@@ -51,7 +51,13 @@ export default function AdminCalendarPage() {
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedStatus, setSelectedStatus] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('status') || '';
+    }
+    return '';
+  });
+  const [pendingCount, setPendingCount] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
 
@@ -142,12 +148,19 @@ export default function AdminCalendarPage() {
   const loadAppointments = async () => {
     try {
       setIsLoading(true);
-      const { dateFrom, dateTo } = getDateRange();
       const params: Record<string, any> = {
         limit: 200,
-        dateFrom,
-        dateTo,
       };
+
+      // If filtering explicitly by PENDING, show all pending bookings across all dates
+      if (selectedStatus === 'PENDING') {
+        params.status = 'PENDING';
+      } else {
+        const { dateFrom, dateTo } = getDateRange();
+        params.dateFrom = dateFrom;
+        params.dateTo = dateTo;
+        if (selectedStatus) params.status = selectedStatus;
+      }
 
       if (user?.role === 'DOCTOR') {
         params.doctorId = user.doctorId;
@@ -157,10 +170,14 @@ export default function AdminCalendarPage() {
 
       if (selectedBranchId) params.branchId = selectedBranchId;
       if (selectedServiceId) params.serviceId = selectedServiceId;
-      if (selectedStatus) params.status = selectedStatus;
 
-      const res = await api.getAdminAppointments(params);
-      setAppointments(res.items || []);
+      const [res, pendingRes] = await Promise.all([
+        api.getAdminAppointments(params),
+        api.getAdminAppointments({ status: 'PENDING', limit: 1 }).catch(() => ({ total: 0 })),
+      ]);
+
+      setAppointments(res?.items || []);
+      setPendingCount(pendingRes?.total || 0);
     } catch (e) {
       console.error('Failed to load appointments', e);
     } finally {
@@ -355,6 +372,17 @@ export default function AdminCalendarPage() {
               Bugun
             </button>
             <button
+              onClick={() => {
+                const tmr = new Date();
+                tmr.setDate(tmr.getDate() + 1);
+                setCurrentDate(tmr);
+              }}
+              className="px-3 py-1.5 border border-teal-200 bg-teal-50/50 hover:bg-teal-100/50 text-xs font-bold text-teal-800 rounded-xl transition-colors"
+              title="Ertangi kun jadvaliga o'tish"
+            >
+              Ertaga
+            </button>
+            <button
               onClick={handleNextDate}
               className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600"
               title="Keyingi"
@@ -453,7 +481,40 @@ export default function AdminCalendarPage() {
             <option value="CANCELLED">Bekor qilingan</option>
             <option value="NO_SHOW">Kelmadi</option>
           </select>
+
+          {/* Quick Pending Filter Button */}
+          <button
+            type="button"
+            onClick={() => setSelectedStatus(selectedStatus === 'PENDING' ? '' : 'PENDING')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+              selectedStatus === 'PENDING'
+                ? 'bg-amber-500 text-white shadow-md'
+                : 'bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-300'
+            }`}
+          >
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>Kutilayotgan arizalar ({pendingCount})</span>
+          </button>
         </div>
+
+        {/* Pending Website Bookings Notice Banner */}
+        {pendingCount > 0 && selectedStatus !== 'PENDING' && (
+          <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                Saytdan kelgan <strong>{pendingCount} ta</strong> tasdiqlash kutilayotgan ariza mavjud (ular joriy sana oralig&apos;idan tashqarida bo&apos;lishi mumkin).
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedStatus('PENDING')}
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold shadow-sm transition-colors self-start sm:self-auto shrink-0"
+            >
+              Arizalarni ko&apos;rish
+            </button>
+          </div>
+        )}
 
         {/* Appointments List / Grid */}
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">

@@ -26,35 +26,14 @@ async function main() {
     console.log(`Connected Test DB : "${dbName}"`);
 
     const EXPECTED_TEST_DB = process.env.TEST_DB_NAME || 'dentacare_test';
-    if (dbName !== EXPECTED_TEST_DB && !dbName.endsWith('_test')) {
-      throw new Error(`FAIL-CLOSED: Connected database "${dbName}" is not the expected isolated test database ("${EXPECTED_TEST_DB}"). A database-name substring alone is insufficient proof of isolation.`);
+    if (dbName !== EXPECTED_TEST_DB) {
+      throw new Error(`FAIL-CLOSED: Connected database "${dbName}" does not match exact configured test database "${EXPECTED_TEST_DB}". A database-name substring or suffix match is rejected.`);
     }
     if (['dentacare', 'postgres', 'production', 'master', 'main'].includes(dbName.toLowerCase()) || dbName.toLowerCase().includes('prod')) {
       throw new Error(`FAIL-CLOSED: Refusing to run tests against protected development/production database "${dbName}"!`);
     }
 
-    // 2. Ensure base admin user exists in test database
-    const existingAdmin = await prisma.staffUser.findUnique({
-      where: { email: 'admin@dentacare.local' },
-    });
-    if (!existingAdmin) {
-      console.log('Seeding admin user into test database...');
-      const hashedPassword = await bcrypt.hash('DentacareAdmin2026!', 10);
-      await prisma.staffUser.create({
-        data: {
-          email: 'admin@dentacare.local',
-          passwordHash: hashedPassword,
-          fullName: 'Test System Administrator',
-          role: 'OWNER',
-          isActive: true,
-        },
-      });
-      console.log('Admin user seeded in test database.');
-    } else {
-      console.log('Admin user verified in test database.');
-    }
-
-    // 3. Verify backend server identity
+    // 2. Verify backend server identity and exact database target
     console.log(`Checking backend API server at ${API_URL}/api/health ...`);
     let health;
     try {
@@ -65,14 +44,14 @@ async function main() {
       );
     }
 
-    if (health?.database?.name !== dbName) {
+    if (health?.database?.name !== EXPECTED_TEST_DB) {
       throw new Error(
-        `Database mismatch detected!\nBackend API is connected to: "${health?.database?.name}"\nTest runner is targeting:      "${dbName}"\nBoth MUST connect to the same test database. Please restart backend with DATABASE_URL=${TEST_DATABASE_URL}`,
+        `Database mismatch detected!\nBackend API is connected to: "${health?.database?.name}"\nExpected configured target: "${EXPECTED_TEST_DB}"\nBoth MUST connect to the same test database. Please restart backend with DATABASE_URL=${TEST_DATABASE_URL}`,
       );
     }
-    console.log(`Verified: Backend and test runner share test database "${dbName}".`);
+    console.log(`Verified: Backend and test runner share test database "${EXPECTED_TEST_DB}".`);
 
-    // 4. Verify frontend is responsive and rewritten API route targets test database
+    // 3. Verify frontend is responsive and rewritten API route targets exact test database
     console.log(`Checking frontend application at ${BASE_URL} ...`);
     try {
       const frontRes = await fetch(BASE_URL);
@@ -95,12 +74,33 @@ async function main() {
       );
     }
 
-    if (frontHealth?.database?.name !== dbName) {
+    if (frontHealth?.database?.name !== EXPECTED_TEST_DB) {
       throw new Error(
-        `Frontend API isolation failure!\nFrontend rewritten API route (${BASE_URL}/api/health) is connected to: "${frontHealth?.database?.name}"\nExpected test database: "${dbName}"\nThe frontend proxy is not routing to the isolated test database environment!`,
+        `Frontend API isolation failure!\nFrontend rewritten API route (${BASE_URL}/api/health) is connected to: "${frontHealth?.database?.name}"\nExpected test database: "${EXPECTED_TEST_DB}"\nThe frontend proxy is not routing to the isolated test database environment!`,
       );
     }
-    console.log(`Verified: Frontend rewritten API route connects to test database "${dbName}".`);
+    console.log(`Verified: Frontend rewritten API route connects to exact test database "${EXPECTED_TEST_DB}".`);
+
+    // 4. Complete isolation checks succeeded: now ensure base admin user exists in verified test database
+    const existingAdmin = await prisma.staffUser.findUnique({
+      where: { email: 'admin@dentacare.local' },
+    });
+    if (!existingAdmin) {
+      console.log('Seeding admin user into test database...');
+      const hashedPassword = await bcrypt.hash('DentacareAdmin2026!', 10);
+      await prisma.staffUser.create({
+        data: {
+          email: 'admin@dentacare.local',
+          passwordHash: hashedPassword,
+          fullName: 'Test System Administrator',
+          role: 'OWNER',
+          isActive: true,
+        },
+      });
+      console.log('Admin user seeded in test database.');
+    } else {
+      console.log('Admin user verified in test database.');
+    }
 
     // 5. Execute browser test workflow
     console.log('\nExecuting browser workflow test suite...');

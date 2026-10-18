@@ -28,18 +28,45 @@ export interface UpgradeLegacyRemindersOptions {
   dryRun?: boolean;
   batchSize?: number;
   maxJobs?: number;
+  legacyCursor?: string | null;
   maxUpcomingAudit?: number;
+  upcomingCursor?: string | null;
 }
 
 export interface UpgradeLegacyRemindersResult {
   scanned: number;
+  legacyScanned: number;
+  legacyCursor?: string | null;
+  hasMoreLegacy: boolean;
   upgraded: number;
   quarantined: number;
   cancelled: number;
   newlyCreated: number;
   skippedActiveLease: number;
+  upcomingScanned: number;
+  upcomingCursor?: string | null;
+  hasMoreUpcoming: boolean;
   errors: number;
+  isCommitted?: boolean;
   details?: Array<{ jobId: string; action: string; reason: string }>;
+}
+
+export interface ScheduleHistoryEvidence {
+  hasExplicitReschedule: boolean;
+  rescheduleTimestamps: Date[];
+  otherScheduleStartTimes: string[];
+}
+
+export type LegacyJobClassification =
+  | 'MALFORMED_PAYLOAD'
+  | 'OBSOLETE_NON_MATCHING_SCHEDULE'
+  | 'AMBIGUOUS_HISTORICAL'
+  | 'CURRENT_GENERATION_MATCH';
+
+export interface ClassifyLegacyJobResult {
+  classification: LegacyJobClassification;
+  targetScheduleRevision: number;
+  reason: string;
 }
 
 function parseSafeIsoTimestamp(value: unknown): Date | null {
@@ -112,6 +139,219 @@ export class NotificationsService {
     } catch {
       return String(dateOrIso);
     }
+  }
+
+  /**
+   * Retrieves schedule history evidence for an appointment to classify legacy reminder records accurately.
+   */
+  async getScheduleHistoryEvidence(
+    appointmentId: string,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<ScheduleHistoryEvidence> {
+    const historyRows = await client.appointmentStatusHistory.findMany({
+      where: { appointmentId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const rescheduleTimestamps: Date[] = [];
+    for (const h of historyRows) {
+      if (h.reason && (h.reason.includes('Qayta rejalashtirildi') || h.reason.toLowerCase().includes('resched'))) {
+        rescheduleTimestamps.push(h.createdAt);
+      }
+    }
+
+    // Inspect AuditLog if accessible
+    try {
+      const auditRows = await client.auditLog.findMany({
+        where: {
+          entityId: appointmentId,
+          action: 'appointment.rescheduled',
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      for (const a of auditRows) {
+        rescheduleTimestamps.push(a.createdAt);
+      }
+    } catch {
+      // Audit log might be empty or unavailable in specific transactional mocks
+    }
+
+    // Inspect other reminder jobs for this appointment
+    const otherJobs = await client.notificationJob.findMany({
+      where: {
+        appointmentId,
+        templateKey: { in: ['appointment_reminder', 'appointment_rescheduled'] },
+      },
+      select: { payload: true, createdAt: true },
+    });
+
+    const otherScheduleStartTimes: string[] = [];
+    for (const j of otherJobs) {
+      const pl = j.payload as any;
+      if (pl && typeof pl === 'object' && typeof pl.startTime === 'string') {
+        if (!otherScheduleStartTimes.includes(pl.startTime)) {
+          otherScheduleStartTimes.push(pl.startTime);
+        }
+      }
+    }
+
+    rescheduleTimestamps.sort((a, b) => a.getTime() - b.getTime());
+
+    return {
+      hasExplicitReschedule: rescheduleTimestamps.length > 0 || otherScheduleStartTimes.length > 1,
+      rescheduleTimestamps,
+      otherScheduleStartTimes,
+    };
+  }
+
+  /**
+   * Shared evidence-based classification policy for legacy reminder jobs:
+   *
+   * Classifies a legacy reminder job without relying solely on appointment.updatedAt or scheduleRevision > 1.
+   *
+   * Tradeoff Policy Documentation:
+   * When generation identity is genuinely ambiguous (e.g. legacy job with null revision, pre-dating an explicit
+   * reschedule or possessing conflicting history), we classify it as AMBIGUOUS_HISTORICAL (target revision 0).
+   * - It is archived rather than assigned to the current generation.
+   * - It does NOT suppress delivery of a current-generation reminder.
+   * Tradeoff:
+   * Suppressing a current reminder on ambiguous evidence risks a missed medical appointment (treatment disruption,
+   * health risk, patient absence). Allowing a fresh reminder risks at most a duplicate notification.
+   * Therefore, the system conservatively prioritizes attendance reliability over strict deduplication.
+   */
+  classifyLegacyReminderJob(
+    job: {
+      id: string;
+      appointmentId: string | null;
+      status: NotificationStatus;
+      createdAt: Date;
+      payload: any;
+    },
+    appointment: {
+      id: string;
+      status: AppointmentStatus | string;
+      startTime: Date;
+      scheduleRevision: number;
+      createdAt: Date;
+      updatedAt: Date;
+    } | null,
+    evidence?: ScheduleHistoryEvidence,
+    nowUtc = new Date(),
+  ): ClassifyLegacyJobResult {
+    // 1. Missing or unassociated appointment
+    if (!job.appointmentId || !appointment) {
+      return {
+        classification: 'OBSOLETE_NON_MATCHING_SCHEDULE',
+        targetScheduleRevision: 0,
+        reason: !job.appointmentId ? 'missing appointmentId' : `appointment not found`,
+      };
+    }
+
+    // 2. Terminal or past appointment
+    const terminalStatuses: string[] = [
+      AppointmentStatus.COMPLETED,
+      AppointmentStatus.CANCELLED,
+      AppointmentStatus.NO_SHOW,
+    ];
+    if (terminalStatuses.includes(appointment.status as string) || appointment.startTime <= nowUtc) {
+      return {
+        classification: 'OBSOLETE_NON_MATCHING_SCHEDULE',
+        targetScheduleRevision: 0,
+        reason: terminalStatuses.includes(appointment.status as string)
+          ? 'Appointment in terminal status'
+          : 'Appointment is in the past',
+      };
+    }
+
+    // 3. Payload validation
+    const payload = job.payload;
+    if (!payload || typeof payload !== 'object') {
+      return {
+        classification: 'MALFORMED_PAYLOAD',
+        targetScheduleRevision: 0,
+        reason: 'Missing or invalid payload',
+      };
+    }
+
+    const parsedStartTime = parseSafeIsoTimestamp(payload.startTime);
+    if (!parsedStartTime) {
+      return {
+        classification: 'MALFORMED_PAYLOAD',
+        targetScheduleRevision: 0,
+        reason: 'Malformed or missing startTime in payload',
+      };
+    }
+
+    // 4. Start time comparison with current schedule
+    const timeDiffMs = Math.abs(parsedStartTime.getTime() - appointment.startTime.getTime());
+    const matchesCurrentStartTime = timeDiffMs < 1000;
+
+    if (!matchesCurrentStartTime) {
+      return {
+        classification: 'OBSOLETE_NON_MATCHING_SCHEDULE',
+        targetScheduleRevision: 0,
+        reason: 'Payload startTime does not match current appointment schedule',
+      };
+    }
+
+    // 5. Historical A -> B -> A and Rescheduling Evidence Analysis:
+    const jobCreatedMs = new Date(job.createdAt).getTime();
+    const apptScheduleRev = appointment.scheduleRevision ?? 1;
+
+    let hasRescheduleBeforeOrIntervening = false;
+
+    if (evidence) {
+      for (const reschedDate of evidence.rescheduleTimestamps) {
+        if (reschedDate.getTime() > jobCreatedMs) {
+          hasRescheduleBeforeOrIntervening = true;
+          break;
+        }
+      }
+
+      if (!hasRescheduleBeforeOrIntervening && evidence.otherScheduleStartTimes.length > 1) {
+        if (apptScheduleRev > 1) {
+          hasRescheduleBeforeOrIntervening = true;
+        }
+      }
+    }
+
+    // If explicit reschedule history shows a reschedule occurred after the job:
+    if (hasRescheduleBeforeOrIntervening) {
+      return {
+        classification: 'AMBIGUOUS_HISTORICAL',
+        targetScheduleRevision: 0,
+        reason: 'Ambiguous legacy generation: record pre-dates appointment rescheduling (A -> B -> A)',
+      };
+    }
+
+    // If appointment scheduleRevision > 1:
+    // If we have explicit evidence that ALL reschedules occurred before the job was created,
+    // then the job was genuinely created for this current revision.
+    // Otherwise, if we do not have explicit evidence proving the job was created after the reschedules,
+    // and the job pre-dates the appointment update (job.createdAt < appointment.updatedAt),
+    // then a legacy job (scheduleRevision === null) cannot be safely assigned to the latest generation!
+    if (apptScheduleRev > 1) {
+      const apptUpdatedMs = new Date(appointment.updatedAt).getTime();
+      const hasExplicitProofAfterReschedule =
+        evidence &&
+        evidence.rescheduleTimestamps.length > 0 &&
+        evidence.rescheduleTimestamps.every((t) => jobCreatedMs >= t.getTime());
+
+      if (!hasExplicitProofAfterReschedule && (jobCreatedMs < apptUpdatedMs || (evidence && evidence.hasExplicitReschedule))) {
+        return {
+          classification: 'AMBIGUOUS_HISTORICAL',
+          targetScheduleRevision: 0,
+          reason: 'Ambiguous legacy generation: record pre-dates appointment rescheduling (A -> B -> A)',
+        };
+      }
+    }
+
+    // Unrelated edits (where updatedAt changed but no rescheduling occurred) do not trigger ambiguous classification
+    return {
+      classification: 'CURRENT_GENERATION_MATCH',
+      targetScheduleRevision: apptScheduleRev,
+      reason: `Matched current generation (revision ${apptScheduleRev})`,
+    };
   }
 
   /**
@@ -269,6 +509,25 @@ export class NotificationsService {
 
     const currentScheduleRev = lockedAppt.schedule_revision ?? appointment.scheduleRevision ?? 1;
     const currentApptRev = lockedAppt.revision ?? appointment.revision ?? 1;
+
+    // Check if an unresolved active legacy reminder lease exists for this appointment
+    const fiveMinutesAgo = new Date(nowUtc.getTime() - 5 * 60 * 1000);
+    const [activeLegacyJob] = await tx.$queryRaw<Array<{ id: string; locked_at: Date }>>`
+      SELECT id, "locked_at"
+      FROM "notification_jobs"
+      WHERE "appointment_id" = ${appointment.id}
+        AND "template_key" = 'appointment_reminder'
+        AND "schedule_revision" IS NULL
+        AND status = 'PROCESSING'::"notification_status"
+        AND "locked_at" >= ${fiveMinutesAgo}
+      FOR UPDATE;
+    `;
+
+    if (activeLegacyJob) {
+      // Defer recovery while unresolved active legacy worker lease exists; do NOT create a competing reminder
+      return { id: activeLegacyJob.id, isNewlyCreated: false, deferredActiveLease: true };
+    }
+
     const canonicalKey = `reminder_${appointment.id}_s${currentScheduleRev}`;
 
     // 2. Lock existing notification job for canonical key if present
@@ -388,10 +647,11 @@ export class NotificationsService {
    * 1. Safely parses ISO timestamps in JS without risky database SQL timestamptz casts.
    * 2. Quarantines/cancels jobs with null or orphaned appointmentId, missing/malformed payloads.
    * 3. Cancels obsolete pending/processing jobs for terminal or past appointments while preserving historical jobs.
-   * 4. Accurately matches startTime against current schedule (handles historical A -> B -> A rescheduling).
+   * 4. Accurately matches startTime and uses shared evidence-based classification policy (handles A -> B -> A and pre-migration reschedules).
    * 5. Detects and deduplicates multiple legacy jobs mapping to the same schedule.
-   * 6. Preserves active worker leases (< 5m).
-   * 7. Supports bounded batching, dry-run mode, and returns comprehensive metrics.
+   * 6. Preserves active worker leases (< 5m) and defers upcoming audit recovery while an unresolved legacy lease is in flight.
+   * 7. Supports bounded batching, resumable cursor pagination for both phases, dry-run simulation of planned state,
+   *    and respects transaction ownership (does not retry inside caller-owned aborted transactions).
    */
   async upgradeLegacyReminderJobs(
     txOrOptions?: Prisma.TransactionClient | PrismaService | UpgradeLegacyRemindersOptions,
@@ -411,46 +671,75 @@ export class NotificationsService {
 
     const dryRun = options.dryRun ?? false;
     const batchSize = Math.max(1, Math.min(options.batchSize ?? 100, 500));
-    const maxJobs = options.maxJobs ?? 10000;
+    const maxLegacyJobs = options.maxJobs ?? 10000;
     const nowUtc = new Date();
+
+    const isMethodOwnedTx = '$transaction' in client;
 
     const result: UpgradeLegacyRemindersResult = {
       scanned: 0,
+      legacyScanned: 0,
+      legacyCursor: null,
+      hasMoreLegacy: false,
       upgraded: 0,
       quarantined: 0,
       cancelled: 0,
       newlyCreated: 0,
       skippedActiveLease: 0,
+      upcomingScanned: 0,
+      upcomingCursor: null,
+      hasMoreUpcoming: false,
       errors: 0,
+      isCommitted: !dryRun && isMethodOwnedTx,
       details: [],
     };
 
-    // Tracks planned upgrades during dry-run so upcoming audit pass avoids double-counting missing reminders
-    const plannedUpgrades = new Set<string>();
+    // Tracks simulated state during dry-run so upcoming audit pass and duplicate detection
+    // accurately mirror live behavior on fixtures containing duplicates, failed, cancelled, delivered, and active leases.
+    const simulatedJobsByAppt = new Map<
+      string,
+      Array<{
+        id: string;
+        status: NotificationStatus;
+        scheduleRevision: number;
+        deduplicationKey?: string;
+      }>
+    >();
 
-    let lastCursorId: string | undefined = undefined;
+    // ==========================================
+    // Phase 1: Legacy Reminder Jobs Upgrade
+    // ==========================================
+    let currentLegacyCursor = options.legacyCursor || null;
+    let hasMoreLegacy = false;
 
-    while (result.scanned < maxJobs) {
-      const takeCount = Math.min(batchSize, maxJobs - result.scanned);
+    while (result.legacyScanned < maxLegacyJobs) {
+      const takeCount = Math.min(batchSize, maxLegacyJobs - result.legacyScanned);
       const jobs: any[] = await (client.notificationJob.findMany as any)({
         where: {
           templateKey: 'appointment_reminder',
           scheduleRevision: null,
+          ...(currentLegacyCursor ? { id: { gt: currentLegacyCursor } } : {}),
         },
-        take: takeCount,
-        ...(lastCursorId ? { skip: 1, cursor: { id: lastCursorId } } : {}),
+        take: takeCount + 1,
         orderBy: { id: 'asc' },
       });
 
       if (jobs.length === 0) break;
-      lastCursorId = jobs[jobs.length - 1].id;
 
-      for (const job of jobs) {
-        result.scanned++;
+      const jobsToProcess = jobs.slice(0, takeCount);
+      const lookaheadHasMore = jobs.length > takeCount;
+
+      currentLegacyCursor = jobsToProcess[jobsToProcess.length - 1].id;
+      if (lookaheadHasMore && result.legacyScanned + jobsToProcess.length >= maxLegacyJobs) {
+        hasMoreLegacy = true;
+      }
+
+      for (const job of jobsToProcess) {
+        result.legacyScanned++;
         try {
           if (dryRun) {
             // ==========================================
-            // DRY-RUN MODE: Pure Read-Only Inspection
+            // DRY-RUN MODE: Pure Read-Only Inspection with Simulation
             // ==========================================
             if (!job.appointmentId) {
               result.quarantined++;
@@ -480,71 +769,48 @@ export class NotificationsService {
               continue;
             }
 
+            // Check active worker lease (< 5m)
             if (job.status === NotificationStatus.PROCESSING) {
               const leaseAgeMs = job.lockedAt ? nowUtc.getTime() - new Date(job.lockedAt).getTime() : Infinity;
               if (leaseAgeMs < 5 * 60 * 1000) {
                 result.skippedActiveLease++;
                 result.details?.push({ jobId: job.id, action: 'SKIPPED', reason: 'Active worker lease' });
+                if (!simulatedJobsByAppt.has(appt.id)) simulatedJobsByAppt.set(appt.id, []);
+                simulatedJobsByAppt.get(appt.id)!.push({
+                  id: job.id,
+                  status: NotificationStatus.PROCESSING,
+                  scheduleRevision: -1, // marker for active legacy lease
+                });
                 continue;
               }
             }
 
-            const terminalStatuses: string[] = [
-              AppointmentStatus.COMPLETED,
-              AppointmentStatus.CANCELLED,
-              AppointmentStatus.NO_SHOW,
-            ];
-            const isTerminal = terminalStatuses.includes(appt.status);
-            const isPast = appt.startTime <= nowUtc;
+            const evidence = await this.getScheduleHistoryEvidence(appt.id, client);
+            const classification = this.classifyLegacyReminderJob(
+              job,
+              appt,
+              evidence,
+              nowUtc,
+            );
 
-            if (isTerminal || isPast) {
+            const isDelivered = job.status === NotificationStatus.SENT || job.status === NotificationStatus.SIMULATED;
+
+            if (classification.classification === 'MALFORMED_PAYLOAD') {
+              result.quarantined++;
+              if (isDelivered) {
+                result.upgraded++;
+                result.details?.push({ jobId: job.id, action: 'QUARANTINED_ARCHIVED', reason: `${classification.reason} (delivered status preserved)` });
+              } else {
+                result.cancelled++;
+                result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: classification.reason });
+              }
+              continue;
+            }
+
+            if (classification.classification === 'OBSOLETE_NON_MATCHING_SCHEDULE') {
               if (job.status === NotificationStatus.PENDING || job.status === NotificationStatus.PROCESSING) {
                 result.cancelled++;
-                result.details?.push({
-                  jobId: job.id,
-                  action: 'CANCELLED',
-                  reason: isTerminal ? 'Appointment in terminal status' : 'Appointment is in the past',
-                });
-              } else {
-                result.upgraded++;
-                result.details?.push({ jobId: job.id, action: 'UPGRADED', reason: 'Historical delivered/failed job archived' });
-              }
-              continue;
-            }
-
-            const payload = job.payload as any;
-            if (!payload || typeof payload !== 'object') {
-              result.quarantined++;
-              if (job.status === NotificationStatus.SENT || job.status === NotificationStatus.SIMULATED) {
-                result.upgraded++;
-                result.details?.push({ jobId: job.id, action: 'QUARANTINED_ARCHIVED', reason: 'Missing or invalid payload (delivered status preserved)' });
-              } else {
-                result.cancelled++;
-                result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Missing or invalid payload' });
-              }
-              continue;
-            }
-
-            const parsedStartTime = parseSafeIsoTimestamp(payload.startTime);
-            if (!parsedStartTime) {
-              result.quarantined++;
-              if (job.status === NotificationStatus.SENT || job.status === NotificationStatus.SIMULATED) {
-                result.upgraded++;
-                result.details?.push({ jobId: job.id, action: 'QUARANTINED_ARCHIVED', reason: 'Malformed or missing startTime (delivered status preserved)' });
-              } else {
-                result.cancelled++;
-                result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Malformed or missing startTime in payload' });
-              }
-              continue;
-            }
-
-            const timeDiffMs = Math.abs(parsedStartTime.getTime() - appt.startTime.getTime());
-            const matchesCurrentSchedule = timeDiffMs < 1000;
-
-            if (!matchesCurrentSchedule) {
-              if (job.status === NotificationStatus.PENDING || job.status === NotificationStatus.PROCESSING) {
-                result.cancelled++;
-                result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'StartTime does not match current schedule' });
+                result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: classification.reason });
               } else {
                 result.upgraded++;
                 result.details?.push({ jobId: job.id, action: 'UPGRADED', reason: 'Historical non-matching job archived' });
@@ -552,28 +818,22 @@ export class NotificationsService {
               continue;
             }
 
-            // Historical A -> B -> A Reschedule Identity Verification:
-            // If appointment was rescheduled (scheduleRevision > 1) and job pre-dates the latest reschedule,
-            // timestamp equality does NOT establish identity with current generation!
-            const apptScheduleRev = appt.scheduleRevision ?? 1;
-            const jobCreatedAtMs = new Date(job.createdAt).getTime();
-            const apptUpdatedAtMs = new Date(appt.updatedAt).getTime();
-            const isAmbiguousHistorical = apptScheduleRev > 1 && jobCreatedAtMs < apptUpdatedAtMs;
-
-            if (isAmbiguousHistorical) {
-              if (job.status === NotificationStatus.SENT || job.status === NotificationStatus.SIMULATED) {
+            if (classification.classification === 'AMBIGUOUS_HISTORICAL') {
+              if (isDelivered) {
                 result.upgraded++;
-                result.details?.push({ jobId: job.id, action: 'AMBIGUOUS_ARCHIVED', reason: 'Ambiguous legacy generation pre-dating rescheduling archived' });
+                result.details?.push({ jobId: job.id, action: 'AMBIGUOUS_ARCHIVED', reason: classification.reason });
               } else {
                 result.cancelled++;
-                result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Ambiguous legacy generation pre-dating rescheduling cancelled' });
+                result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: classification.reason });
               }
               continue;
             }
 
-            // Schedule revision matching: check duplicate
-            const targetScheduleRev = appt.scheduleRevision ?? 1;
-            const existingScheduleJob = await client.notificationJob.findFirst({
+            // Classification is CURRENT_GENERATION_MATCH
+            const targetScheduleRev = classification.targetScheduleRevision;
+
+            // Check duplicate in DB and in simulated planned state
+            const existingDbScheduleJob = await client.notificationJob.findFirst({
               where: {
                 appointmentId: appt.id,
                 templateKey: 'appointment_reminder',
@@ -582,7 +842,12 @@ export class NotificationsService {
               },
             });
 
-            if (existingScheduleJob) {
+            const simulatedApptJobs = simulatedJobsByAppt.get(appt.id) || [];
+            const existingSimulatedJob = simulatedApptJobs.find(
+              (sj) => sj.scheduleRevision === targetScheduleRev && sj.id !== job.id,
+            );
+
+            if (existingDbScheduleJob || existingSimulatedJob) {
               if (job.status === NotificationStatus.PENDING || job.status === NotificationStatus.PROCESSING) {
                 result.cancelled++;
                 result.details?.push({ jobId: job.id, action: 'CANCELLED', reason: 'Duplicate legacy reminder for schedule' });
@@ -593,20 +858,28 @@ export class NotificationsService {
               continue;
             }
 
+            // Not a duplicate: upgrade this job in simulation
             result.upgraded++;
-            plannedUpgrades.add(`${appt.id}:${targetScheduleRev}`);
             result.details?.push({ jobId: job.id, action: 'UPGRADED', reason: `Upgraded to schedule revision ${targetScheduleRev}` });
+
+            if (!simulatedJobsByAppt.has(appt.id)) simulatedJobsByAppt.set(appt.id, []);
+            simulatedJobsByAppt.get(appt.id)!.push({
+              id: job.id,
+              status: job.status,
+              scheduleRevision: targetScheduleRev,
+              deduplicationKey: `reminder_${appt.id}_s${targetScheduleRev}`,
+            });
             continue;
           }
 
           // ==========================================
           // LIVE MODE: Transactional & Concurrency Safe
           // ==========================================
-          // Use short transaction per item with retry logic to avoid long lock contention
           let attempts = 0;
           let jobHandled = false;
+          const maxAttempts = isMethodOwnedTx ? 3 : 1;
 
-          while (attempts < 3 && !jobHandled) {
+          while (attempts < maxAttempts && !jobHandled) {
             attempts++;
             try {
               const runInTx = async (tx: Prisma.TransactionClient) => {
@@ -649,161 +922,124 @@ export class NotificationsService {
 
                 const isDelivered = lockedJob.status === NotificationStatus.SENT || lockedJob.status === NotificationStatus.SIMULATED;
 
-                // Case A: Missing or invalid appointment
-                if (!lockedJob.appointmentId || !lockedAppt) {
-                  const errorMsg = !lockedJob.appointmentId
-                    ? 'Orphaned legacy reminder: missing appointmentId'
-                    : 'Orphaned legacy reminder: appointment not found';
+                // Shared classification with evidence
+                let evidence: ScheduleHistoryEvidence | undefined = undefined;
+                if (lockedAppt) {
+                  evidence = await this.getScheduleHistoryEvidence(lockedAppt.id, tx);
+                }
+
+                const classification = this.classifyLegacyReminderJob(
+                  lockedJob,
+                  lockedAppt,
+                  evidence,
+                  nowUtc,
+                );
+
+                if (classification.classification === 'MALFORMED_PAYLOAD') {
                   if (isDelivered) {
                     await tx.notificationJob.update({
                       where: { id: lockedJob.id },
                       data: {
                         scheduleRevision: 0,
-                        ...(lockedJob.lastError ? {} : { lastError: `${errorMsg} (quarantined delivered record)` }),
+                        ...(lockedJob.lastError ? {} : { lastError: `Quarantined: ${classification.reason} (delivered status preserved)` }),
                       },
                     });
-                    return { action: 'QUARANTINED_ARCHIVED', quarantined: true, reason: `${errorMsg} (delivered status preserved)` };
+                    return { action: 'QUARANTINED_ARCHIVED', quarantined: true, reason: `${classification.reason} (delivered status preserved)` };
                   } else {
                     await tx.notificationJob.update({
                       where: { id: lockedJob.id },
                       data: {
                         status: NotificationStatus.CANCELLED,
-                        lastError: errorMsg,
+                        lastError: `Quarantined: ${classification.reason}`,
                         scheduleRevision: 0,
                         leaseToken: null,
                         lockedAt: null,
                       },
                     });
-                    return { action: 'CANCELLED', quarantined: true, reason: errorMsg };
+                    return { action: 'CANCELLED', quarantined: true, reason: classification.reason };
                   }
                 }
 
-                // Case B: Terminal or past appointment
-                const terminalStatuses: string[] = [
-                  AppointmentStatus.COMPLETED,
-                  AppointmentStatus.CANCELLED,
-                  AppointmentStatus.NO_SHOW,
-                ];
-                const isTerminal = terminalStatuses.includes(lockedAppt.status);
-                const isPast = lockedAppt.startTime <= nowUtc;
+                if (classification.classification === 'OBSOLETE_NON_MATCHING_SCHEDULE') {
+                  if (!lockedJob.appointmentId || !lockedAppt) {
+                    const errReason = classification.reason;
+                    if (isDelivered) {
+                      await tx.notificationJob.update({
+                        where: { id: lockedJob.id },
+                        data: {
+                          scheduleRevision: 0,
+                          ...(lockedJob.lastError ? {} : { lastError: `Quarantined: ${errReason} (delivered status preserved)` }),
+                        },
+                      });
+                      return { action: 'QUARANTINED_ARCHIVED', quarantined: true, reason: `${errReason} (delivered status preserved)` };
+                    } else {
+                      await tx.notificationJob.update({
+                        where: { id: lockedJob.id },
+                        data: {
+                          status: NotificationStatus.CANCELLED,
+                          lastError: `Quarantined: ${errReason}`,
+                          scheduleRevision: 0,
+                          leaseToken: null,
+                          lockedAt: null,
+                        },
+                      });
+                      return { action: 'CANCELLED', quarantined: true, reason: errReason };
+                    }
+                  }
 
-                if (isTerminal || isPast) {
                   if (lockedJob.status === NotificationStatus.PENDING || lockedJob.status === NotificationStatus.PROCESSING) {
                     await tx.notificationJob.update({
                       where: { id: lockedJob.id },
                       data: {
                         status: NotificationStatus.CANCELLED,
-                        lastError: isTerminal ? 'Obsolete legacy reminder for terminal appointment' : 'Obsolete legacy reminder for past appointment',
+                        lastError: `Eski yoki tasdiqlanmagan eslatma (${classification.reason})`,
                         scheduleRevision: 0,
                         leaseToken: null,
                         lockedAt: null,
                       },
                     });
-                    return { action: 'CANCELLED', reason: isTerminal ? 'Terminal appointment' : 'Past appointment' };
+                    return { action: 'CANCELLED', reason: classification.reason };
                   } else {
                     await tx.notificationJob.update({
                       where: { id: lockedJob.id },
                       data: {
                         scheduleRevision: 0,
-                        ...(lockedJob.lastError ? {} : { lastError: 'Historical delivered/failed job archived' }),
+                        ...(lockedJob.lastError ? {} : { lastError: 'Historical reminder archived' }),
                       },
                     });
-                    return { action: 'UPGRADED_HISTORICAL', reason: 'Historical delivered/failed job archived' };
+                    return { action: 'UPGRADED_HISTORICAL', reason: 'Historical reminder archived' };
                   }
                 }
 
-                // Case C: Missing or malformed payload
-                const payload = lockedJob.payload as any;
-                const parsedStartTime = payload && typeof payload === 'object' ? parseSafeIsoTimestamp(payload.startTime) : null;
-
-                if (!parsedStartTime) {
+                if (classification.classification === 'AMBIGUOUS_HISTORICAL') {
                   if (isDelivered) {
                     await tx.notificationJob.update({
                       where: { id: lockedJob.id },
                       data: {
                         scheduleRevision: 0,
-                        ...(lockedJob.lastError ? {} : { lastError: 'Quarantined: malformed or missing startTime (delivered status preserved)' }),
+                        ...(lockedJob.lastError ? {} : { lastError: classification.reason }),
                       },
                     });
-                    return { action: 'QUARANTINED_ARCHIVED', quarantined: true, reason: 'Malformed payload (delivered status preserved)' };
+                    return { action: 'AMBIGUOUS_ARCHIVED', reason: classification.reason };
                   } else {
                     await tx.notificationJob.update({
                       where: { id: lockedJob.id },
                       data: {
                         status: NotificationStatus.CANCELLED,
-                        lastError: 'Quarantined: malformed or missing startTime',
+                        lastError: classification.reason,
                         scheduleRevision: 0,
                         leaseToken: null,
                         lockedAt: null,
                       },
                     });
-                    return { action: 'CANCELLED', quarantined: true, reason: 'Malformed or missing startTime' };
+                    return { action: 'CANCELLED', reason: classification.reason };
                   }
                 }
 
-                // Case D: Schedule matching
-                const timeDiffMs = Math.abs(parsedStartTime.getTime() - lockedAppt.startTime.getTime());
-                const matchesCurrentSchedule = timeDiffMs < 1000;
-
-                if (!matchesCurrentSchedule) {
-                  if (lockedJob.status === NotificationStatus.PENDING || lockedJob.status === NotificationStatus.PROCESSING) {
-                    await tx.notificationJob.update({
-                      where: { id: lockedJob.id },
-                      data: {
-                        status: NotificationStatus.CANCELLED,
-                        lastError: 'Eski yoki tasdiqlanmagan eslatma (migratsiya taftishi orqali bekor qilindi - schedule does not match current appointment)',
-                        scheduleRevision: 0,
-                        leaseToken: null,
-                        lockedAt: null,
-                      },
-                    });
-                    return { action: 'CANCELLED', reason: 'StartTime does not match current schedule' };
-                  } else {
-                    await tx.notificationJob.update({
-                      where: { id: lockedJob.id },
-                      data: {
-                        scheduleRevision: 0,
-                        ...(lockedJob.lastError ? {} : { lastError: 'Historical reminder for prior schedule' }),
-                      },
-                    });
-                    return { action: 'UPGRADED_HISTORICAL', reason: 'Historical non-matching job archived' };
-                  }
-                }
-
-                // Case E: Historical A -> B -> A Rescheduling & Ambiguous Generations
-                const apptScheduleRev = lockedAppt.scheduleRevision ?? 1;
-                const jobCreatedAtMs = new Date(lockedJob.createdAt).getTime();
-                const apptUpdatedAtMs = new Date(lockedAppt.updatedAt).getTime();
-                const isAmbiguousHistorical = apptScheduleRev > 1 && jobCreatedAtMs < apptUpdatedAtMs;
-
-                if (isAmbiguousHistorical) {
-                  if (isDelivered) {
-                    await tx.notificationJob.update({
-                      where: { id: lockedJob.id },
-                      data: {
-                        scheduleRevision: 0,
-                        ...(lockedJob.lastError ? {} : { lastError: 'Ambiguous legacy generation: pre-dates appointment rescheduling' }),
-                      },
-                    });
-                    return { action: 'AMBIGUOUS_ARCHIVED', reason: 'Ambiguous legacy generation pre-dating rescheduling archived' };
-                  } else {
-                    await tx.notificationJob.update({
-                      where: { id: lockedJob.id },
-                      data: {
-                        status: NotificationStatus.CANCELLED,
-                        lastError: 'Ambiguous legacy reminder pre-dating rescheduling cancelled',
-                        scheduleRevision: 0,
-                        leaseToken: null,
-                        lockedAt: null,
-                      },
-                    });
-                    return { action: 'CANCELLED', reason: 'Ambiguous legacy generation pre-dating rescheduling cancelled' };
-                  }
-                }
-
-                // Case F: Valid matching generation
-                const targetScheduleRev = lockedAppt.scheduleRevision ?? 1;
+                // Case: CURRENT_GENERATION_MATCH
+                const targetScheduleRev = classification.targetScheduleRevision;
                 const canonicalKey = `reminder_${lockedAppt.id}_s${targetScheduleRev}`;
+
                 const existingSchedule = await tx.notificationJob.findFirst({
                   where: {
                     appointmentId: lockedAppt.id,
@@ -858,7 +1094,7 @@ export class NotificationsService {
               };
 
               let txResult: any;
-              if ('$transaction' in client) {
+              if (isMethodOwnedTx) {
                 txResult = await (client as PrismaService).$transaction(runInTx, {
                   maxWait: 5000,
                   timeout: 10000,
@@ -882,13 +1118,22 @@ export class NotificationsService {
                 } else if (txResult.action === 'QUARANTINED_ARCHIVED') {
                   result.upgraded++;
                   result.details?.push({ jobId: job.id, action: 'QUARANTINED_ARCHIVED', reason: txResult.reason });
-                } else if (txResult.action === 'UPGRADED' || txResult.action === 'UPGRADED_HISTORICAL' || txResult.action === 'AMBIGUOUS_ARCHIVED') {
+                } else if (
+                  txResult.action === 'UPGRADED' ||
+                  txResult.action === 'UPGRADED_HISTORICAL' ||
+                  txResult.action === 'AMBIGUOUS_ARCHIVED'
+                ) {
                   result.upgraded++;
                   result.details?.push({ jobId: job.id, action: txResult.action, reason: txResult.reason });
                 }
               }
             } catch (txErr: any) {
-              if (attempts >= 3) {
+              if (!isMethodOwnedTx) {
+                // Outer transaction: NEVER retry inside an aborted PostgreSQL transaction!
+                // Propagate immediately so caller can roll back outer transaction.
+                throw txErr;
+              }
+              if (attempts >= maxAttempts) {
                 throw txErr;
               }
               await new Promise((r) => setTimeout(r, 20 * attempts + Math.random() * 20));
@@ -898,27 +1143,33 @@ export class NotificationsService {
           result.errors++;
           result.details?.push({ jobId: job.id, action: 'ERROR', reason: jobErr?.message || 'Unexpected error' });
           this.logger.error(`Error repairing legacy reminder job ${job.id}: ${jobErr?.message}`);
+          if (!isMethodOwnedTx) {
+            throw jobErr;
+          }
         }
       }
     }
 
+    result.legacyCursor = hasMoreLegacy ? currentLegacyCursor : null;
+    result.hasMoreLegacy = hasMoreLegacy;
+
     // ==========================================
-    // 8. Bounded Upcoming Eligible Appointments Audit
+    // Phase 2: Bounded Upcoming Eligible Appointments Audit
     // ==========================================
     const upcomingBatchSize = batchSize;
-    const maxUpcoming = options.maxUpcomingAudit ?? Math.min(maxJobs, 5000);
-    let upcomingScanned = 0;
-    let lastUpcomingId: string | undefined = undefined;
+    const maxUpcoming = options.maxUpcomingAudit ?? Math.min(maxLegacyJobs, 5000);
+    let currentUpcomingCursor = options.upcomingCursor || null;
+    let hasMoreUpcoming = false;
 
-    while (upcomingScanned < maxUpcoming) {
-      const takeCount = Math.min(upcomingBatchSize, maxUpcoming - upcomingScanned);
+    while (result.upcomingScanned < maxUpcoming) {
+      const takeCount = Math.min(upcomingBatchSize, maxUpcoming - result.upcomingScanned);
       const eligibleUpcoming: any[] = await (client.appointment.findMany as any)({
         where: {
           status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.PENDING] },
           startTime: { gt: nowUtc },
+          ...(currentUpcomingCursor ? { id: { gt: currentUpcomingCursor } } : {}),
         },
-        take: takeCount,
-        ...(lastUpcomingId ? { skip: 1, cursor: { id: lastUpcomingId } } : {}),
+        take: takeCount + 1,
         orderBy: { id: 'asc' },
         include: {
           patient: true,
@@ -926,14 +1177,115 @@ export class NotificationsService {
       });
 
       if (eligibleUpcoming.length === 0) break;
-      lastUpcomingId = eligibleUpcoming[eligibleUpcoming.length - 1].id;
 
-      for (const appt of eligibleUpcoming) {
-        upcomingScanned++;
+      const upcomingToProcess = eligibleUpcoming.slice(0, takeCount);
+      const lookaheadHasMoreUpcoming = eligibleUpcoming.length > takeCount;
+
+      currentUpcomingCursor = upcomingToProcess[upcomingToProcess.length - 1].id;
+      if (lookaheadHasMoreUpcoming && result.upcomingScanned + upcomingToProcess.length >= maxUpcoming) {
+        hasMoreUpcoming = true;
+      }
+
+      for (const appt of upcomingToProcess) {
+        result.upcomingScanned++;
         const currentRev = appt.scheduleRevision ?? 1;
 
-        // In dryRun: if plannedUpgrades already scheduled an upgrade for this appointment, avoid double-counting
-        if (dryRun && plannedUpgrades.has(`${appt.id}:${currentRev}`)) {
+        if (dryRun) {
+          // In dryRun: check if an unresolved active legacy lease exists for this appointment
+          const fiveMinutesAgo = new Date(nowUtc.getTime() - 5 * 60 * 1000);
+          const activeLegacyLeaseInDb = await client.notificationJob.findFirst({
+            where: {
+              appointmentId: appt.id,
+              templateKey: 'appointment_reminder',
+              scheduleRevision: null,
+              status: NotificationStatus.PROCESSING,
+              lockedAt: { gte: fiveMinutesAgo },
+            },
+          });
+
+          const simulatedJobs = simulatedJobsByAppt.get(appt.id) || [];
+          const activeLegacyLeaseInSim = simulatedJobs.some(
+            (sj) => sj.status === NotificationStatus.PROCESSING && sj.scheduleRevision === -1,
+          );
+
+          if (activeLegacyLeaseInDb || activeLegacyLeaseInSim) {
+            result.skippedActiveLease++;
+            result.details?.push({
+              jobId: `active_lease_${appt.id}`,
+              action: 'DEFERRED_ACTIVE_LEASE',
+              reason: `Deferred recovery in dry-run: active legacy worker lease in flight for appointment ${appt.id}`,
+            });
+            continue;
+          }
+
+          // Check if DB already has active/delivered job for current generation
+          const hasActiveOrDeliveredInDb = await client.notificationJob.findFirst({
+            where: {
+              appointmentId: appt.id,
+              templateKey: 'appointment_reminder',
+              scheduleRevision: currentRev,
+              status: {
+                in: [
+                  NotificationStatus.PENDING,
+                  NotificationStatus.PROCESSING,
+                  NotificationStatus.SENT,
+                  NotificationStatus.SIMULATED,
+                ],
+              },
+            },
+          });
+
+          // Check if simulated state has active/delivered job for current generation
+          const hasActiveOrDeliveredInSim = simulatedJobs.some(
+            (sj) =>
+              sj.scheduleRevision === currentRev &&
+              (
+                [
+                  NotificationStatus.PENDING,
+                  NotificationStatus.PROCESSING,
+                  NotificationStatus.SENT,
+                  NotificationStatus.SIMULATED,
+                ] as NotificationStatus[]
+              ).includes(sj.status),
+          );
+
+          if (!hasActiveOrDeliveredInDb && !hasActiveOrDeliveredInSim) {
+            result.newlyCreated++;
+            result.details?.push({
+              jobId: `new_reminder_${appt.id}`,
+              action: 'PREDICTED_CREATE',
+              reason: `Would create missing current-generation reminder for appointment ${appt.id}`,
+            });
+
+            if (!simulatedJobsByAppt.has(appt.id)) simulatedJobsByAppt.set(appt.id, []);
+            simulatedJobsByAppt.get(appt.id)!.push({
+              id: `sim_new_${appt.id}`,
+              status: NotificationStatus.PENDING,
+              scheduleRevision: currentRev,
+            });
+          }
+          continue;
+        }
+
+        // LIVE MODE upcoming audit:
+        const fiveMinutesAgo = new Date(nowUtc.getTime() - 5 * 60 * 1000);
+        const activeLegacyJob = await client.notificationJob.findFirst({
+          where: {
+            appointmentId: appt.id,
+            templateKey: 'appointment_reminder',
+            scheduleRevision: null,
+            status: NotificationStatus.PROCESSING,
+            lockedAt: { gte: fiveMinutesAgo },
+          },
+        });
+
+        if (activeLegacyJob) {
+          result.skippedActiveLease++;
+          result.details?.push({
+            jobId: activeLegacyJob.id,
+            action: 'SKIPPED',
+            reason: `Deferred recovery: active legacy worker lease in flight for appointment ${appt.id}`,
+          });
           continue;
         }
 
@@ -954,41 +1306,42 @@ export class NotificationsService {
         });
 
         if (!hasActiveOrDelivered) {
-          if (dryRun) {
+          const recoveryJob = await this.recoverOrEnqueueCurrentReminder(
+            {
+              id: appt.id,
+              startTime: appt.startTime,
+              serviceName: appt.serviceName,
+              patientEmail: appt.patient?.email,
+              patientPhone: appt.patient?.phone || '',
+              status: appt.status,
+              revision: appt.revision,
+              scheduleRevision: currentRev,
+            },
+            client,
+          );
+
+          if (recoveryJob && (recoveryJob as any).isNewlyCreated) {
             result.newlyCreated++;
             result.details?.push({
-              jobId: `new_reminder_${appt.id}`,
-              action: 'PREDICTED_CREATE',
-              reason: `Would create missing current-generation reminder for appointment ${appt.id}`,
+              jobId: recoveryJob.id,
+              action: 'CREATED',
+              reason: `Created missing current-generation reminder for appointment ${appt.id}`,
             });
-          } else {
-            const recoveryJob = await this.recoverOrEnqueueCurrentReminder(
-              {
-                id: appt.id,
-                startTime: appt.startTime,
-                serviceName: appt.serviceName,
-                patientEmail: appt.patient?.email,
-                patientPhone: appt.patient?.phone || '',
-                status: appt.status,
-                revision: appt.revision,
-                scheduleRevision: currentRev,
-              },
-              client,
-            );
-
-            // ONLY count if a new reminder was truly created (not returning existing job)
-            if (recoveryJob && (recoveryJob as any).isNewlyCreated) {
-              result.newlyCreated++;
-              result.details?.push({
-                jobId: recoveryJob.id,
-                action: 'CREATED',
-                reason: `Created missing current-generation reminder for appointment ${appt.id}`,
-              });
-            }
+          } else if (recoveryJob && (recoveryJob as any).deferredActiveLease) {
+            result.skippedActiveLease++;
+            result.details?.push({
+              jobId: recoveryJob.id,
+              action: 'SKIPPED',
+              reason: `Deferred recovery: active legacy lease found inside transaction for appointment ${appt.id}`,
+            });
           }
         }
       }
     }
+
+    result.upcomingCursor = hasMoreUpcoming ? currentUpcomingCursor : null;
+    result.hasMoreUpcoming = hasMoreUpcoming;
+    result.scanned = result.legacyScanned + result.upcomingScanned;
 
     return result;
   }
@@ -1391,21 +1744,46 @@ export class NotificationsService {
       // Check if a reminder for THIS SPECIFIC SCHEDULE has already been delivered
       // (A delivered reminder for schedule A must NOT suppress reminder for rescheduled schedule B!)
       const targetScheduleRevision = job.scheduleRevision ?? currentScheduleRev;
-      const alreadyDeliveredForSchedule = await this.prisma.notificationJob.findFirst({
+
+      // 1. Check explicit schedule revision match
+      let alreadyDeliveredForSchedule = await this.prisma.notificationJob.findFirst({
         where: {
           appointmentId: job.appointmentId,
           templateKey: 'appointment_reminder',
           id: { not: job.id },
-          OR: [
-            { scheduleRevision: targetScheduleRevision },
-            {
-              scheduleRevision: null,
-              payload: { path: ['startTime'], equals: new Date(appt.startTime).toISOString() },
-            },
-          ],
+          scheduleRevision: targetScheduleRevision,
           status: { in: [NotificationStatus.SENT, NotificationStatus.SIMULATED] },
         },
       });
+
+      // 2. If not found by explicit revision, check legacy records (scheduleRevision IS NULL)
+      // BUT ONLY if evidence-based classification proves they belong to the CURRENT generation!
+      if (!alreadyDeliveredForSchedule) {
+        const potentialLegacyDelivered = await this.prisma.notificationJob.findFirst({
+          where: {
+            appointmentId: job.appointmentId,
+            templateKey: 'appointment_reminder',
+            id: { not: job.id },
+            scheduleRevision: null,
+            status: { in: [NotificationStatus.SENT, NotificationStatus.SIMULATED] },
+          },
+        });
+
+        if (potentialLegacyDelivered) {
+          const evidence = await this.getScheduleHistoryEvidence(job.appointmentId);
+          const classification = this.classifyLegacyReminderJob(
+            potentialLegacyDelivered as any,
+            appt as any,
+            evidence,
+            new Date(),
+          );
+
+          if (classification.classification === 'CURRENT_GENERATION_MATCH') {
+            alreadyDeliveredForSchedule = potentialLegacyDelivered;
+          }
+        }
+      }
+
       if (alreadyDeliveredForSchedule) {
         await this.prisma.$executeRaw`
           UPDATE "notification_jobs"

@@ -12,7 +12,7 @@ import { AuthService } from '../src/auth/auth.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { AppointmentsService } from '../src/appointments/appointments.service';
 import { ServicesService } from '../src/services/services.service';
-import { parseArgs, sanitizeDatabaseUrl } from '../scripts/repair-reminders';
+import { parseArgs, sanitizeDatabaseUrl, runMaintenanceCli } from '../scripts/repair-reminders';
 
 function parseAndValidateTestDatabaseUrl(rawUrl: string): string {
   try {
@@ -5206,6 +5206,621 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     } finally {
       await prisma.notificationJob.deleteMany({ where: { appointmentId: testAppt.id } });
       await prisma.appointment.delete({ where: { id: testAppt.id } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
+
+  it('Reliability Pass 1: Controlled concurrency - paused worker in flight defers recovery, preventing duplicate reminders and provider calls', async () => {
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Paused Worker Patient ${runId}`,
+        phone: `+99800${runId}81`,
+        email: `paused.${runId}@dentacare.local`,
+      },
+    });
+
+    const apptTime = getNextWorkingSlot(14, 10, 0);
+    const testAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_paused_${runId}_${Date.now()}`,
+        patientId: testPatient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        startTime: apptTime,
+        endTime: new Date(apptTime.getTime() + 30 * 60 * 1000),
+        durationMinutes: 30,
+        status: AppointmentStatus.CONFIRMED,
+        serviceName: 'Maslahat',
+        scheduleRevision: 1,
+      },
+    });
+
+    // Worker has claimed this legacy job and is actively delivering (< 5m lease)
+    const workerLeaseToken = `worker-lease-pause-${runId}`;
+    const activeLegacyJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: testAppt.id,
+        status: NotificationStatus.PROCESSING,
+        lockedAt: new Date(),
+        leaseToken: workerLeaseToken,
+        scheduleRevision: null, // Legacy job
+        payload: {
+          appointmentId: testAppt.id,
+          startTime: apptTime.toISOString(),
+        },
+      },
+    });
+
+    try {
+      // Step 1: Run repair while worker lease is active in-flight
+      const repairResult = await notificationsService.upgradeLegacyReminderJobs({
+        dryRun: false,
+        batchSize: 50,
+      });
+
+      // Assert that active legacy lease was skipped and upcoming recovery was DEFERRED
+      expect(repairResult.skippedActiveLease).toBeGreaterThanOrEqual(1);
+      // Crucial: repair must NOT have created a competing reminder for this appointment!
+      const competingJob = await prisma.notificationJob.findFirst({
+        where: {
+          appointmentId: testAppt.id,
+          id: { not: activeLegacyJob.id },
+        },
+      });
+      expect(competingJob).toBeNull();
+
+      // Step 2: Now simulate worker completes delivery successfully
+      await prisma.notificationJob.update({
+        where: { id: activeLegacyJob.id },
+        data: {
+          status: NotificationStatus.SENT,
+          sentAt: new Date(),
+          leaseToken: null,
+          lockedAt: null,
+        },
+      });
+
+      // Step 3: Run repair again after lease finished
+      await notificationsService.upgradeLegacyReminderJobs({
+        dryRun: false,
+        batchSize: 50,
+      });
+
+      // The sent legacy job is upgraded cleanly to current schedule revision 1
+      const upgradedJob = await prisma.notificationJob.findUnique({
+        where: { id: activeLegacyJob.id },
+      });
+      expect(upgradedJob!.scheduleRevision).toBe(1);
+      expect(upgradedJob!.status).toBe(NotificationStatus.SENT);
+
+      // Verify no duplicate reminder was created during this second run either
+      const totalJobsForAppt = await prisma.notificationJob.count({
+        where: { appointmentId: testAppt.id },
+      });
+      expect(totalJobsForAppt).toBe(1);
+    } finally {
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: testAppt.id } });
+      await prisma.appointment.delete({ where: { id: testAppt.id } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
+
+  it('Reliability Pass 2: Evidence-based generation identity - delivery before repair and after partial repair for A -> B -> A and unrelated edits', async () => {
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Generation Identity Patient ${runId}`,
+        phone: `+99800${runId}82`,
+      },
+    });
+
+    const timeA = getNextWorkingSlot(15, 9, 0);
+    const timeB = getNextWorkingSlot(15, 14, 0);
+
+    // Appointment originally booked for Time A
+    const testAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_gen_${runId}_${Date.now()}`,
+        patientId: testPatient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        startTime: timeA,
+        endTime: new Date(timeA.getTime() + 30 * 60 * 1000),
+        durationMinutes: 30,
+        status: AppointmentStatus.CONFIRMED,
+        serviceName: 'Maslahat',
+        scheduleRevision: 1,
+      },
+    });
+
+    // Legacy reminder delivered for Generation 1 (Time A)
+    await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: testAppt.id,
+        status: NotificationStatus.SENT, // Delivered in the past
+        scheduleRevision: null, // Legacy null revision
+        sentAt: new Date(Date.now() - 3600000),
+        createdAt: new Date(Date.now() - 7200000),
+        payload: {
+          appointmentId: testAppt.id,
+          startTime: timeA.toISOString(),
+        },
+      },
+    });
+
+    // Appointment rescheduled: Time A -> Time B (Gen 2)
+    const reschedTime1 = new Date(Date.now() - 1800000);
+    await prisma.appointmentStatusHistory.create({
+      data: {
+        appointmentId: testAppt.id,
+        fromStatus: AppointmentStatus.CONFIRMED,
+        toStatus: AppointmentStatus.CONFIRMED,
+        reason: `Qayta rejalashtirildi: ${timeA.toISOString()} -> ${timeB.toISOString()}`,
+        changedBy: 'patient',
+        createdAt: reschedTime1,
+      },
+    });
+
+    // Appointment rescheduled back: Time B -> Time A (Gen 3)
+    const reschedTime2 = new Date(Date.now() - 900000);
+    await prisma.appointmentStatusHistory.create({
+      data: {
+        appointmentId: testAppt.id,
+        fromStatus: AppointmentStatus.CONFIRMED,
+        toStatus: AppointmentStatus.CONFIRMED,
+        reason: `Qayta rejalashtirildi: ${timeB.toISOString()} -> ${timeA.toISOString()}`,
+        changedBy: 'patient',
+        createdAt: reschedTime2,
+      },
+    });
+
+    await prisma.appointment.update({
+      where: { id: testAppt.id },
+      data: {
+        startTime: timeA,
+        endTime: new Date(timeA.getTime() + 30 * 60 * 1000),
+        scheduleRevision: 3,
+      },
+    });
+
+    // Current generation 3 reminder job enqueued
+    const gen3Job = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: testAppt.id,
+        status: NotificationStatus.PENDING,
+        scheduleRevision: 3,
+        scheduledFor: new Date(),
+        payload: {
+          appointmentId: testAppt.id,
+          startTime: timeA.toISOString(),
+          scheduleRevision: 3,
+        },
+      },
+    });
+
+    try {
+      // 1. Delivery BEFORE repair:
+      // In the legacy code, deliverJob would see legacyGen1Job (null revision, matching startTime timeA, SENT)
+      // and falsely suppress gen3Job!
+      // With shared evidence classification, gen3Job must NOT be suppressed!
+      const workerToken = `worker-tok-${runId}-1`;
+      await prisma.$executeRaw`
+        UPDATE "notification_jobs"
+        SET status = 'PROCESSING'::"notification_status", "lease_token" = ${workerToken}, "locked_at" = NOW()
+        WHERE id = ${gen3Job.id};
+      `;
+
+      const claimedGen3Job = await prisma.notificationJob.findUnique({ where: { id: gen3Job.id } });
+      await (notificationsService as any).deliverJob(claimedGen3Job as any, workerToken);
+
+      const gen3AfterDelivery = await prisma.notificationJob.findUnique({ where: { id: gen3Job.id } });
+      // gen3 must be delivered (SENT or SIMULATED), NOT CANCELLED!
+      expect([NotificationStatus.SENT, NotificationStatus.SIMULATED]).toContain(gen3AfterDelivery!.status);
+
+      // 2. Unrelated Appointment Edit Test:
+      // An appointment with scheduleRevision = 1 where updatedAt changed due to doctor notes or patient phone edit
+      // must NOT be classified as ambiguous historical!
+      const apptWithUnrelatedEdit = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_unrel_${runId}_${Date.now()}`,
+          patientId: testPatient.id,
+          doctorId: testDoctorAId,
+          serviceId: testServiceId,
+          branchId: testBranchId,
+          startTime: timeB,
+          endTime: new Date(timeB.getTime() + 30 * 60 * 1000),
+          durationMinutes: 30,
+          status: AppointmentStatus.CONFIRMED,
+          serviceName: 'Maslahat',
+          scheduleRevision: 1,
+          note: 'Updated patient note after booking', // Unrelated edit
+        },
+      });
+
+      const legacyUnrelatedJob = await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: testPatient.phone,
+          appointmentId: apptWithUnrelatedEdit.id,
+          status: NotificationStatus.SENT,
+          scheduleRevision: null,
+          payload: {
+            appointmentId: apptWithUnrelatedEdit.id,
+            startTime: timeB.toISOString(),
+          },
+        },
+      });
+
+      const evidence = await notificationsService.getScheduleHistoryEvidence(apptWithUnrelatedEdit.id);
+      expect(evidence.hasExplicitReschedule).toBe(false);
+
+      const classification = notificationsService.classifyLegacyReminderJob(
+        legacyUnrelatedJob as any,
+        apptWithUnrelatedEdit as any,
+        evidence,
+      );
+      // Unrelated edit preserves CURRENT_GENERATION_MATCH
+      expect(classification.classification).toBe('CURRENT_GENERATION_MATCH');
+      expect(classification.targetScheduleRevision).toBe(1);
+
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: apptWithUnrelatedEdit.id } });
+      await prisma.appointment.delete({ where: { id: apptWithUnrelatedEdit.id } });
+    } finally {
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: testAppt.id } });
+      await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: testAppt.id } });
+      await prisma.appointment.delete({ where: { id: testAppt.id } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
+
+  it('Reliability Pass 3: Resumable bounded repair and accurate dry-run simulation across isolated fixtures', async () => {
+    // Clean up ambient legacy reminder jobs for deterministic counting
+    await prisma.notificationJob.deleteMany({
+      where: {
+        templateKey: 'appointment_reminder',
+        scheduleRevision: null,
+      },
+    });
+
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Resumable Patient ${runId}`,
+        phone: `+99800${runId}83`,
+      },
+    });
+
+    const appts: any[] = [];
+    const jobs: any[] = [];
+
+    // Create 4 distinct upcoming appointments and 4 legacy jobs
+    for (let i = 0; i < 4; i++) {
+      const slotTime = getNextWorkingSlot(16 + i, 10, 0);
+      const appt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_resum_${runId}_${i}_${Date.now()}`,
+          patientId: testPatient.id,
+          doctorId: testDoctorAId,
+          serviceId: testServiceId,
+          branchId: testBranchId,
+          startTime: slotTime,
+          endTime: new Date(slotTime.getTime() + 30 * 60 * 1000),
+          durationMinutes: 30,
+          status: AppointmentStatus.CONFIRMED,
+          serviceName: 'Maslahat',
+          scheduleRevision: 1,
+        },
+      });
+      appts.push(appt);
+
+      const job = await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: testPatient.phone,
+          appointmentId: appt.id,
+          status: NotificationStatus.PENDING,
+          scheduleRevision: null,
+          payload: {
+            appointmentId: appt.id,
+            startTime: slotTime.toISOString(),
+          },
+        },
+      });
+      jobs.push(job);
+    }
+
+    try {
+      // Step 1: Run batch 1 with cap of 2 legacy jobs and cap of 2 upcoming appointments
+      const batch1 = await notificationsService.upgradeLegacyReminderJobs({
+        batchSize: 2,
+        maxJobs: 2,
+        maxUpcomingAudit: 2,
+      });
+
+      expect(batch1.legacyScanned).toBe(2);
+      expect(batch1.hasMoreLegacy).toBe(true);
+      expect(batch1.legacyCursor).not.toBeNull();
+      expect(batch1.upcomingScanned).toBe(2);
+      expect(batch1.hasMoreUpcoming).toBe(true);
+      expect(batch1.upcomingCursor).not.toBeNull();
+
+      // Step 2: Resume with cursors from batch 1
+      const batch2 = await notificationsService.upgradeLegacyReminderJobs({
+        batchSize: 2,
+        maxJobs: 2,
+        legacyCursor: batch1.legacyCursor,
+        maxUpcomingAudit: 2,
+        upcomingCursor: batch1.upcomingCursor,
+      });
+
+      expect(batch2.legacyScanned).toBe(2);
+      expect(batch2.hasMoreLegacy).toBe(false);
+      expect(batch2.legacyCursor).toBeNull();
+
+      // Total legacy jobs scanned across both runs is exactly 4
+      expect(batch1.legacyScanned + batch2.legacyScanned).toBe(4);
+
+      // Verify all 4 jobs now have scheduleRevision = 1
+      const updatedJobs = await prisma.notificationJob.findMany({
+        where: { id: { in: jobs.map((j) => j.id) } },
+      });
+      expect(updatedJobs.every((j) => j.scheduleRevision === 1)).toBe(true);
+
+      // Step 3: Isolated fixtures: Compare dry-run predictions against live execution
+      await prisma.notificationJob.deleteMany({
+        where: { id: { in: jobs.map((j) => j.id) } },
+      });
+
+      const fixtureAppt = appts[0];
+
+      // 1 valid, 1 duplicate, 1 failed, 1 cancelled, 1 active lease
+      await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: testPatient.phone,
+          appointmentId: fixtureAppt.id,
+          status: NotificationStatus.PENDING,
+          scheduleRevision: null,
+          payload: { appointmentId: fixtureAppt.id, startTime: fixtureAppt.startTime.toISOString() },
+        },
+      });
+      await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: testPatient.phone,
+          appointmentId: fixtureAppt.id,
+          status: NotificationStatus.PENDING,
+          scheduleRevision: null,
+          payload: { appointmentId: fixtureAppt.id, startTime: fixtureAppt.startTime.toISOString() },
+        },
+      });
+      await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: testPatient.phone,
+          appointmentId: fixtureAppt.id,
+          status: NotificationStatus.FAILED,
+          scheduleRevision: null,
+          payload: { appointmentId: fixtureAppt.id, startTime: fixtureAppt.startTime.toISOString() },
+        },
+      });
+      await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: testPatient.phone,
+          appointmentId: fixtureAppt.id,
+          status: NotificationStatus.CANCELLED,
+          scheduleRevision: null,
+          payload: { appointmentId: fixtureAppt.id, startTime: fixtureAppt.startTime.toISOString() },
+        },
+      });
+      await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'appointment_reminder',
+          recipient: testPatient.phone,
+          appointmentId: fixtureAppt.id,
+          status: NotificationStatus.PROCESSING,
+          lockedAt: new Date(),
+          leaseToken: `lease-${runId}-dry`,
+          scheduleRevision: null,
+          payload: { appointmentId: fixtureAppt.id, startTime: fixtureAppt.startTime.toISOString() },
+        },
+      });
+
+      // Run dry-run on these mixed fixtures
+      const dryPrediction = await notificationsService.upgradeLegacyReminderJobs({
+        dryRun: true,
+        batchSize: 50,
+        maxJobs: 50,
+      });
+
+      // Run live mode on these mixed fixtures
+      const liveExecution = await notificationsService.upgradeLegacyReminderJobs({
+        dryRun: false,
+        batchSize: 50,
+        maxJobs: 50,
+      });
+
+      // Assert dry-run predictions exactly match live execution outcomes!
+      expect(dryPrediction.upgraded).toBe(liveExecution.upgraded);
+      expect(dryPrediction.cancelled).toBe(liveExecution.cancelled);
+      expect(dryPrediction.skippedActiveLease).toBe(liveExecution.skippedActiveLease);
+      expect(dryPrediction.quarantined).toBe(liveExecution.quarantined);
+    } finally {
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: { in: appts.map((a) => a.id) } } });
+      await prisma.appointment.deleteMany({ where: { id: { in: appts.map((a) => a.id) } } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
+
+  it('Reliability Pass 4: Transaction ownership - reports isCommitted=false on caller tx and propagates error without aborted loop retry', async () => {
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Tx Ownership Patient ${runId}`,
+        phone: `+99800${runId}84`,
+      },
+    });
+
+    const apptTime = getNextWorkingSlot(18, 10, 0);
+    const testAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_tx_${runId}_${Date.now()}`,
+        patientId: testPatient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        startTime: apptTime,
+        endTime: new Date(apptTime.getTime() + 30 * 60 * 1000),
+        durationMinutes: 30,
+        status: AppointmentStatus.CONFIRMED,
+        serviceName: 'Maslahat',
+        scheduleRevision: 1,
+      },
+    });
+
+    await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: testAppt.id,
+        status: NotificationStatus.PENDING,
+        scheduleRevision: null,
+        payload: { appointmentId: testAppt.id, startTime: apptTime.toISOString() },
+      },
+    });
+
+    try {
+      // 1. Caller-supplied transaction client: verify isCommitted is false
+      let outerResult: any;
+      await prisma.$transaction(async (tx) => {
+        outerResult = await notificationsService.upgradeLegacyReminderJobs(tx, {
+          batchSize: 10,
+          maxJobs: 10,
+        });
+      });
+
+      expect(outerResult.isCommitted).toBe(false);
+
+      // 2. Caller-supplied transaction with error: must propagate to caller and not retry in aborted state
+      await expect(
+        prisma.$transaction(async (tx) => {
+          // Force an intentional PostgreSQL syntax error in the outer transaction to abort it
+          await (tx as any).$executeRawUnsafe(`SELECT invalid_syntax_force_abort`);
+          // Calling upgradeLegacyReminderJobs on the already aborted transaction must fail immediately
+          await notificationsService.upgradeLegacyReminderJobs(tx, { maxJobs: 5 });
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: testAppt.id } });
+      await prisma.appointment.delete({ where: { id: testAppt.id } });
+      await prisma.patient.delete({ where: { id: testPatient.id } });
+    }
+  });
+
+  it('Reliability Pass 5: Real runMaintenanceCli entry point with pending notifications and expired bookings across simulated scheduler interval', async () => {
+    // 1. Argument validation with new cursor flags
+    expect(() => parseArgs(['--unknown-flag'])).toThrow('Unknown option');
+    expect(() => parseArgs(['--batch-size=0'])).toThrow('Invalid --batch-size');
+    expect(() => parseArgs(['--max-jobs=-5'])).toThrow('Invalid --max-jobs');
+    expect(() => parseArgs(['--max-upcoming=-1'])).toThrow('Invalid --max-upcoming');
+
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: `Maintenance CLI Patient ${runId}`,
+        phone: `+99800${runId}85`,
+      },
+    });
+
+    const apptTime = getNextWorkingSlot(19, 10, 0);
+
+    // Create an expired pending appointment
+    const expiredAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_cli_exp_${runId}_${Date.now()}`,
+        patientId: testPatient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        startTime: apptTime,
+        endTime: new Date(apptTime.getTime() + 30 * 60 * 1000),
+        durationMinutes: 30,
+        status: AppointmentStatus.PENDING,
+        serviceName: 'Maslahat',
+        expiresAt: new Date(Date.now() - 3600000), // Expired 1 hour ago
+        scheduleRevision: 1,
+      },
+    });
+
+    // Create a pending notification job
+    const pendingJob = await prisma.notificationJob.create({
+      data: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'appointment_reminder',
+        recipient: testPatient.phone,
+        appointmentId: expiredAppt.id,
+        status: NotificationStatus.PENDING,
+        scheduleRevision: null,
+        scheduledFor: new Date(Date.now() - 60000), // Due now
+        payload: {
+          appointmentId: expiredAppt.id,
+          startTime: apptTime.toISOString(),
+        },
+      },
+    });
+
+    // Spy on external provider calls to verify zero network transmissions in dry-run
+    const deliverSmsSpy = jest.spyOn(notificationsService as any, 'deliverSms');
+    const deliverEmailSpy = jest.spyOn(notificationsService as any, 'deliverEmail');
+
+    try {
+      // Execute the real CLI entry point runMaintenanceCli with dry-run
+      const exitCode = await runMaintenanceCli([
+        '--dry-run',
+        '--batch-size=50',
+        '--max-jobs=100',
+        `--database-url=${currentDbUrl}`,
+      ]);
+
+      expect(exitCode).toBe(0);
+
+      // Verify zero provider calls were made
+      expect(deliverSmsSpy).not.toHaveBeenCalled();
+      expect(deliverEmailSpy).not.toHaveBeenCalled();
+
+      // Verify zero database mutations: job remains PENDING with null revision
+      const jobAfterCli = await prisma.notificationJob.findUnique({
+        where: { id: pendingJob.id },
+      });
+      expect(jobAfterCli!.status).toBe(NotificationStatus.PENDING);
+      expect(jobAfterCli!.scheduleRevision).toBeNull();
+
+      // Verify expired appointment was NOT modified by dry-run
+      const apptAfterCli = await prisma.appointment.findUnique({
+        where: { id: expiredAppt.id },
+      });
+      expect(apptAfterCli!.status).toBe(AppointmentStatus.PENDING);
+    } finally {
+      deliverSmsSpy.mockRestore();
+      deliverEmailSpy.mockRestore();
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: expiredAppt.id } });
+      await prisma.appointment.delete({ where: { id: expiredAppt.id } });
       await prisma.patient.delete({ where: { id: testPatient.id } });
     }
   });

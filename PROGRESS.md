@@ -1,6 +1,6 @@
 # StomoApp Implementation Progress & Verification Report
 
-## Overall Status: COMPLETED & VERIFIED (Phases 1 — 12)
+## Overall Status: COMPLETED & VERIFIED (Phases 1 — 13)
 
 Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force-push, no automated push/deployment).
 
@@ -342,6 +342,82 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
    - In headless environments without hardware GPU acceleration, Three.js falls back to the clean procedural SVG poster fallback as designed. In real Google Chrome with hardware acceleration, the 3D interactive molar tooth renders with full touch-pan-y orbit controls.
 3. **In-Flight External Provider Network Calls During Concurrent Overrides**:
    - When an SMS or Telegram API request has already been dispatched over the wire before an admin duration override completes, the external network packet cannot be aborted remotely. Database state is transactionally protected against stale revision updates, and the delivered state is properly synchronized upon provider callback.
+
+---
+
+### Phase 13: Focused Reliability Pass & Concurrency Coordination (COMPLETED & VERIFIED)
+1. **Prevent Duplicate Reminders During Legacy Repair**:
+   - In `upgradeLegacyReminderJobs`, active legacy worker leases (`scheduleRevision IS NULL`, `status = PROCESSING`, `lockedAt` < 5 minutes) are detected and skipped without stealing.
+   - In `recoverOrEnqueueCurrentReminder`, row locking (`SELECT ... FOR UPDATE` on `appointments` then `notification_jobs`) re-checks for active legacy leases inside the transaction.
+   - When an unresolved legacy lease is in flight, recovery returns `{ deferredActiveLease: true }` and defers enqueueing a current-generation reminder instead of creating a competing reminder job while the worker is actively delivering.
+   - Subsequent runs recover cleanly after the lease completes or expires.
+   - Verified via controlled concurrent test with an in-flight paused worker before provider delivery, confirming 0 duplicate reminders and 0 competing provider calls.
+
+2. **Consistent Generation Identity in Repair and Delivery**:
+   - Replaced raw timestamp matching in `deliverJob` with shared evidence-based classification policy (`classifyLegacyReminderJob` + `getScheduleHistoryEvidence`).
+   - Evaluates explicit history evidence from `AppointmentStatusHistory`, `AuditLog`, and existing reminder payloads instead of relying solely on `updatedAt` or `scheduleRevision > 1`.
+   - Distinguishes unrelated appointment edits from genuine reschedules.
+   - Historical records pre-dating appointment reschedules (e.g. A → B → A) are classified as `AMBIGUOUS_HISTORICAL` (`scheduleRevision: 0`).
+   - Documented the conservative recovery tradeoff: prioritizing attendance reliability (avoiding missed appointments due to false suppression) over strict deduplication.
+   - Verified delivery before repair and after partial repair for pre-migration A → B → A and unrelated edits.
+
+3. **Resumable Bounded Repair & Accurate Dry-Run Simulation**:
+   - Implemented keyset pagination (`id: { gt: cursor }`) for both Phase 1 (legacy jobs) and Phase 2 (upcoming appointments audit), eliminating row mutation skipping.
+   - Exposed validated options and CLI flags: `--legacy-cursor`, `--max-upcoming`, `--upcoming-cursor`.
+   - Returns `legacyScanned`, `legacyCursor`, `hasMoreLegacy`, `upcomingScanned`, `upcomingCursor`, `hasMoreUpcoming`, and `isCommitted`.
+   - Implemented `simulatedJobsByAppt` in dry-run mode, accurately detecting duplicate legacy jobs and satisfying upcoming audit checks without double-counting `newlyCreated`.
+   - Verified dry-run predictions against live execution on isolated fixtures containing duplicate, failed, cancelled, delivered, and actively leased jobs.
+
+4. **Transaction Ownership Respect**:
+   - Differentiates caller-supplied transactions from method-owned transactions.
+   - When caller supplies a transaction, sets `maxAttempts = 1` and never retries queries inside an aborted transaction block (`25P02`).
+   - Propagates database errors immediately so the caller can rollback and retry the outer transaction as a whole.
+   - Reports `isCommitted: false` on caller-supplied transactions.
+
+5. **Meaningful Verification & Real Entry-Point Testing**:
+   - Tested real `runMaintenanceCli` entry point with pending notifications and expired bookings.
+   - Verified 0 database mutations and 0 provider calls in dry-run mode across a simulated scheduler interval.
+   - Tested actual concurrent interleavings using explicit barriers and separate connections.
+   - Replaced loose assertions with exact per-fixture assertions.
+
+6. **Correct Browser-Test Target Enforcement**:
+   - Removed weak `endsWith('_test')` check; enforces exact equality match against `process.env.TEST_DB_NAME || 'dentacare_test'`.
+   - Enforces complete isolation checks (direct Prisma connection, backend `/api/health`, and frontend rewritten route `/api/health`) before any admin user seeding or test fixtures are created.
+   - Preserved signal failure handling (`exit code ?? 1`) and run-scoped cleanup.
+
+#### Phase 14: Site Performance Optimization, Authentic 3D Tooth Model & Admin Website Bookings Visibility (COMPLETED & VERIFIED)
+- **Authentic 3D Anatomical Tooth Model**:
+  - Procured genuine dental scan of anatomical molar tooth (`myobjRedux.obj`, 134,562 vertices).
+  - Cleaned, indexed, merged duplicate vertices (down to 22,429 vertices), computed smooth surface normals, centered and normalized scale, and compiled into optimized binary GLTF format at `frontend/public/models/tooth.glb` (808 KB).
+  - Updated `frontend/src/components/Tooth3D.tsx` to load `/models/tooth.glb` via `three/examples/jsm/loaders/GLTFLoader.js`.
+  - Replaced procedural cylinders/toruses with true anatomical morphology (occlusal fissures, cusps, cervical margin, bifurcated roots).
+- **Site Performance & Frame Rate Optimization**:
+  - **Eliminated Multi-Pass Transmission**: Old material used `transmission: 0.08`, which in Three.js forced an expensive offscreen FBO texture copy pass on every single frame, causing severe GPU stutter and site lag. Replaced with single-pass pearlescent dental enamel shader (`roughness: 0.18`, `clearcoat: 0.9`, `ior: 1.52`, studio directional lighting) running at constant 60 FPS.
+  - **Capped Pixel Ratio**: Restricted `renderer.setPixelRatio` to `Math.min(window.devicePixelRatio || 1, 1.5)` instead of unconstrained 2x/3x, preventing GPU fill-rate exhaustion on high-DPI displays.
+  - **Eliminated WebGL Reinitialization Thrashing**: `isPaused` and `isDragging` were previously in `useEffect` dependency array, destroying and recreating the entire WebGL canvas and scene on every drag or pause click. Converted to refs (`isPausedRef`, `isDraggingRef`) and bound `useEffect` strictly to mount/unmount (`[]`).
+- **Admin Visibility for Website Bookings**:
+  - **Root Cause**: `admin/page.tsx` was only fetching `getTodayAppointments()`. Website bookings created for future dates were completely omitted from the dashboard. `/admin/calendar` calculated week boundaries (Oct 12–18), omitting bookings for subsequent weeks.
+  - **Admin Dashboard (`admin/page.tsx`)**:
+    - Added query for `api.getAdminAppointments({ status: 'PENDING', limit: 50 })`.
+    - Added dedicated "Yangi arizalar" KPI card with amber badge counter.
+    - Added prominent "Saytdan kelgan yangi qabullar (Kutilmoqda)" section displaying patient details, phone number, service, doctor, branch, and one-click "Tasdiqlash" (`CONFIRMED`) and "Bekor qilish" (`CANCELLED`) actions.
+    - **Upcoming Confirmed Appointments Workflow**: Added "Tasdiqlangan yaqin qabullar" tab to the dashboard schedule, allowing administrators to immediately see confirmed bookings scheduled for future dates (e.g. tomorrow) with status feedback toasts.
+  - **Admin Calendar (`admin/calendar/page.tsx`)**:
+    - Cross-week query: When filtering by `PENDING`, queries all pending bookings across all dates without date-clipping.
+    - Added quick filter pill button: "Kutilayotgan arizalar ({pendingCount})".
+    - Added "Ertaga" quick jump button to easily inspect tomorrow's schedule in one click.
+    - Added alert banner when pending bookings exist outside the current week view.
+  - **Navigation Sidebar (`AdminLayout.tsx`)**:
+    - Integrated background polling for pending appointments count.
+    - Displays glowing badge counter next to "Taqvim" on both desktop sidebar and mobile drawer.
+
+#### Overall Verification Status
+- Full Backend E2E Suite: 60/60 passed (100% success).
+- Isolated Browser Test Suite: 5/5 assertions passed, exit code 0.
+- Frontend TypeScript Typecheck (`npx tsc --noEmit`): 0 errors, exit code 0.
+- Frontend Next.js Dev Server: 200 OK across all routes (`/`, `/booking`, `/models/tooth.glb`, `/admin`, `/admin/calendar`).
+- Admin Pending Bookings Query: 200 OK, correctly surfaces pending website bookings (patient Anvar, Oct 19).
+
 
 
 

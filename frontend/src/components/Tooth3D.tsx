@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Play, Pause, Rotate3d, AlertCircle } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 
@@ -18,6 +19,12 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
   const [hasError, setHasError] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  const isPausedRef = useRef(isPaused);
+  isPausedRef.current = isPaused;
+
+  const isDraggingRef = useRef(isDragging);
+  isDraggingRef.current = isDragging;
 
   // Three.js instances ref
   const instancesRef = useRef<{
@@ -37,113 +44,12 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
 
   const prevPointerRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Procedural anatomical molar generator
-  const createAnatomicalMolar = (): THREE.Group => {
-    const group = new THREE.Group();
-
-    // 1. Realistic enamel crown material
-    const enamelMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0xfcfbf7), // Warm ivory white
-      roughness: 0.16,
-      metalness: 0.02,
-      clearcoat: 0.85,
-      clearcoatRoughness: 0.12,
-      reflectivity: 0.9,
-      transmission: 0.08, // Subsurface translucency characteristic of enamel
-      ior: 1.55,
-      specularColor: new THREE.Color(0xffffff),
-    });
-
-    // 2. Cementum root material (slightly warmer, matte)
-    const rootMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(0xf3eddc),
-      roughness: 0.38,
-      metalness: 0.0,
-    });
-
-    // 3. Occlusal crown with 4 distinct anatomical cusps (Molar anatomy)
-    // Central crown body: Rounded box with sub-divided vertices shaped like a molar
-    const crownGeo = new THREE.CylinderGeometry(1.28, 1.08, 1.45, 32, 16);
-    const pos = crownGeo.attributes.position;
-
-    // Sculpt realistic cusps on the occlusal table (top vertices)
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const z = pos.getZ(i);
-
-      if (y > 0.3) {
-        // Sculpt 4 cusps: Mesiobuccal, Distobuccal, Mesiolingual, Distolingual
-        const cuspFactor =
-          Math.sin(x * 2.2) * Math.sin(z * 2.2) * 0.22 +
-          Math.cos(x * 3.5 + z * 3.5) * 0.06;
-        // Central developmental groove depression
-        const centralFissure = -Math.exp(-(x * x + z * z) * 2.5) * 0.18;
-        pos.setY(i, y + cuspFactor + centralFissure);
-      } else if (y < -0.3) {
-        // Taper towards the cervical neck
-        const cervicalTaper = 1.0 - (y + 0.3) * 0.15;
-        pos.setX(i, x * cervicalTaper);
-        pos.setZ(i, z * cervicalTaper);
-      }
-    }
-    crownGeo.computeVertexNormals();
-    const crownMesh = new THREE.Mesh(crownGeo, enamelMaterial);
-    crownMesh.position.y = 0.55;
-    group.add(crownMesh);
-
-    // 4. Cervical line / neck ring
-    const neckGeo = new THREE.TorusGeometry(1.02, 0.08, 16, 32);
-    neckGeo.rotateX(Math.PI / 2);
-    const neckMesh = new THREE.Mesh(neckGeo, enamelMaterial);
-    neckMesh.position.y = -0.15;
-    group.add(neckMesh);
-
-    // 5. Roots: Bifurcated anatomical roots (Mesial and Distal roots)
-    const createCurvedRoot = (xOffset: number, zOffset: number, curveDir: number) => {
-      const rootCurve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(xOffset * 0.7, -0.15, zOffset),
-        new THREE.Vector3(xOffset * 0.9, -0.9, zOffset * 0.9),
-        new THREE.Vector3(xOffset * (0.8 + curveDir * 0.25), -1.8, zOffset * 0.7),
-        new THREE.Vector3(xOffset * (0.5 + curveDir * 0.35), -2.6, zOffset * 0.4),
-      ]);
-
-      const rootGeo = new THREE.TubeGeometry(rootCurve, 24, 0.42, 16, false);
-      // Taper the root toward apex
-      const rootPos = rootGeo.attributes.position;
-      for (let i = 0; i < rootPos.count; i++) {
-        const ry = rootPos.getY(i);
-        const factor = THREE.MathUtils.clamp((-ry + 0.2) / 2.6, 0, 1);
-        const scale = 1.0 - factor * 0.65; // taper to 35% radius at apex
-        rootPos.setX(i, rootPos.getX(i) * scale + (1 - scale) * (xOffset * 0.5));
-        rootPos.setZ(i, rootPos.getZ(i) * scale);
-      }
-      rootGeo.computeVertexNormals();
-      return new THREE.Mesh(rootGeo, rootMaterial);
-    };
-
-    // Root 1 (Mesial root - broader with slight inward curve)
-    const root1 = createCurvedRoot(-0.55, 0.1, -0.2);
-    group.add(root1);
-
-    // Root 2 (Distal root - tapered with complementary curve)
-    const root2 = createCurvedRoot(0.55, -0.1, 0.25);
-    group.add(root2);
-
-    // Root 3 (Lingual accessory root for realistic mandibular/maxillary molar volume)
-    const root3 = createCurvedRoot(0.0, 0.55, 0.1);
-    root3.scale.set(0.85, 0.95, 0.85);
-    group.add(root3);
-
-    // Center pivot point
-    group.position.y = 0.5;
-    return group;
-  };
-
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
+
+    let isCancelled = false;
 
     // Detect WebGL support
     try {
@@ -168,9 +74,9 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
 
     // 2. Camera
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 100);
-    camera.position.set(0, 0.5, 6.5);
+    camera.position.set(0, 0.2, 6.2);
 
-    // 3. Renderer with power efficiency settings
+    // 3. Renderer with power efficiency settings (cap pixel ratio to 1.5 to prevent GPU bottleneck)
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
@@ -180,7 +86,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         powerPreference: 'high-performance',
       });
       renderer.setSize(width, height);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.15;
     } catch {
@@ -189,33 +95,74 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
       return;
     }
 
-    // 4. Realistic Studio Lighting Setup
-    // Key light (soft warm overhead)
-    const keyLight = new THREE.DirectionalLight(0xfff8ee, 1.8);
+    // 4. Realistic Dental Studio Lighting Setup
+    // Key light (warm overhead soft illumination)
+    const keyLight = new THREE.DirectionalLight(0xfff8ee, 2.2);
     keyLight.position.set(4, 5, 4);
     scene.add(keyLight);
 
-    // Fill light (cool soft diffuse from left)
-    const fillLight = new THREE.DirectionalLight(0xdbeafe, 1.1);
+    // Fill light (diffuse soft cool illumination)
+    const fillLight = new THREE.DirectionalLight(0xdbeafe, 1.3);
     fillLight.position.set(-4, 2, 3);
     scene.add(fillLight);
 
-    // Mint Rim light (accents tooth silhouette and clinic brand teal)
-    const rimLight = new THREE.DirectionalLight(0x5eead4, 1.4);
+    // Rim light (accents tooth silhouette and clinic brand teal)
+    const rimLight = new THREE.DirectionalLight(0x5eead4, 1.5);
     rimLight.position.set(0, -3, -4);
     scene.add(rimLight);
 
     // Soft ambient illumination
-    const ambientLight = new THREE.AmbientLight(0xf8fafc, 0.85);
+    const ambientLight = new THREE.AmbientLight(0xf8fafc, 0.9);
     scene.add(ambientLight);
 
-    // 5. Add Molar Group
-    const toothGroup = createAnatomicalMolar();
+    // 5. Add Tooth Group
+    const toothGroup = new THREE.Group();
     scene.add(toothGroup);
 
-    // Initial slight tilt for aesthetic presentation
+    // Initial anatomical presentation angle
     toothGroup.rotation.x = 0.22;
     toothGroup.rotation.y = -0.35;
+    toothGroup.position.y = 0.1;
+
+    // 6. Load Authentic 3D Anatomical Tooth Model (tooth.glb)
+    const loader = new GLTFLoader();
+    loader.load(
+      '/models/tooth.glb',
+      (gltf) => {
+        if (isCancelled) return;
+        const root = gltf.scene;
+
+        // Realistic, high-performance dental enamel material
+        // Single-pass forward rendering (NO heavy transmission pass)
+        const enamelMaterial = new THREE.MeshPhysicalMaterial({
+          color: new THREE.Color(0xfcfbf8), // Natural warm enamel ivory
+          roughness: 0.18,
+          metalness: 0.04,
+          clearcoat: 0.9,
+          clearcoatRoughness: 0.1,
+          ior: 1.52,
+        });
+
+        root.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            mesh.material = enamelMaterial;
+            mesh.castShadow = false;
+            mesh.receiveShadow = false;
+          }
+        });
+
+        toothGroup.add(root);
+        setIsLoading(false);
+      },
+      undefined,
+      (err) => {
+        if (isCancelled) return;
+        console.error('Failed to load 3D tooth model', err);
+        setHasError(true);
+        setIsLoading(false);
+      }
+    );
 
     const clock = new THREE.Clock();
 
@@ -234,9 +181,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
       currentRotationX: 0.22,
     };
 
-    setIsLoading(false);
-
-    // 6. Animation loop
+    // 7. Animation loop
     const animate = () => {
       const inst = instancesRef.current;
       if (!inst) return;
@@ -246,10 +191,10 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
 
       // Only render if visible and tab active
       if (inst.isIntersecting && inst.isTabVisible) {
-        // Idle floating & rotation if not paused
-        if (!isPaused && !isDragging) {
+        // Idle floating & rotation if not paused or dragged
+        if (!isPausedRef.current && !isDraggingRef.current) {
           inst.targetRotationY += delta * 0.35; // gentle idle rotation
-          inst.toothGroup.position.y = 0.5 + Math.sin(elapsedTime * 1.5) * 0.08; // subtle floating
+          inst.toothGroup.position.y = 0.1 + Math.sin(elapsedTime * 1.5) * 0.08; // subtle floating
         }
 
         // Smooth damping interpolation
@@ -267,7 +212,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
 
     animate();
 
-    // 7. Resize Observer
+    // 8. Resize Observer
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width: newW, height: newH } = entry.contentRect;
@@ -280,7 +225,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
     });
     resizeObserver.observe(container);
 
-    // 8. Intersection Observer (pause when off-screen)
+    // 9. Intersection Observer (pause when off-screen)
     const intersectionObserver = new IntersectionObserver(
       (entries) => {
         if (entries[0] && instancesRef.current) {
@@ -291,7 +236,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
     );
     intersectionObserver.observe(container);
 
-    // 9. Tab visibility
+    // 10. Tab visibility
     const handleVisibilityChange = () => {
       if (instancesRef.current) {
         instancesRef.current.isTabVisible = document.visibilityState === 'visible';
@@ -299,23 +244,37 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // 10. Check reduced-motion preference
+    // 11. Check reduced-motion preference
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (mediaQuery.matches) {
       setIsPaused(true);
     }
 
     return () => {
+      isCancelled = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
       if (instancesRef.current?.animationId) {
         cancelAnimationFrame(instancesRef.current.animationId);
       }
+      try {
+        toothGroup.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const m = obj as THREE.Mesh;
+            m.geometry?.dispose();
+            if (Array.isArray(m.material)) {
+              m.material.forEach((mat) => mat.dispose());
+            } else {
+              m.material?.dispose();
+            }
+          }
+        });
+      } catch {}
       renderer.dispose();
       instancesRef.current = null;
     };
-  }, [isPaused, isDragging]);
+  }, []);
 
   // Pointer & Touch interactions:
   // Preserves native vertical page scrolling while enabling horizontal drag rotation
@@ -401,7 +360,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         className={`w-full h-full cursor-grab active:cursor-grabbing touch-pan-y transition-opacity duration-700 ${
           isLoading || hasError ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
-        aria-label="3D Tish modeli - interaktiv aylantirish imkoniyati bilan"
+        aria-label="3D Tish modeli - haqiqiy anatomik model"
       />
 
       {/* Floating 3D Controls Bar */}
