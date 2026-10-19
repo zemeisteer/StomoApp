@@ -1,41 +1,20 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Phone, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, User, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
+import { PhoneInput } from './PhoneInput';
+import { normalizeUzPhone } from '../lib/phone';
+import { CustomSelect } from './CustomSelect';
 
 interface CallbackModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-function formatUzPhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
-  let localDigits = digits;
-  if (digits.startsWith('998')) {
-    localDigits = digits.slice(3);
-  }
-  localDigits = localDigits.slice(0, 9);
-
-  let formatted = '+998';
-  if (localDigits.length > 0) {
-    formatted += ' (' + localDigits.slice(0, 2);
-  }
-  if (localDigits.length >= 2) {
-    formatted += ') ' + localDigits.slice(2, 5);
-  }
-  if (localDigits.length >= 5) {
-    formatted += '-' + localDigits.slice(5, 7);
-  }
-  if (localDigits.length >= 7) {
-    formatted += '-' + localDigits.slice(7, 9);
-  }
-  return formatted;
-}
-
 export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose }) => {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('+998 ');
   const [preferredBranch, setPreferredBranch] = useState('');
@@ -48,8 +27,14 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim() || !phone.trim()) {
-      setError('Iltimos, ism va telefon raqamingizni kiriting');
+    if (!fullName.trim()) {
+      setError(language === 'ru' ? 'Введите ваше имя' : 'Iltimos, ismingizni kiriting');
+      return;
+    }
+
+    const phoneVal = normalizeUzPhone(phone, true);
+    if (!phoneVal.isValid) {
+      setError((language === 'ru' ? phoneVal.errorMessageRu : phoneVal.errorMessageUz) || 'Telefon raqami noto\'g\'ri');
       return;
     }
 
@@ -58,7 +43,7 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
       setError(null);
       await api.submitLead({
         fullName: fullName.trim(),
-        phone: phone.trim(),
+        phone: phoneVal.normalized,
         preferredBranch: preferredBranch || undefined,
         preferredTime: preferredTime || undefined,
       });
@@ -74,7 +59,9 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
     setIsSuccess(false);
     setError(null);
     setFullName('');
-    setPhone('');
+    setPhone('+998 ');
+    setPreferredBranch('');
+    setPreferredTime('');
     onClose();
   };
 
@@ -100,7 +87,7 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
               onClick={handleResetAndClose}
               className="w-full py-3 bg-teal-700 hover:bg-teal-800 text-white font-medium rounded-xl shadow-md transition-all"
             >
-              Tushunarli
+              {language === 'ru' ? 'Понятно' : 'Tushunarli'}
             </button>
           </div>
         ) : (
@@ -136,52 +123,40 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t.common.phone} *
-                </label>
-                <div className="relative">
-                  <Phone className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(formatUzPhone(e.target.value))}
-                    placeholder="+998 (90) 123-45-67"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent transition-all"
-                  />
-                </div>
+                <PhoneInput
+                  label={t.common.phone}
+                  required
+                  value={phone}
+                  locale={language}
+                  onChange={(canonical) => setPhone(canonical)}
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {t.callback.branchOptional}
-                  </label>
-                  <select
-                    value={preferredBranch}
-                    onChange={(e) => setPreferredBranch(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
-                  >
-                    <option value="">Ixtiyoriy</option>
-                    <option value="Chilonzor filiali">Chilonzor</option>
-                    <option value="Yunusobod filiali">Yunusobod</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {t.callback.preferredTime}
-                  </label>
-                  <select
-                    value={preferredTime}
-                    onChange={(e) => setPreferredTime(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
-                  >
-                    <option value="">Tez orada</option>
-                    <option value="Ertalab (09:00 - 12:00)">Ertalab</option>
-                    <option value="Tushdan keyin (12:00 - 18:00)">Kunduzi</option>
-                    <option value="Kechqurun (18:00 - 20:00)">Kechqurun</option>
-                  </select>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CustomSelect
+                  label={t.callback.branchOptional}
+                  options={[
+                    { value: '', label: language === 'ru' ? 'Любой филиал' : 'Ixtiyoriy filial' },
+                    { value: 'Chilonzor filiali', label: 'Chilonzor' },
+                    { value: 'Yunusobod filiali', label: 'Yunusobod' },
+                  ]}
+                  value={preferredBranch}
+                  onChange={(val) => setPreferredBranch(val)}
+                  locale={language}
+                />
+
+                <CustomSelect
+                  label={t.callback.preferredTime}
+                  options={[
+                    { value: '', label: language === 'ru' ? 'В ближайшее время' : 'Tez orada' },
+                    { value: 'Ertalab (09:00 - 12:00)', label: language === 'ru' ? 'Утром (09:00 - 12:00)' : 'Ertalab (09:00 - 12:00)' },
+                    { value: 'Tushdan keyin (12:00 - 18:00)', label: language === 'ru' ? 'Днём (12:00 - 18:00)' : 'Kunduzi (12:00 - 18:00)' },
+                    { value: 'Kechqurun (18:00 - 20:00)', label: language === 'ru' ? 'Вечером (18:00 - 20:00)' : 'Kechqurun (18:00 - 20:00)' },
+                  ]}
+                  value={preferredTime}
+                  onChange={(val) => setPreferredTime(val)}
+                  locale={language}
+                />
               </div>
 
               <button

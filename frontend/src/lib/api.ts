@@ -266,6 +266,31 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status, reason }),
     }),
+  recordAppointmentDelay: (id: string, delayMinutes: number, reason?: string) =>
+    fetcher<{
+      appointmentId: string;
+      delayMinutes: number;
+      scheduledStartTime: string;
+      scheduledEndTime: string;
+      estimatedEndTime: string;
+      estimatedFreeTime: string;
+      bufferMinutes: number;
+      affectedCount: number;
+      affectedAppointments: Array<{
+        id: string;
+        patientName: string;
+        patientPhone: string;
+        scheduledStartTime: string;
+        scheduledEndTime: string;
+        serviceName: string;
+        estimatedDelayMinutes: number;
+        estimatedNewStartTime: string;
+        status: string;
+      }>;
+    }>(`/api/admin/appointments/${id}/delay`, {
+      method: 'POST',
+      body: JSON.stringify({ delayMinutes, reason }),
+    }),
   adminRescheduleAppointment: (id: string, startTime: string) =>
     fetcher<any>(`/api/admin/appointments/${id}/reschedule`, {
       method: 'PUT',
@@ -304,9 +329,10 @@ export const api = {
   },
 
   // Admin Lead Management
-  getAdminLeads: (status?: string, page = 1, limit = 30) => {
+  getAdminLeads: (status?: string, page = 1, limit = 30, search?: string) => {
     const q = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) q.set('status', status);
+    if (search) q.set('search', search);
     return fetcher<any>(`/api/admin/leads?${q.toString()}`);
   },
   updateLeadStatus: (id: string, status: string, internalNotes?: string) =>
@@ -332,6 +358,30 @@ export const api = {
     fetcher<any[]>(`/api/scheduling/schedules/${doctorId}`),
   setDoctorSchedule: (payload: any) =>
     fetcher<any>('/api/scheduling/schedules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  setBatchSchedules: (payload: {
+    doctorIds: string[];
+    daysOfWeek: string[];
+    startTime: string;
+    endTime: string;
+    breakStart?: string;
+    breakEnd?: string;
+    branchId: string;
+    mode: 'replace' | 'merge';
+  }) =>
+    fetcher<any>('/api/scheduling/schedules/batch', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  copyDoctorSchedules: (payload: {
+    fromDoctorId: string;
+    toDoctorIds: string[];
+    mode: 'replace' | 'merge';
+    targetBranchId?: string;
+  }) =>
+    fetcher<any>('/api/scheduling/schedules/copy', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

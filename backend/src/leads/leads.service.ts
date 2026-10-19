@@ -31,10 +31,23 @@ export class LeadsService {
     });
   }
 
-  async findAll(params: { status?: LeadStatus; page?: number; limit?: number }) {
-    const { status, page = 1, limit = 20 } = params;
+  async findAll(params: { status?: LeadStatus; page?: number; limit?: number; search?: string }) {
+    const { status, search, page = 1, limit = 20 } = params;
     const where: Prisma.LeadWhereInput = {};
     if (status) where.status = status;
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      const digits = q.replace(/\D/g, '');
+      const orFilters: Prisma.LeadWhereInput[] = [
+        { fullName: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q } },
+      ];
+      if (digits.length >= 3) {
+        orFilters.push({ phone: { contains: digits } });
+      }
+      where.OR = orFilters;
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.lead.findMany({

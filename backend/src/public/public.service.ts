@@ -9,11 +9,25 @@ export class PublicService {
     const settings = await this.prisma.clinicSettings.findFirst();
     if (!settings) throw new NotFoundException('Klinika ma\'lumotlari topilmadi');
 
+    let phones: Array<{ id: string; number: string; label?: string; isPrimary?: boolean }> = [];
+    if (settings.phone) {
+      try {
+        if (settings.phone.trim().startsWith('[')) {
+          phones = JSON.parse(settings.phone);
+        }
+      } catch (e) {}
+    }
+    if (!phones.length && settings.phone) {
+      phones = [{ id: '1', number: settings.phone, label: 'Asosiy raqam', isPrimary: true }];
+    }
+    const primaryPhone = phones.find((p) => p.isPrimary)?.number || phones[0]?.number || settings.phone;
+
     return {
       name: settings.name,
       nameRu: settings.nameRu,
       logo: settings.logo,
-      phone: settings.phone,
+      phone: primaryPhone,
+      phones,
       email: settings.email,
       website: settings.website,
       telegramLink: settings.telegramLink,

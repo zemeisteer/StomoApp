@@ -14,9 +14,64 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
 import { DayOfWeek, ExceptionType, StaffRole } from '@prisma/client';
-import { IsString, IsEnum, IsOptional, IsDateString, Matches } from 'class-validator';
+import { IsString, IsEnum, IsOptional, IsDateString, Matches, IsArray, IsIn } from 'class-validator';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export class BatchScheduleDto {
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  doctorIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  doctorId?: string;
+
+  @IsArray()
+  @IsEnum(DayOfWeek, { each: true })
+  daysOfWeek!: DayOfWeek[];
+
+  @IsString()
+  @Matches(TIME_REGEX, { message: 'Boshlanish vaqti HH:MM formatida bo\'lishi kerak' })
+  startTime!: string;
+
+  @IsString()
+  @Matches(TIME_REGEX, { message: 'Tugash vaqti HH:MM formatida bo\'lishi kerak' })
+  endTime!: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(TIME_REGEX, { message: 'Tanaffus boshlanishi HH:MM formatida bo\'lishi kerak' })
+  breakStart?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(TIME_REGEX, { message: 'Tanaffus tugashi HH:MM formatida bo\'lishi kerak' })
+  breakEnd?: string;
+
+  @IsString()
+  branchId!: string;
+
+  @IsIn(['replace', 'merge'])
+  mode!: 'replace' | 'merge';
+}
+
+export class CopyScheduleDto {
+  @IsString()
+  fromDoctorId!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  toDoctorIds!: string[];
+
+  @IsOptional()
+  @IsString()
+  targetBranchId?: string;
+
+  @IsIn(['replace', 'merge'])
+  mode!: 'replace' | 'merge';
+}
 
 class SetScheduleDto {
   @IsString()
@@ -130,6 +185,26 @@ export class SchedulingController {
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
   async setSchedule(@Body() dto: SetScheduleDto) {
     return this.service.setDoctorSchedule(dto);
+  }
+
+  @Post(['schedule/batch', 'schedules/batch'])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  async setBatchSchedule(@Body() dto: BatchScheduleDto) {
+    const doctorIds = dto.doctorIds && dto.doctorIds.length > 0
+      ? dto.doctorIds
+      : (dto.doctorId ? [dto.doctorId] : []);
+    return this.service.setBatchSchedules({
+      ...dto,
+      doctorIds,
+    });
+  }
+
+  @Post(['schedule/copy', 'schedules/copy'])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  async copySchedule(@Body() dto: CopyScheduleDto) {
+    return this.service.copyDoctorSchedules(dto);
   }
 
   @Post(['exception', 'exceptions'])

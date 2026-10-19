@@ -38,9 +38,16 @@ export default function AdminAnalyticsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Filters
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
+  // Filters with default current clinic month
+  const [activePreset, setActivePreset] = useState<'today' | 'week' | 'month' | 'custom'>('month');
+  const [startDate, setStartDate] = useState<string>(() => {
+    const todayStr = getClinicTodayDateString();
+    return getClinicMonthBoundaries(todayStr).dateFrom.slice(0, 10);
+  });
+  const [endDate, setEndDate] = useState<string>(() => {
+    const todayStr = getClinicTodayDateString();
+    return getClinicMonthBoundaries(todayStr).dateTo.slice(0, 10);
+  });
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
@@ -124,21 +131,25 @@ export default function AdminAnalyticsPage() {
   const applyPreset = (preset: 'today' | 'week' | 'month' | 'clear') => {
     const todayStr = getClinicTodayDateString();
     if (preset === 'today') {
+      setActivePreset('today');
       setStartDate(todayStr);
       setEndDate(todayStr);
     } else if (preset === 'week') {
+      setActivePreset('week');
       const bounds = getClinicWeekBoundaries(todayStr);
       const startDay = bounds.dateFrom.slice(0, 10);
       const endDay = bounds.dateTo.slice(0, 10);
       setStartDate(startDay);
       setEndDate(endDay);
     } else if (preset === 'month') {
+      setActivePreset('month');
       const bounds = getClinicMonthBoundaries(todayStr);
       const startDay = bounds.dateFrom.slice(0, 10);
       const endDay = bounds.dateTo.slice(0, 10);
       setStartDate(startDay);
       setEndDate(endDay);
     } else {
+      setActivePreset('custom');
       setStartDate('');
       setEndDate('');
     }
@@ -247,21 +258,33 @@ export default function AdminAnalyticsPage() {
               <button
                 type="button"
                 onClick={() => applyPreset('today')}
-                className="px-2.5 py-1 rounded-lg font-semibold hover:bg-white text-slate-700 transition-colors"
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  activePreset === 'today'
+                    ? 'bg-teal-700 text-white shadow-sm'
+                    : 'text-slate-700 hover:bg-white'
+                }`}
               >
                 {isUz ? 'Bugun' : 'Сегодня'}
               </button>
               <button
                 type="button"
                 onClick={() => applyPreset('week')}
-                className="px-2.5 py-1 rounded-lg font-semibold hover:bg-white text-slate-700 transition-colors"
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  activePreset === 'week'
+                    ? 'bg-teal-700 text-white shadow-sm'
+                    : 'text-slate-700 hover:bg-white'
+                }`}
               >
                 {isUz ? 'Shu hafta' : 'Эта неделя'}
               </button>
               <button
                 type="button"
                 onClick={() => applyPreset('month')}
-                className="px-2.5 py-1 rounded-lg font-semibold hover:bg-white text-slate-700 transition-colors"
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  activePreset === 'month'
+                    ? 'bg-teal-700 text-white shadow-sm'
+                    : 'text-slate-700 hover:bg-white'
+                }`}
               >
                 {isUz ? 'Shu oy' : 'Этот месяц'}
               </button>
@@ -291,7 +314,10 @@ export default function AdminAnalyticsPage() {
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setActivePreset('custom');
+                }}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:ring-2 focus:ring-teal-600 outline-none"
               />
             </div>
@@ -304,7 +330,10 @@ export default function AdminAnalyticsPage() {
               <input
                 type="date"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setActivePreset('custom');
+                }}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:ring-2 focus:ring-teal-600 outline-none"
               />
             </div>

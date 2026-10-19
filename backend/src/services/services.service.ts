@@ -65,23 +65,66 @@ export class ServicesService {
   }
 
   async create(data: any) {
-    if (data.priceFrom !== undefined && data.priceTo !== undefined && data.priceTo < data.priceFrom) {
+    const { doctorIds, ...serviceData } = data;
+    if (serviceData.priceFrom !== undefined && serviceData.priceTo !== undefined && serviceData.priceTo < serviceData.priceFrom) {
       throw new BadRequestException('Maksimal narx (priceTo) minimal narxdan (priceFrom) kichik bo\'lishi mumkin emas');
     }
-    return this.prisma.service.create({ data });
+
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.service.create({
+        data: serviceData,
+      });
+
+      if (doctorIds && Array.isArray(doctorIds) && doctorIds.length > 0) {
+        await tx.doctorService.createMany({
+          data: doctorIds.map((doctorId: string) => ({
+            doctorId,
+            serviceId: created.id,
+          })),
+        });
+      }
+
+      return tx.service.findUnique({
+        where: { id: created.id },
+        include: {
+          doctors: { include: { doctor: true } },
+        },
+      });
+    });
   }
 
   async update(id: string, data: any) {
     const existing = await this.prisma.service.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Xizmat topilmadi');
 
-    const effectiveFrom = data.priceFrom !== undefined ? data.priceFrom : existing.priceFrom;
-    const effectiveTo = data.priceTo !== undefined ? data.priceTo : existing.priceTo;
+    const { doctorIds, ...serviceData } = data;
+    const effectiveFrom = serviceData.priceFrom !== undefined ? serviceData.priceFrom : existing.priceFrom;
+    const effectiveTo = serviceData.priceTo !== undefined ? serviceData.priceTo : existing.priceTo;
     if (effectiveFrom !== null && effectiveTo !== null && effectiveTo < effectiveFrom) {
       throw new BadRequestException('Maksimal narx (priceTo) minimal narxdan (priceFrom) kichik bo\'lishi mumkin emas');
     }
 
-    return this.prisma.service.update({ where: { id }, data });
+    return this.prisma.$transaction(async (tx) => {
+      if (doctorIds !== undefined && Array.isArray(doctorIds)) {
+        await tx.doctorService.deleteMany({ where: { serviceId: id } });
+        if (doctorIds.length > 0) {
+          await tx.doctorService.createMany({
+            data: doctorIds.map((doctorId: string) => ({
+              doctorId,
+              serviceId: id,
+            })),
+          });
+        }
+      }
+
+      return tx.service.update({
+        where: { id },
+        data: serviceData,
+        include: {
+          doctors: { include: { doctor: true } },
+        },
+      });
+    });
   }
 
   async archive(id: string) {

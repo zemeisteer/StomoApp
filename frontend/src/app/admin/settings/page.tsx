@@ -1,14 +1,46 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Building2, Clock, Globe, Phone, Mail, Save, Plus, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Settings as SettingsIcon,
+  Building2,
+  Clock,
+  Globe,
+  Phone,
+  Mail,
+  Save,
+  Plus,
+  CheckCircle2,
+  AlertCircle,
+  Upload,
+  Image as ImageIcon,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  ExternalLink,
+  MapPin,
+  HelpCircle,
+  Info,
+  Smartphone,
+  Monitor,
+} from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
+import { normalizeUzPhone, formatUzPhoneDisplay } from '../../../lib/phone';
+import { PhoneInput } from '../../../components/PhoneInput';
+
+interface ContactPhoneItem {
+  id: string;
+  number: string;
+  label: string;
+  isPrimary: boolean;
+}
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<any>({
     name: '',
     nameRu: '',
+    logo: '',
     phone: '',
     email: '',
     website: '',
@@ -21,6 +53,17 @@ export default function AdminSettingsPage() {
     bufferMinutes: 5,
     pendingExpiryMinutes: 30,
   });
+
+  // Logo state & guidance
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoWarning, setLogoWarning] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Contact phones state (repeatable list)
+  const [contactPhones, setContactPhones] = useState<ContactPhoneItem[]>([
+    { id: 'phone-1', number: '', label: 'Asosiy raqam (Qabulxona)', isPrimary: true },
+  ]);
 
   const [branches, setBranches] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,6 +80,7 @@ export default function AdminSettingsPage() {
   const [branchAddressRu, setBranchAddressRu] = useState('');
   const [branchPhone, setBranchPhone] = useState('');
   const [branchWorkHours, setBranchWorkHours] = useState('');
+  const [branchMapUrl, setBranchMapUrl] = useState('');
   const [branchIsActive, setBranchIsActive] = useState(true);
 
   const loadData = async () => {
@@ -46,10 +90,12 @@ export default function AdminSettingsPage() {
         api.getClinicSettingsAdmin(),
         api.getBranchesAdmin(),
       ]);
+
       if (settingsRes) {
         setSettings({
           name: settingsRes.name || '',
           nameRu: settingsRes.nameRu || '',
+          logo: settingsRes.logo || '',
           phone: settingsRes.phone || '',
           email: settingsRes.email || '',
           website: settingsRes.website || '',
@@ -62,7 +108,49 @@ export default function AdminSettingsPage() {
           bufferMinutes: settingsRes.bufferMinutes ?? 5,
           pendingExpiryMinutes: settingsRes.pendingExpiryMinutes ?? 30,
         });
+
+        if (settingsRes.logo) {
+          setLogoUrl(settingsRes.logo);
+        }
+
+        // Parse contact phones
+        if (settingsRes.phone) {
+          try {
+            if (settingsRes.phone.trim().startsWith('[')) {
+              const parsed = JSON.parse(settingsRes.phone);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setContactPhones(
+                  parsed.map((p: any, idx: number) => ({
+                    id: p.id || `phone-${idx + 1}`,
+                    number: p.number || '',
+                    label: p.label || (idx === 0 ? 'Asosiy raqam' : 'Qo\'shimcha raqam'),
+                    isPrimary: Boolean(p.isPrimary ?? idx === 0),
+                  })),
+                );
+              }
+            } else {
+              setContactPhones([
+                {
+                  id: 'phone-1',
+                  number: settingsRes.phone,
+                  label: 'Asosiy raqam (Qabulxona)',
+                  isPrimary: true,
+                },
+              ]);
+            }
+          } catch {
+            setContactPhones([
+              {
+                id: 'phone-1',
+                number: settingsRes.phone,
+                label: 'Asosiy raqam',
+                isPrimary: true,
+              },
+            ]);
+          }
+        }
       }
+
       setBranches(branchesRes || []);
     } catch (err: any) {
       console.error('Failed to load clinic settings', err);
@@ -75,13 +163,172 @@ export default function AdminSettingsPage() {
     loadData();
   }, []);
 
+  // Logo upload handler with validation
+  const handleLogoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setErrorMsg(null);
+    setLogoWarning(null);
+
+    // 1. Check format: strictly reject SVG
+    if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+      setErrorMsg('Xavfsizlik talablariga binoan SVG format qabul qilinmaydi. Iltimos, PNG yoki WebP yuklang.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    if (!['image/png', 'image/webp', 'image/jpeg'].includes(file.type)) {
+      setErrorMsg('Faqat PNG yoki WebP formatdagi rasmlar ruxsat etiladi.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // 2. Check file size (max 2MB)
+    const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+    if (file.size > MAX_LOGO_BYTES) {
+      setErrorMsg(`Fayl hajmi 2 MB dan oshmasligi kerak (tanlangan fayl: ${(file.size / (1024 * 1024)).toFixed(2)} MB).`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // 3. Check image dimensions via Image object
+    try {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Rasmni o\'qishda xatolik'));
+        img.src = objectUrl;
+      });
+
+      if (img.naturalWidth < 300 || img.naturalHeight < 100) {
+        setLogoWarning(
+          `Ogohlantirish: Logo o'lchami kichik (${img.naturalWidth}×${img.naturalHeight} px). Yuqori sifatli ko'rinish uchun kamida 300×100 px tavsiya etiladi.`,
+        );
+      }
+    } catch (err) {
+      console.warn('Could not inspect image dimensions:', err);
+    }
+
+    // 4. Upload via media API
+    try {
+      setLogoUploading(true);
+      const res = await api.uploadMedia(file);
+      const uploadedUrl = res.url || res.data?.url;
+      if (uploadedUrl) {
+        setLogoUrl(uploadedUrl);
+        setSettings((prev: any) => ({ ...prev, logo: uploadedUrl }));
+        setSuccessMsg('Logo muvaffaqiyatli yuklandi. O\'zgarishlarni saqlash uchun "Sozlamalarni saqlash" tugmasini bosing.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Logoni yuklashda xatolik yuz berdi');
+    } finally {
+      setLogoUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoUrl(null);
+    setLogoWarning(null);
+    setSettings((prev: any) => ({ ...prev, logo: null }));
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Contact Phones handlers
+  const handleAddPhone = () => {
+    setContactPhones((prev) => [
+      ...prev,
+      {
+        id: `phone-${Date.now()}`,
+        number: '',
+        label: '',
+        isPrimary: prev.length === 0,
+      },
+    ]);
+  };
+
+  const handleRemovePhone = (id: string) => {
+    if (contactPhones.length <= 1) {
+      setErrorMsg('Kamida bitta telefon raqami saqlanishi kerak.');
+      return;
+    }
+    const filtered = contactPhones.filter((p) => p.id !== id);
+    // If we removed the primary one, make the first remaining phone primary
+    const hasPrimary = filtered.some((p) => p.isPrimary);
+    if (!hasPrimary && filtered.length > 0) {
+      filtered[0].isPrimary = true;
+    }
+    setContactPhones(filtered);
+  };
+
+  const handleSetPrimaryPhone = (id: string) => {
+    setContactPhones((prev) =>
+      prev.map((p) => ({
+        ...p,
+        isPrimary: p.id === id,
+      })),
+    );
+  };
+
+  const handleMovePhone = (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === contactPhones.length - 1) return;
+
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    const items = [...contactPhones];
+    const [moved] = items.splice(index, 1);
+    items.splice(newIndex, 0, moved);
+    setContactPhones(items);
+  };
+
+  const handlePhoneChange = (id: string, field: 'number' | 'label', val: string) => {
+    setContactPhones((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, [field]: val } : p)),
+    );
+  };
+
+  // Submit Settings
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setIsSaving(true);
       setSuccessMsg(null);
       setErrorMsg(null);
-      await api.updateClinicSettingsAdmin(settings);
+
+      // Validate all contact phones
+      if (contactPhones.length === 0) {
+        throw new Error('Kamida bitta aloqa telefon raqami talab qilinadi.');
+      }
+
+      const validatedPhones: ContactPhoneItem[] = [];
+      for (const item of contactPhones) {
+        const norm = normalizeUzPhone(item.number, true);
+        if (!norm.isValid) {
+          throw new Error(
+            `"${item.label || 'Telefon'}" raqami noto'g'ri: ${norm.errorMessageUz || '+998XXXXXXXXX formatida 9 ta raqam bo\'lishi kerak'}`,
+          );
+        }
+        validatedPhones.push({
+          ...item,
+          number: norm.normalized,
+        });
+      }
+
+      // Ensure one primary
+      const primaryExists = validatedPhones.some((p) => p.isPrimary);
+      if (!primaryExists && validatedPhones.length > 0) {
+        validatedPhones[0].isPrimary = true;
+      }
+
+      const payload = {
+        ...settings,
+        logo: logoUrl || null,
+        phone: JSON.stringify(validatedPhones),
+      };
+
+      await api.updateClinicSettingsAdmin(payload);
       setSuccessMsg('Klinika sozlamalari muvaffaqiyatli saqlandi');
     } catch (err: any) {
       setErrorMsg(err?.message || 'Sozlamalarni saqlashda xatolik');
@@ -90,11 +337,30 @@ export default function AdminSettingsPage() {
     }
   };
 
+  // Branch Save Handler
   const handleSaveBranch = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setIsSaving(true);
       setErrorMsg(null);
+
+      // Validate mapUrl
+      let cleanedMapUrl = branchMapUrl.trim();
+      if (cleanedMapUrl) {
+        const lower = cleanedMapUrl.toLowerCase();
+        if (
+          lower.startsWith('javascript:') ||
+          lower.includes('<script') ||
+          lower.includes('<iframe') ||
+          lower.startsWith('data:')
+        ) {
+          throw new Error('Xavfsiz xarita havolasi talab qilinadi (http:// yoki https://). Iframe yoki script ruxsat etilmaydi.');
+        }
+        if (!cleanedMapUrl.startsWith('http://') && !cleanedMapUrl.startsWith('https://')) {
+          cleanedMapUrl = `https://${cleanedMapUrl}`;
+        }
+      }
+
       const payload = {
         nameUz: branchNameUz.trim(),
         nameRu: branchNameRu.trim(),
@@ -102,6 +368,7 @@ export default function AdminSettingsPage() {
         addressRu: branchAddressRu.trim(),
         phone: branchPhone.trim(),
         workHours: branchWorkHours.trim(),
+        mapUrl: cleanedMapUrl || null,
         isActive: branchIsActive,
       };
 
@@ -113,6 +380,7 @@ export default function AdminSettingsPage() {
       setShowBranchModal(false);
       setEditingBranch(null);
       await loadData();
+      setSuccessMsg('Filial ma\'lumotlari muvaffaqiyatli saqlandi');
     } catch (err: any) {
       setErrorMsg(err?.message || 'Filialni saqlashda xatolik');
     } finally {
@@ -122,13 +390,13 @@ export default function AdminSettingsPage() {
 
   return (
     <AdminLayout allowedRoles={['OWNER']}>
-      <div className="space-y-8 max-w-5xl">
+      <div className="space-y-8 max-w-5xl pb-16">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900">
             Klinika Sozlamalari va Filiallar
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Klinika profili, bronlash qoidalari, ish vaqti va filiallar ro&apos;yxati (Faqat OWNER)
+            Klinika brendi, logotipi, aloqa raqamlari, bronlash qoidalari va filiallar boshqaruvi (Faqat OWNER)
           </p>
         </div>
 
@@ -146,11 +414,158 @@ export default function AdminSettingsPage() {
           </div>
         )}
 
-        {/* Clinic Identity & Rules Form */}
+        {/* 1. CLINIC LOGO & BRANDING MANAGEMENT (Req 16) */}
+        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="border-b border-slate-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-teal-700" />
+                <span>Klinika Logotipi va Brending</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Veb-sayt bosh sahifasi, yuqori menyu (header), pastki qism (footer) va admin panelda ko&apos;rinadi
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/webp"
+                className="hidden"
+                onChange={handleLogoFileChange}
+              />
+              <button
+                type="button"
+                disabled={logoUploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+              >
+                <Upload className="w-4 h-4" />
+                <span>{logoUrl ? 'Logoni almashtirish' : 'Yangi logo yuklash'}</span>
+              </button>
+              {logoUrl && (
+                <button
+                  type="button"
+                  onClick={handleRemoveLogo}
+                  className="flex items-center gap-1.5 px-3 py-2 text-rose-700 hover:bg-rose-50 rounded-xl text-xs font-semibold transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>O&apos;chirish</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {logoWarning && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>{logoWarning}</span>
+            </div>
+          )}
+
+          {/* Guidelines Box */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 text-xs text-slate-600 space-y-1.5">
+            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5 text-teal-700" />
+              <span>Logotip uchun texnik talablar va tavsiyalar:</span>
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-[11px] text-slate-600">
+              <li><strong>Format:</strong> Shaffof fonli <code>PNG</code> yoki <code>WebP</code> tavsiya etiladi (xavfsizlik sababli SVG qabul qilinmaydi).</li>
+              <li><strong>Tavsiya etiladigan o&apos;lcham:</strong> Gorizontal logo uchun taxminan <code>600×200 px</code>; kvadrat belgi uchun <code>256×256 px</code>.</li>
+              <li><strong>Ruxsat etilgan minimal o&apos;lcham:</strong> Sifat buzilmasligi uchun kamida <code>300×100 px</code>.</li>
+              <li><strong>Maksimal fayl hajmi:</strong> <code>2 MB</code> gacha.</li>
+            </ul>
+          </div>
+
+          {/* Live Previews: Desktop & Mobile Header placement */}
+          <div className="space-y-3 pt-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+              Jonli ko&apos;rinish (Desktop va Mobile Prevyu)
+            </h3>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              {/* Desktop Header Simulation */}
+              <div className="lg:col-span-7 p-4 rounded-2xl border border-slate-200 bg-slate-100 flex flex-col justify-between space-y-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                  <Monitor className="w-3.5 h-3.5 text-teal-700" />
+                  <span>Kompyuter (Desktop) menyusi prevyusi:</span>
+                </div>
+                <div className="h-16 px-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {logoUrl ? (
+                      <img
+                        src={logoUrl}
+                        alt="Klinika logotipi"
+                        className="h-9 max-w-[160px] object-contain"
+                      />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-teal-700 flex items-center justify-center text-white">
+                          <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                            <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
+                          </svg>
+                        </div>
+                        <span className="font-extrabold text-slate-900 text-sm tracking-tight">
+                          Denta<span className="text-teal-700">Care</span>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="hidden sm:flex items-center gap-4 text-[11px] font-semibold text-slate-500">
+                    <span>Xizmatlar</span>
+                    <span>Shifokorlar</span>
+                    <span>Klinika</span>
+                    <span className="px-2.5 py-1 bg-teal-700 text-white rounded-lg text-[10px] font-bold">
+                      Qabulga yozilish
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {logoUrl ? 'Yuklangan logotip o\'z nisbatini saqlagan holda joylashadi' : 'Logotip yuklanmasa, standart toza DentaCare belgisi aks etadi'}
+                </p>
+              </div>
+
+              {/* Mobile Header Simulation */}
+              <div className="lg:col-span-5 p-4 rounded-2xl border border-slate-200 bg-slate-100 flex flex-col justify-between space-y-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                  <Smartphone className="w-3.5 h-3.5 text-teal-700" />
+                  <span>Mobil (Telefon 390px) prevyusi:</span>
+                </div>
+                <div className="h-14 px-3 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between max-w-[320px] mx-auto w-full">
+                  <div className="flex items-center gap-2">
+                    {logoUrl ? (
+                      <img
+                        src={logoUrl}
+                        alt="Mobil logo"
+                        className="h-7 max-w-[120px] object-contain"
+                      />
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-6 h-6 rounded-lg bg-teal-700 flex items-center justify-center text-white">
+                          <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                            <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
+                          </svg>
+                        </div>
+                        <span className="font-extrabold text-slate-900 text-xs">DentaCare</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 text-[10px] font-bold">
+                    ☰
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 text-center">
+                  Mobil ekranda ixcham va toza sig&apos;im
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 2. CLINIC GENERAL & CONTACT PHONES FORM (Req 17) */}
         <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
           <h2 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3 flex items-center gap-2">
             <Building2 className="w-4 h-4 text-teal-700" />
-            <span>Klinika Ma&apos;lumotlari va Bronlash Qoidalari</span>
+            <span>Klinika Asosiy Ma&apos;lumotlari</span>
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -182,18 +597,6 @@ export default function AdminSettingsPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Asosiy telefon raqam
-              </label>
-              <input
-                type="text"
-                value={settings.phone}
-                onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Email manzil
               </label>
               <input
@@ -202,6 +605,127 @@ export default function AdminSettingsPage() {
                 onChange={(e) => setSettings({ ...settings, email: e.target.value })}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Rasmiy veb-sayt
+              </label>
+              <input
+                type="text"
+                value={settings.website}
+                onChange={(e) => setSettings({ ...settings, website: e.target.value })}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                placeholder="https://dentacare.uz"
+              />
+            </div>
+          </div>
+
+          {/* Repeatable Contact Phone Numbers List (Req 17) */}
+          <div className="pt-4 border-t border-slate-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-teal-700" />
+                  <span>Aloqa Telefon Raqamlari (Ko&apos;p tarmoqli kontaktlar)</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Klinika bilan bog&apos;lanish uchun bir nechta raqam kiriting. Ulardan birini &quot;Asosiy&quot; qilib belgilang.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddPhone}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 rounded-xl text-xs font-bold"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Raqam qo&apos;shish</span>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {contactPhones.map((phoneItem, index) => {
+                const normCheck = phoneItem.number.trim()
+                  ? normalizeUzPhone(phoneItem.number, true)
+                  : { isValid: true };
+
+                return (
+                  <div
+                    key={phoneItem.id}
+                    className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-3 shrink-0">
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                        <input
+                          type="radio"
+                          name="primaryPhoneGroup"
+                          checked={phoneItem.isPrimary}
+                          onChange={() => handleSetPrimaryPhone(phoneItem.id)}
+                          className="w-4 h-4 text-teal-700 focus:ring-teal-600"
+                        />
+                        <span>{phoneItem.isPrimary ? 'Asosiy' : 'Qo\'shimcha'}</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 flex-1">
+                      <div>
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel"
+                          placeholder="+998 71 123 45 67"
+                          value={phoneItem.number}
+                          onChange={(e) => handlePhoneChange(phoneItem.id, 'number', e.target.value)}
+                          className={`w-full px-3 py-2 rounded-xl border text-xs focus:ring-2 focus:ring-teal-600 bg-white font-medium ${
+                            phoneItem.number.trim() && !normCheck.isValid
+                              ? 'border-rose-300 text-rose-800'
+                              : 'border-slate-200 text-slate-800'
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="Tavsifi: masalan, Qabulxona yoki WhatsApp"
+                          value={phoneItem.label}
+                          onChange={(e) => handlePhoneChange(phoneItem.id, 'label', e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={index === 0}
+                        onClick={() => handleMovePhone(index, 'up')}
+                        title="Yuqoriga surish"
+                        className="p-1.5 text-slate-500 hover:text-slate-800 disabled:opacity-30 rounded-lg hover:bg-slate-200/50"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={index === contactPhones.length - 1}
+                        onClick={() => handleMovePhone(index, 'down')}
+                        title="Pastga surish"
+                        className="p-1.5 text-slate-500 hover:text-slate-800 disabled:opacity-30 rounded-lg hover:bg-slate-200/50"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={contactPhones.length <= 1}
+                        onClick={() => handleRemovePhone(phoneItem.id)}
+                        title="Raqamni o'chirish"
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-30 rounded-lg"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -246,65 +770,118 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          <div className="pt-4 border-t border-slate-100">
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
-              Bronlash va Vaqt Sozlamalari
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Vaqt mintaqasi
-                </label>
-                <input
-                  type="text"
-                  disabled
-                  value={settings.timezone}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs bg-slate-50 text-slate-500 font-semibold"
-                />
-              </div>
+          {/* 3. PLAIN-LANGUAGE BOOKING SETTINGS (Req 18) */}
+          <div className="pt-6 border-t border-slate-100 space-y-4">
+            <div>
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-teal-700" />
+                <span>Bronlash va Vaqt Qoidalari</span>
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Bemorlar uchun qabulga yozilish qoidalari, oraliqlar va avtomatik bekor bo&apos;lish muddatlari
+              </p>
+            </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Minimal ogohlantirish (soat)
-                </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Field 1: minBookingNoticeHours */}
+              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800">
+                    Qabulga kamida necha soat oldin yozilish kerak?
+                  </label>
+                  <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
+                    soat
+                  </span>
+                </div>
                 <input
                   type="number"
                   min={0}
+                  step={1}
+                  required
                   value={settings.minBookingNoticeHours}
                   onChange={(e) => setSettings({ ...settings, minBookingNoticeHours: Number(e.target.value) })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  <strong>Masalan:</strong> 2 soat. Agar hozir soat 10:00 bo&apos;lsa, bemor eng erta 12:00 dagi bo&apos;sh qabulga yozila oladi.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Maksimal uzoqlik (kun)
-                </label>
+              {/* Field 2: maxBookingHorizonDays */}
+              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800">
+                    Necha kun oldingacha yozilish mumkin?
+                  </label>
+                  <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
+                    kun
+                  </span>
+                </div>
                 <input
                   type="number"
                   min={1}
+                  step={1}
+                  required
                   value={settings.maxBookingHorizonDays}
                   onChange={(e) => setSettings({ ...settings, maxBookingHorizonDays: Number(e.target.value) })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  <strong>Masalan:</strong> 60 kun. Bemor taqvimdan bugundan boshlab 60 kungacha bo&apos;lgan muddatdagi sanalarni tanlashi mumkin.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Bufer oralig&apos;i (daqiqa)
-                </label>
+              {/* Field 3: bufferMinutes */}
+              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800">
+                    Qabullar orasidagi tanaffus
+                  </label>
+                  <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
+                    daqiqa
+                  </span>
+                </div>
                 <input
                   type="number"
                   min={0}
+                  step={5}
+                  required
                   value={settings.bufferMinutes}
                   onChange={(e) => setSettings({ ...settings, bufferMinutes: Number(e.target.value) })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  <strong>Masalan:</strong> 5 yoki 10 daqiqa. Shifokor xonasini tozalash, asboblarni sterilizatsiya qilish va tayyorlash uchun ajratiladi.
+                </p>
+              </div>
+
+              {/* Field 4: pendingExpiryMinutes */}
+              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800">
+                    Tasdiqlanmagan ariza uchun joy qancha vaqt saqlanadi?
+                  </label>
+                  <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
+                    daqiqa
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min={5}
+                  step={5}
+                  required
+                  value={settings.pendingExpiryMinutes}
+                  onChange={(e) => setSettings({ ...settings, pendingExpiryMinutes: Number(e.target.value) })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
+                />
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  <strong>Masalan:</strong> 30 daqiqa. Agar bemor arizani tasdiqlamasa yoki to&apos;lov qilmasa, vaqt oralig&apos;i avtomatik bekor bo&apos;lib boshqalarga ochiladi.
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-end pt-3">
             <button
               type="submit"
               disabled={isSaving}
@@ -316,15 +893,15 @@ export default function AdminSettingsPage() {
           </div>
         </form>
 
-        {/* Branches Management */}
+        {/* 4. BRANCHES MANAGEMENT & LOCATION URLS (Req 17) */}
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Klinika Filiallari
+                Klinika Filiallari va Xaritalar
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Mavjud filiallar manzillari, telefonlari va faollik holati
+                Mavjud filiallar manzillari, telefonlari, xarita havolalari va faollik holati
               </p>
             </div>
             <button
@@ -337,6 +914,7 @@ export default function AdminSettingsPage() {
                 setBranchAddressRu('');
                 setBranchPhone('');
                 setBranchWorkHours('09:00 - 19:00');
+                setBranchMapUrl('');
                 setBranchIsActive(true);
                 setShowBranchModal(true);
               }}
@@ -366,9 +944,27 @@ export default function AdminSettingsPage() {
                       {b.isActive ? 'Faol' : 'Nofaol'}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">{b.addressUz}</p>
+                  <p className="text-xs text-slate-600 mt-1">{b.addressUz}</p>
                   <p className="text-xs text-teal-700 font-semibold mt-1">Tel: {b.phone}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Ish vaqti: {b.workHours}</p>
+
+                  {/* Branch Location URL */}
+                  {b.mapUrl ? (
+                    <div className="mt-2.5 pt-2 border-t border-slate-200/50 flex items-center justify-between">
+                      <a
+                        href={b.mapUrl.startsWith('http://') || b.mapUrl.startsWith('https://') ? b.mapUrl : `https://${b.mapUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-800 underline underline-offset-2"
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        <span>Xaritada ochish</span>
+                        <ExternalLink className="w-3 h-3 ml-0.5" />
+                      </a>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400 italic mt-2">Xarita havolasi kiritilmagan</p>
+                  )}
                 </div>
 
                 <div className="flex justify-end pt-2 border-t border-slate-200/60">
@@ -380,8 +976,9 @@ export default function AdminSettingsPage() {
                       setBranchNameRu(b.nameRu);
                       setBranchAddressUz(b.addressUz);
                       setBranchAddressRu(b.addressRu);
-                      setBranchPhone(b.phone);
-                      setBranchWorkHours(b.workHours);
+                      setBranchPhone(b.phone || '');
+                      setBranchWorkHours(b.workHours || '');
+                      setBranchMapUrl(b.mapUrl || '');
                       setBranchIsActive(b.isActive);
                       setShowBranchModal(true);
                     }}
@@ -398,7 +995,7 @@ export default function AdminSettingsPage() {
         {/* Branch Modal */}
         {showBranchModal && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-extrabold text-slate-900">
                 {editingBranch ? 'Filialni tahrirlash' : 'Yangi filial qo\'shish'}
               </h3>
@@ -483,6 +1080,23 @@ export default function AdminSettingsPage() {
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
+                </div>
+
+                {/* Location URL (Req 17) */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Xarita havolasi (Google Maps, Yandex yoki 2GIS)
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://maps.google.com/?q=... yoki https://yandex.uz/maps/..."
+                    value={branchMapUrl}
+                    onChange={(e) => setBranchMapUrl(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Faqat xavfsiz <code>http://</code> yoki <code>https://</code> havolalari qabul qilinadi. To&apos;g&apos;ridan-to&apos;g&apos;ri iframe kodi kiritilmasligi kerak.
+                  </p>
                 </div>
 
                 <div>

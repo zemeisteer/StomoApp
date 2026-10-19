@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { UserCheck, Plus, Shield, User, RefreshCw, AlertCircle, CheckCircle2, Lock } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
+import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
 
 export default function AdminStaffPage() {
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -298,42 +299,33 @@ export default function AdminStaffPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Vakolat roli
-                    </label>
-                    <select
-                      value={createRole}
-                      onChange={(e) => setCreateRole(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                    >
-                      <option value="OWNER">OWNER (To&apos;liq huquq)</option>
-                      <option value="ADMIN">ADMIN (Operatsion)</option>
-                      <option value="DOCTOR">DOCTOR (Shifokor)</option>
-                      <option value="EDITOR">EDITOR (CMS / Sharhlar)</option>
-                    </select>
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <CustomSelect
+                    label="Vakolat roli"
+                    options={[
+                      { value: 'OWNER', label: 'OWNER (To‘liq huquq)', badge: 'Owner' },
+                      { value: 'ADMIN', label: 'ADMIN (Operatsion)', badge: 'Admin' },
+                      { value: 'DOCTOR', label: 'DOCTOR (Shifokor)', badge: 'Doctor' },
+                      { value: 'EDITOR', label: 'EDITOR (CMS / Sharhlar)', badge: 'Editor' },
+                    ]}
+                    value={createRole}
+                    onChange={(val) => setCreateRole(val)}
+                  />
 
                   {createRole === 'DOCTOR' && (
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Shifokor profiliga biriktirish
-                      </label>
-                      <select
-                        value={createDoctorId}
-                        onChange={(e) => setCreateDoctorId(e.target.value)}
-                        required
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                      >
-                        <option value="">Tanlang...</option>
-                        {doctors.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            Dr. {d.firstNameUz} {d.lastNameUz}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <CustomSelect
+                      label="Shifokor profiliga biriktirish"
+                      options={[
+                        { value: '', label: 'Tanlang...' },
+                        ...doctors.map((d) => ({
+                          value: d.id,
+                          label: `Dr. ${d.firstNameUz} ${d.lastNameUz}`,
+                          badge: d.specialtyUz || undefined,
+                        })),
+                      ]}
+                      value={createDoctorId}
+                      onChange={(val) => setCreateDoctorId(val)}
+                    />
                   )}
                 </div>
 
@@ -387,56 +379,44 @@ export default function AdminStaffPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Vakolat roli
-                    </label>
-                    <select
-                      value={editRole}
-                      onChange={(e) => setEditRole(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                    >
-                      <option value="OWNER">OWNER</option>
-                      <option value="ADMIN">ADMIN</option>
-                      <option value="DOCTOR">DOCTOR</option>
-                      <option value="EDITOR">EDITOR</option>
-                    </select>
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <CustomSelect
+                    label="Vakolat roli"
+                    options={[
+                      { value: 'OWNER', label: 'OWNER (To‘liq huquq)', badge: 'Owner' },
+                      { value: 'ADMIN', label: 'ADMIN (Operatsion)', badge: 'Admin' },
+                      { value: 'DOCTOR', label: 'DOCTOR (Shifokor)', badge: 'Doctor' },
+                      { value: 'EDITOR', label: 'EDITOR (CMS / Sharhlar)', badge: 'Editor' },
+                    ]}
+                    value={editRole}
+                    onChange={(val) => setEditRole(val)}
+                  />
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Hisob holati
-                    </label>
-                    <select
-                      value={editIsActive ? 'true' : 'false'}
-                      onChange={(e) => setEditIsActive(e.target.value === 'true')}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                    >
-                      <option value="true">Faol (Active)</option>
-                      <option value="false">Bloklangan (Inactive)</option>
-                    </select>
-                  </div>
+                  <CustomSelect
+                    label="Hisob holati"
+                    options={[
+                      { value: 'true', label: 'Faol (Active)' },
+                      { value: 'false', label: 'Bloklangan (Inactive)' },
+                    ]}
+                    value={editIsActive ? 'true' : 'false'}
+                    onChange={(val) => setEditIsActive(val === 'true')}
+                  />
                 </div>
 
                 {editRole === 'DOCTOR' && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Shifokor profiliga biriktirish
-                    </label>
-                    <select
-                      value={editDoctorId}
-                      onChange={(e) => setEditDoctorId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                    >
-                      <option value="">Biriktirilmagan</option>
-                      {doctors.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          Dr. {d.firstNameUz} {d.lastNameUz}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <CustomSelect
+                    label="Shifokor profiliga biriktirish"
+                    options={[
+                      { value: '', label: 'Biriktirilmagan' },
+                      ...doctors.map((d) => ({
+                        value: d.id,
+                        label: `Dr. ${d.firstNameUz} ${d.lastNameUz}`,
+                        badge: d.specialtyUz || undefined,
+                      })),
+                    ]}
+                    value={editDoctorId}
+                    onChange={(val) => setEditDoctorId(val)}
+                  />
                 )}
 
                 <div className="p-3 bg-amber-50 rounded-xl text-[11px] text-amber-800 border border-amber-200">

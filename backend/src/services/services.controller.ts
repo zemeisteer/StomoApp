@@ -21,6 +21,7 @@ import {
   IsOptional,
   IsInt,
   IsBoolean,
+  IsArray,
   Min,
   Max,
   Length,
@@ -96,6 +97,11 @@ export class CreateServiceDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  doctorIds?: string[];
 }
 
 import { CurrentUser } from '../auth/current-user.decorator';

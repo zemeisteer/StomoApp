@@ -48,13 +48,13 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   NO_SHOW: [],
 };
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  PENDING: { label: 'Kutilmoqda', color: 'bg-amber-100 text-amber-900 border-amber-300' },
-  CONFIRMED: { label: 'Tasdiqlangan', color: 'bg-teal-100 text-teal-900 border-teal-300' },
-  CHECKED_IN: { label: 'Klinikada', color: 'bg-blue-100 text-blue-900 border-blue-300' },
-  COMPLETED: { label: 'Yakunlangan', color: 'bg-emerald-100 text-emerald-900 border-emerald-300' },
-  CANCELLED: { label: 'Bekor qilingan', color: 'bg-rose-100 text-rose-900 border-rose-300' },
-  NO_SHOW: { label: 'Kelmadi', color: 'bg-slate-200 text-slate-800 border-slate-300' },
+const STATUS_LABELS: Record<string, { label: string; color: string; desc: string }> = {
+  PENDING: { label: 'Tasdiqlash kutilmoqda', color: 'bg-amber-100 text-amber-900 border-amber-300', desc: 'Mijoz arizasi, klinikadan tasdiqlash talab etiladi' },
+  CONFIRMED: { label: 'Kelishi kutilmoqda', color: 'bg-teal-100 text-teal-900 border-teal-300', desc: 'Qabul tasdiqlangan, bemor kelishi kutilmoqda' },
+  CHECKED_IN: { label: 'Klinikaga keldi', color: 'bg-blue-100 text-blue-900 border-blue-300', desc: 'Bemor klinikada ro‘yxatdan o‘tdi / navbatda' },
+  COMPLETED: { label: 'Yakunlandi', color: 'bg-emerald-100 text-emerald-900 border-emerald-300', desc: 'Muolaja to‘liq yakunlangan' },
+  CANCELLED: { label: 'Bekor qilindi', color: 'bg-rose-100 text-rose-900 border-rose-300', desc: 'Qabul bekor qilingan' },
+  NO_SHOW: { label: 'Kelmadi', color: 'bg-slate-200 text-slate-800 border-slate-300', desc: 'Bemor kelmadi (xodim tomonidan qo‘lda belgilangan)' },
 };
 
 export default function AdminCalendarPage() {
@@ -140,6 +140,16 @@ export default function AdminCalendarPage() {
   const [mutatingStatus, setMutatingStatus] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Search by patient name or phone
+  const [search, setSearch] = useState<string>('');
+
+  // Delay & Overrun workflow
+  const [showDelayModal, setShowDelayModal] = useState<boolean>(false);
+  const [delayMinutes, setDelayMinutes] = useState<number>(15);
+  const [delayReason, setDelayReason] = useState<string>('');
+  const [delayResult, setDelayResult] = useState<any | null>(null);
+  const [isSavingDelay, setIsSavingDelay] = useState<boolean>(false);
+
   // Accessible Cancellation Confirmation Modal
   const [cancelModalAppt, setCancelModalAppt] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState<string>('');
@@ -205,6 +215,8 @@ export default function AdminCalendarPage() {
     setActionError(null);
     setTargetApptError(null);
     setIsRescheduling(false);
+    setShowDelayModal(false);
+    setDelayResult(null);
     updateUrlParams({ appointmentId: null });
   }, [updateUrlParams]);
 
@@ -278,6 +290,10 @@ export default function AdminCalendarPage() {
         limit: pageSize,
       };
 
+      if (search && search.trim()) {
+        params.search = search.trim();
+      }
+
       if (user?.role === 'DOCTOR') {
         params.doctorId = user.doctorId;
       } else if (selectedDoctorId) {
@@ -341,10 +357,14 @@ export default function AdminCalendarPage() {
     currentDate,
     viewMode,
     updateUrlParams,
+    search,
   ]);
 
   useEffect(() => {
-    loadAppointments();
+    const timer = setTimeout(() => {
+      loadAppointments();
+    }, 200);
+    return () => clearTimeout(timer);
   }, [loadAppointments]);
 
   // URL appointmentId synchronization & popstate handling
@@ -546,6 +566,21 @@ export default function AdminCalendarPage() {
     }
   };
 
+  const handleRecordDelay = async () => {
+    if (!selectedAppt) return;
+    try {
+      setIsSavingDelay(true);
+      setActionError(null);
+      const res = await api.recordAppointmentDelay(selectedAppt.id, delayMinutes, delayReason);
+      setDelayResult(res);
+      await loadAppointments();
+    } catch (err: any) {
+      setActionError(err?.message || 'Kechikishni qayd etishda xatolik yuz berdi');
+    } finally {
+      setIsSavingDelay(false);
+    }
+  };
+
   const handleCreateAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -674,7 +709,7 @@ export default function AdminCalendarPage() {
           </div>
         </div>
 
-        {/* Mode Selector: Inbox vs Calendar View */}
+        {/* Mode Selector: Pending Applications vs Working Calendar */}
         <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-fit">
           <button
             type="button"
@@ -706,7 +741,7 @@ export default function AdminCalendarPage() {
             }`}
           >
             <Inbox className="w-4 h-4" />
-            <span>Kutilayotgan arizalar inboxi</span>
+            <span>Kutilayotgan arizalar</span>
             {pendingTotal > 0 && (
               <span
                 className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
@@ -780,7 +815,7 @@ export default function AdminCalendarPage() {
             <div className="flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
-                <strong>Barcha sanalardagi kutilayotgan arizalar inboxi:</strong> Saytdan bemorlar tomonidan yuborilgan barcha tasdiqlash kutayotgan arizalar sanasi bo&apos;yicha saralangan.
+                <strong>Kutilayotgan arizalar (Tasdiqlash kutilmoqda):</strong> Saytdan bemorlar tomonidan yuborilgan barcha tasdiqlash kutayotgan arizalar ro‘yxati.
               </span>
             </div>
             <button
@@ -797,11 +832,26 @@ export default function AdminCalendarPage() {
           </div>
         )}
 
-        {/* Filters Bar with CustomSelect */}
+        {/* Filters Bar with CustomSelect and Search */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
             <Filter className="w-4 h-4 text-teal-700" />
-            <span>Filtrlash parametrlari:</span>
+            <span>Filtrlash va qidirish:</span>
+          </div>
+
+          {/* Search Box by Name OR Phone */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Bemor ismi (F.I.SH) yoki telefon raqami bo'yicha qidirish..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1017,6 +1067,26 @@ export default function AdminCalendarPage() {
             </div>
           )}
         </div>
+
+        {/* Attendance Status Legend */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-xs space-y-2">
+          <div className="font-bold text-slate-800 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-teal-700" />
+            <span>Qabullar holatlari va ma&apos;nolari:</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+            {Object.entries(STATUS_LABELS).map(([k, s]) => (
+              <div key={k} className="flex items-start gap-2">
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border shrink-0 mt-0.5 ${s.color}`}>
+                  {s.label}
+                </span>
+                <span className="text-[11px] text-slate-500 leading-tight">
+                  {s.desc}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Appointment Detail & Status Transition Modal */}
@@ -1212,6 +1282,136 @@ export default function AdminCalendarPage() {
             ) : (
               <div className="pt-2 border-t border-slate-100 text-center text-xs text-slate-400">
                 Ushbu qabul yakuniy holatda ({STATUS_LABELS[selectedAppt.status]?.label || selectedAppt.status}).
+              </div>
+            )}
+
+            {/* Delay & Overrun Section for in-progress or confirmed bookings */}
+            {['CONFIRMED', 'CHECKED_IN'].includes(selectedAppt.status) && (
+              <div className="pt-2 border-t border-slate-100">
+                {!showDelayModal ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDelayModal(true);
+                      setDelayResult(null);
+                    }}
+                    className="w-full py-2 px-3 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                  >
+                    <Clock className="w-4 h-4 text-amber-600" />
+                    <span>Kechikishni qayd etish (+15 / +30 daqiqa muolaja cho‘zilishi)</span>
+                  </button>
+                ) : (
+                  <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3 animate-fade-in text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        Kechikish / Muolaja cho‘zilishini qayd etish
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowDelayModal(false)}
+                        className="text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Joriy muolaja kutilganidan uzoq davom etsa, qo‘shimcha kutilayotgan daqiqalarni belgilang. Tizim keyingi navbatdagi bemorlar qabulidagi to‘qnashuvlarni tahlil qiladi va hisoblab beradi (mavjud qabullar bekor qilinmaydi yoki yashirin ko‘chirilmaydi).
+                    </p>
+
+                    <div className="flex items-center gap-2">
+                      <label className="font-semibold text-slate-700 shrink-0">Qo‘shimcha vaqt:</label>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {[10, 15, 20, 30, 45, 60].map((mins) => (
+                          <button
+                            type="button"
+                            key={mins}
+                            onClick={() => setDelayMinutes(mins)}
+                            className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors ${
+                              delayMinutes === mins
+                                ? 'bg-amber-600 text-white shadow-sm'
+                                : 'bg-white border border-amber-200 text-amber-900 hover:bg-amber-100'
+                            }`}
+                          >
+                            +{mins} daq
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Kechikish sababi (ixtiyoriy):</label>
+                      <input
+                        type="text"
+                        value={delayReason}
+                        onChange={(e) => setDelayReason(e.target.value)}
+                        placeholder="Masalan: Murakkab kanal tozalash yoki kutilmagan asorat"
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 bg-white"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowDelayModal(false)}
+                        className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold"
+                      >
+                        Bekor qilish
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSavingDelay}
+                        onClick={handleRecordDelay}
+                        className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold shadow-sm"
+                      >
+                        {isSavingDelay ? 'Qayd etilmoqda...' : 'Kechikishni qayd etish'}
+                      </button>
+                    </div>
+
+                    {delayResult && (
+                      <div className="mt-3 p-3 bg-white rounded-xl border border-amber-300 space-y-2 text-xs">
+                        <div className="flex items-center gap-1.5 text-emerald-800 font-bold">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>Kechikish muvaffaqiyatli qayd etildi!</span>
+                        </div>
+                        <p className="text-slate-600 text-[11px]">
+                          Rejalashtirilgan tugash: <strong>{new Date(delayResult.scheduledEndTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })}</strong><br />
+                          Kutilayotgan yangi tugash: <strong className="text-amber-800">{new Date(delayResult.estimatedEndTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })} (taxminiy)</strong><br />
+                          Bufer bilan shifokor bo‘shash vaqti: <strong className="text-teal-800">{new Date(delayResult.estimatedFreeTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })}</strong>
+                        </p>
+
+                        {delayResult.affectedCount > 0 ? (
+                          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                            <span className="font-bold text-rose-700 block">
+                              ⚠️ Ta&apos;sirlangan keyingi qabullar ({delayResult.affectedCount} ta):
+                            </span>
+                            {delayResult.affectedAppointments.map((aff: any) => (
+                              <div key={aff.id} className="p-2 bg-rose-50/60 rounded-lg border border-rose-200 text-[11px] text-slate-800 flex justify-between items-center">
+                                <div>
+                                  <span className="font-bold">{aff.patientName}</span> ({aff.patientPhone})
+                                  <div className="text-[10px] text-slate-500">
+                                    Reja: {new Date(aff.scheduledStartTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })} • Taxminiy kechikish: +{aff.estimatedDelayMinutes} daqiqa
+                                  </div>
+                                </div>
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-bold">
+                                  To‘qnashuv
+                                </span>
+                              </div>
+                            ))}
+                            <p className="text-[10px] text-slate-500 italic mt-1">
+                              * Bemorlar bilan telefon orqali bog‘lanib, ularning roziligi bilan yangi qulay vaqtga ko‘chirish tavsiya etiladi.
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-emerald-700 font-medium text-[11px]">
+                            ✅ Ushbu kechikish keyingi qabullarga xalaqit bermaydi (yetarli tanaffus mavjud).
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

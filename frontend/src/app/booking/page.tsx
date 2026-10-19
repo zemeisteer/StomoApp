@@ -22,6 +22,17 @@ import {
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 
+import { PhoneInput } from '../../components/PhoneInput';
+import { normalizeUzPhone } from '../../lib/phone';
+
+interface ServerCalculation {
+  key: string;
+  durationMinutes: number;
+  bufferMinutes: number;
+  priceFrom: number;
+  serviceName: string;
+}
+
 const DAY_NAME_MAP_LOCALIZED: Record<string, { uz: string; ru: string }> = {
   MONDAY: { uz: 'Dushanba', ru: 'Понедельник' },
   TUESDAY: { uz: 'Seshanba', ru: 'Вторник' },
@@ -256,11 +267,8 @@ function BookingContent() {
   const [doctors, setDoctors] = useState<any[]>([]);
   const [availableSlots, setAvailableSlots] = useState<any[]>([]);
 
-  // Server-authoritative calculations
-  const [serverDuration, setServerDuration] = useState<number | null>(null);
-  const [serverBuffer, setServerBuffer] = useState<number | null>(null);
-  const [serverPrice, setServerPrice] = useState<number | null>(null);
-  const [serverServiceName, setServerServiceName] = useState<string | null>(null);
+  // Server-authoritative calculations tied strictly to selection key
+  const [serverCalc, setServerCalc] = useState<ServerCalculation | null>(null);
 
   // Loading & error states
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
@@ -285,7 +293,7 @@ function BookingContent() {
     setSelectedDate(toCalendarDateStr(tomorrow));
   }, []);
 
-  // Initial load
+  // Initial load with strict prerequisite validation
   useEffect(() => {
     async function loadData() {
       try {
@@ -296,22 +304,52 @@ function BookingContent() {
           api.getDoctors(),
         ]);
 
-        setBranches(branchesRes || []);
-        setServices(servicesRes || []);
-        setDoctors(doctorsRes || []);
+        const validBranches = branchesRes || [];
+        const validServices = servicesRes || [];
+        const validDoctors = doctorsRes || [];
+
+        setBranches(validBranches);
+        setServices(validServices);
+        setDoctors(validDoctors);
 
         const qBranch = searchParams.get('branchId');
         const qService = searchParams.get('serviceId');
         const qDoctor = searchParams.get('doctorId');
 
-        if (qBranch) setSelectedBranchId(qBranch);
-        if (qService) {
-          setSelectedServiceIds([qService]);
-          setStep(2);
+        let branchFound = false;
+        if (qBranch && validBranches.some((b: any) => b.id === qBranch && b.isActive !== false)) {
+          setSelectedBranchId(qBranch);
+          branchFound = true;
         }
-        if (qDoctor) {
-          setSelectedDoctorId(qDoctor);
+
+        let servicesFound = false;
+        if (branchFound && qService && validServices.some((s: any) => s.id === qService && s.isActive !== false)) {
+          setSelectedServiceIds([qService]);
+          servicesFound = true;
+        }
+
+        let doctorFound = false;
+        if (branchFound && servicesFound && qDoctor) {
+          const doc = validDoctors.find((d: any) => d.id === qDoctor && d.isActive !== false);
+          if (doc) {
+            const worksAtBranch = !doc.branches?.length || doc.branches.some((b: any) => b.branchId === qBranch);
+            const providesService = !doc.services?.length || doc.services.some((ds: any) => ds.serviceId === qService);
+            if (worksAtBranch && providesService) {
+              setSelectedDoctorId(qDoctor);
+              doctorFound = true;
+            }
+          }
+        }
+
+        // Only advance step if all prerequisites are met; never bypass missing branch
+        if (branchFound && servicesFound && doctorFound) {
+          setStep(4);
+        } else if (branchFound && servicesFound) {
           setStep(3);
+        } else if (branchFound) {
+          setStep(2);
+        } else {
+          setStep(1);
         }
       } catch (err: any) {
         setErrorMessage(err?.message || t.common.error);
@@ -335,8 +373,30 @@ function BookingContent() {
     return selectedServices.reduce((sum, s) => sum + (s.priceFrom || 0), 0);
   }, [selectedServices]);
 
-  const totalDuration = serverDuration ?? fallbackTotalDuration;
-  const totalPrice = serverPrice ?? fallbackTotalPrice;
+  // Unique selection key for calculating authoritative duration and price
+  const currentSelectionKey = useMemo(() => {
+    if (!selectedDoctorId || selectedServiceIds.length === 0) return '';
+    const sortedServices = [...selectedServiceIds].sort().join(',');
+    return `${selectedBranchId || ''}|${selectedDoctorId}|${sortedServices}`;
+  }, [selectedBranchId, selectedDoctorId, selectedServiceIds]);
+
+  const isCalculationAuthoritative = Boolean(
+    serverCalc && currentSelectionKey && serverCalc.key === currentSelectionKey
+  );
+
+  const totalDuration = isCalculationAuthoritative
+    ? serverCalc!.durationMinutes
+    : fallbackTotalDuration;
+
+  const totalPrice = isCalculationAuthoritative
+    ? (typeof serverCalc!.priceFrom === 'number' ? serverCalc!.priceFrom : fallbackTotalPrice)
+    : fallbackTotalPrice;
+
+  const totalBuffer = isCalculationAuthoritative
+    ? serverCalc!.bufferMinutes
+    : 5;
+
+  const serverServiceName = isCalculationAuthoritative ? serverCalc!.serviceName : null;
 
   const selectedDoctorObj = useMemo(() => {
     return doctors.find((d) => d.id === selectedDoctorId);
@@ -359,7 +419,6 @@ function BookingContent() {
   // Check if current date is working day for doctor
   const isSelectedDateWorkingDay = useMemo(() => {
     if (!selectedDate || !selectedDoctorObj) return true;
-    // Backend slot availability is definitive: if slots exist and are available, doctor is bookable!
     if (availableSlots && availableSlots.some((s: any) => s.available)) {
       return true;
     }
@@ -387,20 +446,71 @@ function BookingContent() {
     return true;
   };
 
-  // Branch Selection handler with cascading resets
+  // Validated step navigation function
+  const goToStep = (targetStep: number) => {
+    setErrorMessage(null);
+
+    if (targetStep <= step) {
+      setStep(targetStep);
+      return;
+    }
+
+    // Step 1 -> 2: Must have a valid branch
+    if (!selectedBranchId || !branches.some((b) => b.id === selectedBranchId && b.isActive !== false)) {
+      setErrorMessage(language === 'ru' ? 'Сначала выберите филиал' : 'Avval filialni tanlang');
+      setStep(1);
+      return;
+    }
+
+    // Step 2 -> 3: Must have at least one service
+    if (targetStep >= 3 && selectedServiceIds.length === 0) {
+      setErrorMessage(language === 'ru' ? 'Выберите хотя бы одну услугу' : 'Kamida bitta xizmatni tanlang');
+      setStep(2);
+      return;
+    }
+
+    // Step 3 -> 4: Must have selected an eligible doctor
+    if (targetStep >= 4 && (!selectedDoctorId || !selectedDoctorObj || !isDoctorEligible(selectedDoctorObj))) {
+      setErrorMessage(language === 'ru' ? 'Выберите подходящего специалиста' : 'Muvofiq shifokorni tanlang');
+      setStep(3);
+      return;
+    }
+
+    // Step 4 -> 5: Must have selected a slot
+    if (targetStep >= 5 && (!selectedDate || !selectedSlotTime)) {
+      setErrorMessage(language === 'ru' ? 'Выберите дату и время приёма' : 'Qabul sanasi va vaqtini tanlang');
+      setStep(4);
+      return;
+    }
+
+    setStep(targetStep);
+  };
+
+  // Branch Selection handler with cascading resets and immediate calculation invalidation
   const handleSelectBranch = (branchId: string) => {
     setSelectedBranchId(branchId);
     setSelectedSlotTime('');
     setIdempotencyKey('');
-    if (selectedDoctorObj && !isDoctorEligible(selectedDoctorObj)) {
-      setSelectedDoctorId('');
+    setServerCalc(null); // Invalidate calculation immediately
+    setAvailableSlots([]);
+    setErrorMessage(null);
+
+    // If currently selected doctor doesn't work at the new branch, reset doctor
+    if (selectedDoctorObj) {
+      const worksAtNewBranch = !selectedDoctorObj.branches?.length ||
+        selectedDoctorObj.branches.some((b: any) => b.branchId === branchId);
+      if (!worksAtNewBranch) {
+        setSelectedDoctorId('');
+      }
     }
   };
 
-  // Toggle service selection (1..3 services) with cascading resets
+  // Toggle service selection (1..3 services) with cascading resets and immediate calculation invalidation
   const toggleService = (serviceId: string) => {
     setSelectedSlotTime('');
     setIdempotencyKey('');
+    setServerCalc(null); // Invalidate calculation immediately
+    setAvailableSlots([]);
     setSelectedServiceIds((prev) => {
       let updated: string[];
       if (prev.includes(serviceId)) {
@@ -427,11 +537,13 @@ function BookingContent() {
     });
   };
 
-  // Doctor selection handler with cascading resets
+  // Doctor selection handler with cascading resets and immediate calculation invalidation
   const handleSelectDoctor = (doctorId: string) => {
     setSelectedDoctorId(doctorId);
     setSelectedSlotTime('');
     setIdempotencyKey('');
+    setServerCalc(null); // Invalidate calculation immediately
+    setAvailableSlots([]);
     const doc = doctors.find((d) => d.id === doctorId);
     if (doc && selectedDate) {
       const nearest = findNextWorkingDate(selectedDate, doc, selectedBranchId);
@@ -449,12 +561,14 @@ function BookingContent() {
   // Fetch slots whenever doctor, services, date or branch changes
   useEffect(() => {
     async function fetchSlots() {
-      if (!selectedDoctorId || selectedServiceIds.length === 0 || !selectedDate) {
+      if (!selectedDoctorId || selectedServiceIds.length === 0 || !selectedDate || !selectedBranchId) {
         setAvailableSlots([]);
         return;
       }
 
       const currentReqId = ++slotsRequestIdRef.current;
+      const currentReqKey = `${selectedBranchId || ''}|${selectedDoctorId}|${[...selectedServiceIds].sort().join(',')}`;
+
       try {
         setIsLoadingSlots(true);
         setErrorMessage(null);
@@ -477,10 +591,13 @@ function BookingContent() {
         setAvailableSlots(slotList);
 
         if (res && typeof res === 'object' && !Array.isArray(res)) {
-          if (res.durationMinutes) setServerDuration(res.durationMinutes);
-          if (res.bufferMinutes) setServerBuffer(res.bufferMinutes);
-          if (res.priceFrom !== undefined) setServerPrice(res.priceFrom);
-          if (res.serviceName) setServerServiceName(res.serviceName);
+          setServerCalc({
+            key: currentReqKey,
+            durationMinutes: res.durationMinutes || fallbackTotalDuration,
+            bufferMinutes: res.bufferMinutes ?? 5,
+            priceFrom: typeof res.priceFrom === 'number' ? res.priceFrom : fallbackTotalPrice,
+            serviceName: res.serviceName || selectedServices.map((s) => s.nameUz).join(', '),
+          });
         }
       } catch (err: any) {
         if (slotsRequestIdRef.current === currentReqId) {
@@ -497,12 +614,12 @@ function BookingContent() {
     if (step === 4) {
       fetchSlots();
     }
-  }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, t.booking.noSlots]);
+  }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, fallbackTotalDuration, fallbackTotalPrice, selectedServices, t.booking.noSlots]);
 
   // Real-time validation checks
   const isPhoneValid = useMemo(() => {
-    const digitsOnly = patientPhone.replace(/\D/g, '');
-    return digitsOnly.length === 12 && digitsOnly.startsWith('998');
+    const val = normalizeUzPhone(patientPhone, true);
+    return val.isValid;
   }, [patientPhone]);
 
   const isEmailValid = useMemo(() => {
@@ -540,8 +657,9 @@ function BookingContent() {
       return;
     }
 
-    if (!isPhoneValid) {
-      setErrorMessage(t.booking.phoneValidationError);
+    const phoneValidation = normalizeUzPhone(patientPhone, true);
+    if (!phoneValidation.isValid) {
+      setErrorMessage((language === 'ru' ? phoneValidation.errorMessageRu : phoneValidation.errorMessageUz) || 'Telefon raqami noto\'g\'ri');
       return;
     }
 
@@ -563,7 +681,7 @@ function BookingContent() {
         doctorId: selectedDoctorId,
         startTime: selectedSlotTime,
         patientName: patientName.trim(),
-        patientPhone: patientPhone.trim(),
+        patientPhone: phoneValidation.normalized,
         patientEmail: patientEmail.trim() || undefined,
         note: patientNote.trim() || undefined,
         consentGiven,
@@ -583,7 +701,7 @@ function BookingContent() {
           serverServiceName ||
           selectedServices.map((s) => s.nameUz).join(', '),
         durationMinutes: result.durationMinutes || totalDuration,
-        bufferMinutes: result.bufferMinutes || serverBuffer || 5,
+        bufferMinutes: result.bufferMinutes || serverCalc?.bufferMinutes || 5,
         servicePriceFrom: result.servicePriceFrom || totalPrice,
       });
       setStep(6);
@@ -662,14 +780,18 @@ function BookingContent() {
             { num: 5, label: t.booking.stepDetails },
           ].map((item, idx) => (
             <React.Fragment key={item.num}>
-              <div className="flex flex-col items-center shrink-0">
+              <button
+                type="button"
+                onClick={() => goToStep(item.num)}
+                className="flex flex-col items-center shrink-0 focus:outline-none group cursor-pointer"
+              >
                 <div
                   className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-all ${
                     step === item.num
                       ? 'bg-teal-700 text-white ring-4 ring-teal-100 shadow-md'
                       : step > item.num
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-200 text-slate-500'
+                      ? 'bg-emerald-600 text-white group-hover:bg-emerald-700'
+                      : 'bg-slate-200 text-slate-500 group-hover:bg-slate-300'
                   }`}
                 >
                   {step > item.num ? <CheckCircle2 className="w-4 h-4" /> : item.num}
@@ -677,7 +799,7 @@ function BookingContent() {
                 <span className="text-[11px] font-semibold text-slate-600 mt-1.5 hidden sm:block">
                   {item.label}
                 </span>
-              </div>
+              </button>
               {idx < 4 && (
                 <div
                   className={`flex-1 h-0.5 mx-2 transition-all ${
@@ -741,8 +863,9 @@ function BookingContent() {
             <div className="pt-4 flex justify-end">
               <button
                 type="button"
-                onClick={() => setStep(2)}
-                className="px-6 py-3 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl shadow-md flex items-center gap-2"
+                disabled={!selectedBranchId}
+                onClick={() => goToStep(2)}
+                className="px-6 py-3 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-md flex items-center gap-2 transition-all"
               >
                 <span>{t.common.next}</span>
                 <ChevronRight className="w-4 h-4" />
@@ -861,7 +984,7 @@ function BookingContent() {
             <div className="pt-4 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => setStep(1)}
+                onClick={() => goToStep(1)}
                 className="px-5 py-2.5 border border-slate-200 text-slate-600 font-semibold rounded-xl hover:bg-slate-50 flex items-center gap-1"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -871,7 +994,7 @@ function BookingContent() {
               <button
                 type="button"
                 disabled={selectedServiceIds.length === 0}
-                onClick={() => setStep(3)}
+                onClick={() => goToStep(3)}
                 className="px-6 py-3 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-md flex items-center gap-2 transition-all"
               >
                 <span>{t.common.next}</span>
@@ -955,7 +1078,7 @@ function BookingContent() {
             <div className="pt-4 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => setStep(2)}
+                onClick={() => goToStep(2)}
                 className="px-5 py-2.5 border border-slate-200 text-slate-600 font-semibold rounded-xl hover:bg-slate-50 flex items-center gap-1"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -965,7 +1088,7 @@ function BookingContent() {
               <button
                 type="button"
                 disabled={!selectedDoctorId}
-                onClick={() => setStep(4)}
+                onClick={() => goToStep(4)}
                 className="px-6 py-3 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-md flex items-center gap-2"
               >
                 <span>{t.common.next}</span>
@@ -1100,7 +1223,7 @@ function BookingContent() {
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-xs font-semibold text-slate-700">
                   {selectedDate} — {t.booking.estimatedDuration}: {totalDuration} {t.booking.minutes}
-                  {serverBuffer ? ` (+${serverBuffer} ${t.booking.minutes} bufer)` : ''}:
+                  {serverCalc?.bufferMinutes ? ` (+${serverCalc.bufferMinutes} ${t.booking.minutes} bufer)` : ''}:
                 </label>
                 {selectedSlotTime && (
                   <span className="text-xs font-bold text-teal-700">
@@ -1194,7 +1317,7 @@ function BookingContent() {
             <div className="pt-4 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => setStep(3)}
+                onClick={() => goToStep(3)}
                 className="px-5 py-2.5 border border-slate-200 text-slate-600 font-semibold rounded-xl hover:bg-slate-50 flex items-center gap-1"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -1204,7 +1327,7 @@ function BookingContent() {
               <button
                 type="button"
                 disabled={!selectedSlotTime}
-                onClick={() => setStep(5)}
+                onClick={() => goToStep(5)}
                 className="px-6 py-3 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-md flex items-center gap-2"
               >
                 <span>{t.common.next}</span>
@@ -1274,30 +1397,17 @@ function BookingContent() {
                 />
               </div>
 
-              {/* Phone (+998 masked and regex validated) */}
+              {/* Phone (+998 canonical validated) */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t.common.phone} *
-                </label>
-                <input
-                  type="tel"
+                <PhoneInput
+                  label={t.common.phone}
                   required
                   value={patientPhone}
-                  onChange={handlePhoneChange}
-                  onBlur={() => setIsPhoneTouched(true)}
-                  placeholder="+998 (90) 123-45-67"
-                  className={`w-full px-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 bg-white transition-colors ${
-                    isPhoneTouched && !isPhoneValid
-                      ? 'border-red-400 focus:ring-red-500'
-                      : 'border-slate-200 focus:ring-teal-600'
-                  }`}
+                  locale={language}
+                  onChange={(canonical) => {
+                    setPatientPhone(canonical);
+                  }}
                 />
-                {isPhoneTouched && !isPhoneValid && (
-                  <p className="text-[11px] text-red-600 mt-1 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>{t.booking.phoneValidationError}</span>
-                  </p>
-                )}
               </div>
 
               {/* Email (Optional but regex validated) */}

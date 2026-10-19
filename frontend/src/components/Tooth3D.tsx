@@ -296,6 +296,27 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         const center = box.getCenter(new THREE.Vector3());
         root.position.sub(center);
 
+        // Compute bounding sphere of centered object
+        const centeredBox = new THREE.Box3().setFromObject(root);
+        const sphere = new THREE.Sphere();
+        centeredBox.getBoundingSphere(sphere);
+        const modelRadius = sphere.radius || 1.0;
+
+        if (engineRef.current) {
+          const { camera } = engineRef.current;
+          const fovRad = (camera.fov * Math.PI) / 180;
+          const aspect = camera.aspect;
+          const fovH = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
+          const distV = modelRadius / Math.tan(fovRad / 2);
+          const distH = modelRadius / Math.tan(fovH / 2);
+          const fitDistance = Math.max(distV, distH) * 1.35; // 35% comfortable anatomical margin
+
+          camera.position.set(0, 0.05, fitDistance);
+          camera.lookAt(0, 0, 0);
+          camera.updateProjectionMatrix();
+          (engineRef.current as any).modelRadius = modelRadius;
+        }
+
         // Realistic Dental Enamel Material (Physical PBR shader with biological refractive index)
         const enamelMaterial = new THREE.MeshPhysicalMaterial({
           color: new THREE.Color(0xfcfbf7), // Natural organic warm ivory
@@ -351,7 +372,14 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
       for (const entry of entries) {
         const { width: newW, height: newH } = entry.contentRect;
         if (newW > 0 && newH > 0 && engineRef.current) {
-          engineRef.current.camera.aspect = newW / newH;
+          const aspect = newW / newH;
+          engineRef.current.camera.aspect = aspect;
+          const modelRadius = (engineRef.current as any).modelRadius || 1.0;
+          const fovRad = (engineRef.current.camera.fov * Math.PI) / 180;
+          const fovH = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
+          const distV = modelRadius / Math.tan(fovRad / 2);
+          const distH = modelRadius / Math.tan(fovH / 2);
+          engineRef.current.camera.position.z = Math.max(distV, distH) * 1.35;
           engineRef.current.camera.updateProjectionMatrix();
           engineRef.current.renderer.setSize(newW, newH);
           renderSingleFrame();
@@ -478,12 +506,12 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
     const dx = e.clientX - prevPointerRef.current.x;
     const dy = e.clientY - prevPointerRef.current.y;
 
-    // Apply rotation
+    // Apply full inspection rotation freedom
     engineRef.current.targetRotationY += dx * 0.008;
     engineRef.current.targetRotationX = THREE.MathUtils.clamp(
-      engineRef.current.targetRotationX + dy * 0.005,
-      -0.35,
-      0.45
+      engineRef.current.targetRotationX + dy * 0.006,
+      -1.35,
+      1.35
     );
 
     prevPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -568,26 +596,17 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         aria-label={t.hero.toothAriaLabel || 'Anatomik inson tishi 3D modeli'}
       />
 
-      {/* Floating 3D Controls Bar */}
+      {/* Floating 3D Controls Hint Bar (Visible pause button removed as requested) */}
       {!isLoading && !hasError && (
-        <div className="absolute bottom-3 right-4 flex items-center gap-2 z-10 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-200/80 shadow-sm text-xs text-slate-800">
+        <div className="absolute bottom-3 right-4 flex items-center gap-2 z-10 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-200/80 shadow-sm text-xs text-slate-800 pointer-events-none">
           <Rotate3d
             className={`w-3.5 h-3.5 text-teal-700 ${
-              isPaused || reducedMotion ? '' : 'animate-spin-slow'
+              isDragging || reducedMotion ? '' : 'animate-spin-slow'
             }`}
           />
-          <span className="hidden sm:inline font-medium text-[11px] text-slate-700">
+          <span className="font-medium text-[11px] text-slate-700">
             {t.hero.rotateHint}
           </span>
-          <button
-            type="button"
-            onClick={togglePause}
-            aria-label={isPaused ? t.hero.resume3d : t.hero.pause3d}
-            className="ml-1 p-1 hover:bg-slate-100 rounded-full text-teal-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700"
-            title={isPaused ? t.hero.resume3d : t.hero.pause3d}
-          >
-            {isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5 fill-current" />}
-          </button>
         </div>
       )}
     </div>

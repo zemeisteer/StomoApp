@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { PhoneCall, CheckCircle2, Clock, MessageSquare, AlertCircle, RefreshCw, Edit3 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { PhoneCall, CheckCircle2, Clock, MessageSquare, AlertCircle, RefreshCw, Edit3, Search } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
+import { CustomSelect } from '../../../components/CustomSelect';
 
 export default function AdminLeadsPage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
@@ -16,21 +18,33 @@ export default function AdminLeadsPage() {
   const [noteText, setNoteText] = useState('');
   const [noteStatus, setNoteStatus] = useState('CONTACTED');
 
+  const reqIdRef = useRef(0);
+
   const loadLeads = async () => {
+    const curReq = ++reqIdRef.current;
     try {
       setIsLoading(true);
-      const res = await api.getAdminLeads(statusFilter || undefined, 1, 50);
-      setLeads(res.items || []);
+      const res = await api.getAdminLeads(statusFilter || undefined, 1, 50, search || undefined);
+      if (reqIdRef.current === curReq) {
+        setLeads(res.items || []);
+      }
     } catch (e) {
-      console.error('Failed to load leads', e);
+      if (reqIdRef.current === curReq) {
+        console.error('Failed to load leads', e);
+      }
     } finally {
-      setIsLoading(false);
+      if (reqIdRef.current === curReq) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadLeads();
-  }, [statusFilter]);
+    const timer = setTimeout(() => {
+      loadLeads();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [statusFilter, search]);
 
   const handleUpdateStatus = async (id: string, newStatus: string, notes?: string) => {
     try {
@@ -75,18 +89,6 @@ export default function AdminLeadsPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-medium focus:ring-2 focus:ring-teal-600"
-            >
-              <option value="">Barcha holatlar</option>
-              <option value="NEW">Yangi</option>
-              <option value="CONTACTED">Bog&apos;lanildi</option>
-              <option value="BOOKED">Qabulga yozildi</option>
-              <option value="CLOSED">Yopilgan</option>
-            </select>
-
             <button
               onClick={loadLeads}
               className="p-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 shadow-sm"
@@ -94,6 +96,35 @@ export default function AdminLeadsPage() {
             >
               <RefreshCw className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+
+        {/* Filter & Search Bar */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Mijoz ismi yoki telefon raqami bo'yicha qidirish..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
+            />
+          </div>
+
+          <div className="w-full sm:w-56">
+            <CustomSelect
+              options={[
+                { value: '', label: 'Barcha holatlar' },
+                { value: 'NEW', label: 'Yangi', badge: 'Yangi' },
+                { value: 'CONTACTED', label: 'Bog‘lanildi' },
+                { value: 'BOOKED', label: 'Qabulga yozildi' },
+                { value: 'CLOSED', label: 'Yopilgan' },
+              ]}
+              value={statusFilter}
+              onChange={(val) => setStatusFilter(val)}
+              placeholder="Barcha holatlar"
+            />
           </div>
         </div>
 
@@ -121,45 +152,44 @@ export default function AdminLeadsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {leads.map((lead) => (
-                    <tr key={lead.id} className="hover:bg-slate-50/70 transition-colors">
+                    <tr key={lead.id} className="hover:bg-teal-50/30 transition-colors">
                       <td className="py-4 px-6 font-bold text-slate-900">
                         {lead.fullName}
                       </td>
-                      <td className="py-4 px-6">
-                        <a
-                          href={`tel:${lead.phone}`}
-                          className="font-bold text-teal-700 hover:underline"
-                        >
-                          {lead.phone}
-                        </a>
+                      <td className="py-4 px-6 text-teal-800 font-semibold font-mono">
+                        {lead.phone}
                       </td>
                       <td className="py-4 px-6 text-slate-600">
-                        <span>{lead.preferredBranch || 'Istalgan'}</span>
-                        {lead.preferredTime && (
-                          <span className="block text-[11px] text-slate-400">
-                            {lead.preferredTime}
-                          </span>
-                        )}
+                        <div className="font-medium text-slate-800">
+                          {lead.preferredBranch || 'Ixtiyoriy filial'}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          {lead.preferredTime || 'Tez orada'}
+                        </div>
                       </td>
                       <td className="py-4 px-6 text-slate-600 max-w-xs">
-                        <p className="line-clamp-2">{lead.message || '—'}</p>
+                        <p className="line-clamp-2 italic text-slate-700">
+                          &quot;{lead.notes || lead.message || 'Izoh qoldirilmagan'}&quot;
+                        </p>
                         {lead.internalNotes && (
-                          <p className="text-[11px] font-semibold text-teal-800 bg-teal-50 px-2 py-0.5 rounded mt-1">
-                            Qayd: {lead.internalNotes}
-                          </p>
+                          <div className="mt-1 p-1.5 bg-slate-100 rounded-lg text-[10px] text-slate-700 border border-slate-200">
+                            <strong>Qayd:</strong> {lead.internalNotes}
+                          </div>
                         )}
                       </td>
                       <td className="py-4 px-6">
                         <span
                           className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                            statusColors[lead.status] || 'bg-slate-100'
+                            statusColors[lead.status] || 'bg-slate-100 text-slate-700'
                           }`}
                         >
                           {statusLabels[lead.status] || lead.status}
                         </span>
                       </td>
                       <td className="py-4 px-6 text-slate-400 text-[11px]">
-                        {new Date(lead.createdAt).toLocaleString()}
+                        {new Date(lead.createdAt).toLocaleString('uz-UZ', {
+                          timeZone: 'Asia/Tashkent',
+                        })}
                       </td>
                       <td className="py-4 px-6 text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -170,31 +200,23 @@ export default function AdminLeadsPage() {
                               setNoteText(lead.internalNotes || '');
                               setNoteStatus(lead.status);
                             }}
-                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px]"
-                            title="Tahrirlash / Qayd qo'shish"
+                            className="p-1.5 text-slate-500 hover:text-teal-700 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Tahrirlash va izoh"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
+
                           {lead.status === 'NEW' && (
                             <button
                               type="button"
                               disabled={updatingId === lead.id}
                               onClick={() => handleUpdateStatus(lead.id, 'CONTACTED')}
-                              className="px-2.5 py-1 bg-blue-50 text-blue-800 hover:bg-blue-600 hover:text-white rounded-lg font-bold text-[11px] transition-colors"
+                              className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-[11px] font-bold transition-colors"
                             >
                               Bog&apos;lanildi
                             </button>
                           )}
-                          {lead.status === 'CONTACTED' && (
-                            <button
-                              type="button"
-                              disabled={updatingId === lead.id}
-                              onClick={() => handleUpdateStatus(lead.id, 'BOOKED')}
-                              className="px-2.5 py-1 bg-emerald-50 text-emerald-800 hover:bg-emerald-600 hover:text-white rounded-lg font-bold text-[11px] transition-colors"
-                            >
-                              Qabulga yozildi
-                            </button>
-                          )}
+
                           {lead.status !== 'CLOSED' && (
                             <button
                               type="button"
@@ -227,19 +249,17 @@ export default function AdminLeadsPage() {
               </p>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Murojaat holati
-                </label>
-                <select
+                <CustomSelect
+                  label="Murojaat holati"
+                  options={[
+                    { value: 'NEW', label: 'Yangi', badge: 'Yangi' },
+                    { value: 'CONTACTED', label: 'Bog‘lanildi' },
+                    { value: 'BOOKED', label: 'Qabulga yozildi' },
+                    { value: 'CLOSED', label: 'Yopildi' },
+                  ]}
                   value={noteStatus}
-                  onChange={(e) => setNoteStatus(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                >
-                  <option value="NEW">Yangi</option>
-                  <option value="CONTACTED">Bog&apos;lanildi</option>
-                  <option value="BOOKED">Qabulga yozildi</option>
-                  <option value="CLOSED">Yopildi</option>
-                </select>
+                  onChange={(val) => setNoteStatus(val)}
+                />
               </div>
 
               <div>
@@ -251,7 +271,7 @@ export default function AdminLeadsPage() {
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
                   placeholder="Mijoz bilan suhbat natijasi yoki istaklar..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 outline-none"
                 />
               </div>
 

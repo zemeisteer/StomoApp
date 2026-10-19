@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useId, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Check, Search, Loader2 } from 'lucide-react';
 
 export interface SelectOption {
@@ -45,14 +46,17 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   const labelId = `${selectId}-label`;
   const errorId = `${selectId}-error`;
 
+  const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [openUpward, setOpenUpward] = useState(false);
   const [maxListHeight, setMaxListHeight] = useState(240);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listboxRef = useRef<HTMLUListElement>(null);
 
@@ -60,6 +64,10 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   const searchPlaceholderText = isRu ? 'Поиск...' : 'Qidirish...';
   const noResultsText = isRu ? 'Ничего не найдено' : 'Hech narsa topilmadi';
   const loadingText = isRu ? 'Загрузка...' : 'Yuklanmoqda...';
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Automatically enable search if more than 6 options unless explicitly specified
   const isSearchable = searchable !== undefined ? searchable : options.length > 6;
@@ -71,20 +79,37 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
   const selectedOption = options.find((opt) => opt.value === value);
 
-  // Calculate viewport-safe drop direction and height
+  // Calculate viewport-safe drop direction, position, and height
   const updatePosition = useCallback(() => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+
+    const spaceBelow = viewportHeight - rect.bottom - 12;
     const spaceAbove = rect.top - 12;
 
-    if (spaceBelow < 200 && spaceAbove > spaceBelow) {
-      setOpenUpward(true);
-      setMaxListHeight(Math.max(120, Math.min(260, spaceAbove - 50)));
-    } else {
-      setOpenUpward(false);
-      setMaxListHeight(Math.max(120, Math.min(260, spaceBelow - 50)));
+    const isUpward = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const calculatedMaxHeight = Math.max(120, Math.min(260, (isUpward ? spaceAbove : spaceBelow) - 40));
+
+    setOpenUpward(isUpward);
+    setMaxListHeight(calculatedMaxHeight);
+
+    const popoverWidth = Math.max(rect.width, 200);
+    let leftPos = rect.left;
+    if (leftPos + popoverWidth > viewportWidth - 8) {
+      leftPos = Math.max(8, viewportWidth - popoverWidth - 8);
     }
+
+    setPopoverStyle({
+      position: 'fixed',
+      left: `${leftPos}px`,
+      width: `${popoverWidth}px`,
+      maxWidth: 'calc(100vw - 16px)',
+      top: isUpward ? undefined : `${rect.bottom + 6}px`,
+      bottom: isUpward ? `${viewportHeight - rect.top + 6}px` : undefined,
+      zIndex: 99999,
+    });
   }, []);
 
   useEffect(() => {
@@ -132,13 +157,21 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   // Close on outside click
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        popoverRef.current &&
+        !popoverRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, []);
+    if (isOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  }, [isOpen]);
 
   // Keyboard navigation helpers: skip disabled options
   const getNextActiveIndex = (startIndex: number, direction: 1 | -1): number => {
@@ -205,7 +238,6 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         break;
 
       case 'Enter':
-        // Select highlighted option
         if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
           e.preventDefault();
           const targetOpt = filteredOptions[highlightedIndex];
@@ -218,7 +250,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         break;
 
       case ' ':
-        // IMPORTANT: Do NOT intercept Space when search input is focused! Multiword typing must work.
+        // Do NOT intercept Space when search input is focused! Multiword typing must work.
         if (!isSearchFocused) {
           e.preventDefault();
           if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
@@ -249,6 +281,91 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     highlightedIndex >= 0 && highlightedIndex < filteredOptions.length
       ? `${selectId}-opt-${highlightedIndex}`
       : undefined;
+
+  const popoverContent = isOpen && mounted ? (
+    <div
+      ref={popoverRef}
+      style={popoverStyle}
+      className="bg-white rounded-2xl shadow-2xl border border-slate-200 py-1.5 overflow-hidden animate-fade-in"
+      onKeyDown={handleKeyDown}
+    >
+      {/* Optional Search */}
+      {isSearchable && (
+        <div className="p-2 border-b border-slate-100">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={searchPlaceholderText}
+              aria-label={searchPlaceholderText}
+              className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:bg-white"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Options List */}
+      <ul
+        id={listboxId}
+        ref={listboxRef}
+        role="listbox"
+        tabIndex={-1}
+        aria-activedescendant={activeOptionId}
+        aria-labelledby={label ? labelId : selectId}
+        style={{ maxHeight: `${maxListHeight}px` }}
+        className="overflow-y-auto py-1 divide-y divide-slate-50 scrollbar-thin"
+      >
+        {filteredOptions.length > 0 ? (
+          filteredOptions.map((opt, index) => {
+            const isSelected = opt.value === value;
+            const isHighlighted = index === highlightedIndex;
+            const optionId = `${selectId}-opt-${index}`;
+
+            return (
+              <li
+                id={optionId}
+                key={opt.value || `empty-${index}`}
+                role="option"
+                aria-selected={isSelected}
+                aria-disabled={opt.disabled}
+                onClick={() => handleSelect(opt.value, opt.disabled)}
+                onMouseEnter={() => !opt.disabled && setHighlightedIndex(index)}
+                className={`min-h-[40px] px-3.5 py-2 text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                  opt.disabled
+                    ? 'opacity-40 cursor-not-allowed bg-slate-50 text-slate-400'
+                    : isSelected
+                    ? 'bg-teal-50 font-bold text-teal-900'
+                    : isHighlighted
+                    ? 'bg-slate-100 text-slate-900'
+                    : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className="truncate">{opt.label}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {opt.badge && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">
+                      {opt.badge}
+                    </span>
+                  )}
+                  {isSelected && <Check className="w-4 h-4 text-teal-700" />}
+                </div>
+              </li>
+            );
+          })
+        ) : (
+          <li className="p-4 text-center text-xs text-slate-400">
+            {noResultsText}
+          </li>
+        )}
+      </ul>
+    </div>
+  ) : null;
 
   return (
     <div ref={containerRef} className={`relative flex flex-col ${className}`}>
@@ -321,91 +438,8 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         </p>
       )}
 
-      {/* Dropdown Popover */}
-      {isOpen && (
-        <div
-          className={`absolute left-0 right-0 z-50 w-full min-w-[220px] bg-white rounded-2xl shadow-xl border border-slate-100 py-1.5 overflow-hidden animate-fade-in ${
-            openUpward ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
-          }`}
-          onKeyDown={handleKeyDown}
-        >
-          {/* Optional Search */}
-          {isSearchable && (
-            <div className="p-2 border-b border-slate-100">
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={searchPlaceholderText}
-                  aria-label={searchPlaceholderText}
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:bg-white"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Options List */}
-          <ul
-            id={listboxId}
-            ref={listboxRef}
-            role="listbox"
-            tabIndex={-1}
-            aria-activedescendant={activeOptionId}
-            aria-labelledby={label ? labelId : selectId}
-            style={{ maxHeight: `${maxListHeight}px` }}
-            className="overflow-y-auto py-1 divide-y divide-slate-50 scrollbar-thin"
-          >
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt, index) => {
-                const isSelected = opt.value === value;
-                const isHighlighted = index === highlightedIndex;
-                const optionId = `${selectId}-opt-${index}`;
-
-                return (
-                  <li
-                    id={optionId}
-                    key={opt.value || `empty-${index}`}
-                    role="option"
-                    aria-selected={isSelected}
-                    aria-disabled={opt.disabled}
-                    onClick={() => handleSelect(opt.value, opt.disabled)}
-                    onMouseEnter={() => !opt.disabled && setHighlightedIndex(index)}
-                    className={`min-h-[42px] px-3.5 py-2 text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                      opt.disabled
-                        ? 'opacity-40 cursor-not-allowed bg-slate-50 text-slate-400'
-                        : isSelected
-                        ? 'bg-teal-50 font-bold text-teal-900'
-                        : isHighlighted
-                        ? 'bg-slate-100 text-slate-900'
-                        : 'text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="truncate">{opt.label}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {opt.badge && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">
-                          {opt.badge}
-                        </span>
-                      )}
-                      {isSelected && <Check className="w-4 h-4 text-teal-700" />}
-                    </div>
-                  </li>
-                );
-              })
-            ) : (
-              <li className="p-4 text-center text-xs text-slate-400">
-                {noResultsText}
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
+      {/* Dropdown Popover via React Portal */}
+      {mounted && typeof document !== 'undefined' && popoverContent && createPortal(popoverContent, document.body)}
     </div>
   );
 };

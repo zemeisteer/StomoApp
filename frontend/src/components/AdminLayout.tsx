@@ -37,6 +37,15 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getClinicInfo()
+      .then((info) => {
+        if (info?.logo) setClinicLogo(info.logo);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -202,17 +211,27 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       <aside className="hidden lg:flex flex-col w-64 bg-slate-900 text-slate-300 border-r border-slate-800 shrink-0">
         <div className="p-6 border-b border-slate-800 flex items-center justify-between">
           <Link href="/admin" className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-teal-600 flex items-center justify-center text-white">
-              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
-              </svg>
-            </div>
-            <div>
-              <span className="font-extrabold text-lg text-white">DentaCare</span>
-              <span className="text-[10px] text-teal-400 block font-bold tracking-wider uppercase">
-                Admin Panel
-              </span>
-            </div>
+            {clinicLogo ? (
+              <img
+                src={clinicLogo}
+                alt="DentaCare Admin"
+                className="max-h-9 max-w-[150px] object-contain brightness-110"
+              />
+            ) : (
+              <>
+                <div className="w-9 h-9 rounded-xl bg-teal-600 flex items-center justify-center text-white">
+                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
+                  </svg>
+                </div>
+                <div>
+                  <span className="font-extrabold text-lg text-white">DentaCare</span>
+                  <span className="text-[10px] text-teal-400 block font-bold tracking-wider uppercase">
+                    Admin Panel
+                  </span>
+                </div>
+              </>
+            )}
           </Link>
         </div>
 
@@ -287,7 +306,15 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
             >
               {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
-            <span className="font-bold text-sm">DentaCare Admin</span>
+            {clinicLogo ? (
+              <img
+                src={clinicLogo}
+                alt="DentaCare Admin"
+                className="max-h-7 max-w-[120px] object-contain brightness-110"
+              />
+            ) : (
+              <span className="font-bold text-sm">DentaCare Admin</span>
+            )}
           </div>
           <span className="text-[10px] px-2 py-0.5 rounded bg-teal-900 text-teal-300 font-bold uppercase">
             {user.role}

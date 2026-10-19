@@ -1,12 +1,26 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { MapPin, Phone, Mail, Clock, ShieldCheck, Heart } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { api } from '../lib/api';
 
 export const Footer: React.FC = () => {
   const { t } = useI18n();
+  const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+  const [clinicPhone, setClinicPhone] = useState<string>('+998 71 200 45 45');
+  const [clinicEmail, setClinicEmail] = useState<string>('info@dentacare.uz');
+
+  useEffect(() => {
+    api.getClinicInfo()
+      .then((info) => {
+        if (info?.logo) setClinicLogo(info.logo);
+        if (info?.phone) setClinicPhone(info.phone);
+        if (info?.email) setClinicEmail(info.email);
+      })
+      .catch(() => {});
+  }, []);
 
   return (
     <footer className="bg-slate-950 text-slate-400 pt-16 pb-12 border-t border-slate-900">
@@ -15,14 +29,24 @@ export const Footer: React.FC = () => {
           {/* Brand Info */}
           <div>
             <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-9 h-9 rounded-xl bg-teal-600 flex items-center justify-center text-white">
-                <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                  <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
-                </svg>
-              </div>
-              <span className="text-2xl font-bold text-white tracking-tight">
-                Denta<span className="text-teal-400">Care</span>
-              </span>
+              {clinicLogo ? (
+                <img
+                  src={clinicLogo}
+                  alt={t.common.clinicName}
+                  className="max-h-10 max-w-[190px] object-contain brightness-110"
+                />
+              ) : (
+                <>
+                  <div className="w-9 h-9 rounded-xl bg-teal-600 flex items-center justify-center text-white">
+                    <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                      <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
+                    </svg>
+                  </div>
+                  <span className="text-2xl font-bold text-white tracking-tight">
+                    Denta<span className="text-teal-400">Care</span>
+                  </span>
+                </>
+              )}
             </div>
             <p className="text-sm leading-relaxed text-slate-400 mb-4">
               {t.common.tagline}. Zamonaviy stomatologiya, tajribali shifokorlar va qulay narxlar.
@@ -98,14 +122,14 @@ export const Footer: React.FC = () => {
             <ul className="space-y-3 text-sm">
               <li className="flex items-center gap-2">
                 <Phone className="w-4 h-4 text-teal-400" />
-                <a href="tel:+998712004545" className="hover:text-teal-300 transition-colors">
-                  +998 71 200 45 45
+                <a href={`tel:${clinicPhone.replace(/\s+/g, '')}`} className="hover:text-teal-300 transition-colors">
+                  {clinicPhone}
                 </a>
               </li>
               <li className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-teal-400" />
-                <a href="mailto:info@dentacare.uz" className="hover:text-teal-300 transition-colors">
-                  info@dentacare.uz
+                <a href={`mailto:${clinicEmail}`} className="hover:text-teal-300 transition-colors">
+                  {clinicEmail}
                 </a>
               </li>
               <li className="flex items-start gap-2">

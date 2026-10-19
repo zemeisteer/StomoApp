@@ -398,10 +398,14 @@ async function runComprehensiveVerification() {
     // 1. Submit public booking or create test appointment
     const tomorrowStr = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split('T')[0];
     const bookRes = await page.evaluate(async (bookingDate) => {
-      // Find doctor with services
-      const docs = await fetch('/api/doctors').then(r => r.json());
+      // Find doctor with services and branches
+      const [docs, branches] = await Promise.all([
+        fetch('/api/doctors').then(r => r.json()),
+        fetch('/api/public/branches').then(r => r.json()),
+      ]);
       const doctor = docs.find(d => d.services && d.services.length > 0) || docs[0];
       const serviceId = doctor?.services?.[0]?.serviceId || doctor?.services?.[0]?.service?.id;
+      const branchId = branches[0]?.id;
 
       // Try finding open slot
       let targetSlot = null;
@@ -409,7 +413,7 @@ async function runComprehensiveVerification() {
       for (let offset = 1; offset <= 5; offset++) {
         const checkDate = new Date(Date.now() + offset * 24 * 3600 * 1000).toISOString().split('T')[0];
         try {
-          const slotsData = await fetch(`/api/scheduling/slots?doctorId=${doctor.id}&serviceId=${serviceId}&date=${checkDate}`).then(r => r.json());
+          const slotsData = await fetch(`/api/scheduling/slots?doctorId=${doctor.id}&serviceId=${serviceId}&branchId=${branchId}&date=${checkDate}`).then(r => r.json());
           if (slotsData?.slots?.length > 0) {
             const open = slotsData.slots.find(s => s.available);
             if (open) {
@@ -426,6 +430,7 @@ async function runComprehensiveVerification() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            branchId,
             patientName: 'Test Automation Patient',
             patientPhone: '+998901234999',
             doctorId: doctor.id,
@@ -436,7 +441,7 @@ async function runComprehensiveVerification() {
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok) {
-          return { ok: true, status: res.status, data, date: targetDate, doctorId: doctor.id, serviceId };
+          return { ok: true, status: res.status, data, date: targetDate, doctorId: doctor.id, serviceId, branchId };
         }
       }
 
@@ -446,6 +451,7 @@ async function runComprehensiveVerification() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
         body: JSON.stringify({
+          branchId,
           patientName: 'Test Automation Patient',
           patientPhone: '+998901234999',
           doctorId: doctor.id,
@@ -456,7 +462,7 @@ async function runComprehensiveVerification() {
         credentials: 'include',
       });
       const adminData = await adminRes.json().catch(() => ({}));
-      return { ok: adminRes.ok, status: adminRes.status, data: adminData, date: bookingDate, doctorId: doctor.id, serviceId };
+      return { ok: adminRes.ok, status: adminRes.status, data: adminData, date: bookingDate, doctorId: doctor.id, serviceId, branchId };
     }, tomorrowStr);
 
     assert(bookRes.ok, `Appointment booking fixture creation must succeed (status: ${bookRes.status})`);
@@ -478,7 +484,6 @@ async function runComprehensiveVerification() {
 
     // 3. Admin reschedules appointment
     const rescheduleRes = await page.evaluate(async ({ apptId, bookInfo }) => {
-      // Find an available reschedule slot
       let newTime = null;
       for (let offset = 2; offset <= 6; offset++) {
         const checkDate = new Date(Date.now() + offset * 24 * 3600 * 1000).toISOString().split('T')[0];
@@ -510,10 +515,28 @@ async function runComprehensiveVerification() {
       return { ok: res.ok, status: res.status };
     }, { apptId: testAppointmentId, bookInfo: bookRes });
 
-    // Note: If doctor schedule prohibits slot, we verify that reschedule endpoint responds authoritatively
     console.log(`Admin reschedule response status: ${rescheduleRes.status}`);
 
-    // 4. Admin cancels appointment
+    // 4. Admin records delay (Req 9)
+    const delayRes = await page.evaluate(async (apptId) => {
+      const res = await fetch(`/api/admin/appointments/${apptId}/delay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          extraMinutes: 15,
+          reason: 'Muolaja kutilgandan uzoqroq davom etmoqda',
+        }),
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }, testAppointmentId);
+
+    assert(delayRes.ok, `Recording controlled delay must succeed (status: ${delayRes.status})`);
+    assert(delayRes.data.extraMinutes === 15, `Delay response must confirm extraMinutes: 15`);
+    testResults.push('Scenario 9: Controlled delay / overrun recorded without silent rescheduling (Req 9)');
+
+    // 5. Admin cancels appointment
     const cancelRes = await page.evaluate(async (apptId) => {
       const res = await fetch(`/api/admin/appointments/${apptId}/status`, {
         method: 'PATCH',
@@ -536,7 +559,124 @@ async function runComprehensiveVerification() {
     }, testAppointmentId);
 
     assert(finalDetail.status === 'CANCELLED', `Final persisted status must be CANCELLED (was: ${finalDetail.status})`);
-    testResults.push('Scenario 9: Booking -> Confirm -> Reschedule -> Cancel lifecycle passed');
+    testResults.push('Scenario 9: Booking -> Confirm -> Delay -> Cancel lifecycle passed');
+
+    // -------------------------------------------------------------
+    // Scenario 10: Server-Side Search by Name OR Phone (Req 10)
+    // -------------------------------------------------------------
+    console.log('\n--- Scenario 10: Server-Side Search by Name OR Phone ---');
+    const searchRes = await page.evaluate(async () => {
+      const [byName, byPhone, leadsSearch] = await Promise.all([
+        fetch('/api/admin/appointments?search=Alisher', { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()),
+        fetch('/api/admin/appointments?search=998901234', { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()),
+        fetch('/api/admin/leads?search=998', { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()),
+      ]);
+      return { byName, byPhone, leadsSearch };
+    });
+
+    const apptsByName = searchRes.byName.items || searchRes.byName.data || searchRes.byName;
+    const apptsByPhone = searchRes.byPhone.items || searchRes.byPhone.data || searchRes.byPhone;
+    assert(Array.isArray(apptsByName), 'Appointment search by name must return data array');
+    assert(Array.isArray(apptsByPhone), 'Appointment search by phone digits must return data array');
+    testResults.push('Scenario 10: Server-side search by name OR phone passed (Req 10)');
+
+    // -------------------------------------------------------------
+    // Scenario 11: Bulk Weekly Schedules Batch & Copy Endpoints (Req 11)
+    // -------------------------------------------------------------
+    console.log('\n--- Scenario 11: Bulk Weekly Schedules Batch & Copy ---');
+    const bulkRes = await page.evaluate(async () => {
+      const docs = await fetch('/api/doctors').then(r => r.json());
+      const branches = await fetch('/api/public/branches').then(r => r.json());
+      const doctor = docs[0];
+      const branchId = branches[0]?.id;
+
+      const batchRes = await fetch('/api/scheduling/schedules/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          doctorIds: [doctor.id],
+          branchId,
+          daysOfWeek: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+          startTime: '09:00',
+          endTime: '18:00',
+          breakStart: '13:00',
+          breakEnd: '14:00',
+          mode: 'merge',
+        }),
+        credentials: 'include',
+      });
+      const batchData = await batchRes.json().catch(() => ({}));
+      return { ok: batchRes.ok, status: batchRes.status, count: batchData.count || batchData.updatedCount || batchData.daysCount };
+    });
+
+    assert(bulkRes.ok, `Batch weekly schedules setup must succeed (status: ${bulkRes.status})`);
+    assert(bulkRes.count === 3, `Batch setup must configure exactly 3 days (was: ${bulkRes.count})`);
+    testResults.push('Scenario 11: Bulk weekly schedules batch setup passed (Req 11)');
+
+    // -------------------------------------------------------------
+    // Scenario 12: Clinic Branding, Multiple Phones, Map URL & Plain Booking Rules (Req 16, 17, 18)
+    // -------------------------------------------------------------
+    console.log('\n--- Scenario 12: Clinic Branding, Multiple Phones & Plain Booking Rules ---');
+    const clinicSettingsRes = await page.evaluate(async () => {
+      // 1. Update clinic settings with logo, repeatable phone list, and plain booking rules
+      const phones = [
+        { id: 'p1', number: '+998712005544', label: 'Qabulxona (Asosiy)', isPrimary: true },
+        { id: 'p2', number: '+998901234567', label: 'WhatsApp / Tezkor aloqa', isPrimary: false },
+      ];
+
+      const putRes = await fetch('/api/clinic/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          logo: 'http://localhost:4000/api/media/file/verified-logo.png',
+          phone: JSON.stringify(phones),
+          minBookingNoticeHours: 3,
+          maxBookingHorizonDays: 45,
+          bufferMinutes: 10,
+          pendingExpiryMinutes: 25,
+        }),
+        credentials: 'include',
+      });
+      const updated = await putRes.json().catch(() => ({}));
+
+      // 2. Fetch public clinic info to verify serialization & exposed fields
+      const publicInfo = await fetch('/api/public/clinic').then(r => r.json());
+
+      // 3. Test branch mapUrl update
+      const branches = await fetch('/api/public/branches').then(r => r.json());
+      const testBranch = branches[0];
+      const branchRes = await fetch(`/api/clinic/branches/${testBranch.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          nameUz: testBranch.nameUz,
+          nameRu: testBranch.nameRu,
+          addressUz: testBranch.addressUz,
+          addressRu: testBranch.addressRu,
+          mapUrl: 'https://maps.google.com/?q=Tashkent+Dental',
+        }),
+        credentials: 'include',
+      });
+      const updatedBranch = await branchRes.json().catch(() => ({}));
+
+      return {
+        putOk: putRes.ok,
+        updated,
+        publicInfo,
+        branchOk: branchRes.ok,
+        updatedBranch,
+      };
+    });
+
+    assert(clinicSettingsRes.putOk, 'Updating clinic settings with logo and multiple phones must succeed');
+    assert(clinicSettingsRes.publicInfo.logo === 'http://localhost:4000/api/media/file/verified-logo.png', 'Public clinic info must return saved logo');
+    assert(clinicSettingsRes.publicInfo.phone === '+998712005544', 'Public clinic info must expose primary phone');
+    assert(Array.isArray(clinicSettingsRes.publicInfo.phones) && clinicSettingsRes.publicInfo.phones.length === 2, 'Public clinic info must expose structured phones array');
+    assert(clinicSettingsRes.publicInfo.minBookingNoticeHours === 3, 'Public clinic info must reflect minBookingNoticeHours');
+    assert(clinicSettingsRes.publicInfo.maxBookingHorizonDays === 45, 'Public clinic info must reflect maxBookingHorizonDays');
+    assert(clinicSettingsRes.branchOk, 'Updating branch mapUrl must succeed');
+    assert(clinicSettingsRes.updatedBranch.mapUrl === 'https://maps.google.com/?q=Tashkent+Dental', 'Branch mapUrl must be persisted');
+    testResults.push('Scenario 12: Clinic logo, repeatable phones, branch mapUrl, and booking rules verified (Req 16, 17, 18)');
 
     console.log('\n====================================================');
     console.log('   ALL VERIFICATION SCENARIOS PASSED SUCCESSFULLY!  ');

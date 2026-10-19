@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { CallbackModal } from './CallbackModal';
+import { api } from '../lib/api';
 
 export const Header: React.FC = () => {
   const pathname = usePathname();
@@ -26,10 +27,21 @@ export const Header: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [clinicDropdownOpen, setClinicDropdownOpen] = useState(false);
   const [callbackModalOpen, setCallbackModalOpen] = useState(false);
+  const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+  const [clinicPhone, setClinicPhone] = useState<string>('+998 71 200 45 45');
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const clinicButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    api.getClinicInfo()
+      .then((info) => {
+        if (info?.logo) setClinicLogo(info.logo);
+        if (info?.phone) setClinicPhone(info.phone);
+      })
+      .catch(() => {});
+  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -113,7 +125,7 @@ export const Header: React.FC = () => {
               aria-label="Telefon orqali bog'lanish"
             >
               <Phone className="w-3 h-3 text-teal-400" />
-              <span>+998 71 200 45 45</span>
+              <span>{clinicPhone}</span>
             </button>
 
             {/* Language Switcher */}
@@ -167,19 +179,29 @@ export const Header: React.FC = () => {
             className="flex items-center gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 rounded-xl"
             aria-label={`${t.common.clinicName} - ${t.nav.home}`}
           >
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-teal-800 to-teal-600 flex items-center justify-center text-white shadow-md shadow-teal-700/20 group-hover:scale-105 transition-transform">
-              <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
-              </svg>
-            </div>
-            <div>
-              <span className="text-2xl font-extrabold tracking-tight text-slate-900 group-hover:text-teal-800 transition-colors">
-                Denta<span className="text-teal-700">Care</span>
-              </span>
-              <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
-                Dental Clinic
-              </p>
-            </div>
+            {clinicLogo ? (
+              <img
+                src={clinicLogo}
+                alt={t.common.clinicName}
+                className="h-10 max-w-[190px] object-contain"
+              />
+            ) : (
+              <>
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-teal-800 to-teal-600 flex items-center justify-center text-white shadow-md shadow-teal-700/20 group-hover:scale-105 transition-transform">
+                  <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
+                  </svg>
+                </div>
+                <div>
+                  <span className="text-2xl font-extrabold tracking-tight text-slate-900 group-hover:text-teal-800 transition-colors">
+                    Denta<span className="text-teal-700">Care</span>
+                  </span>
+                  <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
+                    Dental Clinic
+                  </p>
+                </div>
+              </>
+            )}
           </Link>
 
           {/* Simplified Desktop Navigation: Xizmatlar / Shifokorlar / Klinika / Aloqa */}
@@ -398,7 +420,7 @@ export const Header: React.FC = () => {
                   className="w-full py-3 border border-slate-200 hover:border-teal-300 text-slate-800 rounded-2xl font-semibold flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors"
                 >
                   <Phone className="w-4 h-4 text-teal-600" />
-                  <span>+998 71 200 45 45</span>
+                  <span>{clinicPhone}</span>
                 </button>
               </div>
             </div>

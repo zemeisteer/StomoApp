@@ -753,6 +753,194 @@ export class SchedulingService {
   }
 
   /**
+   * Bulk weekly schedules:
+   * Select multiple weekdays, single working interval & break applied to selected days.
+   * Supports 'replace' or 'merge' mode.
+   */
+  async setBatchSchedules(data: {
+    doctorIds: string[];
+    daysOfWeek: DayOfWeek[];
+    startTime: string;
+    endTime: string;
+    breakStart?: string;
+    breakEnd?: string;
+    branchId: string;
+    mode: 'replace' | 'merge';
+  }) {
+    if (!data.doctorIds || data.doctorIds.length === 0) {
+      throw new BadRequestException('Kamida bitta shifokor tanlanishi shart');
+    }
+    if (!data.daysOfWeek || data.daysOfWeek.length === 0) {
+      throw new BadRequestException('Kamida bitta hafta kuni tanlanishi shart');
+    }
+
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: data.branchId },
+    });
+    if (!branch || !branch.isActive) {
+      throw new BadRequestException('Tanlangan filial mavjud emas yoki nofaol');
+    }
+
+    const schedStart = this.parseTime(data.startTime);
+    const schedEnd = this.parseTime(data.endTime);
+    if (schedEnd <= schedStart) {
+      throw new BadRequestException('Tugash vaqti boshlanish vaqtidan keyin bo\'lishi kerak');
+    }
+
+    if (data.breakStart && data.breakEnd) {
+      const bStart = this.parseTime(data.breakStart);
+      const bEnd = this.parseTime(data.breakEnd);
+      if (bEnd <= bStart || bStart < schedStart || bEnd > schedEnd) {
+        throw new BadRequestException('Tanaffus vaqti ish soatlari oralig\'ida bo\'lishi kerak');
+      }
+    }
+
+    const warnings: string[] = [];
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      let createdOrUpdatedCount = 0;
+
+      for (const doctorId of data.doctorIds) {
+        const doc = await tx.doctor.findUnique({ where: { id: doctorId } });
+        if (!doc) continue;
+
+        // Ensure doctor is assigned to branch
+        await tx.doctorBranch.upsert({
+          where: { doctorId_branchId: { doctorId, branchId: data.branchId } },
+          create: { doctorId, branchId: data.branchId },
+          update: {},
+        });
+
+        if (data.mode === 'replace') {
+          await tx.doctorSchedule.deleteMany({
+            where: {
+              doctorId,
+              branchId: data.branchId,
+              dayOfWeek: { in: data.daysOfWeek },
+            },
+          });
+        }
+
+        for (const dayOfWeek of data.daysOfWeek) {
+          await tx.doctorSchedule.upsert({
+            where: {
+              doctorId_dayOfWeek_branchId: {
+                doctorId,
+                dayOfWeek,
+                branchId: data.branchId,
+              },
+            },
+            create: {
+              doctorId,
+              dayOfWeek,
+              startTime: data.startTime,
+              endTime: data.endTime,
+              breakStart: data.breakStart,
+              breakEnd: data.breakEnd,
+              branchId: data.branchId,
+            },
+            update: {
+              startTime: data.startTime,
+              endTime: data.endTime,
+              breakStart: data.breakStart,
+              breakEnd: data.breakEnd,
+            },
+          });
+          createdOrUpdatedCount++;
+        }
+      }
+
+      return { count: createdOrUpdatedCount };
+    });
+
+    return {
+      success: true,
+      updatedCount: result.count,
+      doctorCount: data.doctorIds.length,
+      daysCount: data.daysOfWeek.length,
+      warnings,
+    };
+  }
+
+  /**
+   * Copy schedule from one doctor to one or more other doctors
+   */
+  async copyDoctorSchedules(data: {
+    fromDoctorId: string;
+    toDoctorIds: string[];
+    mode: 'replace' | 'merge';
+    targetBranchId?: string;
+  }) {
+    if (!data.toDoctorIds || data.toDoctorIds.length === 0) {
+      throw new BadRequestException('Nusxa olinadigan shifokorlar tanlanmagan');
+    }
+
+    const sourceSchedules = await this.prisma.doctorSchedule.findMany({
+      where: { doctorId: data.fromDoctorId, isActive: true },
+    });
+
+    if (sourceSchedules.length === 0) {
+      throw new BadRequestException('Manba shifokorning faol ish jadvali topilmadi');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      let totalCopied = 0;
+
+      for (const targetDoctorId of data.toDoctorIds) {
+        if (targetDoctorId === data.fromDoctorId) continue;
+
+        if (data.mode === 'replace') {
+          await tx.doctorSchedule.deleteMany({
+            where: { doctorId: targetDoctorId },
+          });
+        }
+
+        for (const sched of sourceSchedules) {
+          const effectiveBranchId = data.targetBranchId || sched.branchId;
+
+          await tx.doctorBranch.upsert({
+            where: { doctorId_branchId: { doctorId: targetDoctorId, branchId: effectiveBranchId } },
+            create: { doctorId: targetDoctorId, branchId: effectiveBranchId },
+            update: {},
+          });
+
+          await tx.doctorSchedule.upsert({
+            where: {
+              doctorId_dayOfWeek_branchId: {
+                doctorId: targetDoctorId,
+                dayOfWeek: sched.dayOfWeek,
+                branchId: effectiveBranchId,
+              },
+            },
+            create: {
+              doctorId: targetDoctorId,
+              dayOfWeek: sched.dayOfWeek,
+              startTime: sched.startTime,
+              endTime: sched.endTime,
+              breakStart: sched.breakStart,
+              breakEnd: sched.breakEnd,
+              branchId: effectiveBranchId,
+            },
+            update: {
+              startTime: sched.startTime,
+              endTime: sched.endTime,
+              breakStart: sched.breakStart,
+              breakEnd: sched.breakEnd,
+            },
+          });
+          totalCopied++;
+        }
+      }
+
+      return {
+        success: true,
+        copiedSchedulesCount: totalCopied,
+        targetDoctorsCount: data.toDoctorIds.length,
+      };
+    });
+  }
+
+  /**
    * Transactional exception addition with advisory lock and collision check against active bookings
    */
   async addException(data: {

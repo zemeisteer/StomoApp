@@ -82,6 +82,22 @@ export class StatusChangeDto {
   reason?: string;
 }
 
+export class RecordDelayDto {
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  delayMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  extraMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
 export class RescheduleDto {
   @IsDateString()
   startTime!: string;
@@ -132,6 +148,10 @@ export class ListQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 // ============================================================
@@ -340,5 +360,17 @@ export class AppointmentsController {
       query.date,
       query.timezone,
     );
+  }
+
+  @Post(':id/delay')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @HttpCode(HttpStatus.OK)
+  async recordDelay(
+    @Param('id') id: string,
+    @Body() dto: RecordDelayDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const delay = dto.extraMinutes || dto.delayMinutes || 15;
+    return this.service.recordDelay(id, delay, dto.reason, user);
   }
 }

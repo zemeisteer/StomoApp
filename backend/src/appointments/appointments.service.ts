@@ -234,6 +234,10 @@ export class AppointmentsService {
     }
 
     let resolvedBranchId = dto.branchId;
+    if (scope === 'public' && (!resolvedBranchId || !resolvedBranchId.trim())) {
+      throw new BadRequestException('Filial tanlanishi shart');
+    }
+
     if (resolvedBranchId) {
       const branch = await this.prisma.branch.findFirst({
         where: { id: resolvedBranchId, isActive: true },
@@ -1328,8 +1332,9 @@ export class AppointmentsService {
     dateTo?: string;
     page?: number;
     limit?: number;
+    search?: string;
   }, user?: { role: StaffRole; doctorId?: string | null }) {
-    const { status, branchId, serviceId, dateFrom, dateTo, page = 1, limit = 50 } = params;
+    const { status, branchId, serviceId, dateFrom, dateTo, search, page = 1, limit = 50 } = params;
 
     const where: Prisma.AppointmentWhereInput = {};
 
@@ -1350,6 +1355,19 @@ export class AppointmentsService {
       where.startTime = {};
       if (dateFrom) where.startTime.gte = new Date(dateFrom);
       if (dateTo) where.startTime.lte = new Date(dateTo);
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      const digits = q.replace(/\D/g, '');
+      const orFilters: Prisma.AppointmentWhereInput[] = [
+        { patient: { fullName: { contains: q, mode: 'insensitive' } } },
+        { patient: { phone: { contains: q } } },
+      ];
+      if (digits.length >= 3) {
+        orFilters.push({ patient: { phone: { contains: digits } } });
+      }
+      where.OR = orFilters;
     }
 
     const [items, total] = await Promise.all([
@@ -1536,8 +1554,90 @@ export class AppointmentsService {
     if (expiredCount > 0) {
       this.logger.log(`Expired ${expiredCount} abandoned pending appointments with status history and reminder cancellation`);
     }
+  }
 
-    return expiredCount;
+  /**
+   * Controlled Delay & Overrun workflow
+   * Tracks extra expected time, records audit trail, identifies affected subsequent bookings
+   */
+  async recordDelay(
+    id: string,
+    delayMinutes: number,
+    reason: string | undefined,
+    user: { role: StaffRole; doctorId?: string | null; sub?: string },
+  ) {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id },
+      include: { doctor: true, patient: true, branch: true },
+    });
+    if (!appointment) {
+      throw new NotFoundException('Qabul topilmadi');
+    }
+
+    if (user.role === StaffRole.DOCTOR && user.doctorId && appointment.doctorId !== user.doctorId) {
+      throw new ForbiddenException('Shifokor faqat o‘z qabulidagi kechikishni qayd eta oladi');
+    }
+
+    const scheduledEndTime = new Date(appointment.endTime);
+    const estimatedEndTime = new Date(scheduledEndTime.getTime() + delayMinutes * 60000);
+    const buffer = appointment.bufferMinutes || 5;
+    const estimatedFreeTime = new Date(estimatedEndTime.getTime() + buffer * 60000);
+
+    // Identify affected subsequent appointments for the same doctor on the same day
+    const affectedAppointments = await this.prisma.appointment.findMany({
+      where: {
+        doctorId: appointment.doctorId,
+        id: { not: appointment.id },
+        startTime: {
+          gte: appointment.startTime,
+          lt: estimatedFreeTime,
+        },
+        status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
+      },
+      include: {
+        patient: { select: { fullName: true, phone: true } },
+        service: { select: { nameUz: true, nameRu: true } },
+      },
+      orderBy: { startTime: 'asc' },
+    });
+
+    // Record audit trail in status history without silently altering scheduled bookings
+    const delayNotice = `[KECHIKISH: +${delayMinutes} daqiqa] ${reason ? reason.trim() : 'Muolaja vaqti cho‘zildi'}. Kutilayotgan tugash: ${estimatedEndTime.toISOString()}`;
+    await this.prisma.appointmentStatusHistory.create({
+      data: {
+        appointmentId: appointment.id,
+        fromStatus: appointment.status,
+        toStatus: appointment.status,
+        reason: delayNotice,
+        changedBy: user.sub || user.doctorId || 'staff',
+      },
+    });
+
+    return {
+      appointmentId: appointment.id,
+      delayMinutes,
+      extraMinutes: delayMinutes,
+      scheduledStartTime: appointment.startTime,
+      scheduledEndTime: appointment.endTime,
+      estimatedEndTime: estimatedEndTime.toISOString(),
+      estimatedFreeTime: estimatedFreeTime.toISOString(),
+      bufferMinutes: buffer,
+      affectedCount: affectedAppointments.length,
+      affectedAppointments: affectedAppointments.map((a: any) => {
+        const conflictMinutes = Math.max(0, Math.round((estimatedFreeTime.getTime() - new Date(a.startTime).getTime()) / 60000));
+        return {
+          id: a.id,
+          patientName: a.patient.fullName,
+          patientPhone: a.patient.phone,
+          scheduledStartTime: a.startTime,
+          scheduledEndTime: a.endTime,
+          serviceName: a.service?.nameUz || 'Xizmat',
+          estimatedDelayMinutes: conflictMinutes,
+          estimatedNewStartTime: new Date(new Date(a.startTime).getTime() + conflictMinutes * 60000).toISOString(),
+          status: a.status,
+        };
+      }),
+    };
   }
 
   private normalizePhone(phone: string): string {
