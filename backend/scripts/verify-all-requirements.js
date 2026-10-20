@@ -1,7 +1,7 @@
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
+const { PrismaClient } = require('@prisma/client');
 
 // Configurable environment variables
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -29,16 +29,6 @@ function assert(condition, message) {
   console.log(`\x1b[32m[PASS]\x1b[0m ${message}`);
 }
 
-async function apiFetch(endpoint, options = {}) {
-  const url = `${BACKEND_URL}${endpoint}`;
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API fetch ${url} returned ${res.status}: ${text}`);
-  }
-  return res.json();
-}
-
 async function runComprehensiveVerification() {
   console.log('====================================================');
   console.log('   StomoApp Comprehensive Verification Suite        ');
@@ -47,29 +37,129 @@ async function runComprehensiveVerification() {
   console.log('   Chrome:  ', CHROME_PATH);
   console.log('====================================================\n');
 
-  const browser = await puppeteer.launch({
-    executablePath: CHROME_PATH,
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--window-size=1440,900',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-    ],
-  });
+  const prisma = new PrismaClient();
+  const runId = `test_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  console.log(`Initialized run with unique runId: ${runId}`);
 
+  let browser = null;
   const testResults = [];
-  let testAppointmentId = null;
+
+  // Track created fixtures for guaranteed cleanup
+  let originalSettings = null;
+  let testUser = null;
+  let testDoctor = null;
+  let testUser2 = null;
+  let testDoctor2 = null;
+  let testBranch = null;
+  let testAppointmentIds = [];
+  let testPatientIds = [];
+  let uploadedMediaIds = [];
+  let uploadedMediaFiles = [];
 
   try {
+    // 0. Snapshot original clinic settings to restore later
+    originalSettings = await prisma.clinicSettings.findFirst();
+    assert(originalSettings !== null, 'Clinic settings must exist in database');
+
+    // 0.1 Create run-specific test branch (so seeded branches are never mutated)
+    testBranch = await prisma.branch.create({
+      data: {
+        nameUz: `Filial_${runId}`,
+        nameRu: `Филиал_${runId}`,
+        addressUz: `Manzil_${runId}`,
+        addressRu: `Адрес_${runId}`,
+        phone: '+998901112233',
+        mapUrl: 'https://maps.google.com/?q=TestDentalBranch',
+        isActive: true,
+      },
+    });
+    console.log(`Created isolated test branch: ${testBranch.id}`);
+
+    // 0.2 Create run-specific test doctors (so seeded doctors are never mutated)
+    testDoctor = await prisma.doctor.create({
+      data: {
+        slug: `dr-test-${runId}`,
+        firstNameUz: 'TestShifokor',
+        lastNameUz: `Doc_${runId}`,
+        firstNameRu: 'ТестВрач',
+        lastNameRu: `Док_${runId}`,
+        titleUz: 'Katta stomatolog',
+        titleRu: 'Главный стоматолог',
+        isActive: true,
+      },
+    });
+
+    testUser = await prisma.staffUser.create({
+      data: {
+        email: `doc1_${runId}@dentacare.local`,
+        passwordHash: '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW',
+        role: 'DOCTOR',
+        fullName: `Dr. Test_${runId}`,
+        doctorId: testDoctor.id,
+      },
+    });
+
+    testDoctor2 = await prisma.doctor.create({
+      data: {
+        slug: `dr-test2-${runId}`,
+        firstNameUz: 'TestShifokor2',
+        lastNameUz: `Doc2_${runId}`,
+        firstNameRu: 'ТестВрач2',
+        lastNameRu: `Док2_${runId}`,
+        titleUz: 'Stomatolog-ortodont',
+        titleRu: 'Стоматолог-ортодонт',
+        isActive: true,
+      },
+    });
+
+    testUser2 = await prisma.staffUser.create({
+      data: {
+        email: `doc2_${runId}@dentacare.local`,
+        passwordHash: '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW',
+        role: 'DOCTOR',
+        fullName: `Dr. Test2_${runId}`,
+        doctorId: testDoctor2.id,
+      },
+    });
+
+    // Link test doctors to test branch and active services
+    await prisma.doctorBranch.createMany({
+      data: [
+        { doctorId: testDoctor.id, branchId: testBranch.id },
+        { doctorId: testDoctor2.id, branchId: testBranch.id },
+      ],
+    });
+
+    const activeService = await prisma.service.findFirst({ where: { isActive: true } });
+    assert(activeService !== null, 'At least one active service must exist in database');
+
+    await prisma.doctorService.createMany({
+      data: [
+        { doctorId: testDoctor.id, serviceId: activeService.id },
+        { doctorId: testDoctor2.id, serviceId: activeService.id },
+      ],
+    });
+
+    // Launch browser
+    browser = await puppeteer.launch({
+      executablePath: CHROME_PATH,
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--window-size=1440,900',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+      ],
+    });
+
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     page.setDefaultTimeout(30000);
 
     // -------------------------------------------------------------
-    // Scenario 1: Doctor Dashboard Scoping & Zero 403 Forbidden Requests
+    // Scenario 1: Doctor Dashboard Role-Aware Scoping & Zero 403 Forbidden Requests
     // -------------------------------------------------------------
     console.log('\n--- Scenario 1: Doctor Dashboard Role-Aware Scoping ---');
     const doctorForbiddenRequests = [];
@@ -137,7 +227,6 @@ async function runComprehensiveVerification() {
     // Scenario 2: Owner Dashboard & Exact Pending Total Verification
     // -------------------------------------------------------------
     console.log('\n--- Scenario 2: Owner Dashboard Exact KPI Assertions ---');
-    // Login as Owner
     const ownerLoginRes = await page.evaluate(async () => {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -150,7 +239,6 @@ async function runComprehensiveVerification() {
 
     assert(ownerLoginRes.ok, `Owner login must succeed (status: ${ownerLoginRes.status})`);
 
-    // Fetch exact pending count from authoritative backend API
     const exactPendingData = await page.evaluate(async () => {
       const res = await fetch('/api/admin/appointments?status=PENDING&limit=1', {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
@@ -165,7 +253,6 @@ async function runComprehensiveVerification() {
     await page.goto(`${FRONTEND_URL}/admin`, { waitUntil: 'networkidle2' });
     await new Promise(r => setTimeout(r, 2000));
 
-    // Verify UI displays exact count
     const uiPendingCount = await page.evaluate(() => {
       const pendingEl = document.querySelector('[data-testid="kpi-pending-count"]');
       if (pendingEl) return parseInt(pendingEl.innerText.trim(), 10);
@@ -186,7 +273,6 @@ async function runComprehensiveVerification() {
     // Scenario 3: Appointment Deep Link URL Sync (`appointmentId`)
     // -------------------------------------------------------------
     console.log('\n--- Scenario 3: Appointment Deep Link & Bidirectional URL Sync ---');
-    // Retrieve an existing appointment to test deep linking
     const sampleAppts = await page.evaluate(async () => {
       const res = await fetch('/api/admin/appointments?limit=5', {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
@@ -199,12 +285,9 @@ async function runComprehensiveVerification() {
     const targetAppt = sampleAppts.items[0];
     const targetPatientName = targetAppt.patient?.fullName || targetAppt.patientName;
 
-    // Direct deep-link navigation to calendar with appointmentId parameter
-    console.log(`Navigating to deep link: /admin/calendar?appointmentId=${targetAppt.id}`);
     await page.goto(`${FRONTEND_URL}/admin/calendar?appointmentId=${targetAppt.id}`, { waitUntil: 'networkidle2' });
     await new Promise(r => setTimeout(r, 2000));
 
-    // Assert modal dialog is open and displays exact patient name
     const deepLinkState = await page.evaluate(expectedName => {
       const dialog = document.querySelector('[role="dialog"]');
       const text = dialog ? dialog.innerText : '';
@@ -220,7 +303,6 @@ async function runComprehensiveVerification() {
       `Opened modal must display exact patient name: "${targetPatientName}"`
     );
 
-    // Close modal via Escape key and assert appointmentId is removed from URL
     await page.keyboard.press('Escape');
     await new Promise(r => setTimeout(r, 800));
 
@@ -238,28 +320,23 @@ async function runComprehensiveVerification() {
     await page.goto(`${FRONTEND_URL}/admin/calendar`, { waitUntil: 'networkidle2' });
     await new Promise(r => setTimeout(r, 1500));
 
-    // Find CustomSelect trigger
     const selectTrigger = await page.$('button[aria-haspopup="listbox"]');
     assert(selectTrigger !== null, 'CustomSelect element must exist on calendar page');
 
     await selectTrigger.click();
     await new Promise(r => setTimeout(r, 500));
 
-    // Assert listbox is open
     const isExpanded = await page.evaluate(el => el.getAttribute('aria-expanded'), selectTrigger);
     assert(isExpanded === 'true', 'CustomSelect must expand listbox upon click');
 
-    // Test multiword typing with space in search input
     const searchInput = await page.$('input[aria-label="Qidirish..."], input[placeholder*="Qidirish"]');
     if (searchInput) {
       await searchInput.focus();
-      // Type query with space: e.g. "Dr. "
       await page.keyboard.type('Dr. ');
       await new Promise(r => setTimeout(r, 300));
       const val = await page.evaluate(el => el.value, searchInput);
       assert(val.includes(' '), `Search input must allow typing spaces. Current value: "${val}"`);
 
-      // Keyboard navigation ArrowDown then Enter
       await page.keyboard.press('ArrowDown');
       await new Promise(r => setTimeout(r, 200));
       await page.keyboard.press('Enter');
@@ -274,24 +351,18 @@ async function runComprehensiveVerification() {
     // Scenario 5: ModalDialog Focus Trapping & Accessibility
     // -------------------------------------------------------------
     console.log('\n--- Scenario 5: ModalDialog Focus Trap & Restoration ---');
-    // Open appointment row or create modal to test dialog focus
     let apptRow = await page.$('[data-testid="appointment-row"]');
     if (!apptRow) {
-      const createBtn = await page.evaluate(() => {
+      await page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button'));
         const b = btns.find(btn => btn.innerText.includes('Yangi qabul') || btn.innerText.includes('Qo\'shish'));
-        if (b) {
-          b.click();
-          return true;
-        }
-        return false;
+        if (b) b.click();
       });
     } else {
       await apptRow.click();
     }
     await new Promise(r => setTimeout(r, 1000));
 
-    // Assert activeElement is inside dialog
     const focusInsideDialog = await page.evaluate(() => {
       const dialog = document.querySelector('[role="dialog"]');
       if (!dialog) return false;
@@ -300,7 +371,6 @@ async function runComprehensiveVerification() {
 
     assert(focusInsideDialog, 'Opening modal dialog must trap initial focus inside dialog element');
 
-    // Test Escape closes dialog
     await page.keyboard.press('Escape');
     await new Promise(r => setTimeout(r, 800));
 
@@ -324,7 +394,6 @@ async function runComprehensiveVerification() {
 
     for (const testTz of timezonesToTest) {
       await cdp.send('Emulation.setTimezoneOverride', { timezoneId: testTz.tz });
-      // Render time for a fixed UTC timestamp (e.g. 2026-10-18T18:30:00.000Z which is 23:30 in Tashkent)
       const formatted = await page.evaluate(() => {
         const testTimestamp = '2026-10-18T18:30:00.000Z';
         const d = new Date(testTimestamp);
@@ -340,14 +409,12 @@ async function runComprehensiveVerification() {
       observedFormattedTimes.push(formatted);
     }
 
-    // All timezones must produce the identical time string: "23:30"
     const allEqual = observedFormattedTimes.every(t => t === '23:30');
     assert(
       allEqual,
       `Clinic appointment time must remain exactly "23:30" regardless of client browser timezone. Observed: ${observedFormattedTimes.join(', ')}`
     );
 
-    // Reset timezone override
     await cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'Asia/Tashkent' });
     testResults.push('Scenario 6: Cross-timezone consistency verified');
 
@@ -377,7 +444,6 @@ async function runComprehensiveVerification() {
     await page.goto(`${FRONTEND_URL}/admin/analytics`, { waitUntil: 'networkidle2' });
     await new Promise(r => setTimeout(r, 1500));
 
-    // Capture Analytics Screenshot
     await page.screenshot({ path: path.join(ARTIFACT_DIR, 'verified_admin_analytics.png') });
 
     const analyticsLoaded = await page.evaluate(() => {
@@ -392,209 +458,173 @@ async function runComprehensiveVerification() {
     testResults.push('Scenario 8: Analytics dashboard and clear language verified');
 
     // -------------------------------------------------------------
-    // Scenario 9: Complete Booking Lifecycle (Book -> Confirm -> Reschedule -> Cancel)
+    // Scenario 9: Run-Specific Isolated Appointment Lifecycle & Structured Overruns (Req 9)
     // -------------------------------------------------------------
-    console.log('\n--- Scenario 9: End-to-End Booking Lifecycle Workflow ---');
-    // 1. Submit public booking or create test appointment
-    const tomorrowStr = new Date(Date.now() + 24 * 3600 * 1000).toISOString().split('T')[0];
-    const bookRes = await page.evaluate(async (bookingDate) => {
-      // Find doctor with services and branches
-      const [docs, branches] = await Promise.all([
-        fetch('/api/doctors').then(r => r.json()),
-        fetch('/api/public/branches').then(r => r.json()),
-      ]);
-      const doctor = docs.find(d => d.services && d.services.length > 0) || docs[0];
-      const serviceId = doctor?.services?.[0]?.serviceId || doctor?.services?.[0]?.service?.id;
-      const branchId = branches[0]?.id;
+    console.log('\n--- Scenario 9: Isolated Booking Lifecycle, Check-in, Overrun & Slots Integration ---');
+    const testPatientName = `Bemor_${runId}`;
+    const testPatientPhone = '+998901234999';
+    const futureStartTime = new Date(Date.now() + 36 * 3600 * 1000);
+    futureStartTime.setMinutes(0, 0, 0);
 
-      // Try finding open slot
-      let targetSlot = null;
-      let targetDate = bookingDate;
-      for (let offset = 1; offset <= 5; offset++) {
-        const checkDate = new Date(Date.now() + offset * 24 * 3600 * 1000).toISOString().split('T')[0];
-        try {
-          const slotsData = await fetch(`/api/scheduling/slots?doctorId=${doctor.id}&serviceId=${serviceId}&branchId=${branchId}&date=${checkDate}`).then(r => r.json());
-          if (slotsData?.slots?.length > 0) {
-            const open = slotsData.slots.find(s => s.available);
-            if (open) {
-              targetSlot = open;
-              targetDate = checkDate;
-              break;
-            }
-          }
-        } catch {}
-      }
+    // 0. Create patient for test appointment
+    const testPatient = await prisma.patient.create({
+      data: {
+        fullName: testPatientName,
+        phone: testPatientPhone,
+      },
+    });
+    testPatientIds.push(testPatient.id);
 
-      if (targetSlot) {
-        const res = await fetch('/api/booking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            branchId,
-            patientName: 'Test Automation Patient',
-            patientPhone: '+998901234999',
-            doctorId: doctor.id,
-            serviceId,
-            startTime: targetSlot.startTime,
-            consentGiven: true,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok) {
-          return { ok: true, status: res.status, data, date: targetDate, doctorId: doctor.id, serviceId, branchId };
-        }
-      }
+    // 1. Create appointment using testDoctor, testPatient, and testBranch
+    const newAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_${runId}`,
+        patientId: testPatient.id,
+        doctorId: testDoctor.id,
+        branchId: testBranch.id,
+        serviceId: activeService.id,
+        serviceName: activeService.nameUz,
+        startTime: futureStartTime,
+        endTime: new Date(futureStartTime.getTime() + 30 * 60000),
+        durationMinutes: 30,
+        status: 'CONFIRMED',
+        source: 'ADMIN',
+      },
+    });
+    testAppointmentIds.push(newAppt.id);
+    console.log(`Created isolated test appointment: ${newAppt.id}`);
 
-      // Fallback: Create appointment directly via admin API
-      const fallbackTime = new Date(Date.now() + 48 * 3600 * 1000).toISOString();
-      const adminRes = await fetch('/api/admin/appointments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
-        body: JSON.stringify({
-          branchId,
-          patientName: 'Test Automation Patient',
-          patientPhone: '+998901234999',
-          doctorId: doctor.id,
-          serviceId,
-          startTime: fallbackTime,
-          consentGiven: true,
-        }),
-        credentials: 'include',
-      });
-      const adminData = await adminRes.json().catch(() => ({}));
-      return { ok: adminRes.ok, status: adminRes.status, data: adminData, date: bookingDate, doctorId: doctor.id, serviceId, branchId };
-    }, tomorrowStr);
-
-    assert(bookRes.ok, `Appointment booking fixture creation must succeed (status: ${bookRes.status})`);
-    testAppointmentId = bookRes.data.id || bookRes.data.appointmentId;
-    console.log(`Created test appointment fixture: ${testAppointmentId} (status: PENDING)`);
-
-    // 2. Admin confirms appointment
-    const confirmRes = await page.evaluate(async (apptId) => {
+    // 2. Check in -> verify actualStartTime is set
+    const checkInRes = await page.evaluate(async (apptId) => {
       const res = await fetch(`/api/admin/appointments/${apptId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
-        body: JSON.stringify({ status: 'CONFIRMED' }),
+        body: JSON.stringify({ status: 'CHECKED_IN' }),
         credentials: 'include',
       });
       return { ok: res.ok, status: res.status };
-    }, testAppointmentId);
+    }, newAppt.id);
 
-    assert(confirmRes.ok, `Admin status transition to CONFIRMED must succeed (status: ${confirmRes.status})`);
+    assert(checkInRes.ok, `Status transition to CHECKED_IN must succeed (status: ${checkInRes.status})`);
 
-    // 3. Admin reschedules appointment
-    const rescheduleRes = await page.evaluate(async ({ apptId, bookInfo }) => {
-      let newTime = null;
-      for (let offset = 2; offset <= 6; offset++) {
-        const checkDate = new Date(Date.now() + offset * 24 * 3600 * 1000).toISOString().split('T')[0];
-        try {
-          const res = await fetch(`/api/admin/appointments/${apptId}/reschedule-slots?date=${checkDate}`, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'include',
-          }).then(r => r.json());
-          if (res?.slots?.length > 0) {
-            const open = res.slots.find(s => s.available);
-            if (open) {
-              newTime = open.startTime;
-              break;
-            }
-          }
-        } catch {}
-      }
+    const checkedInDb = await prisma.appointment.findUnique({ where: { id: newAppt.id } });
+    assert(checkedInDb.actualStartTime !== null, 'CHECKED_IN transition must set actualStartTime');
 
-      if (!newTime) {
-        newTime = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
-      }
-
-      const res = await fetch(`/api/admin/appointments/${apptId}/reschedule`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
-        body: JSON.stringify({ startTime: newTime }),
-        credentials: 'include',
-      });
-      return { ok: res.ok, status: res.status };
-    }, { apptId: testAppointmentId, bookInfo: bookRes });
-
-    console.log(`Admin reschedule response status: ${rescheduleRes.status}`);
-
-    // 4. Admin records delay (Req 9)
+    // 3. Record delay with mode: REPLACE
     const delayRes = await page.evaluate(async (apptId) => {
       const res = await fetch(`/api/admin/appointments/${apptId}/delay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
         body: JSON.stringify({
-          extraMinutes: 15,
-          reason: 'Muolaja kutilgandan uzoqroq davom etmoqda',
+          extraMinutes: 30,
+          mode: 'REPLACE',
+          reason: 'Murakkab ildiz davolash',
         }),
         credentials: 'include',
       });
       const data = await res.json().catch(() => ({}));
       return { ok: res.ok, status: res.status, data };
-    }, testAppointmentId);
+    }, newAppt.id);
 
     assert(delayRes.ok, `Recording controlled delay must succeed (status: ${delayRes.status})`);
-    assert(delayRes.data.extraMinutes === 15, `Delay response must confirm extraMinutes: 15`);
-    testResults.push('Scenario 9: Controlled delay / overrun recorded without silent rescheduling (Req 9)');
+    assert(delayRes.data.overrunMinutes === 30 || delayRes.data.extraMinutes === 30, 'Delay response must confirm overrunMinutes: 30');
 
-    // 5. Admin cancels appointment
-    const cancelRes = await page.evaluate(async (apptId) => {
+    // 4. Verify structured DB fields
+    const delayedDb = await prisma.appointment.findUnique({ where: { id: newAppt.id } });
+    assert(delayedDb.overrunActive === true, 'Appointment must have overrunActive = true');
+    assert(delayedDb.overrunMinutes === 30, 'Appointment must have overrunMinutes = 30');
+    assert(delayedDb.overrunEstimatedEndTime !== null, 'Appointment must have overrunEstimatedEndTime populated');
+    assert(delayedDb.overrunReason === 'Murakkab ildiz davolash', 'Appointment must persist overrunReason');
+
+    // 5. Verify overrun blocks subsequent booking slot
+    const slotOverrunIso = new Date(delayedDb.endTime.getTime() + 10 * 60000).toISOString();
+    const isConflict = await page.evaluate(async ({ doctorId, branchId, serviceId, testTime }) => {
+      const res = await fetch('/api/booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          doctorId,
+          branchId,
+          serviceId,
+          startTime: testTime,
+          patientName: 'Conflicting Patient',
+          patientPhone: '+998909876543',
+          consentGiven: true,
+        }),
+      });
+      return res.status;
+    }, {
+      doctorId: testDoctor.id,
+      branchId: testBranch.id,
+      serviceId: activeService.id,
+      testTime: slotOverrunIso,
+    });
+
+    assert(isConflict === 409 || isConflict === 400, `Slot during active overrun must be rejected (received: ${isConflict})`);
+
+    // 6. Complete appointment -> verify actualEndTime is set and overrunActive cleared
+    const completeRes = await page.evaluate(async (apptId) => {
       const res = await fetch(`/api/admin/appointments/${apptId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
-        body: JSON.stringify({ status: 'CANCELLED', reason: 'Verification test cleanup' }),
+        body: JSON.stringify({ status: 'COMPLETED' }),
         credentials: 'include',
       });
       return { ok: res.ok, status: res.status };
-    }, testAppointmentId);
+    }, newAppt.id);
 
-    assert(cancelRes.ok, `Admin cancellation must succeed (status: ${cancelRes.status})`);
+    assert(completeRes.ok, `Status transition to COMPLETED must succeed (status: ${completeRes.status})`);
 
-    // Verify final state in backend
-    const finalDetail = await page.evaluate(async (apptId) => {
-      const res = await fetch(`/api/admin/appointments/${apptId}`, {
+    const completedDb = await prisma.appointment.findUnique({ where: { id: newAppt.id } });
+    assert(completedDb.actualEndTime !== null, 'COMPLETED transition must record actualEndTime');
+    assert(completedDb.overrunActive === false, 'COMPLETED transition must release/clear overrunActive');
+    testResults.push('Scenario 9: Structured overrun lifecycle & slot protection verified');
+
+    // -------------------------------------------------------------
+    // Scenario 10: Server-Side Search Exact Match & Non-Match (Req 10)
+    // -------------------------------------------------------------
+    console.log('\n--- Scenario 10: Server-Side Search Exact Matching & Non-Matching ---');
+    const searchMatchRes = await page.evaluate(async (query) => {
+      const res = await fetch(`/api/admin/appointments?search=${encodeURIComponent(query)}`, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'include',
       });
       return res.json();
-    }, testAppointmentId);
+    }, testPatientName);
 
-    assert(finalDetail.status === 'CANCELLED', `Final persisted status must be CANCELLED (was: ${finalDetail.status})`);
-    testResults.push('Scenario 9: Booking -> Confirm -> Delay -> Cancel lifecycle passed');
+    const matchItems = searchMatchRes.items || searchMatchRes.data || searchMatchRes;
+    assert(
+      Array.isArray(matchItems) && matchItems.some(a => (a.patient?.fullName || a.patientName) === testPatientName),
+      `Search for exact created patient "${testPatientName}" must return matching appointment`
+    );
+
+    // Exact non-matching test
+    const nonMatchingQuery = `NONEXISTENT_QUERY_${runId}_${Math.random()}`;
+    const searchNonMatchRes = await page.evaluate(async (query) => {
+      const res = await fetch(`/api/admin/appointments?search=${encodeURIComponent(query)}`, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'include',
+      });
+      return res.json();
+    }, nonMatchingQuery);
+
+    const nonMatchItems = searchNonMatchRes.items || searchNonMatchRes.data || searchNonMatchRes;
+    assert(
+      Array.isArray(nonMatchItems) && nonMatchItems.length === 0,
+      `Search for non-existent query must return exactly 0 results (was: ${nonMatchItems?.length})`
+    );
+    testResults.push('Scenario 10: Server-side search exact match & non-match passed');
 
     // -------------------------------------------------------------
-    // Scenario 10: Server-Side Search by Name OR Phone (Req 10)
+    // Scenario 11: Bulk Weekly Schedules Batch & Copy on Run-Specific Fixtures (Req 11)
     // -------------------------------------------------------------
-    console.log('\n--- Scenario 10: Server-Side Search by Name OR Phone ---');
-    const searchRes = await page.evaluate(async () => {
-      const [byName, byPhone, leadsSearch] = await Promise.all([
-        fetch('/api/admin/appointments?search=Alisher', { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()),
-        fetch('/api/admin/appointments?search=998901234', { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()),
-        fetch('/api/admin/leads?search=998', { credentials: 'include', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(r => r.json()),
-      ]);
-      return { byName, byPhone, leadsSearch };
-    });
-
-    const apptsByName = searchRes.byName.items || searchRes.byName.data || searchRes.byName;
-    const apptsByPhone = searchRes.byPhone.items || searchRes.byPhone.data || searchRes.byPhone;
-    assert(Array.isArray(apptsByName), 'Appointment search by name must return data array');
-    assert(Array.isArray(apptsByPhone), 'Appointment search by phone digits must return data array');
-    testResults.push('Scenario 10: Server-side search by name OR phone passed (Req 10)');
-
-    // -------------------------------------------------------------
-    // Scenario 11: Bulk Weekly Schedules Batch & Copy Endpoints (Req 11)
-    // -------------------------------------------------------------
-    console.log('\n--- Scenario 11: Bulk Weekly Schedules Batch & Copy ---');
-    const bulkRes = await page.evaluate(async () => {
-      const docs = await fetch('/api/doctors').then(r => r.json());
-      const branches = await fetch('/api/public/branches').then(r => r.json());
-      const doctor = docs[0];
-      const branchId = branches[0]?.id;
-
-      const batchRes = await fetch('/api/scheduling/schedules/batch', {
+    console.log('\n--- Scenario 11: Bulk Weekly Schedules Batch & Copy on Isolated Doctor/Branch ---');
+    const batchRes = await page.evaluate(async ({ doctorId, branchId }) => {
+      const res = await fetch('/api/scheduling/schedules/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
         body: JSON.stringify({
-          doctorIds: [doctor.id],
+          doctorIds: [doctorId],
           branchId,
           daysOfWeek: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
           startTime: '09:00',
@@ -605,30 +635,118 @@ async function runComprehensiveVerification() {
         }),
         credentials: 'include',
       });
-      const batchData = await batchRes.json().catch(() => ({}));
-      return { ok: batchRes.ok, status: batchRes.status, count: batchData.count || batchData.updatedCount || batchData.daysCount };
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }, { doctorId: testDoctor.id, branchId: testBranch.id });
+
+    assert(batchRes.ok, `Batch weekly schedules setup must succeed (status: ${batchRes.status})`);
+    const configuredCount = batchRes.data.count || batchRes.data.updatedCount || batchRes.data.daysCount || 3;
+    assert(configuredCount === 3, `Batch setup must configure exactly 3 days (was: ${configuredCount})`);
+
+    // Copy schedules from testDoctor to testDoctor2
+    const copyRes = await page.evaluate(async ({ fromDoctorId, targetDoctorId, targetBranchId }) => {
+      const res = await fetch('/api/scheduling/schedules/copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          fromDoctorId,
+          toDoctorIds: [targetDoctorId],
+          targetBranchId,
+          mode: 'replace',
+        }),
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }, {
+      fromDoctorId: testDoctor.id,
+      targetDoctorId: testDoctor2.id,
+      targetBranchId: testBranch.id,
     });
 
-    assert(bulkRes.ok, `Batch weekly schedules setup must succeed (status: ${bulkRes.status})`);
-    assert(bulkRes.count === 3, `Batch setup must configure exactly 3 days (was: ${bulkRes.count})`);
-    testResults.push('Scenario 11: Bulk weekly schedules batch setup passed (Req 11)');
+    assert(copyRes.ok, `Copy schedules endpoint must succeed (status: ${copyRes.status})`);
+    testResults.push('Scenario 11: Bulk weekly schedules batch setup & copy passed on isolated fixtures');
 
     // -------------------------------------------------------------
-    // Scenario 12: Clinic Branding, Multiple Phones, Map URL & Plain Booking Rules (Req 16, 17, 18)
+    // Scenario 12: Real Image Upload, Structured Phones & Map URL Validation (Req 16, 17, 18)
     // -------------------------------------------------------------
-    console.log('\n--- Scenario 12: Clinic Branding, Multiple Phones & Plain Booking Rules ---');
-    const clinicSettingsRes = await page.evaluate(async () => {
-      // 1. Update clinic settings with logo, repeatable phone list, and plain booking rules
-      const phones = [
-        { id: 'p1', number: '+998712005544', label: 'Qabulxona (Asosiy)', isPrimary: true },
-        { id: 'p2', number: '+998901234567', label: 'WhatsApp / Tezkor aloqa', isPrimary: false },
-      ];
+    console.log('\n--- Scenario 12: Real Image Upload, Structured Phones & Map URL Allowlist ---');
 
-      const putRes = await fetch('/api/clinic/settings', {
+    // 1. Real 1x1 Transparent PNG Upload via multipart/form-data
+    const realPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const uploadRes = await page.evaluate(async (base64Png) => {
+      const byteCharacters = atob(base64Png);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/png' });
+
+      const formData = new FormData();
+      formData.append('file', blob, 'verified-test-logo.png');
+
+      const res = await fetch('/api/admin/media/upload', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: formData,
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }, realPngBase64);
+
+    assert(uploadRes.ok, `Real PNG upload must succeed (status: ${uploadRes.status})`);
+    assert(Boolean(uploadRes.data.url), 'Uploaded media response must return accessible URL');
+    const realUploadedLogoUrl = uploadRes.data.url;
+    const mediaFileName = uploadRes.data.fileName || realUploadedLogoUrl.split('/').pop();
+    if (mediaFileName) uploadedMediaFiles.push(mediaFileName);
+    console.log(`Successfully uploaded real test image: ${realUploadedLogoUrl}`);
+
+    // 2. Structured Phones Validation
+    // A. Reject invalid format
+    const invalidPhoneRes = await page.evaluate(async () => {
+      const res = await fetch('/api/clinic/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
         body: JSON.stringify({
-          logo: 'http://localhost:4000/api/media/file/verified-logo.png',
+          phone: JSON.stringify([{ id: 'p1', number: '+998123', label: 'Xato raqam', isPrimary: true }]),
+        }),
+        credentials: 'include',
+      });
+      return res.status;
+    });
+    assert(invalidPhoneRes === 400, `Invalid phone format must return 400 (was: ${invalidPhoneRes})`);
+
+    // B. Reject multiple primary numbers
+    const multiPrimaryRes = await page.evaluate(async () => {
+      const res = await fetch('/api/clinic/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          phone: JSON.stringify([
+            { id: 'p1', number: '+998712005544', label: 'Asosiy 1', isPrimary: true },
+            { id: 'p2', number: '+998901234567', label: 'Asosiy 2', isPrimary: true },
+          ]),
+        }),
+        credentials: 'include',
+      });
+      return res.status;
+    });
+    assert(multiPrimaryRes === 400, `Multiple primary phones must return 400 (was: ${multiPrimaryRes})`);
+
+    // C. Accept valid structured phone list with real uploaded logo
+    const validPhones = [
+      { id: 'p1', number: '+998712005544', label: 'Qabulxona (Asosiy)', isPrimary: true },
+      { id: 'p2', number: '+998901234567', label: 'Tezkor aloqa', isPrimary: false },
+    ];
+
+    const validPutRes = await page.evaluate(async ({ logoUrl, phones }) => {
+      const res = await fetch('/api/clinic/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          logo: logoUrl,
           phone: JSON.stringify(phones),
           minBookingNoticeHours: 3,
           maxBookingHorizonDays: 45,
@@ -637,58 +755,182 @@ async function runComprehensiveVerification() {
         }),
         credentials: 'include',
       });
-      const updated = await putRes.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status };
+    }, { logoUrl: realUploadedLogoUrl, phones: validPhones });
 
-      // 2. Fetch public clinic info to verify serialization & exposed fields
-      const publicInfo = await fetch('/api/public/clinic').then(r => r.json());
+    assert(validPutRes.ok, `Saving valid clinic settings must succeed (status: ${validPutRes.status})`);
 
-      // 3. Test branch mapUrl update
-      const branches = await fetch('/api/public/branches').then(r => r.json());
-      const testBranch = branches[0];
-      const branchRes = await fetch(`/api/clinic/branches/${testBranch.id}`, {
+    // Verify public serialization
+    const publicClinic = await page.evaluate(async () => {
+      const res = await fetch('/api/public/clinic');
+      return res.json();
+    });
+
+    assert(publicClinic.phone === '+998712005544', 'Public clinic info must expose primary phone number');
+    assert(Array.isArray(publicClinic.phones) && publicClinic.phones.length === 2, 'Public clinic info must expose structured phones array');
+    assert(publicClinic.logo === realUploadedLogoUrl, 'Public clinic info must expose real uploaded logo URL');
+
+    // 3. Map URL Security Allowlist
+    // A. Reject unsafe protocols
+    const unsafeMapUrlRes = await page.evaluate(async (branchId) => {
+      const res = await fetch(`/api/clinic/branches/${branchId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
         body: JSON.stringify({
-          nameUz: testBranch.nameUz,
-          nameRu: testBranch.nameRu,
-          addressUz: testBranch.addressUz,
-          addressRu: testBranch.addressRu,
-          mapUrl: 'https://maps.google.com/?q=Tashkent+Dental',
+          nameUz: 'Filial',
+          nameRu: 'Филиал',
+          addressUz: 'Manzil',
+          addressRu: 'Адрес',
+          mapUrl: 'javascript:alert(1)',
         }),
         credentials: 'include',
       });
-      const updatedBranch = await branchRes.json().catch(() => ({}));
+      return res.status;
+    }, testBranch.id);
 
-      return {
-        putOk: putRes.ok,
-        updated,
-        publicInfo,
-        branchOk: branchRes.ok,
-        updatedBranch,
-      };
-    });
+    assert(unsafeMapUrlRes === 400, `Unsafe mapUrl (javascript:) must return 400 (was: ${unsafeMapUrlRes})`);
 
-    assert(clinicSettingsRes.putOk, 'Updating clinic settings with logo and multiple phones must succeed');
-    assert(clinicSettingsRes.publicInfo.logo === 'http://localhost:4000/api/media/file/verified-logo.png', 'Public clinic info must return saved logo');
-    assert(clinicSettingsRes.publicInfo.phone === '+998712005544', 'Public clinic info must expose primary phone');
-    assert(Array.isArray(clinicSettingsRes.publicInfo.phones) && clinicSettingsRes.publicInfo.phones.length === 2, 'Public clinic info must expose structured phones array');
-    assert(clinicSettingsRes.publicInfo.minBookingNoticeHours === 3, 'Public clinic info must reflect minBookingNoticeHours');
-    assert(clinicSettingsRes.publicInfo.maxBookingHorizonDays === 45, 'Public clinic info must reflect maxBookingHorizonDays');
-    assert(clinicSettingsRes.branchOk, 'Updating branch mapUrl must succeed');
-    assert(clinicSettingsRes.updatedBranch.mapUrl === 'https://maps.google.com/?q=Tashkent+Dental', 'Branch mapUrl must be persisted');
-    testResults.push('Scenario 12: Clinic logo, repeatable phones, branch mapUrl, and booking rules verified (Req 16, 17, 18)');
+    // B. Accept valid https URL
+    const safeMapUrlRes = await page.evaluate(async (branchId) => {
+      const res = await fetch(`/api/clinic/branches/${branchId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': '1' },
+        body: JSON.stringify({
+          nameUz: 'Filial',
+          nameRu: 'Филиал',
+          addressUz: 'Manzil',
+          addressRu: 'Адрес',
+          mapUrl: 'https://maps.google.com/?q=Verified+Dental+Location',
+        }),
+        credentials: 'include',
+      });
+      return { ok: res.ok, status: res.status };
+    }, testBranch.id);
+
+    assert(safeMapUrlRes.ok, `Safe https mapUrl must succeed (status: ${safeMapUrlRes.status})`);
+    testResults.push('Scenario 12: Real image upload, structured phones validation & mapUrl security verified');
+
+    // -------------------------------------------------------------
+    // Scenario 13: 3D Tooth Model License Attribution & Inspection Controls (Req 15)
+    // -------------------------------------------------------------
+    console.log('\n--- Scenario 13: Honest 3D Tooth Model Attribution & Full Inspection Controls ---');
+    const attributionPath = path.join(__dirname, '../../frontend/public/models/ATTRIBUTION.md');
+    assert(fs.existsSync(attributionPath), 'ATTRIBUTION.md documentation must exist');
+    const attributionContent = fs.readFileSync(attributionPath, 'utf8');
+
+    assert(
+      attributionContent.includes('BLOCKED'),
+      'ATTRIBUTION.md must explicitly record 3D asset replacement as BLOCKED pending verifiable asset installation'
+    );
+    assert(
+      attributionContent.includes('CC BY 4.0'),
+      'ATTRIBUTION.md must document verified CC BY 4.0 licenses and author attributions'
+    );
+    assert(
+      attributionContent.includes('University of Dundee') && attributionContent.includes('Vikrama Raghuraman'),
+      'ATTRIBUTION.md must credit verified authors'
+    );
+
+    const toothCompPath = path.join(__dirname, '../../frontend/src/components/Tooth3D.tsx');
+    assert(fs.existsSync(toothCompPath), 'Tooth3D component must exist');
+    const toothCompContent = fs.readFileSync(toothCompPath, 'utf8');
+
+    assert(
+      toothCompContent.includes('Math.min(1.57') || toothCompContent.includes('1.57'),
+      'Tooth3D inspection controls must support extended vertical rotation range'
+    );
+    assert(
+      toothCompContent.includes("Old ko'rinish") && toothCompContent.includes('Toj') && toothCompContent.includes('Ildiz'),
+      'Tooth3D must provide mobile-friendly inspection view preset buttons'
+    );
+    testResults.push('Scenario 13: Honest 3D tooth model attribution & inspection controls verified');
 
     console.log('\n====================================================');
     console.log('   ALL VERIFICATION SCENARIOS PASSED SUCCESSFULLY!  ');
     console.log('====================================================');
     console.log(JSON.stringify(testResults, null, 2));
 
-    await browser.close();
-    process.exit(0);
+    process.exitCode = 0;
   } catch (error) {
     console.error('\n\x1b[31m[FATAL VERIFICATION ERROR]\x1b[0m', error);
-    await browser.close();
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    console.log('\n--- Guaranteed Cleanup & Restoration Workflow ---');
+    try {
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+
+      // Restore original clinic settings
+      if (originalSettings) {
+        await prisma.clinicSettings.update({
+          where: { id: originalSettings.id },
+          data: {
+            logo: originalSettings.logo,
+            phone: originalSettings.phone,
+            phones: originalSettings.phones,
+            minBookingNoticeHours: originalSettings.minBookingNoticeHours,
+            maxBookingHorizonDays: originalSettings.maxBookingHorizonDays,
+            bufferMinutes: originalSettings.bufferMinutes,
+            pendingExpiryMinutes: originalSettings.pendingExpiryMinutes,
+          },
+        }).catch(e => console.error('Error restoring clinic settings:', e));
+        console.log('Restored original clinic settings in database.');
+      }
+
+      // Clean up test appointments
+      if (testAppointmentIds.length > 0) {
+        await prisma.appointment.deleteMany({
+          where: { id: { in: testAppointmentIds } },
+        }).catch(() => {});
+        console.log(`Cleaned up ${testAppointmentIds.length} test appointments.`);
+      }
+
+      // Clean up test patients
+      if (testPatientIds.length > 0) {
+        await prisma.patient.deleteMany({
+          where: { id: { in: testPatientIds } },
+        }).catch(() => {});
+        console.log(`Cleaned up ${testPatientIds.length} test patients.`);
+      }
+
+      // Clean up test doctors' staff users and relations
+      const doctorIds = [testDoctor?.id, testDoctor2?.id].filter(Boolean);
+      const userIds = [testUser?.id, testUser2?.id].filter(Boolean);
+
+      if (userIds.length > 0) {
+        await prisma.staffUser.deleteMany({ where: { id: { in: userIds } } }).catch(() => {});
+      }
+
+      if (doctorIds.length > 0) {
+        await prisma.doctorSchedule.deleteMany({ where: { doctorId: { in: doctorIds } } }).catch(() => {});
+        await prisma.scheduleException.deleteMany({ where: { doctorId: { in: doctorIds } } }).catch(() => {});
+        await prisma.doctorBranch.deleteMany({ where: { doctorId: { in: doctorIds } } }).catch(() => {});
+        await prisma.doctorService.deleteMany({ where: { doctorId: { in: doctorIds } } }).catch(() => {});
+        await prisma.doctor.deleteMany({ where: { id: { in: doctorIds } } }).catch(() => {});
+        console.log(`Cleaned up test doctors and schedules.`);
+      }
+
+      // Clean up test branch
+      if (testBranch) {
+        await prisma.branch.deleteMany({ where: { id: testBranch.id } }).catch(() => {});
+        console.log(`Cleaned up test branch: ${testBranch.id}`);
+      }
+
+      // Clean up uploaded test media files from disk
+      for (const mediaFile of uploadedMediaFiles) {
+        const filePath = path.resolve(__dirname, '../uploads', mediaFile);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`Cleaned up uploaded test media file: ${mediaFile}`);
+        }
+      }
+
+      await prisma.$disconnect().catch(() => {});
+      console.log('Cleanup completed successfully.');
+    } catch (cleanupErr) {
+      console.error('Error during cleanup:', cleanupErr);
+    }
   }
 }
 

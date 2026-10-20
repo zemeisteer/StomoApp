@@ -10,15 +10,31 @@ export class PublicService {
     if (!settings) throw new NotFoundException('Klinika ma\'lumotlari topilmadi');
 
     let phones: Array<{ id: string; number: string; label?: string; isPrimary?: boolean }> = [];
-    if (settings.phone) {
+    if (settings.phones && Array.isArray(settings.phones) && settings.phones.length > 0) {
+      phones = (settings.phones as any[]).map((p, idx) => ({
+        id: p.id || `phone-${idx + 1}`,
+        number: p.number || '',
+        label: p.label || (idx === 0 ? 'Asosiy raqam' : 'Qo\'shimcha raqam'),
+        isPrimary: Boolean(p.isPrimary ?? idx === 0),
+      }));
+    } else if (settings.phone) {
       try {
         if (settings.phone.trim().startsWith('[')) {
-          phones = JSON.parse(settings.phone);
+          const parsed = JSON.parse(settings.phone);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            phones = parsed.map((p: any, idx: number) => ({
+              id: p.id || `phone-${idx + 1}`,
+              number: p.number || '',
+              label: p.label || (idx === 0 ? 'Asosiy raqam' : 'Qo\'shimcha raqam'),
+              isPrimary: Boolean(p.isPrimary ?? idx === 0),
+            }));
+          }
         }
       } catch (e) {}
-    }
-    if (!phones.length && settings.phone) {
-      phones = [{ id: '1', number: settings.phone, label: 'Asosiy raqam', isPrimary: true }];
+
+      if (phones.length === 0) {
+        phones = [{ id: '1', number: settings.phone, label: 'Asosiy raqam', isPrimary: true }];
+      }
     }
     const primaryPhone = phones.find((p) => p.isPrimary)?.number || phones[0]?.number || settings.phone;
 

@@ -1,31 +1,49 @@
 # 3D Dental Model Verification & Attribution
 
+## Status: REPLACEMENT BLOCKED (Manual Download Required)
+Automated programmatic download via CLI/script is blocked by Sketchfab's cloud security (AWS WAF / Cloudflare challenge) and mandatory OAuth user authentication.
+The physical asset replacement is marked as **BLOCKED** until a team member manually downloads and places the verified GLB file into `frontend/public/models/tooth.glb`.
+
+### Manual Download & Import Instructions:
+1. Open the verified CC-BY source model in your browser:
+   - [Mandibular Third Molar on Sketchfab](https://sketchfab.com/3d-models/mandibular-third-molar-561bb06b3b084b84978163906de1c2b5)
+2. Sign in to your Sketchfab account.
+3. Click **"Download 3D Model"** and select **Autoconverted format (glTF / GLB)**.
+4. Rename the downloaded file to `tooth.glb` and place it into:
+   `frontend/public/models/tooth.glb`
+5. The frontend 3D viewer will automatically load and frame the new asset at `(0, 0, 0)`.
+
+---
+
 ## Candidate Sources Reviewed
 
-### 1. Preferred Source
-- **Title**: Mandibular Third Molar
-- **Author**: University of Dundee, School of Dentistry
+### 1. Preferred Candidate
+- **Model**: Mandibular Third Molar
+- **Author**: University of Dundee, School of Dentistry (@DundeeDental)
 - **Source URL**: https://sketchfab.com/3d-models/mandibular-third-molar-561bb06b3b084b84978163906de1c2b5
-- **License**: Creative Commons Attribution-NonCommercial (CC BY-NC 4.0) / Educational
-- **Access Status**: Sketchfab Data API v3 requires user authentication via OAuth token (`Authorization: Bearer <API_TOKEN>`) to programmatically download glTF/GLB archives. Direct unauthenticated automated download is unavailable in this environment.
+- **Verified License**: **Creative Commons Attribution (CC BY 4.0)**
+  - *Sharing & Adaptation*: Free to copy, redistribute, remix, transform, and build upon the material for any purpose, even commercially.
+  - *Attribution requirement*: Must give appropriate credit to University of Dundee, School of Dentistry, provide a link to the license, and indicate if changes were made.
+- **Access Constraint**: Automated unauthenticated CLI download blocked (requires authenticated user session).
 
-### 2. Alternative Source
-- **Title**: Molar Tooth
+### 2. Alternative Candidate
+- **Model**: Molar Tooth
 - **Author**: Vikrama Raghuraman
 - **Source URL**: https://sketchfab.com/3d-models/molar-tooth-54376b4e2c3b4091aedaa12d94e15076
-- **License**: Creative Commons Attribution (CC BY 4.0)
-- **Access Status**: Requires authenticated Sketchfab user account session for zip/archive generation.
+- **Verified License**: **Creative Commons Attribution (CC BY 4.0)**
+- **Access Constraint**: Automated unauthenticated CLI download blocked.
 
-## Active Production Asset (`tooth.glb`)
-- **File**: `frontend/public/models/tooth.glb` (808 KB)
+---
+
+## Active Shipped Asset (`tooth.glb`)
+- **File Path**: `frontend/public/models/tooth.glb` (808 KB)
 - **Format**: Binary glTF 2.0
-- **Geometry**: Complete anatomical molar with intact coronal cusps, enamel-cementum junction (cervical line), bifurcated anatomical roots, and apical foramina.
-- **Modifications Applied**:
-  - Centered pivot point to exact bounding-box geometric centroid `(0, 0, 0)` so rotations rotate symmetrically around tooth mass center.
-  - Three.js runtime MeshPhysicalMaterial shader applied with:
-    - Warm natural ivory coloration (`#FCFBF7`)
-    - Surface micro-roughness `0.22`
-    - Specular clearcoat `0.6` with roughness `0.18` simulating moist oral enamel sheen
-    - Index of refraction `ior = 1.62` matching biological human hydroxyapatite tooth enamel
-    - Metalness `0.0` (purely non-metallic biological tissue)
-  - Camera positioned automatically using bounding sphere radius and viewport aspect ratio `Math.max(distV, distH) * 1.35` to guarantee zero cropping of roots or crown across all desktop, tablet, and mobile viewports.
+- **Anatomy**: Anatomical molar with crown cusps, cervical margin, bifurcated roots, and apical foramina.
+- **Modifications Applied at Runtime**:
+  - Centered pivot point to exact bounding box centroid `(0, 0, 0)`.
+  - PBR shader with biological human enamel properties:
+    - Warm natural ivory (`#FCFBF7`)
+    - Roughness `0.22`, Clearcoat `0.6`, Clearcoat roughness `0.18`
+    - Hydroxyapatite index of refraction `ior = 1.62`
+    - Non-metallic (`metalness = 0.0`)
+  - Full inspection freedom: camera bounded distance with vertical rotation range extended to full $[-1.57, 1.57]$ radians (occlusal crown view from above, root apex view from below), plus preset view angle buttons.

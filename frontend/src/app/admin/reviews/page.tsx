@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, Star, CheckCircle, XCircle, Archive, RefreshCw } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
+import { CustomSelect } from '../../../components/CustomSelect';
 import { api } from '../../../lib/api';
 
 export default function AdminReviewsPage() {
@@ -67,16 +68,19 @@ export default function AdminReviewsPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-medium focus:ring-2 focus:ring-teal-600"
-            >
-              <option value="">Barcha sharhlar</option>
-              <option value="PENDING">Kutilmoqda</option>
-              <option value="APPROVED">Tasdiqlangan</option>
-              <option value="REJECTED">Rad etilgan</option>
-            </select>
+            <div className="w-48">
+              <CustomSelect
+                options={[
+                  { value: '', label: 'Barcha sharhlar' },
+                  { value: 'PENDING', label: 'Kutilmoqda' },
+                  { value: 'APPROVED', label: 'Tasdiqlangan' },
+                  { value: 'REJECTED', label: 'Rad etilgan' },
+                ]}
+                value={statusFilter}
+                onChange={(val) => setStatusFilter(val)}
+                placeholder="Holat..."
+              />
+            </div>
 
             <button
               onClick={loadReviews}

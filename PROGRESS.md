@@ -411,12 +411,35 @@ Branch: `dev` (Preserved uncommitted local changes, no merge to `main`, no force
     - Integrated background polling for pending appointments count.
     - Displays glowing badge counter next to "Taqvim" on both desktop sidebar and mobile drawer.
 
+#### Phase 15: Owner Requirements 1-18 Hardening & Non-Mutating Verification Suite (COMPLETED & VERIFIED)
+- **Database Schema Hardening**:
+  - Added structured phones array to `ClinicSettings`: `phones Json? @default("[]")`.
+  - Added structured actual treatment times and overrun tracking to `Appointment`: `actualStartTime`, `actualEndTime`, `overrunMinutes`, `overrunEstimatedEndTime`, `overrunActive`, `overrunReason`, `overrunUpdatedAt`, with index `@@index([overrunActive, overrunEstimatedEndTime])`.
+- **Backend Services & Security Hardening**:
+  - `ClinicService`: Strict `/^\+998\d{9}$/` normalization, duplicate phone rejection, exactly 1 primary phone constraint. Safe `mapUrl` protocol allowlist (`http:`, `https:` via `new URL()`), rejecting `javascript:` or malformed URLs.
+  - `AppointmentsService`: Status transitions (`CHECKED_IN` records `actualStartTime`, `COMPLETED` records `actualEndTime` and clears `overrunActive`, `CANCELLED` and `NO_SHOW` clear `overrunActive`). Delay recording (`mode: 'REPLACE' | 'ADD'`, 5-240 min limit) with audit history. Slot conflict protection against active overruns.
+  - `SchedulingService`: Transaction-safe batch weekly schedule creation and schedule copying (`toDoctorIds`, `targetBranchId`, `mode: 'replace' | 'merge'`). Deduplication of doctor IDs and weekdays, paired break times, cross-branch conflict validation. Buffer minutes 0 support.
+- **Frontend Refinements & Accessibility**:
+  - Replaced 100% of native `<select>` across all admin screens with `CustomSelect` (0 remaining).
+  - Portaled select dropdowns escape containers via `createPortal`, with `ModalDialog` focus trap honoring `[data-custom-select-popover]`.
+  - Admin Calendar: Day Timeline view (08:00 - 20:00) with appointment blocks and live overrun badges (`⚠️ Kechikish: +X daq`), Month Calendar Overview grid with day jump.
+  - Booking page: Strict doctor eligibility, slot cache key with date, immediate slot invalidation, conflict recovery preserving patient details.
+  - 3D Tooth Component: Extended vertical rotation range ($[-\pi/2, \pi/2]$) for crown and root inspection, inspection view preset buttons ("Old ko'rinish", "Toj (tepadan)", "Ildiz (pastdan)").
+  - `ATTRIBUTION.md`: Explicitly documented 3D model replacement as BLOCKED pending manual download due to Sketchfab OAuth authentication barrier; documented full CC BY 4.0 licenses and author credits.
+- **Verification Suite (`backend/scripts/verify-all-requirements.js`)**:
+  - 13/13 scenarios passed with exit code 0.
+  - Zero mutation of seeded clinic data or seeded doctor schedules.
+  - Isolated test fixtures (branch, doctors, staff users, patient, appointment) tagged with unique run ID.
+  - Guaranteed `try...finally` cleanup restoring clinic settings and unlinking uploaded test images.
+
 #### Overall Verification Status
+- Comprehensive Requirements Suite (`verify-all-requirements.js`): 13/13 scenarios passed (100% success).
 - Full Backend E2E Suite: 60/60 passed (100% success).
 - Isolated Browser Test Suite: 5/5 assertions passed, exit code 0.
 - Frontend TypeScript Typecheck (`npx tsc --noEmit`): 0 errors, exit code 0.
-- Frontend Next.js Dev Server: 200 OK across all routes (`/`, `/booking`, `/models/tooth.glb`, `/admin`, `/admin/calendar`).
-- Admin Pending Bookings Query: 200 OK, correctly surfaces pending website bookings (patient Anvar, Oct 19).
+- Backend Build (`nest build`): 0 errors, exit code 0.
+- Frontend Next.js Dev Server: 200 OK across all routes (`/`, `/booking`, `/admin`, `/admin/calendar`).
+
 
 
 

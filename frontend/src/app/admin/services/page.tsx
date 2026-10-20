@@ -20,6 +20,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
+import { CustomSelect } from '../../../components/CustomSelect';
 import { api } from '../../../lib/api';
 
 const CATEGORIES = [
@@ -371,18 +372,17 @@ export default function AdminServicesPage() {
                 />
               </div>
 
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 outline-none focus:ring-2 focus:ring-teal-600 font-medium"
-              >
-                <option value="">Barcha toifalar</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
+              <div className="w-52">
+                <CustomSelect
+                  options={[
+                    { value: '', label: 'Barcha toifalar' },
+                    ...CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
+                  ]}
+                  value={selectedCategory}
+                  onChange={(val) => setSelectedCategory(val)}
+                  placeholder="Toifa..."
+                />
+              </div>
             </div>
 
             {/* Services Table */}
@@ -668,24 +668,21 @@ export default function AdminServicesPage() {
             <form onSubmit={handleReconcileSubmit} className="space-y-4 text-xs">
               {reconcileAction === 'RESOLVE_TO_SERVICE' && (
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Bog&apos;lanadigan katalog xizmati *
-                  </label>
-                  <select
+                  <CustomSelect
+                    label="Bog'lanadigan katalog xizmati *"
+                    options={[
+                      { value: '', label: '-- Xizmatni tanlang --' },
+                      ...services
+                        .filter((s) => s.isActive)
+                        .map((s) => ({
+                          value: s.id,
+                          label: `${s.nameUz} (${s.durationMinutes} daqiqa)`,
+                        })),
+                    ]}
                     value={targetServiceId}
-                    onChange={(e) => setTargetServiceId(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600 text-xs font-medium"
-                  >
-                    <option value="">-- Xizmatni tanlang --</option>
-                    {services
-                      .filter((s) => s.isActive)
-                      .map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.nameUz} ({s.durationMinutes} daqiqa)
-                        </option>
-                      ))}
-                  </select>
+                    onChange={(val) => setTargetServiceId(val)}
+                    placeholder="Xizmatni tanlang..."
+                  />
                   {selectedItem.serviceNameUz?.includes(',') && (
                     <div className="mt-1 text-[11px] text-amber-700 flex items-center gap-1 font-medium">
                       <Info className="w-3.5 h-3.5 flex-shrink-0" />
@@ -789,18 +786,13 @@ export default function AdminServicesPage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Kategoriya *</label>
-                  <select
+                  <CustomSelect
+                    label="Kategoriya *"
+                    options={CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
                     value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
-                  >
-                    {CATEGORIES.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setFormData({ ...formData, category: val })}
+                    placeholder="Kategoriyani tanlang..."
+                  />
                 </div>
               </div>
 

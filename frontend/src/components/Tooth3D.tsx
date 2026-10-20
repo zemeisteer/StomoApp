@@ -506,12 +506,12 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
     const dx = e.clientX - prevPointerRef.current.x;
     const dy = e.clientY - prevPointerRef.current.y;
 
-    // Apply full inspection rotation freedom
+    // Apply full inspection rotation freedom (crown from above to roots from below)
     engineRef.current.targetRotationY += dx * 0.008;
     engineRef.current.targetRotationX = THREE.MathUtils.clamp(
       engineRef.current.targetRotationX + dy * 0.006,
-      -1.35,
-      1.35
+      -1.57,
+      1.57
     );
 
     prevPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -595,6 +595,54 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
         }`}
         aria-label={t.hero.toothAriaLabel || 'Anatomik inson tishi 3D modeli'}
       />
+
+      {/* View Angle Preset Pills for complete 360 inspection from every side */}
+      {!isLoading && !hasError && (
+        <div className="absolute top-3 left-4 flex flex-wrap items-center gap-1.5 z-10 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => {
+              if (engineRef.current) {
+                engineRef.current.targetRotationX = 0.18;
+                engineRef.current.targetRotationY = -0.3;
+                renderSingleFrame();
+                if (shouldAnimateContinuous()) startAnimationLoop();
+              }
+            }}
+            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
+          >
+            Old ko'rinish
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (engineRef.current) {
+                engineRef.current.targetRotationX = 1.48;
+                engineRef.current.targetRotationY = 0;
+                renderSingleFrame();
+                if (shouldAnimateContinuous()) startAnimationLoop();
+              }
+            }}
+            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
+          >
+            Toj (tepadan)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (engineRef.current) {
+                engineRef.current.targetRotationX = -1.48;
+                engineRef.current.targetRotationY = 0;
+                renderSingleFrame();
+                if (shouldAnimateContinuous()) startAnimationLoop();
+              }
+            }}
+            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
+          >
+            Ildiz (pastdan)
+          </button>
+        </div>
+      )}
 
       {/* Floating 3D Controls Hint Bar (Visible pause button removed as requested) */}
       {!isLoading && !hasError && (

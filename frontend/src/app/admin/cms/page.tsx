@@ -17,6 +17,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
+import { CustomSelect } from '../../../components/CustomSelect';
 import { api } from '../../../lib/api';
 
 export default function AdminCmsPage() {
@@ -668,18 +669,17 @@ export default function AdminCmsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Holati
-                    </label>
-                    <select
+                    <CustomSelect
+                      label="Holati"
+                      options={[
+                        { value: 'PUBLISHED', label: 'Nashr qilingan (PUBLISHED)' },
+                        { value: 'DRAFT', label: 'Qoralama (DRAFT)' },
+                        { value: 'ARCHIVED', label: 'Arxivlangan (ARCHIVED)' },
+                      ]}
                       value={articleForm.status}
-                      onChange={(e) => setArticleForm({ ...articleForm, status: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                    >
-                      <option value="PUBLISHED">Nashr qilingan (PUBLISHED)</option>
-                      <option value="DRAFT">Qoralama (DRAFT)</option>
-                      <option value="ARCHIVED">Arxivlangan (ARCHIVED)</option>
-                    </select>
+                      onChange={(val) => setArticleForm({ ...articleForm, status: val })}
+                      placeholder="Holatni tanlang..."
+                    />
                   </div>
                 </div>
 
@@ -788,17 +788,16 @@ export default function AdminCmsPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Holat
-                    </label>
-                    <select
+                    <CustomSelect
+                      label="Holat"
+                      options={[
+                        { value: 'true', label: 'Faol' },
+                        { value: 'false', label: 'Nofaol' },
+                      ]}
                       value={faqForm.isActive ? 'true' : 'false'}
-                      onChange={(e) => setFaqForm({ ...faqForm, isActive: e.target.value === 'true' })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                    >
-                      <option value="true">Faol</option>
-                      <option value="false">Nofaol</option>
-                    </select>
+                      onChange={(val) => setFaqForm({ ...faqForm, isActive: val === 'true' })}
+                      placeholder="Holatni tanlang..."
+                    />
                   </div>
                 </div>
 

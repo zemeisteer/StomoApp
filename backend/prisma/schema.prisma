@@ -17,6 +17,7 @@ model ClinicSettings {
   nameRu    String   @default("DentaCare") @map("name_ru")
   logo      String?
   phone     String   @default("+998 71 123 45 67")
+  phones    Json?    @default("[]")
   email     String   @default("info@dentacare.uz")
   website   String?
   
@@ -424,6 +425,17 @@ model Appointment {
   tokenExpiresAt DateTime?     @map("token_expires_at")
   tokenRevokedAt DateTime?     @map("token_revoked_at")
   
+  // Actual treatment times (from explicit staff actions)
+  actualStartTime DateTime?     @map("actual_start_time")
+  actualEndTime   DateTime?     @map("actual_end_time")
+
+  // Structured overrun lifecycle
+  overrunMinutes           Int?      @map("overrun_minutes")
+  overrunEstimatedEndTime  DateTime? @map("overrun_estimated_end_time")
+  overrunActive            Boolean   @default(false) @map("overrun_active")
+  overrunReason            String?   @map("overrun_reason")
+  overrunUpdatedAt         DateTime? @map("overrun_updated_at")
+
   createdAt DateTime          @default(now()) @map("created_at")
   updatedAt DateTime          @updatedAt @map("updated_at")
   
@@ -438,6 +450,7 @@ model Appointment {
   @@index([patientId])
   @@index([status])
   @@index([expiresAt])
+  @@index([overrunActive, overrunEstimatedEndTime])
   @@map("appointments")
 }
 

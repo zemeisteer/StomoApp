@@ -707,33 +707,23 @@ export default function AdminDoctorsManagePage() {
 
             <form onSubmit={handleSaveSchedule} className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Hafta kuni *</label>
-                <select
+                <CustomSelect
+                  label="Hafta kuni *"
+                  options={DAYS_OF_WEEK.map((d) => ({ value: d.value, label: d.label }))}
                   value={scheduleForm.dayOfWeek}
-                  onChange={(e) => setScheduleForm({ ...scheduleForm, dayOfWeek: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
-                >
-                  {DAYS_OF_WEEK.map((d) => (
-                    <option key={d.value} value={d.value}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setScheduleForm({ ...scheduleForm, dayOfWeek: val })}
+                  placeholder="Hafta kunini tanlang..."
+                />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Filial *</label>
-                <select
+                <CustomSelect
+                  label="Filial *"
+                  options={branches.map((b) => ({ value: b.id, label: b.nameUz }))}
                   value={scheduleForm.branchId}
-                  onChange={(e) => setScheduleForm({ ...scheduleForm, branchId: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
-                >
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.nameUz}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setScheduleForm({ ...scheduleForm, branchId: val })}
+                  placeholder="Filialni tanlang..."
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1044,16 +1034,17 @@ export default function AdminDoctorsManagePage() {
 
             <form onSubmit={handleAddException} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Turi</label>
-                <select
+                <CustomSelect
+                  label="Turi"
+                  options={[
+                    { value: 'LEAVE', label: "Ta'til (Butun kun)" },
+                    { value: 'HOLIDAY', label: 'Bayram kuni' },
+                    { value: 'BLOCKED', label: 'Band qilingan soatlar' },
+                  ]}
                   value={exceptionType}
-                  onChange={(e) => setExceptionType(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
-                >
-                  <option value="LEAVE">Ta&apos;til (Butun kun)</option>
-                  <option value="HOLIDAY">Bayram kuni</option>
-                  <option value="BLOCKED">Band qilingan soatlar</option>
-                </select>
+                  onChange={(val) => setExceptionType(val)}
+                  placeholder="Turini tanlang..."
+                />
               </div>
 
               <div>
@@ -1272,19 +1263,16 @@ export default function AdminDoctorsManagePage() {
 
                 {/* Branch selector */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Qaysi filial uchun? *</label>
-                  <select
+                  <CustomSelect
+                    label="Qaysi filial uchun? *"
+                    options={branches.map((b) => ({
+                      value: b.id,
+                      label: `${b.nameUz} (${b.addressUz})`,
+                    }))}
                     value={bulkForm.branchId}
-                    onChange={(e) => setBulkForm({ ...bulkForm, branchId: e.target.value })}
-                    required
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium"
-                  >
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.nameUz} ({b.addressUz})
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setBulkForm({ ...bulkForm, branchId: val })}
+                    placeholder="Filialni tanlang..."
+                  />
                 </div>
 
                 {/* Working Interval */}
@@ -1389,38 +1377,37 @@ export default function AdminDoctorsManagePage() {
             ) : (
               <form onSubmit={handleCopySchedule} className="space-y-4 text-xs">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Qaysi shifokordan nusxa olinadi? *</label>
-                  <select
+                  <CustomSelect
+                    label="Qaysi shifokordan nusxa olinadi? *"
+                    options={[
+                      { value: '', label: '-- Shifokorni tanlang --' },
+                      ...doctors
+                        .filter((d) => d.id !== selectedDoctorId)
+                        .map((d) => ({
+                          value: d.id,
+                          label: `Dr. ${d.firstNameUz} ${d.lastNameUz} (${d.titleUz || 'Shifokor'})`,
+                        })),
+                    ]}
                     value={copyForm.fromDoctorId}
-                    onChange={(e) => setCopyForm({ ...copyForm, fromDoctorId: e.target.value })}
-                    required
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium"
-                  >
-                    <option value="">-- Shifokorni tanlang --</option>
-                    {doctors
-                      .filter((d) => d.id !== selectedDoctorId)
-                      .map((d) => (
-                        <option key={d.id} value={d.id}>
-                          Dr. {d.firstNameUz} {d.lastNameUz} ({d.titleUz || 'Shifokor'})
-                        </option>
-                      ))}
-                  </select>
+                    onChange={(val) => setCopyForm({ ...copyForm, fromDoctorId: val })}
+                    placeholder="Shifokorni tanlang..."
+                  />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Maqsadli filial (ixtiyoriy)</label>
-                  <select
+                  <CustomSelect
+                    label="Maqsadli filial (ixtiyoriy)"
+                    options={[
+                      { value: '', label: '-- Manbadagi filial saqlansin --' },
+                      ...branches.map((b) => ({
+                        value: b.id,
+                        label: b.nameUz,
+                      })),
+                    ]}
                     value={copyForm.targetBranchId}
-                    onChange={(e) => setCopyForm({ ...copyForm, targetBranchId: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium"
-                  >
-                    <option value="">-- Manbadagi filial saqlansin --</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.nameUz}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setCopyForm({ ...copyForm, targetBranchId: val })}
+                    placeholder="Filialni tanlang..."
+                  />
                 </div>
 
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">

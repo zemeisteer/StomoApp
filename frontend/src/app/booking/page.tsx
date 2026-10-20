@@ -332,8 +332,10 @@ function BookingContent() {
         if (branchFound && servicesFound && qDoctor) {
           const doc = validDoctors.find((d: any) => d.id === qDoctor && d.isActive !== false);
           if (doc) {
-            const worksAtBranch = !doc.branches?.length || doc.branches.some((b: any) => b.branchId === qBranch);
-            const providesService = !doc.services?.length || doc.services.some((ds: any) => ds.serviceId === qService);
+            const worksAtBranch = Array.isArray(doc.branches) && doc.branches.length > 0 &&
+              doc.branches.some((b: any) => b.branchId === qBranch);
+            const providesService = Array.isArray(doc.services) && doc.services.length > 0 &&
+              doc.services.some((ds: any) => ds.serviceId === qService);
             if (worksAtBranch && providesService) {
               setSelectedDoctorId(qDoctor);
               doctorFound = true;
@@ -375,10 +377,10 @@ function BookingContent() {
 
   // Unique selection key for calculating authoritative duration and price
   const currentSelectionKey = useMemo(() => {
-    if (!selectedDoctorId || selectedServiceIds.length === 0) return '';
+    if (!selectedDoctorId || selectedServiceIds.length === 0 || !selectedDate) return '';
     const sortedServices = [...selectedServiceIds].sort().join(',');
-    return `${selectedBranchId || ''}|${selectedDoctorId}|${sortedServices}`;
-  }, [selectedBranchId, selectedDoctorId, selectedServiceIds]);
+    return `${selectedBranchId || ''}|${selectedDoctorId}|${selectedDate}|${sortedServices}`;
+  }, [selectedBranchId, selectedDoctorId, selectedDate, selectedServiceIds]);
 
   const isCalculationAuthoritative = Boolean(
     serverCalc && currentSelectionKey && serverCalc.key === currentSelectionKey
@@ -433,14 +435,17 @@ function BookingContent() {
 
   // Helper to check if a doctor is eligible for current branch and all selected services
   const isDoctorEligible = (doc: any) => {
-    if (selectedBranchId && doc.branches && doc.branches.length > 0) {
-      const worksAtBranch = doc.branches.some((b: any) => b.branchId === selectedBranchId);
+    if (!doc) return false;
+    if (selectedBranchId) {
+      const worksAtBranch = Array.isArray(doc.branches) && doc.branches.length > 0 &&
+        doc.branches.some((b: any) => b.branchId === selectedBranchId);
       if (!worksAtBranch) return false;
     }
-    if (selectedServiceIds.length > 0 && doc.services) {
-      const providesAll = selectedServiceIds.every((srvId) =>
-        doc.services.some((ds: any) => ds.serviceId === srvId),
-      );
+    if (selectedServiceIds.length > 0) {
+      const providesAll = Array.isArray(doc.services) && doc.services.length > 0 &&
+        selectedServiceIds.every((srvId) =>
+          doc.services.some((ds: any) => ds.serviceId === srvId),
+        );
       if (!providesAll) return false;
     }
     return true;
@@ -449,6 +454,11 @@ function BookingContent() {
   // Validated step navigation function
   const goToStep = (targetStep: number) => {
     setErrorMessage(null);
+
+    if (targetStep < 4) {
+      slotsRequestIdRef.current++;
+      setAvailableSlots([]);
+    }
 
     if (targetStep <= step) {
       setStep(targetStep);
@@ -492,12 +502,13 @@ function BookingContent() {
     setSelectedSlotTime('');
     setIdempotencyKey('');
     setServerCalc(null); // Invalidate calculation immediately
+    slotsRequestIdRef.current++;
     setAvailableSlots([]);
     setErrorMessage(null);
 
     // If currently selected doctor doesn't work at the new branch, reset doctor
     if (selectedDoctorObj) {
-      const worksAtNewBranch = !selectedDoctorObj.branches?.length ||
+      const worksAtNewBranch = Array.isArray(selectedDoctorObj.branches) && selectedDoctorObj.branches.length > 0 &&
         selectedDoctorObj.branches.some((b: any) => b.branchId === branchId);
       if (!worksAtNewBranch) {
         setSelectedDoctorId('');
@@ -510,6 +521,7 @@ function BookingContent() {
     setSelectedSlotTime('');
     setIdempotencyKey('');
     setServerCalc(null); // Invalidate calculation immediately
+    slotsRequestIdRef.current++;
     setAvailableSlots([]);
     setSelectedServiceIds((prev) => {
       let updated: string[];
@@ -526,9 +538,10 @@ function BookingContent() {
 
       // Revalidate currently selected doctor against new services
       if (selectedDoctorObj) {
-        const stillEligible = updated.every((id) =>
-          selectedDoctorObj.services?.some((ds: any) => ds.serviceId === id),
-        );
+        const stillEligible = Array.isArray(selectedDoctorObj.services) && selectedDoctorObj.services.length > 0 &&
+          updated.every((id) =>
+            selectedDoctorObj.services.some((ds: any) => ds.serviceId === id),
+          );
         if (!stillEligible) {
           setSelectedDoctorId('');
         }
@@ -543,6 +556,7 @@ function BookingContent() {
     setSelectedSlotTime('');
     setIdempotencyKey('');
     setServerCalc(null); // Invalidate calculation immediately
+    slotsRequestIdRef.current++;
     setAvailableSlots([]);
     const doc = doctors.find((d) => d.id === doctorId);
     if (doc && selectedDate) {
@@ -556,6 +570,8 @@ function BookingContent() {
     setSelectedDate(dateStr);
     setSelectedSlotTime('');
     setIdempotencyKey('');
+    slotsRequestIdRef.current++;
+    setAvailableSlots([]);
   };
 
   // Fetch slots whenever doctor, services, date or branch changes
@@ -567,7 +583,7 @@ function BookingContent() {
       }
 
       const currentReqId = ++slotsRequestIdRef.current;
-      const currentReqKey = `${selectedBranchId || ''}|${selectedDoctorId}|${[...selectedServiceIds].sort().join(',')}`;
+      const currentReqKey = `${selectedBranchId || ''}|${selectedDoctorId}|${selectedDate}|${[...selectedServiceIds].sort().join(',')}`;
 
       try {
         setIsLoadingSlots(true);
@@ -613,6 +629,9 @@ function BookingContent() {
 
     if (step === 4) {
       fetchSlots();
+    } else {
+      slotsRequestIdRef.current++;
+      setAvailableSlots([]);
     }
   }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, fallbackTotalDuration, fallbackTotalPrice, selectedServices, t.booking.noSlots]);
 
@@ -716,6 +735,9 @@ function BookingContent() {
       if (isConflict) {
         setErrorMessage(t.booking.slotConflictNotice);
         setSelectedSlotTime('');
+        setIdempotencyKey('');
+        slotsRequestIdRef.current++;
+        setAvailableSlots([]);
         setStep(4);
       } else {
         setErrorMessage(err?.message || 'Qabulga yozilishda xatolik yuz berdi. Iltimos qayta urinib ko\'ring.');

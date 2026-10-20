@@ -98,6 +98,27 @@ export function verifyFingerprintMatch(
   return existingFingerprint === reqFingerprint;
 }
 
+export function isAppointmentOverlapping(
+  appt: {
+    startTime: Date | string;
+    endTime: Date | string;
+    bufferMinutes?: number | null;
+    overrunActive?: boolean;
+    overrunEstimatedEndTime?: Date | string | null;
+  },
+  slotStart: Date,
+  slotEnd: Date,
+): boolean {
+  const apptStart = new Date(appt.startTime);
+  const apptEnd = new Date(appt.endTime);
+  const buffer = appt.bufferMinutes ?? 5;
+  const effectiveEnd = (appt.overrunActive && appt.overrunEstimatedEndTime)
+    ? new Date(new Date(appt.overrunEstimatedEndTime).getTime() + buffer * 60000)
+    : apptEnd;
+
+  return apptStart < slotEnd && effectiveEnd > slotStart;
+}
+
 export function serializeAppointmentResponse(appointment: any) {
   const doc = appointment.doctor;
   const branch = appointment.branch;
@@ -140,6 +161,13 @@ export function serializeAppointmentResponse(appointment: any) {
     serviceId: appointment.serviceId,
     doctorId: appointment.doctorId,
     serviceItems,
+    actualStartTime: appointment.actualStartTime,
+    actualEndTime: appointment.actualEndTime,
+    overrunMinutes: appointment.overrunMinutes,
+    overrunEstimatedEndTime: appointment.overrunEstimatedEndTime,
+    overrunActive: Boolean(appointment.overrunActive),
+    overrunReason: appointment.overrunReason,
+    overrunUpdatedAt: appointment.overrunUpdatedAt,
     doctor: doc ? {
       id: doc.id,
       firstNameUz: doc.firstNameUz,
@@ -448,15 +476,22 @@ export class AppointmentsService {
             throw new BadRequestException('Tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
-          // Double check overlap within lock using the exact txEndTimeUtc
-          const conflicting = await tx.appointment.findFirst({
+          // Double check overlap within lock using the exact txEndTimeUtc and active overruns
+          const candidateAppts = await tx.appointment.findMany({
             where: {
               doctorId: dto.doctorId,
               status: { in: TIME_RESERVING_STATUSES },
-              startTime: { lt: txEndTimeUtc },
-              endTime: { gt: startTimeUtc },
+              startTime: { lt: new Date(txEndTimeUtc.getTime() + 24 * 60 * 60000) },
+              OR: [
+                { endTime: { gt: startTimeUtc } },
+                { overrunActive: true },
+              ],
             },
           });
+
+          const conflicting = candidateAppts.find((a) =>
+            isAppointmentOverlapping(a, startTimeUtc, txEndTimeUtc),
+          );
 
           if (conflicting) {
             throw new ConflictException('Bu vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
@@ -648,16 +683,26 @@ export class AppointmentsService {
         );
       }
 
+      const now = new Date();
+      const isCheckingIn = newStatus === AppointmentStatus.CHECKED_IN;
+      const isCompleting = newStatus === AppointmentStatus.COMPLETED;
+      const isReleasing = ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(newStatus);
+
       // Atomic update
       const appt = await tx.appointment.update({
         where: { id: appointmentId },
         data: {
           status: newStatus,
+          // Explicit treatment lifecycle timestamps from real staff actions
+          actualStartTime: isCheckingIn ? now : undefined,
+          actualEndTime: isCompleting ? now : undefined,
+          // Release active overrun when completed, cancelled, or marked no-show
+          overrunActive: isReleasing ? false : undefined,
           // Clear pending expiry when confirmed
           expiresAt: newStatus === AppointmentStatus.CONFIRMED ? null : undefined,
           // Revoke self-service token if appointment is cancelled or completed
           tokenRevokedAt: ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED] as AppointmentStatus[]).includes(newStatus)
-            ? new Date()
+            ? now
             : undefined,
         },
         include: {
@@ -879,16 +924,23 @@ export class AppointmentsService {
             throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
-          // 11. Double-check conflicting slots (excluding current appointment) using txNewEndTime
-          const conflicting = await tx.appointment.findFirst({
+          // 11. Double-check conflicting slots (excluding current appointment) using txNewEndTime and active overruns
+          const candidateConflicting = await tx.appointment.findMany({
             where: {
               doctorId: currentAppt.doctorId,
               status: { in: TIME_RESERVING_STATUSES },
               id: { not: appointmentId },
-              startTime: { lt: txNewEndTime },
-              endTime: { gt: newStartTime },
+              startTime: { lt: new Date(txNewEndTime.getTime() + 24 * 60 * 60000) },
+              OR: [
+                { endTime: { gt: newStartTime } },
+                { overrunActive: true },
+              ],
             },
           });
+
+          const conflicting = candidateConflicting.find((a) =>
+            isAppointmentOverlapping(a, newStartTime, txNewEndTime),
+          );
 
           if (conflicting) {
             throw new ConflictException('Yangi tanlangan vaqt boshqa bemor tomonidan band qilindi');
@@ -1558,14 +1610,19 @@ export class AppointmentsService {
 
   /**
    * Controlled Delay & Overrun workflow
-   * Tracks extra expected time, records audit trail, identifies affected subsequent bookings
+   * Structured persistence, explicit lifecycle, bounds checking, and conflict preview
    */
   async recordDelay(
     id: string,
     delayMinutes: number,
     reason: string | undefined,
     user: { role: StaffRole; doctorId?: string | null; sub?: string },
+    mode: 'REPLACE' | 'ADD' = 'REPLACE',
   ) {
+    if (typeof delayMinutes !== 'number' || isNaN(delayMinutes) || delayMinutes < 5 || delayMinutes > 240) {
+      throw new BadRequestException('Kechikish vaqti 5 dan 240 daqiqagacha bo\'lishi shart');
+    }
+
     const appointment = await this.prisma.appointment.findUnique({
       where: { id },
       include: { doctor: true, patient: true, branch: true },
@@ -1574,13 +1631,36 @@ export class AppointmentsService {
       throw new NotFoundException('Qabul topilmadi');
     }
 
-    if (user.role === StaffRole.DOCTOR && user.doctorId && appointment.doctorId !== user.doctorId) {
-      throw new ForbiddenException('Shifokor faqat o‘z qabulidagi kechikishni qayd eta oladi');
+    if (user.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profiliga biriktirilmagan foydalanuvchi');
+      }
+      if (appointment.doctorId !== user.doctorId) {
+        throw new ForbiddenException('Shifokor faqat o‘z qabulidagi kechikishni qayd eta oladi');
+      }
     }
 
+    // Permitted statuses: only active in-progress or confirmed appointments
+    const permittedStatuses: AppointmentStatus[] = [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN];
+    if (!permittedStatuses.includes(appointment.status)) {
+      throw new BadRequestException(
+        `Kechikish faqat tasdiqlangan yoki klinikaga kelgan qabullarga kiritilishi mumkin (Hozirgi holat: ${appointment.status})`,
+      );
+    }
+
+    const buffer = appointment.bufferMinutes ?? 5;
     const scheduledEndTime = new Date(appointment.endTime);
-    const estimatedEndTime = new Date(scheduledEndTime.getTime() + delayMinutes * 60000);
-    const buffer = appointment.bufferMinutes || 5;
+    const scheduledTreatmentEnd = new Date(scheduledEndTime.getTime() - buffer * 60000);
+
+    const effectiveDelay = mode === 'ADD'
+      ? (appointment.overrunMinutes || 0) + delayMinutes
+      : delayMinutes;
+
+    if (effectiveDelay < 5 || effectiveDelay > 240) {
+      throw new BadRequestException('Umumiy kechikish vaqti 5 dan 240 daqiqagacha bo\'lishi lozim');
+    }
+
+    const estimatedEndTime = new Date(scheduledTreatmentEnd.getTime() + effectiveDelay * 60000);
     const estimatedFreeTime = new Date(estimatedEndTime.getTime() + buffer * 60000);
 
     // Identify affected subsequent appointments for the same doctor on the same day
@@ -1601,22 +1681,42 @@ export class AppointmentsService {
       orderBy: { startTime: 'asc' },
     });
 
-    // Record audit trail in status history without silently altering scheduled bookings
-    const delayNotice = `[KECHIKISH: +${delayMinutes} daqiqa] ${reason ? reason.trim() : 'Muolaja vaqti cho‘zildi'}. Kutilayotgan tugash: ${estimatedEndTime.toISOString()}`;
-    await this.prisma.appointmentStatusHistory.create({
-      data: {
-        appointmentId: appointment.id,
-        fromStatus: appointment.status,
-        toStatus: appointment.status,
-        reason: delayNotice,
-        changedBy: user.sub || user.doctorId || 'staff',
-      },
+    const delayNotice = `[KECHIKISH: ${effectiveDelay} daqiqa (${mode === 'ADD' ? '+' + delayMinutes : 'belgilandi'})] ${
+      reason ? reason.trim() : 'Muolaja vaqti cho‘zildi'
+    }. Kutilayotgan tugash: ${estimatedEndTime.toISOString()}`;
+
+    // Atomically persist structured overrun state and status history in transaction
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.appointment.update({
+        where: { id: appointment.id },
+        data: {
+          overrunMinutes: effectiveDelay,
+          overrunEstimatedEndTime: estimatedEndTime,
+          overrunActive: true,
+          overrunReason: reason ? reason.trim() : null,
+          overrunUpdatedAt: new Date(),
+        },
+      });
+
+      await tx.appointmentStatusHistory.create({
+        data: {
+          appointmentId: appointment.id,
+          fromStatus: appointment.status,
+          toStatus: appointment.status,
+          reason: delayNotice,
+          changedBy: user.sub || user.doctorId || 'staff',
+        },
+      });
+
+      return saved;
     });
 
     return {
-      appointmentId: appointment.id,
-      delayMinutes,
-      extraMinutes: delayMinutes,
+      appointmentId: updated.id,
+      delayMinutes: effectiveDelay,
+      extraMinutes: effectiveDelay,
+      overrunActive: true,
+      mode,
       scheduledStartTime: appointment.startTime,
       scheduledEndTime: appointment.endTime,
       estimatedEndTime: estimatedEndTime.toISOString(),
@@ -1637,6 +1737,55 @@ export class AppointmentsService {
           status: a.status,
         };
       }),
+    };
+  }
+
+  /**
+   * Explicitly clear overrun without modifying appointment status
+   */
+  async clearOverrun(
+    id: string,
+    user: { role: StaffRole; doctorId?: string | null; sub?: string },
+  ) {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id },
+    });
+    if (!appointment) throw new NotFoundException('Qabul topilmadi');
+
+    if (user.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) throw new ForbiddenException('Shifokor profiliga biriktirilmagan');
+      if (appointment.doctorId !== user.doctorId) throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.appointment.update({
+        where: { id },
+        data: {
+          overrunActive: false,
+          overrunMinutes: 0,
+          overrunEstimatedEndTime: null,
+          overrunReason: null,
+          overrunUpdatedAt: new Date(),
+        },
+      });
+
+      await tx.appointmentStatusHistory.create({
+        data: {
+          appointmentId: id,
+          fromStatus: appointment.status,
+          toStatus: appointment.status,
+          reason: '[KECHIKISH BEKOR QILINDI] Rejadagi jadvalga qaytarildi',
+          changedBy: user.sub || user.doctorId || 'staff',
+        },
+      });
+
+      return saved;
+    });
+
+    return {
+      success: true,
+      appointmentId: updated.id,
+      overrunActive: false,
     };
   }
 

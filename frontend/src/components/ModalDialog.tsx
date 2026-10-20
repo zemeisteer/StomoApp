@@ -73,6 +73,17 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
       }
 
       if (e.key === 'Tab' && dialogRef.current) {
+        // If focus or event target is inside a portaled popover or custom select, bypass dialog focus clamp
+        const activeEl = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+        const targetEl = e.target as HTMLElement | null;
+        const isInsidePortaled =
+          (activeEl && (activeEl.closest('[data-custom-select-popover]') || activeEl.closest('[role="listbox"]') || activeEl.closest('[data-portal]'))) ||
+          (targetEl && (targetEl.closest('[data-custom-select-popover]') || targetEl.closest('[role="listbox"]') || targetEl.closest('[data-portal]')));
+
+        if (isInsidePortaled) {
+          return;
+        }
+
         const focusables = Array.from(
           dialogRef.current.querySelectorAll<HTMLElement>(
             'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'

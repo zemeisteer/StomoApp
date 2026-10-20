@@ -285,6 +285,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   const popoverContent = isOpen && mounted ? (
     <div
       ref={popoverRef}
+      data-custom-select-popover="true"
       style={popoverStyle}
       className="bg-white rounded-2xl shadow-2xl border border-slate-200 py-1.5 overflow-hidden animate-fade-in"
       onKeyDown={handleKeyDown}

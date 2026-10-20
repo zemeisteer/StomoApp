@@ -86,12 +86,18 @@ export class RecordDelayDto {
   @IsOptional()
   @IsInt()
   @Min(5)
+  @Max(240)
   delayMinutes?: number;
 
   @IsOptional()
   @IsInt()
   @Min(5)
+  @Max(240)
   extraMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  mode?: 'REPLACE' | 'ADD';
 
   @IsOptional()
   @IsString()
@@ -371,6 +377,16 @@ export class AppointmentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     const delay = dto.extraMinutes || dto.delayMinutes || 15;
-    return this.service.recordDelay(id, delay, dto.reason, user);
+    return this.service.recordDelay(id, delay, dto.reason, user, dto.mode || 'REPLACE');
+  }
+
+  @Post(':id/clear-overrun')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @HttpCode(HttpStatus.OK)
+  async clearOverrun(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.clearOverrun(id, user);
   }
 }

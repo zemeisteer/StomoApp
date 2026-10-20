@@ -28,6 +28,7 @@ import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
 import { normalizeUzPhone, formatUzPhoneDisplay } from '../../../lib/phone';
 import { PhoneInput } from '../../../components/PhoneInput';
+import { CustomSelect } from '../../../components/CustomSelect';
 
 interface ContactPhoneItem {
   id: string;
@@ -1100,17 +1101,16 @@ export default function AdminSettingsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Holati
-                  </label>
-                  <select
+                  <CustomSelect
+                    label="Holati"
+                    options={[
+                      { value: 'true', label: 'Faol (Active)' },
+                      { value: 'false', label: 'Nofaol (Inactive)' },
+                    ]}
                     value={branchIsActive ? 'true' : 'false'}
-                    onChange={(e) => setBranchIsActive(e.target.value === 'true')}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-teal-600"
-                  >
-                    <option value="true">Faol (Active)</option>
-                    <option value="false">Nofaol (Inactive)</option>
-                  </select>
+                    onChange={(val) => setBranchIsActive(val === 'true')}
+                    placeholder="Holatni tanlang..."
+                  />
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
