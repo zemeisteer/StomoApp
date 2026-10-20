@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -115,6 +115,10 @@ export default function AdminCalendarPage() {
   });
 
   const [daySubView, setDaySubView] = useState<'timeline' | 'list'>('timeline');
+  const [showFullDayHours, setShowFullDayHours] = useState<boolean>(false);
+  const [monthAggregates, setMonthAggregates] = useState<Record<string, any>>({});
+  const [isStartingTreatment, setIsStartingTreatment] = useState<boolean>(false);
+  const loadRequestIdRef = useRef<number>(0);
 
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     if (typeof window !== 'undefined') {
@@ -285,7 +289,28 @@ export default function AdminCalendarPage() {
     }
   }, [currentDate, viewMode]);
 
-  // Compute month overview grid cells
+  // Dynamic Interval-Aware Timeline Hours Range
+  const dayTimelineHours = useMemo(() => {
+    if (showFullDayHours) {
+      return Array.from({ length: 24 }, (_, i) => i);
+    }
+    let minH = 8;
+    let maxH = 20;
+    for (const a of appointments) {
+      const startP = getClinicDateParts(a.startTime);
+      minH = Math.min(minH, startP.hour);
+      const effEnd = (a.overrunActive && a.overrunEstimatedEndTime)
+        ? new Date(new Date(a.overrunEstimatedEndTime).getTime() + (a.bufferMinutes ?? 5) * 60000)
+        : new Date(a.endTime);
+      const endP = getClinicDateParts(effEnd);
+      const endH = endP.dateString !== startP.dateString ? 23 : Math.min(23, endP.hour + (endP.minute > 0 ? 1 : 0));
+      maxH = Math.max(maxH, endH);
+    }
+    const count = Math.max(1, maxH - minH + 1);
+    return Array.from({ length: count }, (_, i) => minH + i);
+  }, [appointments, showFullDayHours]);
+
+  // Compute month overview grid cells with authoritative complete server totals
   const monthCells = useMemo(() => {
     if (viewMode !== 'month') return [];
     const parts = getClinicDateParts(currentDate);
@@ -293,9 +318,14 @@ export default function AdminCalendarPage() {
     const firstDayParts = getClinicDateParts(new Date(Date.UTC(parts.year, parts.monthIndex, 1, 12, 0, 0)));
     const leadBlanks = firstDayParts.weekdayIndex === 0 ? 6 : firstDayParts.weekdayIndex - 1;
 
-    const cells: Array<{ day: number | null; dateStr: string; appts: any[] }> = [];
+    const cells: Array<{
+      day: number | null;
+      dateStr: string;
+      appts: any[];
+      totalCount: number;
+    }> = [];
     for (let i = 0; i < leadBlanks; i++) {
-      cells.push({ day: null, dateStr: '', appts: [] });
+      cells.push({ day: null, dateStr: '', appts: [], totalCount: 0 });
     }
 
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -305,20 +335,23 @@ export default function AdminCalendarPage() {
         const aParts = getClinicDateParts(a.startTime);
         return aParts.dateString === dateStr;
       });
-      cells.push({ day: d, dateStr, appts: apptsOnDay });
+      const agg = monthAggregates[dateStr];
+      const totalCount = agg ? agg.total : apptsOnDay.length;
+      cells.push({ day: d, dateStr, appts: apptsOnDay, totalCount });
     }
     return cells;
-  }, [viewMode, currentDate, appointments]);
+  }, [viewMode, currentDate, appointments, monthAggregates]);
 
-  // Load appointments
+  // Load appointments with server aggregates and race-condition protection
   const loadAppointments = useCallback(async () => {
+    const currentReqId = ++loadRequestIdRef.current;
     try {
       setIsLoading(true);
       setFetchError(null);
 
       const params: Record<string, any> = {
         page: currentPage,
-        limit: viewMode === 'month' ? 200 : (viewMode === 'day' ? 100 : pageSize),
+        limit: viewMode === 'month' ? 100 : (viewMode === 'day' ? 100 : pageSize),
       };
 
       if (search && search.trim()) {
@@ -348,14 +381,34 @@ export default function AdminCalendarPage() {
         pendingParams.doctorId = user.doctorId;
       }
 
-      const [res, pendingRes] = await Promise.all([
+      const curParts = getClinicDateParts(currentDate);
+      const isMonth = viewMode === 'month' && !isInboxMode;
+
+      const [res, pendingRes, monthAggRes] = await Promise.all([
         api.getAdminAppointments(params),
         api.getAdminAppointments(pendingParams).catch(() => ({ total: 0 })),
+        isMonth
+          ? api.getAdminMonthAggregates({
+              year: curParts.year,
+              month: curParts.month,
+              doctorId: user?.role === 'DOCTOR' ? (user.doctorId || undefined) : (selectedDoctorId || undefined),
+              branchId: selectedBranchId || undefined,
+              status: selectedStatus || undefined,
+            }).catch(() => null)
+          : Promise.resolve(null),
       ]);
+
+      // Discard stale out-of-order response after rapid date or filter switching
+      if (currentReqId !== loadRequestIdRef.current) return;
 
       setAppointments(res?.items || []);
       setTotalCount(res?.total || 0);
       setPendingTotal(pendingRes?.total || 0);
+      if (monthAggRes?.dailyCounts) {
+        setMonthAggregates(monthAggRes.dailyCounts);
+      } else if (!isMonth) {
+        setMonthAggregates({});
+      }
 
       // Sync URL
       const dateStr = toClinicDateString(currentDate);
@@ -370,10 +423,13 @@ export default function AdminCalendarPage() {
         page: currentPage > 1 ? String(currentPage) : null,
       });
     } catch (e: any) {
+      if (currentReqId !== loadRequestIdRef.current) return;
       console.error('Failed to load appointments', e);
       setFetchError(e?.message || 'Qabullar ro\'yxatini yuklashda xatolik yuz berdi');
     } finally {
-      setIsLoading(false);
+      if (currentReqId === loadRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [
     currentPage,
@@ -607,6 +663,55 @@ export default function AdminCalendarPage() {
       await loadAppointments();
     } catch (err: any) {
       setActionError(err?.message || 'Kechikishni qayd etishda xatolik yuz berdi');
+    } finally {
+      setIsSavingDelay(false);
+    }
+  };
+
+  const handleStartTreatment = async () => {
+    if (!selectedAppt) return;
+    try {
+      setIsStartingTreatment(true);
+      setActionError(null);
+      const updated = await api.startAppointmentTreatment(selectedAppt.id);
+      setSelectedAppt((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              actualStartTime: updated?.actualStartTime || new Date().toISOString(),
+              status: prev.status === 'CONFIRMED' ? 'CHECKED_IN' : prev.status,
+            }
+          : prev
+      );
+      await loadAppointments();
+    } catch (err: any) {
+      setActionError(err?.message || 'Muolajani boshlashda xatolik yuz berdi');
+    } finally {
+      setIsStartingTreatment(false);
+    }
+  };
+
+  const handleClearOverrun = async () => {
+    if (!selectedAppt) return;
+    try {
+      setIsSavingDelay(true);
+      setActionError(null);
+      await api.clearAppointmentOverrun(selectedAppt.id);
+      setSelectedAppt((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              overrunActive: false,
+              overrunMinutes: 0,
+              overrunEstimatedEndTime: null,
+            }
+          : prev
+      );
+      setShowDelayModal(false);
+      setDelayResult(null);
+      await loadAppointments();
+    } catch (err: any) {
+      setActionError(err?.message || 'Kechikishni tozalashda xatolik yuz berdi');
     } finally {
       setIsSavingDelay(false);
     }
@@ -1001,6 +1106,20 @@ export default function AdminCalendarPage() {
                     <List className="w-3.5 h-3.5" />
                     <span>Ro&apos;yxat</span>
                   </button>
+                  {daySubView === 'timeline' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFullDayHours((prev) => !prev)}
+                      className={`ml-1 px-2 py-1 rounded-lg transition-all ${
+                        showFullDayHours
+                          ? 'bg-teal-700 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title={showFullDayHours ? "Moslashuvchan ish vaqtiga qaytish" : "To'liq 24 soatlik ko'rinish"}
+                    >
+                      {showFullDayHours ? '24 soat' : 'Ish vaqti'}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1083,9 +1202,9 @@ export default function AdminCalendarPage() {
                         >
                           {cell.day}
                         </span>
-                        {cell.appts.length > 0 && (
+                        {cell.totalCount > 0 && (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-800">
-                            {cell.appts.length}
+                            {cell.totalCount}
                           </span>
                         )}
                       </div>
@@ -1099,9 +1218,14 @@ export default function AdminCalendarPage() {
                             {formatClinicTime(a.startTime)} {a.patient?.fullName?.split(' ')[0] || a.patientName?.split(' ')[0]}
                           </div>
                         ))}
-                        {cell.appts.length > 2 && (
+                        {cell.totalCount > 2 && (
                           <div className="text-[8px] text-slate-400 font-bold pl-0.5">
-                            +{cell.appts.length - 2} ta yana
+                            +{cell.totalCount - Math.min(2, cell.appts.length)} ta yana
+                          </div>
+                        )}
+                        {cell.totalCount > 0 && cell.appts.length === 0 && (
+                          <div className="text-[9px] text-teal-700 font-bold pl-0.5">
+                            {cell.totalCount} ta qabul
                           </div>
                         )}
                       </div>
@@ -1121,14 +1245,31 @@ export default function AdminCalendarPage() {
                 : 'Ushbu sana va parametrlar bo\'yicha qabullar topilmadi.'}
             </div>
           ) : viewMode === 'day' && !isInboxMode && daySubView === 'timeline' ? (
-            /* Day Timeline View */
+            /* Day Timeline View - Interval-Aware & Doctor-Specific */
             <div className="space-y-2 py-2">
-              {Array.from({ length: 13 }, (_, i) => i + 8).map((hour) => {
+              {dayTimelineHours.map((hour) => {
                 const hourLabel = `${String(hour).padStart(2, '0')}:00`;
+                const curParts = getClinicDateParts(currentDate);
+                const slotStartMs = Date.UTC(curParts.year, curParts.monthIndex, curParts.day, hour - 5, 0, 0);
+                const slotEndMs = Date.UTC(curParts.year, curParts.monthIndex, curParts.day, hour + 1 - 5, 0, 0);
+
+                // Interval-aware matching: includes continuing appointments, multi-hour treatments, buffers and overruns
                 const hourAppts = appointments.filter((a) => {
-                  const parts = getClinicDateParts(a.startTime);
-                  return parts.hour === hour;
+                  const aStart = new Date(a.startTime).getTime();
+                  const aEnd = (a.overrunActive && a.overrunEstimatedEndTime)
+                    ? new Date(new Date(a.overrunEstimatedEndTime).getTime() + (a.bufferMinutes ?? 5) * 60000).getTime()
+                    : new Date(a.endTime).getTime();
+                  return aStart < slotEndMs && aEnd > slotStartMs;
                 });
+
+                // Doctor-specific occupancy
+                const occupiedDoctorIds = new Set(hourAppts.map((a) => a.doctorId).filter(Boolean));
+                const occupiedDoctorNames = Array.from(occupiedDoctorIds)
+                  .map((docId) => {
+                    const d = doctors.find((doc) => doc.id === docId);
+                    return d ? `Dr. ${d.firstNameUz || d.lastNameUz}` : null;
+                  })
+                  .filter(Boolean);
 
                 return (
                   <div key={hour} className="flex gap-3 sm:gap-4 items-start group">
@@ -1137,50 +1278,81 @@ export default function AdminCalendarPage() {
                     </div>
                     <div className="flex-1 min-h-[56px] border-l-2 border-slate-200 pl-3 sm:pl-4 pb-3">
                       {hourAppts.length === 0 ? (
-                        <div className="h-full border border-dashed border-slate-100 rounded-xl px-3 py-2 text-[11px] text-slate-400 flex items-center">
-                          Bo&apos;sh vaqt oralig&apos;i
+                        <div className="h-full border border-dashed border-slate-100 rounded-xl px-3 py-2 text-[11px] text-slate-400 flex items-center justify-between">
+                          <span>Bo&apos;sh vaqt oralig&apos;i</span>
+                          <span className="text-[10px] text-teal-600 font-semibold">
+                            {selectedDoctorId ? 'Shifokor bo\'sh' : 'Barcha shifokorlar bo\'sh'}
+                          </span>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                          {hourAppts.map((appt) => {
-                            const timeStr = `${formatClinicTime(appt.startTime)} - ${formatClinicTime(appt.endTime)}`;
-                            const badge = STATUS_LABELS[appt.status] || {
-                              label: appt.status,
-                              color: 'bg-slate-100 text-slate-700 border-slate-200',
-                            };
-                            return (
-                              <div
-                                key={appt.id}
-                                data-testid="appointment-row"
-                                onClick={() => openAppointment(appt)}
-                                className="p-3 bg-white hover:bg-slate-50 border border-slate-200 hover:border-teal-500 rounded-2xl shadow-sm cursor-pointer transition-all space-y-1.5"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-xs font-extrabold text-teal-800 font-mono">
-                                    {timeStr}
-                                  </span>
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.color}`}>
-                                    {badge.label}
-                                  </span>
-                                </div>
-                                <div className="font-bold text-xs text-slate-900">
-                                  {appt.patient?.fullName || appt.patientName}
-                                  <span className="text-slate-400 font-normal ml-1.5">
-                                    ({appt.patient?.phone || appt.patientPhone})
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-slate-600">
-                                  {appt.serviceName || appt.service?.nameUz} • Dr. {appt.doctor?.firstNameUz} {appt.doctor?.lastNameUz}
-                                </div>
-                                {appt.overrunActive && (
-                                  <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold">
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                    <span>Kechikish: +{appt.overrunMinutes} daq {appt.overrunReason ? `(${appt.overrunReason})` : ''}</span>
+                        <div className="space-y-2">
+                          {!selectedDoctorId && occupiedDoctorNames.length > 0 && (
+                            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 pb-0.5">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                                Band: {occupiedDoctorNames.join(', ')}
+                              </span>
+                              {doctors.length > occupiedDoctorIds.size && (
+                                <span className="text-teal-700 font-medium">
+                                  ({doctors.length - occupiedDoctorIds.size} ta shifokor bo&apos;sh)
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                            {hourAppts.map((appt) => {
+                              const aStart = new Date(appt.startTime).getTime();
+                              const isContinuing = aStart < slotStartMs;
+                              const timeStr = `${formatClinicTime(appt.startTime)} - ${formatClinicTime(appt.endTime)}`;
+                              const badge = STATUS_LABELS[appt.status] || {
+                                label: appt.status,
+                                color: 'bg-slate-100 text-slate-700 border-slate-200',
+                              };
+                              return (
+                                <div
+                                  key={appt.id}
+                                  data-testid="appointment-row"
+                                  onClick={() => openAppointment(appt)}
+                                  className="p-3 bg-white hover:bg-slate-50 border border-slate-200 hover:border-teal-500 rounded-2xl shadow-sm cursor-pointer transition-all space-y-1.5"
+                                >
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-xs font-extrabold text-teal-800 font-mono">
+                                        {timeStr}
+                                      </span>
+                                      {isContinuing && (
+                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                          Davom etmoqda ({formatClinicTime(appt.startTime)} dan)
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.color}`}>
+                                      {badge.label}
+                                    </span>
                                   </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                                  <div className="font-bold text-xs text-slate-900">
+                                    {appt.patient?.fullName || appt.patientName}
+                                    <span className="text-slate-400 font-normal ml-1.5">
+                                      ({appt.patient?.phone || appt.patientPhone})
+                                    </span>
+                                  </div>
+                                  <div className="text-[11px] text-slate-600">
+                                    {appt.serviceName || appt.service?.nameUz} • Dr. {appt.doctor?.firstNameUz} {appt.doctor?.lastNameUz}
+                                  </div>
+                                  {appt.actualStartTime && appt.status !== 'COMPLETED' && (
+                                    <div className="text-[10px] text-emerald-800 font-semibold">
+                                      Muolaja: {formatClinicTime(appt.actualStartTime)} da boshlangan
+                                    </div>
+                                  )}
+                                  {appt.overrunActive && (
+                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                      <span>Kechikish: +{appt.overrunMinutes} daq {appt.overrunReason ? `(${appt.overrunReason})` : ''}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1404,19 +1576,40 @@ export default function AdminCalendarPage() {
                 </span>
               </div>
 
-              <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
-                <span className="text-slate-500">Vaqt:</span>
-                <span className="font-bold text-slate-800">
-                  {formatClinicDate(selectedAppt.startTime, 'uz', { includeWeekday: true, includeYear: true })}{' '}
-                  • {formatClinicTime(selectedAppt.startTime)}
-                </span>
-              </div>
-
-              <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
-                <span className="text-slate-500">Joriy holat:</span>
-                <span className="font-bold text-teal-800">
-                  {STATUS_LABELS[selectedAppt.status]?.label || selectedAppt.status}
-                </span>
+              <div className="p-2.5 bg-slate-50 rounded-xl space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Rejalashtirilgan:</span>
+                  <span className="font-bold text-slate-800">
+                    {formatClinicDate(selectedAppt.startTime, 'uz', { includeWeekday: true, includeYear: true })}{' '}
+                    • {formatClinicTime(selectedAppt.startTime)} - {formatClinicTime(selectedAppt.endTime)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Klinikaga kelgan:</span>
+                  <span className="font-semibold text-slate-700">
+                    {selectedAppt.arrivedAt ? formatClinicTime(selectedAppt.arrivedAt) : 'Kelmagan / kutilmoqda'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Muolaja boshlanishi:</span>
+                  <span className="font-semibold text-slate-700">
+                    {selectedAppt.actualStartTime ? formatClinicTime(selectedAppt.actualStartTime) : 'Boshlanmagan'}
+                  </span>
+                </div>
+                {selectedAppt.actualEndTime && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Muolaja yakuni:</span>
+                    <span className="font-semibold text-slate-700">
+                      {formatClinicTime(selectedAppt.actualEndTime)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-1 border-t border-slate-200/60">
+                  <span className="text-slate-500 font-semibold">Joriy holat:</span>
+                  <span className="font-bold text-teal-800">
+                    {STATUS_LABELS[selectedAppt.status]?.label || selectedAppt.status}
+                  </span>
+                </div>
               </div>
 
               {selectedAppt.note && (
@@ -1427,78 +1620,114 @@ export default function AdminCalendarPage() {
               )}
             </div>
 
-            {/* Valid Status Transitions */}
-            {validTransitions.length > 0 ? (
-              <div className="pt-2 border-t border-slate-100">
-                <p className="text-xs font-bold text-slate-700 mb-2">Holatni o&apos;zgartirish:</p>
-                <div className="flex flex-wrap gap-2">
-                  {validTransitions.includes('CONFIRMED') && (
-                    <button
-                      type="button"
-                      disabled={isUpdating}
-                      onClick={() => handleStatusUpdate('CONFIRMED')}
-                      className="py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
-                    >
-                      {isUpdating && mutatingStatus === 'CONFIRMED'
-                        ? 'Tasdiqlanmoqda...'
-                        : 'Tasdiqlash'}
-                    </button>
-                  )}
-                  {validTransitions.includes('CHECKED_IN') && (
-                    <button
-                      type="button"
-                      disabled={isUpdating}
-                      onClick={() => handleStatusUpdate('CHECKED_IN')}
-                      className="py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
-                    >
-                      {isUpdating && mutatingStatus === 'CHECKED_IN'
-                        ? 'Kiritilmoqda...'
-                        : 'Klinikaga keldi'}
-                    </button>
-                  )}
-                  {validTransitions.includes('COMPLETED') && (
-                    <button
-                      type="button"
-                      disabled={isUpdating}
-                      onClick={() => handleStatusUpdate('COMPLETED')}
-                      className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
-                    >
-                      {isUpdating && mutatingStatus === 'COMPLETED'
-                        ? 'Yakunlanmoqda...'
-                        : 'Yakunlash'}
-                    </button>
-                  )}
-                  {validTransitions.includes('NO_SHOW') && (
-                    <button
-                      type="button"
-                      disabled={isUpdating}
-                      onClick={() => handleStatusUpdate('NO_SHOW')}
-                      className="py-2 px-3 bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
-                    >
-                      {isUpdating && mutatingStatus === 'NO_SHOW' ? 'Saqlanmoqda...' : 'Kelmadi'}
-                    </button>
-                  )}
-                  {validTransitions.includes('CANCELLED') && (
-                    <button
-                      type="button"
-                      disabled={isUpdating}
-                      onClick={() => handleStatusUpdate('CANCELLED')}
-                      className="py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
-                    >
-                      Bekor qilish...
-                    </button>
-                  )}
-                </div>
+            {/* Valid Status Transitions & Clinical Actions */}
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <p className="text-xs font-bold text-slate-700">Amallar va holatni o&apos;zgartirish:</p>
+              <div className="flex flex-wrap gap-2 items-center">
+                {/* Explicit Start Treatment Action */}
+                {['CONFIRMED', 'CHECKED_IN'].includes(selectedAppt.status) && !selectedAppt.actualStartTime && (
+                  <button
+                    type="button"
+                    disabled={isStartingTreatment || isUpdating}
+                    onClick={handleStartTreatment}
+                    className="py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>{isStartingTreatment ? 'Boshlanmoqda...' : 'Muolajani boshlash'}</span>
+                  </button>
+                )}
+                {selectedAppt.actualStartTime && selectedAppt.status !== 'COMPLETED' && (
+                  <div className="py-1 px-2.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Muolaja ketmoqda ({formatClinicTime(selectedAppt.actualStartTime)})</span>
+                  </div>
+                )}
+
+                {validTransitions.includes('CONFIRMED') && (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => handleStatusUpdate('CONFIRMED')}
+                    className="py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    {isUpdating && mutatingStatus === 'CONFIRMED'
+                      ? 'Tasdiqlanmoqda...'
+                      : 'Tasdiqlash'}
+                  </button>
+                )}
+                {validTransitions.includes('CHECKED_IN') && (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => handleStatusUpdate('CHECKED_IN')}
+                    className="py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    {isUpdating && mutatingStatus === 'CHECKED_IN'
+                      ? 'Kiritilmoqda...'
+                      : 'Klinikaga keldi'}
+                  </button>
+                )}
+                {validTransitions.includes('COMPLETED') && (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => handleStatusUpdate('COMPLETED')}
+                    className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    {isUpdating && mutatingStatus === 'COMPLETED'
+                      ? 'Yakunlanmoqda...'
+                      : 'Yakunlash'}
+                  </button>
+                )}
+                {validTransitions.includes('NO_SHOW') && (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => handleStatusUpdate('NO_SHOW')}
+                    className="py-2 px-3 bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    {isUpdating && mutatingStatus === 'NO_SHOW' ? 'Saqlanmoqda...' : 'Kelmadi'}
+                  </button>
+                )}
+                {validTransitions.includes('CANCELLED') && (
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={() => handleStatusUpdate('CANCELLED')}
+                    className="py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  >
+                    Bekor qilish...
+                  </button>
+                )}
               </div>
-            ) : (
-              <div className="pt-2 border-t border-slate-100 text-center text-xs text-slate-400">
-                Ushbu qabul yakuniy holatda ({STATUS_LABELS[selectedAppt.status]?.label || selectedAppt.status}).
-              </div>
-            )}
+            </div>
 
             {/* Delay & Overrun Section for in-progress or confirmed bookings */}
             {['CONFIRMED', 'CHECKED_IN'].includes(selectedAppt.status) && (
-              <div className="pt-2 border-t border-slate-100">
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                {selectedAppt.overrunActive && (
+                  <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        Aktiv kechikish: +{selectedAppt.overrunMinutes} daqiqa {selectedAppt.overrunReason ? `(${selectedAppt.overrunReason})` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isSavingDelay}
+                        onClick={handleClearOverrun}
+                        className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-bold rounded-lg text-[11px] transition-colors"
+                      >
+                        {isSavingDelay ? 'Tozalanmoqda...' : 'Kechikishni tozalash'}
+                      </button>
+                    </div>
+                    {selectedAppt.overrunEstimatedEndTime && (
+                      <p className="text-[11px] text-amber-800">
+                        Kutilayotgan yangi tugash vaqti: <strong>{formatClinicTime(selectedAppt.overrunEstimatedEndTime)}</strong>
+                      </p>
+                    )}
+                  </div>
+                )}
                 {!showDelayModal ? (
                   <button
                     type="button"

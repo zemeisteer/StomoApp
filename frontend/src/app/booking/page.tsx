@@ -514,6 +514,19 @@ function BookingContent() {
         setSelectedDoctorId('');
       }
     }
+
+    // Clear incompatible services not offered by any doctor at the new branch
+    if (branchId) {
+      const branchDoctors = doctors.filter((d: any) =>
+        d.isActive !== false &&
+        Array.isArray(d.branches) &&
+        d.branches.some((b: any) => b.branchId === branchId)
+      );
+      const availableServiceIds = new Set(
+        branchDoctors.flatMap((d: any) => (d.services || []).map((ds: any) => ds.serviceId))
+      );
+      setSelectedServiceIds((prev) => prev.filter((id) => availableServiceIds.has(id)));
+    }
   };
 
   // Toggle service selection (1..3 services) with cascading resets and immediate calculation invalidation

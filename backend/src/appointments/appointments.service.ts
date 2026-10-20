@@ -161,6 +161,7 @@ export function serializeAppointmentResponse(appointment: any) {
     serviceId: appointment.serviceId,
     doctorId: appointment.doctorId,
     serviceItems,
+    arrivedAt: appointment.arrivedAt,
     actualStartTime: appointment.actualStartTime,
     actualEndTime: appointment.actualEndTime,
     overrunMinutes: appointment.overrunMinutes,
@@ -494,6 +495,11 @@ export class AppointmentsService {
           );
 
           if (conflicting) {
+            if (conflicting.overrunActive) {
+              throw new ConflictException(
+                'Shifokor qabuli kechikishi (overrun) sababli ushbu vaqt band. Iltimos boshqa vaqtni tanlang.',
+              );
+            }
             throw new ConflictException('Bu vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
           }
 
@@ -656,10 +662,22 @@ export class AppointmentsService {
   ) {
     let didCancel = false;
 
+    const pre = await this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: { id: true, doctorId: true },
+    });
+    if (!pre) throw new NotFoundException('Qabul topilmadi');
+
+    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+
     const updated = await this.prisma.$transaction(async (tx) => {
-      // Row lock to ensure atomic status check and update
+      // 1. Consistent doctor advisory lock first
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+      // 2. Row lock on appointment FOR UPDATE second
       const [locked] = await tx.$queryRaw<any[]>`
-        SELECT id, status, "doctor_id" as "doctorId", "service_id" as "serviceId", "service_name" as "serviceName"
+        SELECT id, status, "doctor_id" as "doctorId", "service_id" as "serviceId", "service_name" as "serviceName",
+               "arrived_at" as "arrivedAt", "actual_start_time" as "actualStartTime"
         FROM "appointments"
         WHERE id = ${appointmentId}
         FOR UPDATE
@@ -689,18 +707,18 @@ export class AppointmentsService {
       const isReleasing = ([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as AppointmentStatus[]).includes(newStatus);
 
       // Atomic update
+      // CHECKED_IN records patient arrival in waiting room (arrivedAt).
+      // actualStartTime is NOT populated here; treatment start is an explicit action.
+      // COMPLETED records actualEndTime and clears active overrun.
+      // CANCELLED or NO_SHOW clears active overrun.
       const appt = await tx.appointment.update({
         where: { id: appointmentId },
         data: {
           status: newStatus,
-          // Explicit treatment lifecycle timestamps from real staff actions
-          actualStartTime: isCheckingIn ? now : undefined,
+          arrivedAt: isCheckingIn ? (locked.arrivedAt || now) : undefined,
           actualEndTime: isCompleting ? now : undefined,
-          // Release active overrun when completed, cancelled, or marked no-show
           overrunActive: isReleasing ? false : undefined,
-          // Clear pending expiry when confirmed
           expiresAt: newStatus === AppointmentStatus.CONFIRMED ? null : undefined,
-          // Revoke self-service token if appointment is cancelled or completed
           tokenRevokedAt: ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED] as AppointmentStatus[]).includes(newStatus)
             ? now
             : undefined,
@@ -710,6 +728,7 @@ export class AppointmentsService {
           service: true,
           patient: true,
           branch: true,
+          serviceItems: { orderBy: { sortOrder: 'asc' } },
         },
       });
 
@@ -724,10 +743,15 @@ export class AppointmentsService {
         },
       });
 
-      // Record audit log inside tx using actual staff ID if not system/patient
+      // Record audit log inside tx using verified staff ID
+      let validStaffId: string | null = null;
+      if (changedBy && changedBy !== 'system' && changedBy !== 'patient') {
+        const staffExists = await tx.staffUser.findUnique({ where: { id: changedBy }, select: { id: true } });
+        if (staffExists) validStaffId = staffExists.id;
+      }
       await tx.auditLog.create({
         data: {
-          userId: (changedBy && changedBy !== 'system' && changedBy !== 'patient') ? changedBy : null,
+          userId: validStaffId,
           action: `appointment.status_${newStatus.toLowerCase()}`,
           entity: 'Appointment',
           entityId: appointmentId,
@@ -766,6 +790,97 @@ export class AppointmentsService {
     });
 
     return updated;
+  }
+
+  /**
+   * Explicit action to record treatment start time (separate from clinic arrival)
+   */
+  async startTreatment(
+    appointmentId: string,
+    user?: { role: StaffRole; doctorId?: string | null; sub?: string },
+  ) {
+    const pre = await this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: { id: true, doctorId: true, status: true },
+    });
+    if (!pre) throw new NotFoundException('Qabul topilmadi');
+
+    if (user && user.role === StaffRole.DOCTOR) {
+      if (!user.doctorId || pre.doctorId !== user.doctorId) {
+        throw new ForbiddenException('Faqat o\'zingizning qabullaringizda muolajani boshlay olasiz');
+      }
+    }
+
+    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Doctor advisory lock
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+      // 2. Appointment row lock FOR UPDATE
+      const [locked] = await tx.$queryRaw<any[]>`
+        SELECT id, status, "doctor_id" as "doctorId", "actual_start_time" as "actualStartTime"
+        FROM "appointments"
+        WHERE id = ${appointmentId}
+        FOR UPDATE
+      `;
+      if (!locked) throw new NotFoundException('Qabul topilmadi');
+
+      if (user && user.role === StaffRole.DOCTOR && locked.doctorId !== user.doctorId) {
+        throw new ForbiddenException('Faqat o\'zingizning qabullaringizda muolajani boshlay olasiz');
+      }
+
+      const terminalStatuses: AppointmentStatus[] = [
+        AppointmentStatus.COMPLETED,
+        AppointmentStatus.CANCELLED,
+        AppointmentStatus.NO_SHOW,
+      ];
+      if (terminalStatuses.includes(locked.status)) {
+        throw new BadRequestException('Tugallangan yoki bekor qilingan qabulda muolajani boshlab bo\'lmaydi');
+      }
+
+      const now = new Date();
+      const updated = await tx.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          actualStartTime: locked.actualStartTime || now,
+        },
+        include: {
+          doctor: true,
+          service: true,
+          patient: true,
+          branch: true,
+          serviceItems: { orderBy: { sortOrder: 'asc' } },
+        },
+      });
+
+      await tx.appointmentStatusHistory.create({
+        data: {
+          appointmentId,
+          fromStatus: locked.status,
+          toStatus: locked.status,
+          reason: 'Muolaja boshlandi (Shifokor xonasiga kirdi)',
+          changedBy: user?.sub || user?.doctorId || 'staff',
+        },
+      });
+
+      let validStaffId: string | null = null;
+      if (user?.sub && user.sub !== 'system') {
+        const staffExists = await tx.staffUser.findUnique({ where: { id: user.sub }, select: { id: true } });
+        if (staffExists) validStaffId = staffExists.id;
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: validStaffId,
+          action: 'appointment.treatment_started',
+          entity: 'Appointment',
+          entityId: appointmentId,
+          details: { actualStartTime: now.toISOString() } as Prisma.InputJsonValue,
+        },
+      });
+
+      return serializeAppointmentResponse(updated);
+    });
   }
 
   /**
@@ -1458,6 +1573,100 @@ export class AppointmentsService {
   }
 
   /**
+   * Month overview daily aggregates for complete non-paginated calendar grid
+   */
+  async getMonthAggregates(
+    params: {
+      year: number;
+      month: number;
+      doctorId?: string;
+      branchId?: string;
+      status?: AppointmentStatus;
+    },
+    user?: { role: StaffRole; doctorId?: string | null },
+  ) {
+    const { year, month, branchId, status } = params;
+    let doctorId = params.doctorId;
+
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profili topilmadi');
+      }
+      doctorId = user.doctorId;
+    }
+
+    const settings = await this.prisma.clinicSettings.findFirst();
+    const tz = settings?.timezone?.trim() || 'Asia/Tashkent';
+
+    const monthStr = String(month).padStart(2, '0');
+    const startIso = `${year}-${monthStr}-01T00:00:00`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endIso = `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}T23:59:59.999`;
+
+    const startUtc = fromZonedTime(startIso, tz);
+    const endUtc = fromZonedTime(endIso, tz);
+
+    const rows = await this.prisma.$queryRaw<Array<{
+      day: string;
+      total: number;
+      pending: number;
+      confirmed: number;
+      checked_in: number;
+      completed: number;
+      cancelled: number;
+      no_show: number;
+    }>>`
+      SELECT
+        TO_CHAR(timezone(${tz}, "start_time"), 'YYYY-MM-DD') AS day,
+        COUNT(*)::int AS total,
+        COUNT(CASE WHEN status = 'PENDING' THEN 1 END)::int AS pending,
+        COUNT(CASE WHEN status = 'CONFIRMED' THEN 1 END)::int AS confirmed,
+        COUNT(CASE WHEN status = 'CHECKED_IN' THEN 1 END)::int AS checked_in,
+        COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END)::int AS completed,
+        COUNT(CASE WHEN status = 'CANCELLED' THEN 1 END)::int AS cancelled,
+        COUNT(CASE WHEN status = 'NO_SHOW' THEN 1 END)::int AS no_show
+      FROM "appointments"
+      WHERE "start_time" >= ${startUtc} AND "start_time" <= ${endUtc}
+        AND (${doctorId || null}::text IS NULL OR "doctor_id" = ${doctorId || null})
+        AND (${branchId || null}::text IS NULL OR "branch_id" = ${branchId || null})
+        AND (${status || null}::"appointment_status" IS NULL OR "status" = ${status || null}::"appointment_status")
+      GROUP BY day
+      ORDER BY day ASC;
+    `;
+
+    const dailyCounts: Record<string, {
+      total: number;
+      pending: number;
+      confirmed: number;
+      checkedIn: number;
+      completed: number;
+      cancelled: number;
+      noShow: number;
+    }> = {};
+
+    for (const r of rows) {
+      dailyCounts[r.day] = {
+        total: Number(r.total),
+        pending: Number(r.pending),
+        confirmed: Number(r.confirmed),
+        checkedIn: Number(r.checked_in),
+        completed: Number(r.completed),
+        cancelled: Number(r.cancelled),
+        noShow: Number(r.no_show),
+      };
+    }
+
+    const totalCount = Object.values(dailyCounts).reduce((acc, d) => acc + d.total, 0);
+
+    return {
+      year,
+      month,
+      totalCount,
+      dailyCounts,
+    };
+  }
+
+  /**
    * Doctor-scoped Today's Appointments with clinic timezone boundaries
    */
   async getToday(timezone?: string, user?: { role: StaffRole; doctorId?: string | null }) {
@@ -1610,7 +1819,8 @@ export class AppointmentsService {
 
   /**
    * Controlled Delay & Overrun workflow
-   * Structured persistence, explicit lifecycle, bounds checking, and conflict preview
+   * Concurrency-safe: Doctor advisory lock + row lock FOR UPDATE inside transaction
+   * Atomic ADD calculation, ownership/status re-validation, bounded retries, and accurate preview
    */
   async recordDelay(
     id: string,
@@ -1623,11 +1833,12 @@ export class AppointmentsService {
       throw new BadRequestException('Kechikish vaqti 5 dan 240 daqiqagacha bo\'lishi shart');
     }
 
-    const appointment = await this.prisma.appointment.findUnique({
+    // Pre-read to resolve doctorId for consistent lock ordering
+    const pre = await this.prisma.appointment.findUnique({
       where: { id },
-      include: { doctor: true, patient: true, branch: true },
+      select: { id: true, doctorId: true, status: true },
     });
-    if (!appointment) {
+    if (!pre) {
       throw new NotFoundException('Qabul topilmadi');
     }
 
@@ -1635,60 +1846,71 @@ export class AppointmentsService {
       if (!user.doctorId) {
         throw new ForbiddenException('Shifokor profiliga biriktirilmagan foydalanuvchi');
       }
-      if (appointment.doctorId !== user.doctorId) {
+      if (pre.doctorId !== user.doctorId) {
         throw new ForbiddenException('Shifokor faqat o‘z qabulidagi kechikishni qayd eta oladi');
       }
     }
 
-    // Permitted statuses: only active in-progress or confirmed appointments
-    const permittedStatuses: AppointmentStatus[] = [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN];
-    if (!permittedStatuses.includes(appointment.status)) {
-      throw new BadRequestException(
-        `Kechikish faqat tasdiqlangan yoki klinikaga kelgan qabullarga kiritilishi mumkin (Hozirgi holat: ${appointment.status})`,
-      );
-    }
+    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
 
-    const buffer = appointment.bufferMinutes ?? 5;
-    const scheduledEndTime = new Date(appointment.endTime);
-    const scheduledTreatmentEnd = new Date(scheduledEndTime.getTime() - buffer * 60000);
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Consistent doctor advisory lock first
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-    const effectiveDelay = mode === 'ADD'
-      ? (appointment.overrunMinutes || 0) + delayMinutes
-      : delayMinutes;
+      // 2. Row lock on appointment FOR UPDATE inside transaction
+      const [locked] = await tx.$queryRaw<Array<{
+        id: string;
+        doctorId: string;
+        status: AppointmentStatus;
+        startTime: Date;
+        endTime: Date;
+        bufferMinutes: number | null;
+        overrunMinutes: number | null;
+        overrunActive: boolean;
+      }>>`
+        SELECT id, "doctor_id" as "doctorId", status, "start_time" as "startTime",
+               "end_time" as "endTime", "buffer_minutes" as "bufferMinutes",
+               "overrun_minutes" as "overrunMinutes", "overrun_active" as "overrunActive"
+        FROM "appointments"
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
 
-    if (effectiveDelay < 5 || effectiveDelay > 240) {
-      throw new BadRequestException('Umumiy kechikish vaqti 5 dan 240 daqiqagacha bo\'lishi lozim');
-    }
+      if (!locked) {
+        throw new NotFoundException('Qabul topilmadi');
+      }
 
-    const estimatedEndTime = new Date(scheduledTreatmentEnd.getTime() + effectiveDelay * 60000);
-    const estimatedFreeTime = new Date(estimatedEndTime.getTime() + buffer * 60000);
+      // 3. Ownership re-validation on locked state
+      if (user.role === StaffRole.DOCTOR && locked.doctorId !== user.doctorId) {
+        throw new ForbiddenException('Shifokor faqat o‘z qabulidagi kechikishni qayd eta oladi');
+      }
 
-    // Identify affected subsequent appointments for the same doctor on the same day
-    const affectedAppointments = await this.prisma.appointment.findMany({
-      where: {
-        doctorId: appointment.doctorId,
-        id: { not: appointment.id },
-        startTime: {
-          gte: appointment.startTime,
-          lt: estimatedFreeTime,
-        },
-        status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
-      },
-      include: {
-        patient: { select: { fullName: true, phone: true } },
-        service: { select: { nameUz: true, nameRu: true } },
-      },
-      orderBy: { startTime: 'asc' },
-    });
+      // 4. Status re-validation on locked state (reject terminal appointments immediately)
+      const permittedStatuses: AppointmentStatus[] = [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN];
+      if (!permittedStatuses.includes(locked.status)) {
+        throw new BadRequestException(
+          `Kechikish faqat tasdiqlangan yoki klinikaga kelgan qabullarga kiritilishi mumkin (Hozirgi holat: ${locked.status})`,
+        );
+      }
 
-    const delayNotice = `[KECHIKISH: ${effectiveDelay} daqiqa (${mode === 'ADD' ? '+' + delayMinutes : 'belgilandi'})] ${
-      reason ? reason.trim() : 'Muolaja vaqti cho‘zildi'
-    }. Kutilayotgan tugash: ${estimatedEndTime.toISOString()}`;
+      // 5. Atomic calculation of effective delay from current locked state
+      const effectiveDelay = mode === 'ADD'
+        ? (locked.overrunMinutes || 0) + delayMinutes
+        : delayMinutes;
 
-    // Atomically persist structured overrun state and status history in transaction
-    const updated = await this.prisma.$transaction(async (tx) => {
+      if (effectiveDelay < 5 || effectiveDelay > 240) {
+        throw new BadRequestException('Umumiy kechikish vaqti 5 dan 240 daqiqagacha bo\'lishi lozim');
+      }
+
+      const buffer = locked.bufferMinutes ?? 5;
+      const scheduledEndTime = new Date(locked.endTime);
+      const scheduledTreatmentEnd = new Date(scheduledEndTime.getTime() - buffer * 60000);
+      const estimatedEndTime = new Date(scheduledTreatmentEnd.getTime() + effectiveDelay * 60000);
+      const estimatedFreeTime = new Date(estimatedEndTime.getTime() + buffer * 60000);
+
+      // 6. Update appointment state atomically inside transaction
       const saved = await tx.appointment.update({
-        where: { id: appointment.id },
+        where: { id: locked.id },
         data: {
           overrunMinutes: effectiveDelay,
           overrunEstimatedEndTime: estimatedEndTime,
@@ -1698,66 +1920,107 @@ export class AppointmentsService {
         },
       });
 
+      // 7. Write history log inside transaction
+      const delayNotice = `[KECHIKISH: ${effectiveDelay} daqiqa (${mode === 'ADD' ? '+' + delayMinutes : 'belgilandi'})] ${
+        reason ? reason.trim() : 'Muolaja vaqti cho‘zildi'
+      }. Kutilayotgan tugash: ${estimatedEndTime.toISOString()}`;
+
       await tx.appointmentStatusHistory.create({
         data: {
-          appointmentId: appointment.id,
-          fromStatus: appointment.status,
-          toStatus: appointment.status,
+          appointmentId: locked.id,
+          fromStatus: locked.status,
+          toStatus: locked.status,
           reason: delayNotice,
           changedBy: user.sub || user.doctorId || 'staff',
         },
       });
 
-      return saved;
-    });
+      // 8. Accurate preview of affected appointments without mutating or notifying
+      const affectedAppointments = await tx.appointment.findMany({
+        where: {
+          doctorId: locked.doctorId,
+          id: { not: locked.id },
+          startTime: {
+            gte: locked.startTime,
+            lt: estimatedFreeTime,
+          },
+          status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
+        },
+        include: {
+          patient: { select: { fullName: true, phone: true } },
+          service: { select: { nameUz: true, nameRu: true } },
+        },
+        orderBy: { startTime: 'asc' },
+      });
 
-    return {
-      appointmentId: updated.id,
-      delayMinutes: effectiveDelay,
-      extraMinutes: effectiveDelay,
-      overrunActive: true,
-      mode,
-      scheduledStartTime: appointment.startTime,
-      scheduledEndTime: appointment.endTime,
-      estimatedEndTime: estimatedEndTime.toISOString(),
-      estimatedFreeTime: estimatedFreeTime.toISOString(),
-      bufferMinutes: buffer,
-      affectedCount: affectedAppointments.length,
-      affectedAppointments: affectedAppointments.map((a: any) => {
-        const conflictMinutes = Math.max(0, Math.round((estimatedFreeTime.getTime() - new Date(a.startTime).getTime()) / 60000));
-        return {
-          id: a.id,
-          patientName: a.patient.fullName,
-          patientPhone: a.patient.phone,
-          scheduledStartTime: a.startTime,
-          scheduledEndTime: a.endTime,
-          serviceName: a.service?.nameUz || 'Xizmat',
-          estimatedDelayMinutes: conflictMinutes,
-          estimatedNewStartTime: new Date(new Date(a.startTime).getTime() + conflictMinutes * 60000).toISOString(),
-          status: a.status,
-        };
-      }),
-    };
+      return {
+        appointmentId: saved.id,
+        delayMinutes: effectiveDelay,
+        extraMinutes: effectiveDelay,
+        overrunActive: true,
+        mode,
+        scheduledStartTime: locked.startTime,
+        scheduledEndTime: locked.endTime,
+        estimatedEndTime: estimatedEndTime.toISOString(),
+        estimatedFreeTime: estimatedFreeTime.toISOString(),
+        bufferMinutes: buffer,
+        affectedCount: affectedAppointments.length,
+        affectedAppointments: affectedAppointments.map((a: any) => {
+          const conflictMinutes = Math.max(0, Math.round((estimatedFreeTime.getTime() - new Date(a.startTime).getTime()) / 60000));
+          return {
+            id: a.id,
+            patientName: a.patient.fullName,
+            patientPhone: a.patient.phone,
+            scheduledStartTime: a.startTime,
+            scheduledEndTime: a.endTime,
+            serviceName: a.service?.nameUz || 'Xizmat',
+            estimatedDelayMinutes: conflictMinutes,
+            estimatedNewStartTime: new Date(new Date(a.startTime).getTime() + conflictMinutes * 60000).toISOString(),
+            status: a.status,
+          };
+        }),
+      };
+    });
   }
 
   /**
    * Explicitly clear overrun without modifying appointment status
+   * Concurrency-safe: Doctor advisory lock + row lock FOR UPDATE inside transaction
    */
   async clearOverrun(
     id: string,
     user: { role: StaffRole; doctorId?: string | null; sub?: string },
   ) {
-    const appointment = await this.prisma.appointment.findUnique({
+    const pre = await this.prisma.appointment.findUnique({
       where: { id },
+      select: { id: true, doctorId: true, status: true },
     });
-    if (!appointment) throw new NotFoundException('Qabul topilmadi');
+    if (!pre) throw new NotFoundException('Qabul topilmadi');
 
     if (user.role === StaffRole.DOCTOR) {
       if (!user.doctorId) throw new ForbiddenException('Shifokor profiliga biriktirilmagan');
-      if (appointment.doctorId !== user.doctorId) throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
+      if (pre.doctorId !== user.doctorId) throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
     }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
+    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Consistent doctor advisory lock first
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+      // 2. Row lock on appointment FOR UPDATE
+      const [locked] = await tx.$queryRaw<Array<{ id: string; doctorId: string; status: AppointmentStatus }>>`
+        SELECT id, "doctor_id" as "doctorId", status
+        FROM "appointments"
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+      if (!locked) throw new NotFoundException('Qabul topilmadi');
+
+      if (user.role === StaffRole.DOCTOR && locked.doctorId !== user.doctorId) {
+        throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
+      }
+
       const saved = await tx.appointment.update({
         where: { id },
         data: {
@@ -1772,21 +2035,19 @@ export class AppointmentsService {
       await tx.appointmentStatusHistory.create({
         data: {
           appointmentId: id,
-          fromStatus: appointment.status,
-          toStatus: appointment.status,
+          fromStatus: locked.status,
+          toStatus: locked.status,
           reason: '[KECHIKISH BEKOR QILINDI] Rejadagi jadvalga qaytarildi',
           changedBy: user.sub || user.doctorId || 'staff',
         },
       });
 
-      return saved;
+      return {
+        success: true,
+        appointmentId: saved.id,
+        overrunActive: false,
+      };
     });
-
-    return {
-      success: true,
-      appointmentId: updated.id,
-      overrunActive: false,
-    };
   }
 
   private normalizePhone(phone: string): string {

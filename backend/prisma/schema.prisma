@@ -425,7 +425,8 @@ model Appointment {
   tokenExpiresAt DateTime?     @map("token_expires_at")
   tokenRevokedAt DateTime?     @map("token_revoked_at")
   
-  // Actual treatment times (from explicit staff actions)
+  // Clinical arrival and actual treatment times (from explicit staff actions)
+  arrivedAt       DateTime?     @map("arrived_at")
   actualStartTime DateTime?     @map("actual_start_time")
   actualEndTime   DateTime?     @map("actual_end_time")
 

@@ -611,7 +611,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
             }}
             className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
           >
-            Old ko'rinish
+            Old ko&apos;rinish
           </button>
           <button
             type="button"

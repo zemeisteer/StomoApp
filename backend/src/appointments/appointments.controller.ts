@@ -288,6 +288,27 @@ export class AppointmentsController {
     return this.service.findAll(query, user);
   }
 
+  @Get('month-aggregates')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  getMonthAggregates(
+    @Query('year') yearStr: string,
+    @Query('month') monthStr: string,
+    @Query('doctorId') doctorId?: string,
+    @Query('branchId') branchId?: string,
+    @Query('status') status?: AppointmentStatus,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    const year = parseInt(yearStr, 10) || new Date().getFullYear();
+    const month = parseInt(monthStr, 10) || (new Date().getMonth() + 1);
+    return this.service.getMonthAggregates({
+      year,
+      month,
+      doctorId,
+      branchId,
+      status,
+    }, user);
+  }
+
   @Get('today')
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
   getToday(@CurrentUser() user: JwtPayload) {
@@ -330,6 +351,16 @@ export class AppointmentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.changeStatus(id, dto.status, user.sub, dto.reason, user);
+  }
+
+  @Post(':id/start-treatment')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @HttpCode(HttpStatus.OK)
+  async startTreatment(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.startTreatment(id, user);
   }
 
   @Put(':id/reschedule')

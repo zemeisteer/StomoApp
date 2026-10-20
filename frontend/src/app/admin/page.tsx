@@ -414,7 +414,7 @@ export default function AdminOverviewPage() {
                   {pendingTotal}
                 </div>
               </div>
-              <p className="text-2xl font-black text-slate-900">{pendingTotal}</p>
+              <p data-testid="kpi-pending-count" className="text-2xl font-black text-slate-900">{pendingTotal}</p>
               <span className="text-[11px] text-amber-800 font-semibold mt-1 block">
                 {pendingTotal > 0 ? 'Tasdiqlash kutilayotgan' : 'Barcha arizalar ko\'rib chiqilgan'}
               </span>
@@ -492,7 +492,7 @@ export default function AdminOverviewPage() {
                   {pendingTotal}
                 </div>
               </div>
-              <p className="text-2xl font-black text-slate-900">{pendingTotal}</p>
+              <p data-testid="kpi-pending-count" className="text-2xl font-black text-slate-900">{pendingTotal}</p>
               <span className="text-[11px] text-amber-800 font-semibold mt-1 block">
                 {pendingTotal > 0 ? 'Tasdiqlash kutilayotgan yangi qabullar' : t.admin.allPendingReviewed}
               </span>

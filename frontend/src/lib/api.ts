@@ -254,6 +254,34 @@ export const api = {
     });
     return fetcher<any>(`/api/admin/appointments?${q.toString()}`);
   },
+  getAdminMonthAggregates: (params: {
+    year: number;
+    month: number;
+    doctorId?: string;
+    branchId?: string;
+    status?: string;
+  }) => {
+    const q = new URLSearchParams({
+      year: String(params.year),
+      month: String(params.month),
+    });
+    if (params.doctorId) q.set('doctorId', params.doctorId);
+    if (params.branchId) q.set('branchId', params.branchId);
+    if (params.status) q.set('status', params.status);
+    return fetcher<{
+      year: number;
+      month: number;
+      dailyCounts: Record<string, {
+        total: number;
+        pending: number;
+        confirmed: number;
+        checkedIn: number;
+        completed: number;
+        cancelled: number;
+        noShow: number;
+      }>;
+    }>(`/api/admin/appointments/month-aggregates?${q.toString()}`);
+  },
   getTodayAppointments: () => fetcher<any[]>('/api/admin/appointments/today'),
   getAppointmentDetail: (id: string) => fetcher<any>(`/api/admin/appointments/${id}`),
   createAppointmentAdmin: (payload: any) =>
@@ -265,6 +293,10 @@ export const api = {
     fetcher<any>(`/api/admin/appointments/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, reason }),
+    }),
+  startAppointmentTreatment: (id: string) =>
+    fetcher<any>(`/api/admin/appointments/${id}/start-treatment`, {
+      method: 'POST',
     }),
   recordAppointmentDelay: (id: string, delayMinutes: number, reason?: string) =>
     fetcher<{
@@ -290,6 +322,10 @@ export const api = {
     }>(`/api/admin/appointments/${id}/delay`, {
       method: 'POST',
       body: JSON.stringify({ delayMinutes, reason }),
+    }),
+  clearAppointmentOverrun: (id: string) =>
+    fetcher<any>(`/api/admin/appointments/${id}/clear-overrun`, {
+      method: 'POST',
     }),
   adminRescheduleAppointment: (id: string, startTime: string) =>
     fetcher<any>(`/api/admin/appointments/${id}/reschedule`, {
