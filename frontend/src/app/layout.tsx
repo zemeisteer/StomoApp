@@ -19,7 +19,7 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>
-      <body className="bg-[#faf9f5] text-slate-900 antialiased selection:bg-teal-600 selection:text-white">
+      <body className="bg-[var(--app-bg)] text-[var(--text)] antialiased selection:bg-[#167b78] selection:text-white">
         <ClientLayout>{children}</ClientLayout>
       </body>
     </html>

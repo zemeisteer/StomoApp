@@ -21,30 +21,28 @@
 | **5** | **Removal of False-Pass Verification** | **COMPLETED & VERIFIED** | `verify-all-requirements.js` completely hardened: deterministic fixtures with nonzero pending KPI comparisons, search and space key navigation assertions that fail on missing elements, exact 409 Conflict overrun error message verification, real WebGL context and preset assertions, and nonzero exit codes on failures. Suite passed 13/13 scenarios with exit code 0. |
 | **6** | **3D Tooth Model Requirement & Attribution** | **COMPLETED & DOCUMENTED** | Shipped asset `frontend/public/models/tooth.glb` documented honestly in `ATTRIBUTION.md`: `THREE.GLTFExporter r169` (`RealisticTooth`), 22,429 vertices, 44,854 triangles, MIT license, human enamel PBR shader. External download blocker (Sketchfab OAuth user login requirement / Cloudflare WAF challenge) honestly reported without false attribution. Viewer verified visually: full framing, preset controls, no pause button, WebGL context active. |
 | **7** | **Booking & Admin E2E Verification** | **COMPLETED & VERIFIED** | Verified with real Puppeteer browser interactions: branch requirement blocks step progression, changing branch resets incompatible doctors/services/slots, doctor-specific duration and price match across selection, summary, and saved appointment, conflict preserves patient details, CustomSelect focus trapping and keyboard navigation work, settings persist after reload. Screenshots captured for all requested views. |
+| **8** | **Comprehensive Redesign (4 Roles)** | **COMPLETED & VERIFIED** | Integrated Image 1 (Patient Portal), Image 2 (Receptionist Workspace), Image 3 (Doctor Workspace), and Image 4 (Owner Analytics). Rebuilt Admin Shell (`AdminLayout.tsx`) with deep-teal navigation and responsive drawer; unified design tokens in `globals.css` and `tailwind.config.ts`. Verified with 13/13 automated scenarios and 9 desktop/mobile screenshots. |
 
 ---
 
 ### 3. Captured Verification Artifacts
 
 Screenshots stored in:
-`C:\Users\user\.gemini\antigravity-ide\brain\0458366d-2a4a-4fbc-a1d3-7a71b54536b1\screenshots`
+`C:\Users\user\.gemini\antigravity-ide\brain\7f9f12fc-4c76-43cf-b704-011dbbebe816\`
 
-1. **`booking_summary.png`**: Booking confirmation view displaying doctor-specific duration (45 min) and price (350,000 UZS) matching selection.
-2. **`calendar_occupancy_desktop.png`**: Admin calendar desktop view displaying multi-hour interval occupancy and active overrun block.
-3. **`calendar_occupancy_mobile_360.png`**: Admin calendar responsive layout on 360px mobile viewport.
-4. **`dropdown_in_modal.png`**: CustomSelect dropdown open inside modal dialog with search query, keyboard navigation, and focus trapping.
-5. **`tooth_viewer_desktop.png`**: 3D tooth viewer framed on desktop with WebGL rendering and inspection preset buttons ('Old', 'Toj', 'Ildiz').
-6. **`tooth_viewer_mobile_390.png`**: 3D tooth viewer framed on 390px mobile viewport without overflow.
-7. **`verified_admin_analytics.png`**: Admin analytics dashboard with real metrics and current month boundaries.
-8. **`verified_doctor_dashboard.png`**: Doctor dashboard with role-aware scoping and zero 403 errors.
+1. **`patient_portal_desktop.png` & `patient_portal_mobile.png`**: OraDent-style patient portal with upcoming appointment hero card, branch location, doctor info, price breakdown, and direct cancel/reschedule.
+2. **`receptionist_workspace_desktop.png` & `receptionist_workspace_mobile.png`**: DentalCare OS receptionist workspace with daily appointment calendar, live check-in queue, quick registration, and verified billing ledger.
+3. **`doctor_workspace_desktop.png` & `doctor_workspace_mobile.png`**: DentaCare Clinic doctor workspace with assigned schedule, active patient treatment management, delay/overrun controls, and milestone 2 clinical disclosure.
+4. **`owner_analytics_desktop.png` & `owner_analytics_mobile.png`**: DentFlow executive owner analytics with dark-teal financial ledger, doctor workload progress bars, status distribution, and retention metrics.
+5. **`public_landing_desktop.png`**: Spacious public landing page with interactive 3D tooth viewer and booking CTA.
 
 ---
 
 ### 4. Build & Test Verification Commands
 
 - Backend compilation: `npm run build` in `backend/` -> **PASS (Exit code: 0)**
-- Frontend compilation: `npm run build` in `frontend/` -> **PASS (Exit code: 0, 28/28 routes)**
+- Frontend compilation: `npm run build` in `frontend/` -> **PASS (Exit code: 0, 28/28 routes compiled)**
 - Migration verification: `node backend/scripts/verify-migration.js` -> **PASS (Exit code: 0)**
-- Concurrency regression suite: `npx ts-node backend/scripts/test-concurrency-overrun.ts` -> **PASS (Exit code: 0)**
+- Concurrency regression suite: `npx ts-node backend/scripts/test-concurrency-overrun.ts` -> **PASS (Exit code: 0, 6/6 scenarios)**
 - Comprehensive verification suite: `node backend/scripts/verify-all-requirements.js` -> **PASS (Exit code: 0, 13/13 scenarios)**
-- E2E artifact capture: `node backend/scripts/capture-remaining-artifacts.js` -> **PASS (Exit code: 0)**
+- Role workspace artifacts capture: `node backend/scripts/capture-all-roles.js` -> **PASS (Exit code: 0, 9 desktop/mobile screenshots)**

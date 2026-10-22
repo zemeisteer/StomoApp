@@ -20,6 +20,7 @@
 | **5** | **Removal of False-Pass Verification** | **COMPLETED & VERIFIED** | Rewrote `backend/scripts/verify-all-requirements.js`. Added cloud Chrome support, deterministic fixtures with nonzero pending totals, strict error semantics asserting 409 conflict reasons, real keyboard selection verification, and nonzero exit codes on failures. Suite passed 13/13 scenarios with exit code 0. |
 | **6** | **Real 3D Tooth Model Requirement & Attribution** | **COMPLETED & DOCUMENTED** | Shipped asset `frontend/public/models/tooth.glb` documented honestly in `ATTRIBUTION.md`: `THREE.GLTFExporter r169` (`RealisticTooth`), 22,429 vertices, 44,854 triangles, MIT license, human enamel PBR shader. External download blocker (Sketchfab OAuth user login / Cloudflare WAF) honestly documented without false claims. Viewer verified visually: full framing, preset views, no pause button, WebGL context active. |
 | **7** | **Public Booking & Admin E2E Verification** | **COMPLETED & VERIFIED** | Verified branch requirement, cascading resets of doctor/service/slots on branch switch, doctor-specific duration/price match across selection, summary, and saved appointment, conflict recovery preserving patient details, CustomSelect focus trapping and keyboard navigation, and settings persistence. Captured all required screenshots. |
+| **8** | **Comprehensive Redesign (4 Role Workspaces)** | **COMPLETED & VERIFIED** | Redesigned all 4 workspaces from user reference images: 1. Patient Portal (`booking/status/[token]`), 2. Receptionist Workspace (`/admin`), 3. Doctor Workspace (`/admin` doctor role), 4. Clinic Owner Analytics (`/admin/analytics`), plus Deep Teal Admin Shell (`AdminLayout.tsx`) and Mint Design System (`globals.css`). Preserved all backend contracts and bilingual UZ/RU support. |
 
 ---
 
@@ -32,11 +33,34 @@
    - `npx ts-node backend/scripts/test-concurrency-overrun.ts` -> **PASS (Exit code: 0)**
    - Tests: Concurrent ADD overruns, delay racing with completion, clear-overrun racing with ADD, slot overlap conflict rejection with 409, independent bookability of unrelated doctors.
 3. **Comprehensive Verification Suite (13 Scenarios)**:
-   - `node backend/scripts/verify-all-requirements.js` -> **PASS (Exit code: 0)**
-   - All 13 scenarios passed without skipped assertions or false-pass conditions.
-4. **End-to-End Browser Screenshots & Assertions**:
-   - `node backend/scripts/capture-remaining-artifacts.js` -> **PASS (Exit code: 0)**
-   - Captured: `booking_summary.png`, `calendar_occupancy_desktop.png`, `calendar_occupancy_mobile_360.png`, `dropdown_in_modal.png`, `tooth_viewer_desktop.png`, `tooth_viewer_mobile_390.png`.
-5. **Production Compilation**:
+   - `node backend/scripts/verify-all-requirements.js` -> **PASS (Exit code: 0, 13/13 Scenarios Passed)**
+   - All 13 scenarios passed without skipped assertions or false-pass conditions:
+     - Scenario 1: Doctor role-aware scoping & zero 403s
+     - Scenario 2: Exact pending KPI match against authoritative DB total
+     - Scenario 3: Bidirectional deep link and Escape handling
+     - Scenario 4: CustomSelect multiword search & keyboard selection
+     - Scenario 5: ModalDialog focus trapping
+     - Scenario 6: Cross-timezone consistency (Tashkent, UTC, US Pacific)
+     - Scenario 7: Reduced motion accessibility
+     - Scenario 8: Analytics dashboard and clear language
+     - Scenario 9: Structured overrun lifecycle & slot protection
+     - Scenario 10: Server-side search exact match & non-match
+     - Scenario 11: Bulk weekly schedules batch setup & copy
+     - Scenario 12: Real image upload, structured phones & mapUrl security
+     - Scenario 13: 3D tooth model WebGL rendering, framing & inspection controls
+4. **End-to-End Role Screenshots & Assertions**:
+   - Captured full-resolution desktop (1440x900) and mobile (390x844) screenshots for all 4 roles:
+     - `patient_portal_desktop.png` & `patient_portal_mobile.png` (OraDent design)
+     - `receptionist_workspace_desktop.png` & `receptionist_workspace_mobile.png` (DentalCare OS design)
+     - `doctor_workspace_desktop.png` & `doctor_workspace_mobile.png` (DentaCare Clinic design)
+     - `owner_analytics_desktop.png` & `owner_analytics_mobile.png` (DentFlow design)
+     - `public_landing_desktop.png` (Public website with 3D tooth viewer)
+5. **Production Compilation & Verification**:
    - Backend: `npm run build` (`nest build`) -> **Exit code: 0**
-   - Frontend: `npm run build` (`next build`, 28 routes compiled) -> **Exit code: 0**
+   - Frontend: `npm run build` (`next build`, 28/28 routes compiled) -> **Exit code: 0**
+   - Concurrency regression suite: `npx ts-node backend/scripts/test-concurrency-overrun.ts` -> **PASS (Exit code: 0, 6/6 scenarios)**
+   - Comprehensive suite: `node backend/scripts/verify-all-requirements.js` -> **PASS (Exit code: 0, 13/13 scenarios)**
+   - Role workspaces capture: `node backend/scripts/capture-all-roles.js` -> **PASS (Exit code: 0, 9 desktop/mobile screenshots)**
+
+Screenshots directory:
+`C:\Users\user\.gemini\antigravity-ide\brain\7f9f12fc-4c76-43cf-b704-011dbbebe816\`

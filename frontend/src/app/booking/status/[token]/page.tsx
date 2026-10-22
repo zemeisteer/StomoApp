@@ -13,9 +13,16 @@ import {
   AlertCircle,
   RefreshCw,
   ArrowLeft,
+  MapPin,
+  ExternalLink,
+  ChevronRight,
+  ShieldCheck,
+  CalendarCheck,
+  Phone,
 } from 'lucide-react';
 import { useI18n } from '../../../../lib/i18n';
 import { api } from '../../../../lib/api';
+import { formatClinicDate, formatClinicTime } from '../../../../lib/dateFormat';
 
 function getTashkentDateString(d: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -61,7 +68,10 @@ export default function BookingStatusPage() {
       const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
       setNewDate(getTashkentDateString(tomorrow));
     } catch (err: any) {
-      setErrorMessage(err?.message || (currentLang === 'ru' ? 'Не удалось найти запись' : 'Qabul ma\'lumotlarini topib bo\'lmadi'));
+      setErrorMessage(
+        err?.message ||
+          (currentLang === 'ru' ? 'Не удалось найти запись' : 'Qabul ma\'lumotlarini topib bo\'lmadi')
+      );
     } finally {
       setIsLoading(false);
     }
@@ -71,7 +81,6 @@ export default function BookingStatusPage() {
     loadAppointment();
   }, [token]);
 
-  // Load appointment-aware slots when rescheduling (preserves historical duration & buffer)
   useEffect(() => {
     async function loadSlots() {
       if (!isRescheduling || !appointment || !newDate || !token) return;
@@ -81,7 +90,12 @@ export default function BookingStatusPage() {
         const slots = Array.isArray(res) ? res : res?.slots || [];
         setAvailableSlots(slots);
       } catch (err: any) {
-        setErrorMessage(err?.message || (currentLang === 'ru' ? 'Ошибка загрузки свободного времени' : 'Bo\'sh vaqtlarni yuklashda xatolik yuz berdi'));
+        setErrorMessage(
+          err?.message ||
+            (currentLang === 'ru'
+              ? 'Ошибка загрузки свободного времени'
+              : 'Bo\'sh vaqtlarni yuklashda xatolik yuz berdi')
+        );
       } finally {
         setIsLoadingSlots(false);
       }
@@ -97,11 +111,20 @@ export default function BookingStatusPage() {
       setIsSubmittingReschedule(true);
       setErrorMessage(null);
       await api.rescheduleBooking(token, selectedSlotTime);
-      setSuccessMessage(currentLang === 'ru' ? 'Время приема успешно изменено!' : 'Qabul vaqti muvaffaqiyatli o\'zgartirildi!');
+      setSuccessMessage(
+        currentLang === 'ru'
+          ? 'Время приема успешно изменено!'
+          : 'Qabul vaqti muvaffaqiyatli o\'zgartirildi!'
+      );
       setIsRescheduling(false);
       await loadAppointment();
     } catch (err: any) {
-      setErrorMessage(err?.message || (currentLang === 'ru' ? 'Ошибка при переносе приема' : 'Vaqtni o\'zgartirishda xatolik yuz berdi'));
+      setErrorMessage(
+        err?.message ||
+          (currentLang === 'ru'
+            ? 'Ошибка при переносе приема'
+            : 'Vaqtni o\'zgartirishda xatolik yuz berdi')
+      );
     } finally {
       setIsSubmittingReschedule(false);
     }
@@ -113,7 +136,7 @@ export default function BookingStatusPage() {
       setIsSubmittingCancel(true);
       setErrorMessage(null);
       await api.cancelBooking(token, cancelReason || undefined);
-      setSuccessMessage('Qabul bekor qilindi.');
+      setSuccessMessage(currentLang === 'ru' ? 'Запись отменена.' : 'Qabul bekor qilindi.');
       setIsCancelling(false);
       await loadAppointment();
     } catch (err: any) {
@@ -125,9 +148,11 @@ export default function BookingStatusPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-xl mx-auto px-4 py-20 text-center">
-        <div className="w-10 h-10 border-4 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-sm font-semibold text-slate-600">{t.common.loading}</p>
+      <div className="min-h-[70vh] flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-3 border-[#167b78] border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-semibold text-[#52696e]">{t.common.loading}</p>
+        </div>
       </div>
     );
   }
@@ -135,14 +160,14 @@ export default function BookingStatusPage() {
   if (errorMessage && !appointment) {
     return (
       <div className="max-w-xl mx-auto px-4 py-16 text-center">
-        <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-200">
           <AlertCircle className="w-8 h-8" />
         </div>
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">{t.common.error}</h2>
-        <p className="text-sm text-slate-500 mb-6">{errorMessage}</p>
+        <h2 className="text-xl font-bold text-[#152f34] mb-2">{t.common.error}</h2>
+        <p className="text-sm text-[#52696e] mb-6">{errorMessage}</p>
         <Link
           href="/"
-          className="inline-flex items-center gap-2 px-6 py-3 bg-teal-700 text-white rounded-xl font-semibold shadow-md"
+          className="ui-button ui-button--primary text-sm font-bold"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>{t.nav.home}</span>
@@ -150,42 +175,6 @@ export default function BookingStatusPage() {
       </div>
     );
   }
-
-  const statusColorMap: Record<string, string> = {
-    PENDING: 'bg-amber-100 text-amber-800 border-amber-200',
-    CONFIRMED: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    CHECKED_IN: 'bg-blue-100 text-blue-800 border-blue-200',
-    COMPLETED: 'bg-purple-100 text-purple-800 border-purple-200',
-    CANCELLED: 'bg-rose-100 text-rose-800 border-rose-200',
-    NO_SHOW: 'bg-slate-100 text-slate-800 border-slate-200',
-  };
-
-  const statusLabelMap: Record<string, Record<'uz' | 'ru', string>> = {
-    PENDING: {
-      uz: 'Kutilmoqda (So\'rov qabul qilindi)',
-      ru: 'Ожидает подтверждения',
-    },
-    CONFIRMED: {
-      uz: 'Tasdiqlangan',
-      ru: 'Подтверждено',
-    },
-    CHECKED_IN: {
-      uz: 'Klinikada qabulda',
-      ru: 'В клинике на приеме',
-    },
-    COMPLETED: {
-      uz: 'Muvaffaqiyatli yakunlangan',
-      ru: 'Завершено',
-    },
-    CANCELLED: {
-      uz: 'Bekor qilingan',
-      ru: 'Отменено',
-    },
-    NO_SHOW: {
-      uz: 'Kelmadi',
-      ru: 'Не явился',
-    },
-  };
 
   const isTerminal = appointment?.status === 'COMPLETED' || appointment?.status === 'CANCELLED';
 
@@ -201,139 +190,195 @@ export default function BookingStatusPage() {
         : (appointment.branchName || appointment.branchNameUz || appointment.branch?.nameUz || 'Asosiy filial'))
     : '';
 
+  const branchAddress = appointment?.branch
+    ? (currentLang === 'ru' ? appointment.branch.addressRu : appointment.branch.addressUz)
+    : '';
+
   const serviceTitle = appointment
     ? (appointment.serviceItems && appointment.serviceItems.length > 0
         ? appointment.serviceItems.map((i: any) => currentLang === 'ru' && i.serviceNameRu ? i.serviceNameRu : i.serviceNameUz).join(', ')
         : (appointment.serviceName || (currentLang === 'ru' ? 'Стоматологическая услуга' : 'Stomatologiya xizmati')))
     : '';
 
-  const durationMinutes = appointment
-    ? (appointment.durationMinutes || (appointment.startTime && appointment.endTime ? Math.round((new Date(appointment.endTime).getTime() - new Date(appointment.startTime).getTime()) / 60000) : 30))
-    : 30;
+  const durationMinutes = appointment?.durationMinutes || 30;
+  const isUz = currentLang === 'uz';
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-12">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-teal-700 mb-6"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span>{t.nav.home}</span>
-      </Link>
+    <div className="max-w-3xl mx-auto px-4 py-10 sm:py-14 space-y-6">
+      {/* Back button */}
+      <div className="flex items-center justify-between">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#52696e] hover:text-[#167b78] transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>{t.nav.home}</span>
+        </Link>
+
+        <span className="text-xs text-[#52696e] bg-[#eaf5f2] px-3 py-1 rounded-full font-semibold border border-[#d8e5e2]">
+          {isUz ? "Bemor portali (O'z-o'ziga xizmat)" : "Портал пациента (Самообслуживание)"}
+        </span>
+      </div>
 
       {/* Notifications */}
       {successMessage && (
-        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-sm text-emerald-800 animate-fade-in">
+        <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center gap-3 text-xs text-emerald-900 font-semibold animate-fade-in">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
           <span>{successMessage}</span>
         </div>
       )}
 
       {errorMessage && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3 text-sm text-red-800 animate-fade-in">
-          <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+        <div className="p-4 bg-rose-50 border border-rose-300 rounded-2xl flex items-center gap-3 text-xs text-rose-900 font-semibold animate-fade-in">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
           <span>{errorMessage}</span>
         </div>
       )}
 
-      {/* Main Appointment Card */}
-      <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-100 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-5">
+      {/* Welcome & Patient Header (Image 1 Style) */}
+      <div className="bg-white p-6 rounded-2xl border border-[#d8e5e2] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-[#e0f2ed] text-[#167b78] flex items-center justify-center font-bold text-base border border-[#167b78]/20">
+            {appointment.patient?.fullName?.charAt(0) || appointment.patientName?.charAt(0) || 'B'}
+          </div>
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-teal-700">
-              {currentLang === 'ru' ? 'Детали записи' : 'Qabul tafsilotlari'}
-            </span>
-            <h1 className="text-2xl font-extrabold text-slate-900 mt-0.5">
-              {serviceTitle}
+            <h1 className="text-lg sm:text-xl font-bold text-[#152f34]">
+              {appointment.patient?.fullName || appointment.patientName}
             </h1>
-          </div>
-
-          <span
-            className={`self-start sm:self-auto px-3.5 py-1.5 rounded-full text-xs font-bold border ${
-              statusColorMap[appointment.status] || 'bg-slate-100 text-slate-700'
-            }`}
-          >
-            {statusLabelMap[appointment.status]?.[currentLang] || appointment.status}
-          </span>
-        </div>
-
-        {/* Key Info Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          <div className="p-4 bg-slate-50 rounded-2xl flex items-start gap-3">
-            <Clock className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
-            <div>
-              <span className="text-xs text-slate-400 block">{t.common.time}</span>
-              <span className="font-bold text-slate-800">
-                {new Date(appointment.startTime).toLocaleString(currentLang === 'ru' ? 'ru-RU' : 'uz-UZ', { timeZone: 'Asia/Tashkent' })}
-              </span>
-            </div>
-          </div>
-
-          <div className="p-4 bg-slate-50 rounded-2xl flex items-start gap-3">
-            <User className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
-            <div>
-              <span className="text-xs text-slate-400 block">{t.common.doctor}</span>
-              <span className="font-bold text-slate-800">
-                {doctorDisplayName}
-              </span>
-            </div>
-          </div>
-
-          <div className="p-4 bg-slate-50 rounded-2xl flex items-start gap-3">
-            <Building2 className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
-            <div>
-              <span className="text-xs text-slate-400 block">{t.common.branch}</span>
-              <span className="font-bold text-slate-800">
-                {branchDisplayName}
-              </span>
-            </div>
-          </div>
-
-          <div className="p-4 bg-slate-50 rounded-2xl flex items-start gap-3">
-            <Calendar className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
-            <div>
-              <span className="text-xs text-slate-400 block">
-                {currentLang === 'ru' ? 'Длительность приема' : 'Qabul davomiyligi'}
-              </span>
-              <span className="font-bold text-slate-800 flex items-center flex-wrap gap-1">
-                {durationMinutes} {currentLang === 'ru' ? 'минут' : 'daqiqa'}
-                {appointment.durationAdjustmentMinutes !== undefined && appointment.durationAdjustmentMinutes !== 0 && (
-                  <span
-                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200"
-                    title={currentLang === 'ru' ? 'Длительность изменена администратором' : 'Administrator tomonidan davomiylik o\'zgartirilgan'}
-                  >
-                    {appointment.durationAdjustmentMinutes > 0 ? `+${appointment.durationAdjustmentMinutes}` : appointment.durationAdjustmentMinutes} {currentLang === 'ru' ? 'мин (коррекция)' : 'daq (tuzatish)'}
-                  </span>
-                )}
-              </span>
-            </div>
+            <p className="text-xs text-[#52696e]">
+              {appointment.patient?.phone || (isUz ? 'Telefon qayd etilgan' : 'Телефон указан')}
+            </p>
           </div>
         </div>
 
-        {/* Multi-service Itemized Breakdown */}
+        <Link
+          href="/booking"
+          className="ui-button ui-button--primary text-xs font-bold self-start sm:self-center"
+        >
+          <CalendarCheck className="w-4 h-4" />
+          <span>{isUz ? 'Yangi qabulga yozilish' : 'Записаться на новый прием'}</span>
+        </Link>
+      </div>
+
+      {/* Main Upcoming Appointment Card (Image 1 OraDent Style) */}
+      <div className="ui-card space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-4">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#167b78] bg-[#e0f2ed] px-2 py-0.5 rounded-md">
+              {isUz ? 'Navbatdagi qabulingiz' : 'Ваш следующий прием'}
+            </span>
+            <h2 className="text-xl font-black text-[#152f34] mt-1">
+              {serviceTitle}
+            </h2>
+          </div>
+
+          <div className="self-start sm:self-auto">
+            {appointment.status === 'CONFIRMED' && (
+              <span className="ui-badge bg-teal-100 text-teal-900 border border-teal-300">
+                <CheckCircle2 className="w-3.5 h-3.5 text-teal-700" />
+                <span>{isUz ? 'Tasdiqlangan' : 'Подтвержден'}</span>
+              </span>
+            )}
+            {appointment.status === 'PENDING' && (
+              <span className="ui-badge bg-amber-100 text-amber-900 border border-amber-300">
+                <Clock className="w-3.5 h-3.5 text-amber-700" />
+                <span>{isUz ? 'Kutilmoqda' : 'В ожидании'}</span>
+              </span>
+            )}
+            {appointment.status === 'CHECKED_IN' && (
+              <span className="ui-badge bg-blue-100 text-blue-900 border border-blue-300">
+                <CheckCircle2 className="w-3.5 h-3.5 text-blue-700" />
+                <span>{isUz ? 'Klinikada qabulda' : 'В клинике на приеме'}</span>
+              </span>
+            )}
+            {appointment.status === 'COMPLETED' && (
+              <span className="ui-badge bg-emerald-100 text-emerald-900 border border-emerald-300">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                <span>{isUz ? 'Yakunlandi' : 'Завершено'}</span>
+              </span>
+            )}
+            {appointment.status === 'CANCELLED' && (
+              <span className="ui-badge bg-rose-100 text-rose-800 border border-rose-300">
+                <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                <span>{isUz ? 'Bekor qilingan' : 'Отменено'}</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Doctor & Location Info (Image 1 Style) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          {/* Doctor Info */}
+          <div className="p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-[#167b78] text-white flex items-center justify-center font-bold text-sm shrink-0">
+              {doctorDisplayName.replace(/^(Dr\.|Д-р)\s*/, '').charAt(0)}
+            </div>
+            <div>
+              <span className="text-[#52696e] block text-[11px]">
+                {isUz ? 'Shifokoringiz' : 'Ваш лечащий врач'}
+              </span>
+              <span className="font-bold text-[#152f34] text-sm">{doctorDisplayName}</span>
+            </div>
+          </div>
+
+          {/* Time & Duration */}
+          <div className="p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#e0f2ed] text-[#167b78] flex items-center justify-center shrink-0">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[#52696e] block text-[11px]">
+                {isUz ? `Qabul vaqti (${durationMinutes} daqiqa)` : `Время приема (${durationMinutes} минут)`}
+              </span>
+              <span className="font-bold text-[#152f34] text-sm">
+                {formatClinicDate(appointment.startTime, currentLang, { includeWeekday: true })} • {formatClinicTime(appointment.startTime)}
+              </span>
+            </div>
+          </div>
+
+          {/* Branch & Map */}
+          <div className="sm:col-span-2 p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <MapPin className="w-4 h-4 text-[#167b78] shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-[#152f34] block">{branchDisplayName}</span>
+                {branchAddress && <span className="text-[#52696e] text-[11px] block">{branchAddress}</span>}
+              </div>
+            </div>
+
+            {appointment.branch?.mapUrl && (
+              <a
+                href={appointment.branch.mapUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-[#167b78] hover:bg-[#eaf5f2] rounded-lg border border-[#d8e5e2] font-semibold text-xs transition-colors shrink-0"
+              >
+                <span>{isUz ? "Xaritada ko'rish" : "Посмотреть на карте"}</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Services & Price breakdown */}
         {appointment.serviceItems && appointment.serviceItems.length > 0 && (
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-            <span className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
-              {t.booking.selectedServices} ({appointment.serviceItems.length}):
+          <div className="p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] space-y-2">
+            <span className="text-xs font-bold text-[#152f34] block uppercase tracking-wider">
+              {isUz ? `Tanlangan xizmatlar (${appointment.serviceItems.length}):` : `Выбранные услуги (${appointment.serviceItems.length}):`}
             </span>
             <div className="space-y-1.5">
               {appointment.serviceItems.map((item: any, idx: number) => {
                 const itemName = currentLang === 'ru' && item.serviceNameRu ? item.serviceNameRu : item.serviceNameUz;
                 return (
-                  <div key={item.id || idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-xl border border-slate-200">
-                    <span className="font-semibold text-slate-800">
-                      {itemName}
-                      {item.isLegacyBundle && (
-                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                          {currentLang === 'ru' ? 'Пакет' : 'Paket'}
-                        </span>
-                      )}
-                    </span>
+                  <div key={item.id || idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-[#d8e5e2]">
+                    <span className="font-semibold text-[#152f34]">{itemName}</span>
                     <div className="text-right">
-                      <span className="text-slate-500 mr-2">{item.durationMinutes} {currentLang === 'ru' ? 'мин' : 'daqiqa'}</span>
+                      <span className="text-[#52696e] mr-2">
+                        {item.durationMinutes} {isUz ? 'daqiqa' : 'мин'}
+                      </span>
                       {item.priceFrom ? (
-                        <span className="font-bold text-teal-800">
-                          {(item.priceFrom / 100).toLocaleString(currentLang === 'ru' ? 'ru-RU' : 'uz-UZ')} {t.common.uzs}
+                        <span className="font-bold text-[#167b78]">
+                          {(item.priceFrom / 100).toLocaleString(isUz ? 'uz-UZ' : 'ru-RU')} {isUz ? "so'm" : "сум"}
                         </span>
                       ) : null}
                     </div>
@@ -344,164 +389,149 @@ export default function BookingStatusPage() {
           </div>
         )}
 
-        {/* Action Buttons (Disabled if completed/cancelled) */}
+        {/* Action Buttons: Reschedule & Cancel */}
         {!isTerminal && !isRescheduling && !isCancelling && (
-          <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-3">
+          <div className="pt-3 border-t border-[#d8e5e2] flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setIsRescheduling(true)}
-              className="w-full sm:w-auto px-5 py-2.5 bg-teal-700 hover:bg-teal-800 text-white text-sm font-semibold rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+              className="ui-button ui-button--primary text-xs font-bold"
             >
-              <RefreshCw className="w-4 h-4" />
-              <span>{t.common.reschedule}</span>
+              {isUz ? "Vaqtni o'zgartirish" : 'Перенести запись'}
             </button>
-
             <button
               type="button"
               onClick={() => setIsCancelling(true)}
-              className="w-full sm:w-auto px-5 py-2.5 border border-red-200 text-red-600 hover:bg-red-50 text-sm font-semibold rounded-xl transition-all"
+              className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors"
             >
-              <span>{t.common.cancel}</span>
+              {isUz ? 'Qabulni bekor qilish' : 'Отменить запись'}
             </button>
           </div>
         )}
 
-        {/* RESCHEDULE FORM */}
+        {/* Reschedule Form Drawer */}
         {isRescheduling && (
-          <form
-            onSubmit={handleRescheduleSubmit}
-            className="p-5 bg-teal-50/70 border border-teal-200 rounded-2xl space-y-4 animate-fade-in"
-          >
-            <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 text-teal-700" />
-              <span>{currentLang === 'ru' ? 'Выберите новое время приема' : 'Yangi qabul vaqtini tanlang'}</span>
+          <form onSubmit={handleRescheduleSubmit} className="p-4 bg-teal-50/50 rounded-2xl border border-teal-200 space-y-4 animate-fade-in text-xs">
+            <h3 className="font-bold text-[#152f34] text-sm">
+              {isUz ? "Qabul vaqtini o'zgartirish" : 'Перенос времени приема'}
             </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-[#52696e] block mb-1">
+                  {isUz ? 'Yangi sanani tanlang:' : 'Выберите новую дату:'}
+                </label>
+                <input
+                  type="date"
+                  value={newDate}
+                  min={getTashkentDateString(new Date())}
+                  onChange={(e) => setNewDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-white rounded-xl border border-[#d8e5e2] text-[#152f34]"
+                  required
+                />
+              </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                {t.booking.selectDate}
-              </label>
-              <input
-                type="date"
-                value={newDate}
-                min={getTashkentDateString()}
-                onChange={(e) => {
-                  setNewDate(e.target.value);
-                  setSelectedSlotTime('');
-                }}
-                className="w-full sm:w-60 px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white"
-              />
+              <div>
+                <label className="font-semibold text-[#52696e] block mb-1">
+                  {isUz ? "Mavjud bo'sh vaqtlar:" : 'Доступное свободное время:'}
+                </label>
+                {isLoadingSlots ? (
+                  <p className="text-[#52696e] py-2">
+                    {isUz ? 'Vaqtlar tekshirilmoqda...' : 'Проверка доступного времени...'}
+                  </p>
+                ) : availableSlots.length === 0 ? (
+                  <p className="text-rose-600 py-2">
+                    {isUz ? "Ushbu kunda bo'sh vaqt yo'q" : 'На этот день нет свободного времени'}
+                  </p>
+                ) : (
+                  <select
+                    value={selectedSlotTime}
+                    onChange={(e) => setSelectedSlotTime(e.target.value)}
+                    className="w-full px-3 py-2 bg-white rounded-xl border border-[#d8e5e2] text-[#152f34]"
+                    required
+                  >
+                    <option value="">{isUz ? 'Vaqtni tanlang' : 'Выберите время'}</option>
+                    {availableSlots.map((slot, idx) => (
+                      <option key={idx} value={slot.startTime}>
+                        {formatClinicTime(slot.startTime)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-2">
-                {currentLang === 'ru' ? 'Доступное свободное время:' : 'Mavjud bo\'sh vaqtlar:'}
-              </label>
-              {isLoadingSlots ? (
-                <div className="p-4 text-center text-xs text-slate-500">{t.common.loading}</div>
-              ) : availableSlots.length === 0 ? (
-                <div className="p-4 text-center text-xs text-slate-500">{t.booking.noSlots}</div>
-              ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
-                  {availableSlots.map((slot) => {
-                    const slotDate = new Date(slot.startTime);
-                    const timeStr = slotDate.toLocaleTimeString(currentLang === 'ru' ? 'ru-RU' : 'uz-UZ', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      timeZone: 'Asia/Tashkent',
-                    });
-                    const isSelected = selectedSlotTime === slot.startTime;
-
-                    return (
-                      <button
-                        type="button"
-                        key={slot.startTime}
-                        disabled={!slot.available}
-                        onClick={() => setSelectedSlotTime(slot.startTime)}
-                        className={`py-2 px-1 text-xs font-bold rounded-lg ${
-                          !slot.available
-                            ? 'bg-slate-200 text-slate-400 line-through'
-                            : isSelected
-                            ? 'bg-teal-700 text-white'
-                            : 'bg-white text-teal-800 border border-teal-200 hover:bg-teal-100'
-                        }`}
-                      >
-                        {timeStr}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-2">
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="submit"
+                disabled={isSubmittingReschedule || !selectedSlotTime}
+                className="ui-button ui-button--primary text-xs font-bold"
+              >
+                {isSubmittingReschedule
+                  ? (isUz ? 'Saqlanmoqda...' : 'Сохранение...')
+                  : (isUz ? 'Vaqtni tasdiqlash' : 'Подтвердить время')}
+              </button>
               <button
                 type="button"
                 onClick={() => setIsRescheduling(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-lg"
+                className="px-4 py-2 border border-[#d8e5e2] text-[#152f34] rounded-xl font-semibold hover:bg-white"
               >
-                {t.common.cancel}
-              </button>
-              <button
-                type="submit"
-                disabled={!selectedSlotTime || isSubmittingReschedule}
-                className="px-5 py-2 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow"
-              >
-                {isSubmittingReschedule ? t.common.loading : t.common.save}
+                {isUz ? 'Bekor qilish' : 'Отмена'}
               </button>
             </div>
           </form>
         )}
 
-        {/* CANCEL FORM */}
+        {/* Cancel Form Drawer */}
         {isCancelling && (
-          <form
-            onSubmit={handleCancelSubmit}
-            className="p-5 bg-red-50 border border-red-200 rounded-2xl space-y-4 animate-fade-in"
-          >
-            <h3 className="font-bold text-red-900 text-base flex items-center gap-2">
-              <XCircle className="w-5 h-5 text-red-600" />
-              <span>{currentLang === 'ru' ? 'Отмена записи' : 'Qabulni bekor qilish'}</span>
+          <form onSubmit={handleCancelSubmit} className="p-4 bg-rose-50/60 rounded-2xl border border-rose-200 space-y-3 animate-fade-in text-xs">
+            <h3 className="font-bold text-rose-900 text-sm">
+              {isUz ? 'Haqiqatan ham qabulni bekor qilmoqchimisiz?' : 'Вы действительно хотите отменить прием?'}
             </h3>
-
-            <p className="text-xs text-red-700">
-              {currentLang === 'ru'
-                ? 'Вы уверены, что хотите отменить запись? Это действие нельзя отменить.'
-                : 'Qabulni bekor qilishga ishonchingiz komilmi? Bu amalni orqaga qaytarib bo\'lmaydi.'}
-            </p>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                {currentLang === 'ru' ? 'Причина отмены (необязательно)' : 'Bekor qilish sababi (ixtiyoriy)'}
-              </label>
-              <input
-                type="text"
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                placeholder={currentLang === 'ru' ? 'Планы изменились...' : "Rejalar o'zgardi, boshqa vaqtga qoldirildi..."}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white"
-              />
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsCancelling(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-lg"
-              >
-                {currentLang === 'ru' ? 'Назад' : 'Ortga'}
-              </button>
+            <textarea
+              placeholder={isUz ? 'Bekor qilish sababi (ixtiyoriy)...' : 'Причина отмены (необязательно)...'}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              className="w-full p-3 bg-white rounded-xl border border-rose-200 text-[#152f34]"
+              rows={2}
+            />
+            <div className="flex items-center gap-2">
               <button
                 type="submit"
                 disabled={isSubmittingCancel}
-                className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold"
               >
-                {isSubmittingCancel ? t.common.loading : (currentLang === 'ru' ? 'Да, отменить' : 'Ha, bekor qilinsin')}
+                {isSubmittingCancel
+                  ? (isUz ? 'Bekor qilinmoqda...' : 'Отмена...')
+                  : (isUz ? 'Ha, bekor qilinsin' : 'Да, отменить')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCancelling(false)}
+                className="px-4 py-2 border border-[#d8e5e2] text-[#152f34] rounded-xl font-semibold hover:bg-white"
+              >
+                {isUz ? 'Ortga qaytish' : 'Назад'}
               </button>
             </div>
           </form>
         )}
       </div>
+
+      {/* Security & Milestone Disclosure */}
+      <div className="p-4 bg-white rounded-2xl border border-[#d8e5e2] text-xs text-[#52696e] flex items-start gap-3">
+        <ShieldCheck className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <strong className="text-[#152f34] block">
+            {isUz ? 'Maxfiylik va Xavfsizlik' : 'Конфиденциальность и безопасность'}
+          </strong>
+          <p className="leading-relaxed">
+            {isUz
+              ? "Qabulingiz shaxsiy maxfiy havola orqali himoyalangan. Barcha ma'lumotlar xavfsiz saqlanadi."
+              : 'Ваша запись защищена персональной секретной ссылкой. Все данные хранятся в безопасности.'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
+
+
