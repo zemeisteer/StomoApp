@@ -15,7 +15,7 @@ export const ScrollReveal: React.FC<ScrollRevealProps> = ({
   children,
   className = '',
   delayMs = 0,
-  durationMs = 500,
+  durationMs = 240,
   distancePx = 16,
   once = true,
 }) => {

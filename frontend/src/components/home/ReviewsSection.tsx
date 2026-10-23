@@ -2,19 +2,27 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Star, MessageSquare, ArrowRight, User } from 'lucide-react';
+import { Star, MessageSquare, ArrowRight, User, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 
 interface ReviewsSectionProps {
   reviews: any[];
+  isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
-export const ReviewsSection: React.FC<ReviewsSectionProps> = ({ reviews }) => {
+export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
+  reviews,
+  isLoading = false,
+  error = null,
+  onRetry,
+}) => {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
 
   return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <section id="reviews" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10 text-center sm:text-left">
         <div>
@@ -36,8 +44,67 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({ reviews }) => {
         </Link>
       </div>
 
+      {/* Loading Skeleton */}
+      {isLoading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((n) => (
+            <div
+              key={n}
+              className="bg-white rounded-2xl p-6 sm:p-7 border border-[#d8e5e2] animate-pulse space-y-4 shadow-sm"
+            >
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <div key={s} className="w-4 h-4 bg-slate-100 rounded" />
+                ))}
+              </div>
+              <div className="space-y-2">
+                <div className="h-4 bg-slate-100 rounded w-full" />
+                <div className="h-4 bg-slate-100 rounded w-5/6" />
+                <div className="h-4 bg-slate-100 rounded w-2/3" />
+              </div>
+              <div className="pt-4 border-t border-[#d8e5e2] flex justify-between items-center">
+                <div className="h-4 w-28 bg-slate-100 rounded" />
+                <div className="h-3 w-16 bg-slate-100 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error State */}
+      {!isLoading && error && (
+        <div className="text-center py-10 bg-white rounded-2xl border border-rose-200 p-8 shadow-sm">
+          <AlertCircle className="w-7 h-7 text-rose-500 mx-auto mb-2" />
+          <p className="text-rose-600 text-sm font-semibold mb-3">{error}</p>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              {t.common.retry}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!isLoading && !error && reviews.length === 0 && (
+        <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-[#d8e5e2] p-8">
+          <p className="text-[#52696e] text-sm mb-3">
+            {isRu ? 'Отзывы пока отсутствуют. Будьте первыми!' : 'Hozircha sharhlar mavjud emas. Birinchi bo\'lib fikringizni qoldiring!'}
+          </p>
+          <Link
+            href="/reviews"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] text-white rounded-xl text-xs font-bold"
+          >
+            {t.reviews.writeReview}
+          </Link>
+        </div>
+      )}
+
       {/* Reviews Grid */}
-      {reviews.length > 0 ? (
+      {!isLoading && !error && reviews.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {reviews.slice(0, 3).map((r) => {
             const author = r.authorName || (isRu ? 'Пациент клиники' : 'Klinika bemori');
@@ -77,18 +144,6 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({ reviews }) => {
               </div>
             );
           })}
-        </div>
-      ) : (
-        <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-[#d8e5e2] p-8">
-          <p className="text-[#52696e] text-sm mb-3">
-            {isRu ? 'Отзывы пока отсутствуют. Будьте первыми!' : 'Hozircha sharhlar mavjud emas. Birinchi bo\'lib fikringizni qoldiring!'}
-          </p>
-          <Link
-            href="/reviews"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] text-white rounded-xl text-xs font-bold"
-          >
-            {t.reviews.writeReview}
-          </Link>
         </div>
       )}
     </section>

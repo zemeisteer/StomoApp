@@ -124,7 +124,7 @@ export const api = {
     if (branchId) q.set('branchId', branchId);
     if (serviceIds && serviceIds.length > 0) q.set('serviceIds', serviceIds.join(','));
     return fetcher<{
-      slots: Array<{ startTime: string; endTime: string; available: boolean; reason?: string }>;
+      slots: Array<{ startTime: string; endTime: string; available: boolean; branchId?: string; reason?: string }>;
       durationMinutes: number;
       bufferMinutes: number;
       totalDurationWithBufferMinutes: number;

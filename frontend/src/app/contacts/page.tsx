@@ -6,6 +6,7 @@ import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { PhoneInput } from '../../components/PhoneInput';
 import { normalizeUzPhone } from '../../lib/phone';
+import { formatWorkingHours } from '../../lib/dateFormat';
 
 export default function ContactsPage() {
   const { t, language } = useI18n();
@@ -164,43 +165,49 @@ export default function ContactsPage() {
                   <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
                     {t.common.phone}
                   </strong>
-                  <a
-                    href={`tel:${activeBranch.phone || '+998712004545'}`}
-                    className="mt-0.5 block text-xs sm:text-sm text-[#152f34] font-bold hover:text-[#167b78] transition-colors"
-                  >
-                    {activeBranch.phone || '+998 71 200 45 45'}
-                  </a>
+                  {activeBranch.phone ? (
+                    <a
+                      href={`tel:${activeBranch.phone.replace(/\s+/g, '')}`}
+                      className="mt-0.5 block text-xs sm:text-sm text-[#152f34] font-bold hover:text-[#167b78] transition-colors"
+                    >
+                      {activeBranch.phone}
+                    </a>
+                  ) : (
+                    <span className="mt-0.5 block text-xs sm:text-sm text-[#52696e]">—</span>
+                  )}
                 </div>
               </div>
 
-              <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
-                <Clock className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
-                    {t.common.workingHours}
-                  </strong>
-                  <p className="mt-0.5 text-xs sm:text-sm text-[#152f34]">
-                    {isRu
-                      ? 'Понедельник - Суббота: 09:00 - 20:00, Воскресенье: 10:00 - 16:00'
-                      : 'Dushanba - Shanba: 09:00 - 20:00, Yakshanba: 10:00 - 16:00'}
-                  </p>
+              {formatWorkingHours(activeBranch.workingHours, language) && (
+                <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
+                  <Clock className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
+                      {t.common.workingHours}
+                    </strong>
+                    <p className="mt-0.5 text-xs sm:text-sm text-[#152f34]">
+                      {formatWorkingHours(activeBranch.workingHours, language)}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
-                <Mail className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
-                    {isRu ? 'Электронная почта' : 'Elektron pochta'}
-                  </strong>
-                  <a
-                    href="mailto:info@dentacare.uz"
-                    className="mt-0.5 block text-xs sm:text-sm text-[#152f34] font-semibold hover:text-[#167b78] transition-colors"
-                  >
-                    {activeBranch.email || 'info@dentacare.uz'}
-                  </a>
+              {activeBranch.email && (
+                <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
+                  <Mail className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
+                      {isRu ? 'Электронная почта' : 'Elektron pochta'}
+                    </strong>
+                    <a
+                      href={`mailto:${activeBranch.email}`}
+                      className="mt-0.5 block text-xs sm:text-sm text-[#152f34] font-semibold hover:text-[#167b78] transition-colors"
+                    >
+                      {activeBranch.email}
+                    </a>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}

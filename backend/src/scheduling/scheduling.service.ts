@@ -24,11 +24,13 @@ export interface TimeSlot {
   startTime: string; // ISO string in UTC
   endTime: string;   // ISO string in UTC
   available: boolean;
+  branchId?: string;
 }
 
 export interface TimeInterval {
   start: number; // minutes from midnight (0..1440)
   end: number;
+  branchId?: string;
 }
 
 export function subtractInterval(source: TimeInterval, remove: TimeInterval): TimeInterval[] {
@@ -37,10 +39,10 @@ export function subtractInterval(source: TimeInterval, remove: TimeInterval): Ti
   }
   const result: TimeInterval[] = [];
   if (remove.start > source.start) {
-    result.push({ start: source.start, end: Math.min(remove.start, source.end) });
+    result.push({ start: source.start, end: Math.min(remove.start, source.end), branchId: source.branchId });
   }
   if (remove.end < source.end) {
-    result.push({ start: Math.max(remove.end, source.start), end: source.end });
+    result.push({ start: Math.max(remove.end, source.start), end: source.end, branchId: source.branchId });
   }
   return result;
 }
@@ -52,7 +54,7 @@ export function mergeIntervals(intervals: TimeInterval[]): TimeInterval[] {
   for (let i = 1; i < sorted.length; i++) {
     const prev = merged[merged.length - 1];
     const curr = sorted[i];
-    if (curr.start <= prev.end) {
+    if (curr.start <= prev.end && prev.branchId === curr.branchId) {
       prev.end = Math.max(prev.end, curr.end);
     } else {
       merged.push({ ...curr });
@@ -262,7 +264,7 @@ export class SchedulingService {
       if (sEnd <= sStart) {
         throw new BadRequestException('Tungi/yarim kechadan o\'tuvchi ish grafigi qo\'llab-quvvatlanmaydi');
       }
-      let currentList: TimeInterval[] = [{ start: sStart, end: sEnd }];
+      let currentList: TimeInterval[] = [{ start: sStart, end: sEnd, branchId: sched.branchId }];
       if (sched.breakStart && sched.breakEnd) {
         const bStart = this.parseTime(sched.breakStart);
         const bEnd = this.parseTime(sched.breakEnd);
@@ -650,19 +652,21 @@ export class SchedulingService {
           continue;
         }
 
+        const slotBranchId = interval.branchId || branchId;
         const available = await this.isTimeSlotAvailable(
           doctorId,
           slotStartUtc,
           slotEndUtc,
           clinicTimezone,
           undefined,
-          branchId,
+          slotBranchId,
         );
 
         slots.push({
           startTime: slotStartUtc.toISOString(),
           endTime: slotEndUtc.toISOString(),
           available,
+          branchId: slotBranchId,
         });
       }
     }

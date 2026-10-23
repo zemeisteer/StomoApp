@@ -5,12 +5,16 @@ import Link from 'next/link';
 import { MapPin, Phone, Mail, Clock, ShieldCheck, Stethoscope } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
+import { formatWorkingHours } from '../lib/dateFormat';
 
 export const Footer: React.FC = () => {
   const { t, language } = useI18n();
+  const isRu = language === 'ru';
+
   const [clinicLogo, setClinicLogo] = useState<string | null>(null);
-  const [clinicPhone, setClinicPhone] = useState<string>('+998 71 200 45 45');
-  const [clinicEmail, setClinicEmail] = useState<string>('info@dentacare.uz');
+  const [clinicName, setClinicName] = useState<string>('DentaCare');
+  const [clinicPhone, setClinicPhone] = useState<string>('');
+  const [clinicEmail, setClinicEmail] = useState<string>('');
   const [branches, setBranches] = useState<any[]>([]);
 
   useEffect(() => {
@@ -21,6 +25,8 @@ export const Footer: React.FC = () => {
         if (info?.logo) setClinicLogo(info.logo);
         if (info?.phone) setClinicPhone(info.phone);
         if (info?.email) setClinicEmail(info.email);
+        if (info?.name) setClinicName(info.name);
+        else if (info?.clinicName) setClinicName(info.clinicName);
       })
       .catch(() => {});
 
@@ -36,7 +42,9 @@ export const Footer: React.FC = () => {
     };
   }, []);
 
-  const isRu = language === 'ru';
+  const firstBranchHours = branches[0]?.workingHours
+    ? formatWorkingHours(branches[0].workingHours, language)
+    : branches[0]?.openingHours;
 
   return (
     <footer className="bg-[#0b2228] text-[#e8f3f2] pt-16 pb-12 border-t border-[#12353b]">
@@ -48,7 +56,7 @@ export const Footer: React.FC = () => {
               {clinicLogo ? (
                 <img
                   src={clinicLogo}
-                  alt={t.common.clinicName}
+                  alt={clinicName}
                   className="max-h-10 max-w-[190px] object-contain brightness-110"
                 />
               ) : (
@@ -57,7 +65,7 @@ export const Footer: React.FC = () => {
                     <Stethoscope className="w-5 h-5" />
                   </div>
                   <span className="text-2xl font-bold text-white tracking-tight">
-                    Denta<span className="text-[#2bb49c]">Care</span>
+                    {clinicName}
                   </span>
                 </>
               )}
@@ -65,13 +73,13 @@ export const Footer: React.FC = () => {
 
             <p className="text-sm leading-relaxed text-[#b2c9ca]">
               {isRu
-                ? 'Современная стоматологическая клиника. Безболезненное лечение, передовые технологии и забота о каждом пациенте.'
-                : 'Zamonaviy stomatologiya klinikasi. Og\'riqsiz muolaja, ilg\'or texnologiyalar va har bir bemorga samimiy e\'tibor.'}
+                ? 'Современная стоматологическая клиника. Квалифицированная помощь, передовые стандарты и забота о каждом пациенте.'
+                : 'Zamonaviy stomatologiya klinikasi. Malakali muolaja, ilg\'or standartlar va har bir bemorga samimiy e\'tibor.'}
             </p>
 
             <div className="flex items-center gap-2 text-xs text-[#b2c9ca]/80 pt-1">
               <ShieldCheck className="w-4 h-4 text-[#2bb49c] shrink-0" />
-              <span>{isRu ? 'Лицензия Минздрава РУз № 7482910' : 'O\'zbekiston SSV Litsenziyasi № 7482910'}</span>
+              <span>{isRu ? 'Официальная медицинская деятельность' : 'Rasmiy tibbiy faoliyat litsenziyasi'}</span>
             </div>
           </div>
 
@@ -83,7 +91,7 @@ export const Footer: React.FC = () => {
             <ul className="space-y-2.5 text-sm text-[#b2c9ca]">
               <li>
                 <Link href="/services" className="hover:text-white transition-colors">
-                  {isRu ? 'Терапия и лечение кариеса' : 'Terapiya va karies davolash'}
+                  {isRu ? 'Терапия и лечение кариеса' : 'Terapiya va davolash'}
                 </Link>
               </li>
               <li>
@@ -98,7 +106,7 @@ export const Footer: React.FC = () => {
               </li>
               <li>
                 <Link href="/services" className="hover:text-white transition-colors">
-                  {isRu ? 'Профессиональная чистка' : 'Professional tozalash va gigiyena'}
+                  {isRu ? 'Профессиональная чистка' : 'Professional gigiyena'}
                 </Link>
               </li>
               <li>
@@ -131,8 +139,10 @@ export const Footer: React.FC = () => {
                 })
               ) : (
                 <div className="space-y-2">
-                  <p className="font-semibold text-white">Chilonzor & Yunusobod</p>
-                  <p className="text-xs text-[#b2c9ca]">Toshkent shahri bo&apos;ylab filiallarimiz mavjud.</p>
+                  <p className="font-semibold text-white">{clinicName}</p>
+                  <p className="text-xs text-[#b2c9ca]">
+                    {isRu ? 'Филиалы в Ташкенте' : 'Toshkent shahri bo\'ylab filiallar'}
+                  </p>
                 </div>
               )}
             </div>
@@ -144,56 +154,57 @@ export const Footer: React.FC = () => {
               {t.nav.contacts}
             </h4>
             <ul className="space-y-3 text-sm text-[#b2c9ca]">
-              <li className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0">
-                  <Phone className="w-3.5 h-3.5" />
-                </div>
-                <a
-                  href={`tel:${clinicPhone.replace(/\s+/g, '')}`}
-                  className="hover:text-white transition-colors font-medium text-white"
-                >
-                  {clinicPhone}
-                </a>
-              </li>
-              <li className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0">
-                  <Mail className="w-3.5 h-3.5" />
-                </div>
-                <a
-                  href={`mailto:${clinicEmail}`}
-                  className="hover:text-white transition-colors"
-                >
-                  {clinicEmail}
-                </a>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0 mt-0.5">
-                  <Clock className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-xs leading-relaxed">
-                  {isRu ? 'Пн - Сб: 09:00 - 20:00' : 'Dushanba - Shanba: 09:00 - 20:00'}<br />
-                  {isRu ? 'Вс: 10:00 - 16:00' : 'Yakshanba: 10:00 - 16:00'}
-                </span>
-              </li>
+              {clinicPhone && (
+                <li className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0">
+                    <Phone className="w-3.5 h-3.5" />
+                  </div>
+                  <a
+                    href={`tel:${clinicPhone.replace(/\s+/g, '')}`}
+                    className="hover:text-white transition-colors font-medium text-white"
+                  >
+                    {clinicPhone}
+                  </a>
+                </li>
+              )}
+              {clinicEmail && (
+                <li className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0">
+                    <Mail className="w-3.5 h-3.5" />
+                  </div>
+                  <a
+                    href={`mailto:${clinicEmail}`}
+                    className="hover:text-white transition-colors"
+                  >
+                    {clinicEmail}
+                  </a>
+                </li>
+              )}
+              {firstBranchHours && (
+                <li className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0 mt-0.5">
+                    <Clock className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-xs leading-relaxed">
+                    {firstBranchHours}
+                  </span>
+                </li>
+              )}
             </ul>
           </div>
         </div>
 
-        {/* Bottom bar */}
-        <div className="pt-8 border-t border-[#12353b] flex flex-col sm:flex-row items-center justify-between text-xs text-[#b2c9ca]/70 gap-4">
-          <p>© {new Date().getFullYear()} DentaCare. {isRu ? 'Все права защищены.' : 'Barcha huquqlar himoyalangan.'}</p>
-          <div className="flex items-center gap-6">
+        <div className="pt-8 border-t border-[#12353b] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#b2c9ca]/70">
+          <p>© {new Date().getFullYear()} {clinicName}. {isRu ? 'Все права защищены.' : 'Barcha huquqlar himoyalangan.'}</p>
+          <div className="flex items-center gap-4">
             <Link href="/about" className="hover:text-white transition-colors">
               {t.nav.about}
             </Link>
             <Link href="/faq" className="hover:text-white transition-colors">
               FAQ
             </Link>
-            <Link href="/reviews" className="hover:text-white transition-colors">
-              {t.nav.reviews}
-            </Link>
-            <Link href="/admin/login" className="hover:text-[#2bb49c] transition-colors font-semibold">
-              {t.nav.admin}
+            <Link href="/contacts" className="hover:text-white transition-colors">
+              {t.nav.contacts}
             </Link>
           </div>
         </div>

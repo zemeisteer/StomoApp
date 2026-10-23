@@ -6,42 +6,42 @@ import { ShieldCheck, Sparkles, Microscope, Award, ArrowRight, CheckCircle2 } fr
 import { useI18n } from '../../lib/i18n';
 
 export const ClinicSection: React.FC = () => {
-  const { language } = useI18n();
+  const { t, language } = useI18n();
   const isRu = language === 'ru';
 
   const benefits = [
     {
       icon: Microscope,
-      title: isRu ? 'Современная 3D диагностика' : 'Zamonaviy 3D diagnostika',
+      title: isRu ? 'Современная цифровая диагностика' : 'Zamonaviy raqamli diagnostika',
       desc: isRu
-        ? 'Точная компьютерная томография и цифровое сканирование для планирования безопасного лечения.'
-        : 'Aniq kompyuter tomografiyasi va xavfsiz davolash rejasini tuzish uchun raqamli skanerlash.',
+        ? 'Цифровое сканирование и точные снимки для безопасного и обоснованного планирования лечения.'
+        : 'Xavfsiz va aniq davolash rejasini tuzish uchun raqamli tekshiruv va diagnostika.',
     },
     {
       icon: ShieldCheck,
-      title: isRu ? '100% стерильность и безопасность' : '100% xavfsizlik va sterilizatsiya',
+      title: isRu ? 'Стерильность и инфекционный контроль' : 'Sterillik va sanitariya nazorati',
       desc: isRu
-        ? 'Трехступенчатая немецкая система дезинфекции и индивидуальные стерильные наборы для каждого визита.'
-        : 'Uch bosqichli nemis dezinfeksiya tizimi va har bir tashrif uchun individual steril asboblar.',
+        ? 'Строгие санитарные протоколы автоклавирования и индивидуальные стерильные наборы для каждого пациента.'
+        : 'Xalqaro talablar asosidagi avtoklavlash va har bir bemor uchun alohida steril to\'plamlar.',
     },
     {
       icon: Award,
-      title: isRu ? 'Сертифицированные врачи' : 'Sertifikatlangan shifokorlar',
+      title: isRu ? 'Квалифицированная команда' : 'Malakali shifokorlar jamoasi',
       desc: isRu
-        ? 'Врачи высшей категории, регулярно повышающие квалификацию в ведущих клиниках Европы и Азии.'
-        : 'Yevropa va Osiyo yetakchi klinikalarida malaka oshirgan yuqori toifali stomatologlar jamoasi.',
+        ? 'Врачи с подтвержденными сертификатами, регулярно проходящие повышение профессиональной квалификации.'
+        : 'Doimiy ravishda o\'z ustida ishlaydigan va amaliy bilimlarini oshirib boradigan shifokorlar.',
     },
     {
       icon: Sparkles,
-      title: isRu ? 'Лечение без страха и боли' : 'Og\'riqsiz va qulay muolaja',
+      title: isRu ? 'Комфорт и забота' : 'Qulaylik va e\'tibor',
       desc: isRu
-        ? 'Компьютерная локальная анестезия, исключающая дискомфорт как для взрослых, так и для детей.'
-        : 'Kattalar va bolalar uchun hech qanday noqulayliksiz, kompyuterlashgan mahalliy anesteziya.',
+        ? 'Бережная анестезия и спокойная атмосфера для максимального комфорта взрослых и детей.'
+        : 'Kattalar va bolalar uchun yoqimli muhit hamda bemorning erkin his qilishini ta\'minlash.',
     },
   ];
 
   return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <section id="clinic" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
       <div className="bg-white rounded-3xl p-8 sm:p-12 border border-[#d8e5e2] shadow-[0_4px_24px_rgba(21,47,52,0.04)]">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
           
@@ -55,13 +55,13 @@ export const ClinicSection: React.FC = () => {
             <h2 className="text-2xl sm:text-3xl font-extrabold text-[#152f34] leading-tight">
               {isRu
                 ? 'Высокие стандарты стоматологии для вашего комфорта'
-                : 'Salomatligingiz va tabassumingiz uchun eng yuqori standartlar'}
+                : 'Salomatligingiz va tabassumingiz uchun sifatli xizmat'}
             </h2>
 
             <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
               {isRu
-                ? 'DentaCare объединяет передовое стоматологическое оборудование и заботливый подход к пациентам. Мы ориентированы на долговечный результат и абсолютную прозрачность цен.'
-                : 'DentaCare klinikasi ilg\'or stomatologiya texnologiyalari va har bir bemorga samimiy e\'tiborni birlashtiradi. Bizning maqsadimiz — uzoq muddatli sifat va narxlarning to\'liq shaffofligi.'}
+                ? 'Наша клиника объединяет современное стоматологическое оснащение и заботливый подход к пациентам. Мы ориентированы на долговечный результат и прозрачность цен.'
+                : 'Klinikamiz zamonaviy stomatologiya imkoniyatlari va har bir bemorga samimiy e\'tiborni birlashtiradi. Bizning maqsadimiz — uzoq muddatli sifat va narxlarning to\'liq shaffofligi.'}
             </p>
 
             <div className="pt-2">

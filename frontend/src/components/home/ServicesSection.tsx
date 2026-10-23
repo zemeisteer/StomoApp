@@ -9,14 +9,15 @@ interface ServicesSectionProps {
   services: any[];
   isLoading: boolean;
   error?: string | null;
+  onRetry?: () => void;
 }
 
-export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLoading, error }) => {
+export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLoading, error, onRetry }) => {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
 
   return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <section id="services" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       {/* Section Header */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10 text-center sm:text-left">
         <div>
@@ -68,12 +69,22 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLo
       {!isLoading && error && (
         <div className="text-center py-12 bg-white rounded-2xl border border-rose-200 p-6">
           <p className="text-rose-600 text-sm font-medium mb-3">{error}</p>
-          <Link
-            href="/services"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] text-white rounded-xl text-xs font-bold"
-          >
-            {t.common.retry}
-          </Link>
+          {onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              {t.common.retry}
+            </button>
+          ) : (
+            <Link
+              href="/services"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] text-white rounded-xl text-xs font-bold"
+            >
+              {t.common.retry}
+            </Link>
+          )}
         </div>
       )}
 

@@ -136,6 +136,16 @@ export interface Translations {
     estimatedPrice: string;
     minutes: string;
     selectedServices: string;
+    confirmLocation: string;
+    confirmLocationDesc: string;
+    switchBranchNote: string;
+    branchSwitchedBanner: string;
+    slotBranchLabel: string;
+    allSlotsBooked: string;
+    freePrice: string;
+    selectionMismatchWarning: string;
+    returnToSlotSelection: string;
+    switchBranchBtn: string;
   };
   callback: {
     title: string;
@@ -330,6 +340,16 @@ const translations: Record<Language, Translations> = {
       estimatedPrice: 'Taxminiy narx',
       minutes: 'daqiqa',
       selectedServices: 'Tanlangan xizmatlar',
+      confirmLocation: 'Filial manzilini tasdiqlash',
+      confirmLocationDesc: 'Siz tanlagan qabul vaqti bo\'yicha shifokor quyidagi filialda qabul qiladi:',
+      switchBranchNote: 'Boshqa filialni tanlasangiz, ushbu filial uchun mos qabul vaqtini tanlashingiz lozim bo\'ladi.',
+      branchSwitchedBanner: 'Filial tanlandi. Iltimos, ushbu filial uchun mos bo\'sh qabul vaqtini tanlang.',
+      slotBranchLabel: 'Filial:',
+      allSlotsBooked: 'Ushbu kunda barcha qabul vaqtlari band qilingan. Iltimos, boshqa sanani tanlang.',
+      freePrice: 'Bepul',
+      selectionMismatchWarning: 'Tanlangan qabul parametrlari o\'zgargan. Iltimos, bo\'sh vaqtni qayta tanlang.',
+      returnToSlotSelection: 'Qabul vaqtini tanlashga qaytish',
+      switchBranchBtn: 'Boshqa filialni tanlash',
     },
     callback: {
       title: 'Qayta qo\'ng\'iroq buyurtma qilish',
@@ -522,6 +542,16 @@ const translations: Record<Language, Translations> = {
       estimatedPrice: 'Ориентировочная стоимость',
       minutes: 'минут',
       selectedServices: 'Выбранные услуги',
+      confirmLocation: 'Подтвердить адрес филиала',
+      confirmLocationDesc: 'По выбранному времени приём врача состоится в следующем филиале:',
+      switchBranchNote: 'При выборе другого филиала потребуется выбрать подходящее время приёма в этом филиале.',
+      branchSwitchedBanner: 'Филиал выбран. Пожалуйста, выберите подходящее свободное время приёма.',
+      slotBranchLabel: 'Филиал:',
+      allSlotsBooked: 'На эту дату все доступные интервалы уже заняты. Пожалуйста, выберите другую дату.',
+      freePrice: 'Бесплатно',
+      selectionMismatchWarning: 'Параметры записи изменились. Пожалуйста, выберите время повторно.',
+      returnToSlotSelection: 'Вернуться к выбору времени',
+      switchBranchBtn: 'Выбрать другой филиал',
     },
     callback: {
       title: 'Заказать обратный звонок',

@@ -313,3 +313,67 @@ export function parseClinicDateTimeToUtcIso(dateStr: string, timeStr: string): s
   const cleanTime = timeStr.slice(0, 5);
   return new Date(`${cleanDate}T${cleanTime}:00+05:00`).toISOString();
 }
+
+/**
+ * Formats a Branch workingHours JSON object into a human-readable localized string.
+ */
+export function formatWorkingHours(workingHours: any, lang: 'uz' | 'ru' = 'uz'): string {
+  if (!workingHours) return '';
+  if (typeof workingHours === 'string') return workingHours;
+  if (typeof workingHours !== 'object') return '';
+
+  const dayLabelsUz: Record<string, string> = {
+    mon: 'Dush', tue: 'Sesh', wed: 'Chor', thu: 'Pay', fri: 'Juma', sat: 'Shanba', sun: 'Yakshanba',
+  };
+  const dayLabelsRu: Record<string, string> = {
+    mon: 'Пн', tue: 'Вт', wed: 'Ср', thu: 'Чт', fri: 'Пт', sat: 'Сб', sun: 'Вс',
+  };
+
+  const getHours = (d: string) => {
+    const val = workingHours[d];
+    if (!val || val.closed || val.isClosed) return 'closed';
+    if (val.open && val.close) return `${val.open} - ${val.close}`;
+    return '';
+  };
+
+  const monHours = getHours('mon');
+  const tueHours = getHours('tue');
+  const wedHours = getHours('wed');
+  const thuHours = getHours('thu');
+  const friHours = getHours('fri');
+  const satHours = getHours('sat');
+  const sunHours = getHours('sun');
+
+  if (!monHours && !satHours && !sunHours) {
+    return '';
+  }
+
+  const parts: string[] = [];
+  const closedText = lang === 'ru' ? 'Выходной' : 'Yopiq';
+
+  if (monHours && monHours === tueHours && monHours === wedHours && monHours === thuHours && monHours === friHours) {
+    const rangeLabel = lang === 'ru' ? 'Пн-Пт' : 'Dush-Juma';
+    parts.push(`${rangeLabel}: ${monHours === 'closed' ? closedText : monHours}`);
+  } else {
+    for (const d of ['mon', 'tue', 'wed', 'thu', 'fri'] as const) {
+      const h = getHours(d);
+      if (h) {
+        const label = lang === 'ru' ? dayLabelsRu[d] : dayLabelsUz[d];
+        parts.push(`${label}: ${h === 'closed' ? closedText : h}`);
+      }
+    }
+  }
+
+  if (satHours) {
+    const satLabel = lang === 'ru' ? 'Сб' : 'Shanba';
+    parts.push(`${satLabel}: ${satHours === 'closed' ? closedText : satHours}`);
+  }
+
+  if (sunHours) {
+    const sunLabel = lang === 'ru' ? 'Вс' : 'Yakshanba';
+    parts.push(`${sunLabel}: ${sunHours === 'closed' ? closedText : sunHours}`);
+  }
+
+  return parts.join(', ');
+}
+

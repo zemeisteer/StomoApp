@@ -23,7 +23,7 @@ export const HeroSection: React.FC = () => {
             {/* Small subtle clinic badge */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#eaf5f2] border border-[#d8e5e2] text-[#167b78] text-xs font-bold tracking-wide">
               <HeartPulse className="w-4 h-4 text-[#167b78]" />
-              <span>{isRu ? 'Стоматологическая помощь европейского уровня' : 'Toshkentdagi zamonaviy stomatologiya klinikasi'}</span>
+              <span>{isRu ? 'Современная стоматологическая помощь' : 'Toshkentdagi zamonaviy stomatologiya klinikasi'}</span>
             </div>
 
             {/* Main Headline */}
@@ -31,12 +31,12 @@ export const HeroSection: React.FC = () => {
               {isRu ? (
                 <>
                   Здоровая улыбка —{' '}
-                  <span className="text-[#167b78]">надежное и безболезненное</span> лечение
+                  <span className="text-[#167b78]">надежное и комфортное</span> лечение
                 </>
               ) : (
                 <>
                   Sog&apos;lom tabassum —{' '}
-                  <span className="text-[#167b78]">ishonchli va og&apos;riqsiz</span> muolaja
+                  <span className="text-[#167b78]">ishonchli va sifatli</span> muolaja
                 </>
               )}
             </h1>
@@ -44,8 +44,8 @@ export const HeroSection: React.FC = () => {
             {/* Subtitle */}
             <p className="text-base sm:text-lg text-[#52696e] max-w-2xl mx-auto lg:mx-0 leading-relaxed font-normal">
               {isRu
-                ? 'Новейшие стоматологические технологии, сертифицированные специалисты с опытом более 15 лет и индивидуальный подход к каждому пациенту.'
-                : 'Eng so\'nggi mikroskopik texnologiyalar, nemis va yapon asbob-uskunalari hamda 15 yildan ortiq tajribaga ega malakali mutaxassislar xizmatingizda.'}
+                ? 'Современная цифровая диагностика, сертифицированные специалисты и бережный индивидуальный подход к каждому пациенту.'
+                : 'Zamonaviy raqamli diagnostika, tajribali stomatologlar va har bir bemorga samimiy, individual yondashuv.'}
             </p>
 
             {/* Primary & Secondary Action Buttons */}
@@ -74,8 +74,8 @@ export const HeroSection: React.FC = () => {
                   <Award className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-xs font-bold text-[#152f34] block">15+ yil</span>
-                  <span className="text-[11px] text-[#52696e] block">{isRu ? 'Опытные врачи' : 'Shifokorlar tajribasi'}</span>
+                  <span className="text-xs font-bold text-[#152f34] block">{isRu ? 'Опытные врачи' : 'Malakali shifokorlar'}</span>
+                  <span className="text-[11px] text-[#52696e] block">{isRu ? 'Сертифицированные специалисты' : 'Katta tajribaga ega jamoa'}</span>
                 </div>
               </div>
 
@@ -84,8 +84,8 @@ export const HeroSection: React.FC = () => {
                   <ShieldCheck className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-xs font-bold text-[#152f34] block">100%</span>
-                  <span className="text-[11px] text-[#52696e] block">{isRu ? 'Стерильность' : 'Sterilizatsiya kafolati'}</span>
+                  <span className="text-xs font-bold text-[#152f34] block">{isRu ? 'Безопасность' : 'Xavfsizlik'}</span>
+                  <span className="text-[11px] text-[#52696e] block">{isRu ? 'Строгая стерилизация' : 'Qat\'iy sterilizatsiya me\'yori'}</span>
                 </div>
               </div>
 
@@ -94,16 +94,16 @@ export const HeroSection: React.FC = () => {
                   <HeartPulse className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-xs font-bold text-[#152f34] block">{isRu ? 'Без боли' : 'Og\'riqsiz'}</span>
-                  <span className="text-[11px] text-[#52696e] block">{isRu ? 'Компьютерная анестезия' : 'Kompyuter anesteziyasi'}</span>
+                  <span className="text-xs font-bold text-[#152f34] block">{isRu ? 'Комфорт' : 'Qulaylik'}</span>
+                  <span className="text-[11px] text-[#52696e] block">{isRu ? 'Бережное лечение' : 'Bemorga samimiy e\'tibor'}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Soft Mint Visual Panel with 3D Interactive Tooth */}
-          <div className="lg:col-span-5 relative flex items-center justify-center">
-            <div className="w-full max-w-md lg:max-w-none bg-gradient-to-tr from-[#ffffff] via-[#f4f9f7] to-[#e2f2ed] rounded-3xl p-3 sm:p-5 shadow-sm border border-[#d8e5e2]">
+          {/* Right Column: 3D Interactive Tooth Model */}
+          <div className="lg:col-span-5 flex justify-center">
+            <div className="w-full max-w-md aspect-square rounded-3xl bg-white/70 backdrop-blur-md p-4 sm:p-6 border border-[#d8e5e2] shadow-[0_8px_30px_rgba(22,123,120,0.06)] relative flex items-center justify-center">
               <Tooth3D />
             </div>
           </div>

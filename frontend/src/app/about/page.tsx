@@ -1,62 +1,78 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ShieldCheck, Award, Sparkles, CheckCircle2, Heart, Calendar } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { api } from '../../lib/api';
 
 export default function AboutPage() {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
+  const [clinicName, setClinicName] = useState('DentaCare');
+
+  useEffect(() => {
+    let isMounted = true;
+    api.getClinicInfo()
+      .then((info) => {
+        if (!isMounted) return;
+        if (info?.name) setClinicName(info.name);
+        else if (info?.clinicName) setClinicName(info.clinicName);
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const values = [
     {
       icon: ShieldCheck,
-      title: isRu ? '100% безопасность и стерильность' : '100% xavfsizlik va sterilizatsiya',
+      title: isRu ? 'Стерильность и безопасность' : 'Xavfsizlik va sterilizatsiya',
       desc: isRu
-        ? 'Многоступенчатая автоклавная обработка класса B по европейским протоколам и индивидуальные стерильные пакеты для каждого пациента.'
-        : 'Yevropa B-sinf avtoklavlarida ko\'p bosqichli kimyoviy va termik ishlov. Har bir bemor uchun faqat yakka tartibdagi steril paketlar.',
+        ? 'Строгие протоколы автоклавирования и индивидуальные стерильные пакеты для каждого пациента.'
+        : 'Ko\'p bosqichli tozalash va zararsizlantirish me\'yorlari. Har bir bemor uchun faqat yakka tartibdagi steril to\'plamlar.',
     },
     {
       icon: Sparkles,
-      title: isRu ? 'Микроскопическая точность' : 'Mikroskopik aniqlik',
+      title: isRu ? 'Точность и современные стандарты' : 'Aniq va sifatli davolash',
       desc: isRu
-        ? 'Лечение сложных корневых каналов под стоматологическим микроскопом с увеличением до 25 крат позволяет сохранить зуб.'
-        : 'Murakkab tish kanallarini davolash maxsus mikroskoplar yordamida 25 barobar kattalashtirilgan holda amalga oshiriladi.',
+        ? 'Цифровое планирование и бережная обработка тканей позволяют бережно сохранить естественные зубы.'
+        : 'Raqamli rejalashtirish va ehtiyotkorlik bilan muolaja qilish orqali tabiiy tishlarni asrab qolish.',
     },
     {
       icon: Heart,
-      title: isRu ? 'Психологический комфорт' : 'Psixologik qulaylik',
+      title: isRu ? 'Психологический комфорт' : 'Bemor qulayligi va g\'amxo\'rlik',
       desc: isRu
-        ? 'Забота и деликатное отношение. Компьютерная анестезия обеспечивает полное отсутствие боли и страха перед процедурой.'
-        : 'Har bir bemorga samimiy g\'amxo\'rlik. Bolalar va kattalar uchun yumshoq, mutlaqo og\'riqsiz kompyuter anesteziyasi qo\'llaniladi.',
+        ? 'Забота и деликатное отношение. Современная анестезия обеспечивает спокойствие и комфорт во время визита.'
+        : 'Har bir bemorga samimiy e\'tibor. Bolalar va kattalar uchun yumshoq, og\'riqsiz zamonaviy anesteziya qo\'llaniladi.',
     },
   ];
 
   const technologies = [
     {
-      brand: isRu ? 'Kavo и Sirona (Германия)' : 'Kavo va Sirona (Germaniya)',
+      brand: isRu ? 'Эргономичные стоматологические установки' : 'Ergonomik stomatologiya kreslolari',
       desc: isRu
-        ? 'Эргономичные кресла и бесшумные микромоторы для комфортного пребывания в кресле.'
-        : 'Bemor qulayligi uchun ergonomik kreslolar va vibratsiyasiz asboblar.',
+        ? 'Комфортное пребывание в кресле и бережные инструменты для точных манипуляций.'
+        : 'Bemorning qulay joylashishi va muolaja vaqtida erkin his qilishi uchun zamonaviy sharoit.',
     },
     {
-      brand: 'Straumann & Osstem',
+      brand: isRu ? 'Современные системы имплантации' : 'Zamonaviy implantatsiya tizimlari',
       desc: isRu
-        ? 'Швейцарские и южнокорейские импланты премиум-класса с высоким процентом приживаемости.'
-        : 'Shveytsariya va Janubiy Koreya implantlari bilan yuqori sifatli restavratsiya.',
+        ? 'Сертифицированные биосовместимые материалы для надежной эстетической и функциональной реставрации.'
+        : 'Tabassum go\'zalligi va chaynash funksiyasini to\'liq tiklash uchun sertifikatlangan materiallar.',
     },
     {
-      brand: isRu ? 'Zoom 4 WhiteSpeed (США)' : 'Zoom 4 WhiteSpeed (AQSH)',
+      brand: isRu ? 'Безопасное профессиональное отбеливание' : 'Xavfsiz professional tish oqartirish',
       desc: isRu
-        ? 'Безопасное профессиональное отбеливание без повреждения эмали.'
-        : 'Tish emaliga zarar yetkazmasdan xavfsiz va samarali oqartirish texnologiyasi.',
+        ? 'Бережные клинические протоколы осветления эмали без риска для здоровья зубов.'
+        : 'Tish emaliga zarar yetkazmasdan estetik jihatdan chiroyli va tabiiy oqlik baxsh etish.',
     },
     {
-      brand: isRu ? '3D Компьютерная томография' : '3D Kompyuter tomografiyasi',
+      brand: isRu ? 'Цифровая 3D диагностика' : 'Raqamli 3D diagnostika',
       desc: isRu
-        ? 'Сверхточная цифровая диагностика челюстно-лицевой области с минимальной лучевой нагрузкой.'
-        : 'Minimal nurlanish yuklamasi bilan aniq raqamli 3D diagnostika.',
+        ? 'Точная визуализация зубочелюстной системы для объективного планирования лечения.'
+        : 'Aniq tashxis qo\'yish va davolash rejasini xavfsiz tuzish uchun raqamli tekshiruv.',
     },
   ];
 
@@ -69,12 +85,12 @@ export default function AboutPage() {
           <span>{t.nav.about}</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-[#152f34] tracking-tight">
-          {isRu ? 'DentaCare — европейские стандарты стоматологии' : 'DentaCare — Ishonchli stomatologiya standarti'}
+          {clinicName} — {isRu ? 'стандарты современной стоматологии' : 'Ishonchli stomatologiya xizmati'}
         </h1>
         <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
           {isRu
-            ? 'Наша главная цель — предоставить каждому пациенту безболезненную, качественную и эстетичную стоматологическую помощь.'
-            : 'Bizning asosiy maqsadimiz — har bir bemorga xalqaro standartdagi og\'riqsiz, sifatli va estetik stomatologik yordam ko\'rsatishdir.'}
+            ? 'Наша главная цель — предоставить каждому пациенту качественную, безопасную и эстетичную стоматологическую помощь.'
+            : 'Bizning asosiy maqsadimiz — har bir bemorga sifatli, xavfsiz va qulay stomatologik yordam ko\'rsatishdir.'}
         </p>
       </div>
 
@@ -103,15 +119,15 @@ export default function AboutPage() {
       <div className="bg-white rounded-3xl p-8 sm:p-12 border border-[#d8e5e2] shadow-[0_4px_20px_rgba(21,47,52,0.04)] space-y-8">
         <div className="max-w-2xl space-y-2">
           <span className="text-xs font-bold uppercase tracking-widest text-[#167b78]">
-            {isRu ? 'Оборудование' : 'Texnologiyalar'}
+            {isRu ? 'Оснащение' : 'Texnologiyalar'}
           </span>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-[#152f34]">
-            {isRu ? 'Передовое оборудование и сертифицированные материалы' : 'Zamonaviy uskunalar va original materiallar'}
+            {isRu ? 'Современное оснащение и сертифицированные материалы' : 'Zamonaviy jihozlar va sertifikatlangan materiallar'}
           </h2>
           <p className="text-xs sm:text-sm text-[#52696e]">
             {isRu
-              ? 'Мы сотрудничаем только с признанными мировыми лидерами стоматологической индустрии.'
-              : 'Biz faqat xalqaro sertifikatga ega yetakchi jahon brendlari materiallari bilan ishlaymiz.'}
+              ? 'В работе используются проверенные клинические методики и надежные сертифицированные материалы.'
+              : 'Faoliyatimizda faqat xalqaro talablarga javob beradigan sinovdan o\'tgan usullar va materiallar qo\'llaniladi.'}
           </p>
         </div>
 
@@ -120,7 +136,9 @@ export default function AboutPage() {
             <div key={idx} className="flex items-start gap-3.5 p-5 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
               <CheckCircle2 className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
               <div>
-                <strong className="text-sm font-bold block mb-1">{item.brand}</strong>
+                <strong className="text-sm font-bold text-[#152f34] block mb-1">
+                  {item.brand}
+                </strong>
                 <p className="text-xs text-[#52696e] leading-relaxed">
                   {item.desc}
                 </p>
@@ -130,25 +148,15 @@ export default function AboutPage() {
         </div>
       </div>
 
-      {/* Final Booking Invitation */}
-      <div className="text-center p-8 bg-[#eaf5f2] rounded-3xl border border-[#d8e5e2] space-y-4">
-        <h3 className="text-xl sm:text-2xl font-extrabold text-[#152f34]">
-          {isRu ? 'Запишитесь на консультацию прямо сейчас' : 'Birinchi ko\'rikka hoziroq yoziling'}
-        </h3>
-        <p className="text-xs sm:text-sm text-[#52696e] max-w-xl mx-auto">
-          {isRu
-            ? 'Опытный врач проведет осмотр, ответит на все вопросы и предложит оптимальный план лечения.'
-            : 'Malakali shifokorimiz ko\'rik o\'tkazib, barcha savollaringizga javob beradi va eng maqbul davolash rejasini tuzadi.'}
-        </p>
-        <div className="pt-2">
-          <Link
-            href="/booking"
-            className="inline-flex items-center gap-2 px-7 py-3.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-2xl font-bold text-sm shadow-md shadow-[#167b78]/20 transition-all"
-          >
-            <Calendar className="w-4 h-4" />
-            <span>{t.common.bookAppointment}</span>
-          </Link>
-        </div>
+      {/* Quick CTA */}
+      <div className="text-center py-6">
+        <Link
+          href="/booking"
+          className="inline-flex items-center gap-2 px-8 py-4 bg-[#167b78] hover:bg-[#116460] text-white font-bold text-base rounded-2xl shadow-lg shadow-[#167b78]/25 transition-all"
+        >
+          <Calendar className="w-5 h-5" />
+          <span>{t.common.bookAppointment}</span>
+        </Link>
       </div>
     </div>
   );
