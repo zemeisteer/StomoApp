@@ -13,7 +13,6 @@ import {
   ArrowLeft,
   ChevronRight,
   ShieldCheck,
-  CheckCircle2,
   User,
 } from 'lucide-react';
 import { useI18n } from '../../../lib/i18n';
@@ -21,6 +20,7 @@ import { api } from '../../../lib/api';
 
 export default function DoctorDetailPage() {
   const { t, language } = useI18n();
+  const isRu = language === 'ru';
   const params = useParams();
   const slug = params?.slug as string;
 
@@ -29,24 +29,28 @@ export default function DoctorDetailPage() {
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
     async function loadDoctor() {
       if (!slug) return;
       try {
         setIsLoading(true);
         const doc = await api.getDoctorBySlug(slug);
-        setDoctor(doc);
+        if (isMounted) setDoctor(doc);
       } catch (err: any) {
-        setNotFound(true);
+        if (isMounted) setNotFound(true);
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     }
     loadDoctor();
+    return () => {
+      isMounted = false;
+    };
   }, [slug]);
 
   if (isLoading) {
     return (
-      <div className="py-32 text-center text-slate-400 font-semibold text-sm">
+      <div className="py-32 text-center text-[#52696e] font-semibold text-sm">
         {t.common.loading}
       </div>
     );
@@ -55,195 +59,202 @@ export default function DoctorDetailPage() {
   if (notFound || !doctor) {
     return (
       <div className="max-w-md mx-auto py-32 text-center space-y-4 px-4">
-        <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+        <div className="w-16 h-16 bg-[#eaf5f2] text-[#167b78] rounded-full flex items-center justify-center mx-auto">
           <User className="w-8 h-8" />
         </div>
-        <h1 className="text-xl font-bold text-slate-900">
-          {language === 'uz' ? 'Shifokor topilmadi' : 'Врач не найден'}
+        <h1 className="text-xl font-bold text-[#152f34]">
+          {isRu ? 'Врач не найден' : 'Shifokor topilmadi'}
         </h1>
-        <p className="text-xs text-slate-500">
-          {language === 'uz'
-            ? 'Ushbu mutaxassis profili mavjud emas yoki faol emas.'
-            : 'Профиль данного специалиста не найден или деактивирован.'}
+        <p className="text-xs text-[#52696e]">
+          {isRu
+            ? 'Профиль данного специалиста не найден или деактивирован.'
+            : 'Ushbu mutaxassis profili mavjud emas yoki faol emas.'}
         </p>
         <Link
           href="/doctors"
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-teal-700 text-white rounded-xl text-xs font-bold"
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#167b78] text-white rounded-xl text-xs font-bold"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>{language === 'uz' ? 'Barcha shifokorlar' : 'Все врачи'}</span>
+          <span>{isRu ? 'Все врачи' : 'Barcha shifokorlar'}</span>
         </Link>
       </div>
     );
   }
 
-  const fullName =
-    language === 'uz'
-      ? `${doctor.firstNameUz} ${doctor.lastNameUz}`
-      : `${doctor.firstNameRu || doctor.firstNameUz} ${doctor.lastNameRu || doctor.lastNameUz}`;
+  const fullName = isRu && doctor.firstNameRu
+    ? `Dr. ${doctor.firstNameRu} ${doctor.lastNameRu}`
+    : `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`;
 
-  const title = language === 'uz' ? doctor.titleUz : doctor.titleRu || doctor.titleUz;
-  const bio = language === 'uz' ? doctor.bioUz : doctor.bioRu || doctor.bioUz;
-  const education = language === 'uz' ? doctor.educationUz : doctor.educationRu || doctor.educationUz;
+  const title = isRu && doctor.titleRu ? doctor.titleRu : (doctor.titleUz || (isRu ? 'Стоматолог' : 'Stomatolog'));
+  const bio = isRu && doctor.bioRu ? doctor.bioRu : doctor.bioUz;
+  const education = isRu && doctor.educationRu ? doctor.educationRu : doctor.educationUz;
+  const initials = `${doctor.firstNameUz?.[0] || 'D'}${doctor.lastNameUz?.[0] || ''}`.toUpperCase();
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full space-y-8">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-xs text-slate-500">
-          <Link href="/" className="hover:text-teal-700">
-            {t.nav.home}
-          </Link>
-          <ChevronRight className="w-3.5 h-3.5" />
-          <Link href="/doctors" className="hover:text-teal-700">
-            {t.nav.doctors}
-          </Link>
-          <ChevronRight className="w-3.5 h-3.5" />
-          <span className="font-semibold text-slate-800">{fullName}</span>
-        </nav>
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-2 text-xs text-[#52696e]">
+        <Link href="/" className="hover:text-[#167b78] transition-colors">
+          {t.nav.home}
+        </Link>
+        <ChevronRight className="w-3.5 h-3.5" />
+        <Link href="/doctors" className="hover:text-[#167b78] transition-colors">
+          {t.nav.doctors}
+        </Link>
+        <ChevronRight className="w-3.5 h-3.5" />
+        <span className="font-semibold text-[#152f34]">{fullName}</span>
+      </nav>
 
-        {/* Doctor Header Profile Card */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-10 shadow-sm flex flex-col md:flex-row gap-8 items-start">
-          <div className="w-44 h-52 sm:w-56 sm:h-64 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200 shadow-inner">
-            {doctor.photoUrl ? (
-              <img src={doctor.photoUrl} alt={fullName} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-300">
-                <User className="w-16 h-16" />
+      {/* Doctor Header Profile Card */}
+      <div className="bg-white rounded-3xl border border-[#d8e5e2] p-6 sm:p-10 shadow-[0_4px_20px_rgba(21,47,52,0.03)] flex flex-col md:flex-row gap-8 items-start">
+        {/* Photo or Initials */}
+        <div className="w-44 h-52 sm:w-56 sm:h-64 rounded-2xl overflow-hidden bg-gradient-to-tr from-[#eaf5f2] to-[#d8e5e2] shrink-0 border border-[#d8e5e2] shadow-inner">
+          {doctor.photoUrl ? (
+            <img src={doctor.photoUrl} alt={fullName} className="w-full h-full object-cover object-top" />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center text-[#167b78] text-3xl font-extrabold p-4">
+              <div className="w-20 h-20 rounded-2xl bg-white shadow-sm flex items-center justify-center mb-2">
+                {initials}
               </div>
-            )}
-          </div>
-
-          <div className="flex-1 space-y-4">
-            <div>
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                {doctor.specialties?.map((sp: any) => (
-                  <span
-                    key={sp.specialtyId || sp.specialty?.id}
-                    className="px-3 py-1 bg-teal-50 text-teal-800 rounded-full text-xs font-bold border border-teal-200"
-                  >
-                    {language === 'uz' ? sp.specialty?.nameUz : sp.specialty?.nameRu || sp.specialty?.nameUz}
-                  </span>
-                ))}
-              </div>
-
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">{fullName}</h1>
-              <p className="text-sm font-semibold text-teal-700 mt-1">{title}</p>
+              <span className="text-xs font-semibold text-[#52696e]">
+                {isRu ? 'Врач клиники' : 'Klinika shifokori'}
+              </span>
             </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3">
-                <Award className="w-5 h-5 text-teal-700 shrink-0" />
-                <div>
-                  <span className="text-[11px] text-slate-400 block font-medium">
-                    {language === 'uz' ? 'Tajriba' : 'Опыт'}
-                  </span>
-                  <span className="text-xs font-bold text-slate-800">
-                    {doctor.experienceYears} {language === 'uz' ? 'yil' : 'лет'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3">
-                <Languages className="w-5 h-5 text-teal-700 shrink-0" />
-                <div>
-                  <span className="text-[11px] text-slate-400 block font-medium">
-                    {language === 'uz' ? 'Tillar' : 'Языки'}
-                  </span>
-                  <span className="text-xs font-bold text-slate-800">
-                    {doctor.languages?.join(', ') || 'UZ, RU'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3 col-span-2 sm:col-span-1">
-                <Building2 className="w-5 h-5 text-teal-700 shrink-0" />
-                <div>
-                  <span className="text-[11px] text-slate-400 block font-medium">
-                    {language === 'uz' ? 'Filial' : 'Филиал'}
-                  </span>
-                  <span className="text-xs font-bold text-slate-800 truncate block max-w-[120px]">
-                    {doctor.branches?.[0]?.branch?.nameUz || 'Barcha filiallar'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <Link
-                href={`/booking?doctorId=${doctor.id}`}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold text-xs shadow-md shadow-teal-700/20 transition-all"
-              >
-                <Calendar className="w-4 h-4" />
-                <span>{language === 'uz' ? 'Ushbu shifokorga yozilish' : 'Записаться к этому врачу'}</span>
-              </Link>
-            </div>
-          </div>
+          )}
         </div>
 
-        {/* Biography & Education */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-3">
-            <h2 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3 flex items-center gap-2">
-              <User className="w-4 h-4 text-teal-700" />
-              <span>{language === 'uz' ? 'Mutaxassis haqida' : 'О специалисте'}</span>
-            </h2>
-            <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">
-              {bio || (language === 'uz' ? 'Ma\'lumot kiritilmagan.' : 'Информация не указана.')}
-            </p>
+        <div className="flex-1 space-y-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              {doctor.specialties?.map((sp: any) => (
+                <span
+                  key={sp.specialtyId || sp.specialty?.id}
+                  className="px-3 py-1 bg-[#eaf5f2] text-[#167b78] rounded-full text-xs font-bold border border-[#d8e5e2]"
+                >
+                  {isRu ? sp.specialty?.nameRu : (sp.specialty?.nameUz || sp.nameUz)}
+                </span>
+              ))}
+            </div>
+
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#152f34]">{fullName}</h1>
+            <p className="text-sm font-semibold text-[#167b78] mt-1">{title}</p>
           </div>
 
-          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-3">
-            <h2 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3 flex items-center gap-2">
-              <Award className="w-4 h-4 text-teal-700" />
-              <span>{language === 'uz' ? 'Ta\'lim va malaka' : 'Образование и квалификация'}</span>
-            </h2>
-            <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">
-              {education || (language === 'uz' ? 'Oliy tibbiy ta\'lim va xalqaro malaka oshirish kurslari.' : 'Высшее медицинское образование и курсы повышения квалификации.')}
-            </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+            <div className="p-3 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2] flex items-center gap-3">
+              <Award className="w-5 h-5 text-[#167b78] shrink-0" />
+              <div>
+                <span className="text-[11px] text-[#52696e] block font-medium">
+                  {isRu ? 'Опыт работы' : 'Tajriba'}
+                </span>
+                <span className="text-xs font-bold text-[#152f34]">
+                  {doctor.experienceYears} {isRu ? 'лет' : 'yil'}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2] flex items-center gap-3">
+              <Languages className="w-5 h-5 text-[#167b78] shrink-0" />
+              <div>
+                <span className="text-[11px] text-[#52696e] block font-medium">
+                  {isRu ? 'Языки приема' : 'Qabul tillari'}
+                </span>
+                <span className="text-xs font-bold text-[#152f34]">
+                  {doctor.languages?.join(', ').toUpperCase() || 'UZ, RU'}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2] flex items-center gap-3 col-span-2 sm:col-span-1">
+              <Building2 className="w-5 h-5 text-[#167b78] shrink-0" />
+              <div>
+                <span className="text-[11px] text-[#52696e] block font-medium">
+                  {isRu ? 'Филиал' : 'Filial'}
+                </span>
+                <span className="text-xs font-bold text-[#152f34] truncate block max-w-[130px]">
+                  {isRu && doctor.branches?.[0]?.branch?.nameRu
+                    ? doctor.branches[0].branch.nameRu
+                    : (doctor.branches?.[0]?.branch?.nameUz || (isRu ? 'Все филиалы' : 'Barcha filiallar'))}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <Link
+              href={`/booking?doctorId=${doctor.id}`}
+              className="inline-flex items-center gap-2 px-7 py-3.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-2xl font-bold text-sm shadow-md shadow-[#167b78]/20 transition-all"
+            >
+              <Calendar className="w-4 h-4" />
+              <span>{isRu ? 'Записаться к этому врачу' : 'Ushbu shifokorga yozilish'}</span>
+            </Link>
           </div>
         </div>
+      </div>
 
-        {/* Provided Services */}
-        {doctor.services && doctor.services.length > 0 && (
-          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-4">
-            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Stethoscope className="w-4 h-4 text-teal-700" />
-              <span>{language === 'uz' ? 'Ko\'rsatiladigan xizmatlar' : 'Оказываемые услуги'}</span>
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {doctor.services.map((ds: any) => {
-                const s = ds.service;
-                if (!s) return null;
-                return (
-                  <div
-                    key={s.id}
-                    className="p-4 rounded-2xl border border-slate-100 bg-slate-50/70 hover:bg-white hover:border-teal-200 transition-all flex flex-col justify-between space-y-2"
-                  >
-                    <div>
-                      <h3 className="text-xs font-bold text-slate-800">
-                        {language === 'uz' ? s.nameUz : s.nameRu || s.nameUz}
-                      </h3>
-                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
-                        {language === 'uz' ? s.descriptionUz : s.descriptionRu}
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-200/50">
-                      <span className="text-xs font-extrabold text-teal-800">
-                        {s.priceFrom ? `${s.priceFrom.toLocaleString()} so'm` : 'Kelishuv asosida'}
-                      </span>
+      {/* Biography & Education Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
+        <div className="bg-white rounded-3xl border border-[#d8e5e2] p-6 sm:p-8 shadow-sm space-y-3">
+          <h2 className="text-base font-bold text-[#152f34] border-b border-[#d8e5e2] pb-3 flex items-center gap-2">
+            <User className="w-4 h-4 text-[#167b78]" />
+            <span>{isRu ? 'О специалисте' : 'Mutaxassis haqida'}</span>
+          </h2>
+          <p className="text-xs sm:text-sm text-[#52696e] leading-relaxed whitespace-pre-line">
+            {bio || (isRu ? 'Информация уточняется.' : 'Ma\'lumot kiritilmagan.')}
+          </p>
+        </div>
+
+        <div className="bg-white rounded-3xl border border-[#d8e5e2] p-6 sm:p-8 shadow-sm space-y-3">
+          <h2 className="text-base font-bold text-[#152f34] border-b border-[#d8e5e2] pb-3 flex items-center gap-2">
+            <Award className="w-4 h-4 text-[#167b78]" />
+            <span>{isRu ? 'Образование и квалификация' : 'Ta\'lim va malaka'}</span>
+          </h2>
+          <p className="text-xs sm:text-sm text-[#52696e] leading-relaxed whitespace-pre-line">
+            {education || (isRu ? 'Высшее медицинское образование.' : 'Oliy tibbiy ma\'lumot.')}
+          </p>
+        </div>
+      </div>
+
+      {/* Services Provided by Doctor */}
+      {doctor.services && doctor.services.length > 0 && (
+        <div className="bg-white rounded-3xl border border-[#d8e5e2] p-6 sm:p-8 shadow-sm space-y-4">
+          <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
+            <Stethoscope className="w-4 h-4 text-[#167b78]" />
+            <span>{isRu ? 'Оказываемые услуги' : 'Ko\'rsatiladigan xizmatlar'}</span>
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {doctor.services.map((ds: any) => {
+              const s = ds.service;
+              if (!s) return null;
+              const sName = isRu && s.nameRu ? s.nameRu : s.nameUz;
+              const sPrice = s.priceFrom ? `${(s.priceFrom > 1000000 ? s.priceFrom / 100 : s.priceFrom).toLocaleString('uz-UZ')} ${t.common.uzs}` : '';
+
+              return (
+                <div
+                  key={s.id}
+                  className="p-4 rounded-2xl border border-[#d8e5e2] bg-[#f4f9f7] hover:bg-white hover:border-[#167b78]/40 transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <h4 className="text-xs font-bold text-[#152f34] mb-1">{sName}</h4>
+                    <span className="text-[11px] text-[#52696e] block">{s.durationMinutes} {isRu ? 'минут' : 'daqiqa'}</span>
+                  </div>
+                  {sPrice && (
+                    <div className="pt-2 mt-2 border-t border-[#d8e5e2] flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-[#167b78]">{sPrice}</span>
                       <Link
-                        href={`/services/${s.slug}`}
-                        className="text-[11px] font-bold text-teal-700 hover:underline"
+                        href={`/booking?doctorId=${doctor.id}&serviceId=${s.id}`}
+                        className="text-[11px] font-bold text-[#167b78] hover:underline"
                       >
-                        {language === 'uz' ? 'Batafsil' : 'Подробнее'}
+                        {isRu ? 'Записаться →' : 'Yozilish →'}
                       </Link>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        )}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,33 +2,49 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { MapPin, Phone, Mail, Clock, ShieldCheck, Heart } from 'lucide-react';
+import { MapPin, Phone, Mail, Clock, ShieldCheck, Stethoscope } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
 
 export const Footer: React.FC = () => {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [clinicLogo, setClinicLogo] = useState<string | null>(null);
   const [clinicPhone, setClinicPhone] = useState<string>('+998 71 200 45 45');
   const [clinicEmail, setClinicEmail] = useState<string>('info@dentacare.uz');
+  const [branches, setBranches] = useState<any[]>([]);
 
   useEffect(() => {
+    let isMounted = true;
     api.getClinicInfo()
       .then((info) => {
+        if (!isMounted) return;
         if (info?.logo) setClinicLogo(info.logo);
         if (info?.phone) setClinicPhone(info.phone);
         if (info?.email) setClinicEmail(info.email);
       })
       .catch(() => {});
+
+    api.getBranches()
+      .then((data) => {
+        if (!isMounted) return;
+        if (Array.isArray(data)) setBranches(data.slice(0, 3));
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
+  const isRu = language === 'ru';
+
   return (
-    <footer className="bg-slate-950 text-slate-400 pt-16 pb-12 border-t border-slate-900">
+    <footer className="bg-[#0b2228] text-[#e8f3f2] pt-16 pb-12 border-t border-[#12353b]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 mb-12">
           {/* Brand Info */}
-          <div>
-            <div className="flex items-center gap-2.5 mb-4">
+          <div className="space-y-4">
+            <Link href="/" className="inline-flex items-center gap-2.5">
               {clinicLogo ? (
                 <img
                   src={clinicLogo}
@@ -37,106 +53,126 @@ export const Footer: React.FC = () => {
                 />
               ) : (
                 <>
-                  <div className="w-9 h-9 rounded-xl bg-teal-600 flex items-center justify-center text-white">
-                    <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                      <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
-                    </svg>
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#167b78] to-[#2bb49c] flex items-center justify-center text-white shadow-md">
+                    <Stethoscope className="w-5 h-5" />
                   </div>
                   <span className="text-2xl font-bold text-white tracking-tight">
-                    Denta<span className="text-teal-400">Care</span>
+                    Denta<span className="text-[#2bb49c]">Care</span>
                   </span>
                 </>
               )}
-            </div>
-            <p className="text-sm leading-relaxed text-slate-400 mb-4">
-              {t.common.tagline}. Zamonaviy stomatologiya, tajribali shifokorlar va qulay narxlar.
+            </Link>
+
+            <p className="text-sm leading-relaxed text-[#b2c9ca]">
+              {isRu
+                ? 'Современная стоматологическая клиника. Безболезненное лечение, передовые технологии и забота о каждом пациенте.'
+                : 'Zamonaviy stomatologiya klinikasi. Og\'riqsiz muolaja, ilg\'or texnologiyalar va har bir bemorga samimiy e\'tibor.'}
             </p>
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <ShieldCheck className="w-4 h-4 text-teal-400" />
-              <span>O&apos;zbekiston SSV Litsenziyasi № 7482910</span>
+
+            <div className="flex items-center gap-2 text-xs text-[#b2c9ca]/80 pt-1">
+              <ShieldCheck className="w-4 h-4 text-[#2bb49c] shrink-0" />
+              <span>{isRu ? 'Лицензия Минздрава РУз № 7482910' : 'O\'zbekiston SSV Litsenziyasi № 7482910'}</span>
             </div>
           </div>
 
           {/* Quick Links */}
           <div>
-            <h4 className="text-sm font-bold uppercase tracking-wider text-white mb-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-white mb-4">
               {t.nav.services}
             </h4>
-            <ul className="space-y-2.5 text-sm">
+            <ul className="space-y-2.5 text-sm text-[#b2c9ca]">
               <li>
-                <Link href="/services" className="hover:text-teal-300 transition-colors">
-                  Terapiya va karies davolash
+                <Link href="/services" className="hover:text-white transition-colors">
+                  {isRu ? 'Терапия и лечение кариеса' : 'Terapiya va karies davolash'}
                 </Link>
               </li>
               <li>
-                <Link href="/services" className="hover:text-teal-300 transition-colors">
-                  Breketlar va ortodontiya
+                <Link href="/services" className="hover:text-white transition-colors">
+                  {isRu ? 'Ортодонтия и брекеты' : 'Ortodontiya va breketlar'}
                 </Link>
               </li>
               <li>
-                <Link href="/services" className="hover:text-teal-300 transition-colors">
-                  Dental implantatsiya
+                <Link href="/services" className="hover:text-white transition-colors">
+                  {isRu ? 'Дентальная имплантация' : 'Dental implantatsiya'}
                 </Link>
               </li>
               <li>
-                <Link href="/services" className="hover:text-teal-300 transition-colors">
-                  Professional tozalash va AirFlow
+                <Link href="/services" className="hover:text-white transition-colors">
+                  {isRu ? 'Профессиональная чистка' : 'Professional tozalash va gigiyena'}
                 </Link>
               </li>
               <li>
-                <Link href="/services" className="hover:text-teal-300 transition-colors">
-                  Bolalar stomatologiyasi
+                <Link href="/prices" className="hover:text-white transition-colors text-xs text-[#2bb49c]">
+                  {isRu ? 'Посмотреть все цены →' : 'Barcha narxlarni ko\'rish →'}
                 </Link>
               </li>
             </ul>
           </div>
 
-          {/* Branches */}
+          {/* Real Branches from Database */}
           <div>
-            <h4 className="text-sm font-bold uppercase tracking-wider text-white mb-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-white mb-4">
               {t.common.branches}
             </h4>
-            <div className="space-y-3 text-sm">
-              <div>
-                <p className="font-semibold text-slate-200">Chilonzor filiali</p>
-                <p className="text-xs text-slate-400 flex items-start gap-1.5 mt-1">
-                  <MapPin className="w-3.5 h-3.5 text-teal-400 shrink-0 mt-0.5" />
-                  <span>Chilonzor tumani, Bunyodkor shoh ko&apos;chasi 42</span>
-                </p>
-              </div>
-              <div className="pt-2">
-                <p className="font-semibold text-slate-200">Yunusobod filiali</p>
-                <p className="text-xs text-slate-400 flex items-start gap-1.5 mt-1">
-                  <MapPin className="w-3.5 h-3.5 text-teal-400 shrink-0 mt-0.5" />
-                  <span>Yunusobod tumani, Amir Temur ko&apos;chasi 108</span>
-                </p>
-              </div>
+            <div className="space-y-4 text-sm text-[#b2c9ca]">
+              {branches.length > 0 ? (
+                branches.map((b) => {
+                  const bName = isRu && b.nameRu ? b.nameRu : b.nameUz;
+                  const bAddress = isRu && b.addressRu ? b.addressRu : b.addressUz;
+                  return (
+                    <div key={b.id} className="space-y-1">
+                      <p className="font-semibold text-white">{bName}</p>
+                      <p className="text-xs text-[#b2c9ca] flex items-start gap-1.5 leading-relaxed">
+                        <MapPin className="w-3.5 h-3.5 text-[#2bb49c] shrink-0 mt-0.5" />
+                        <span>{bAddress}</span>
+                      </p>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="space-y-2">
+                  <p className="font-semibold text-white">Chilonzor & Yunusobod</p>
+                  <p className="text-xs text-[#b2c9ca]">Toshkent shahri bo&apos;ylab filiallarimiz mavjud.</p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Contacts & Working Hours */}
+          {/* Contact Details */}
           <div>
-            <h4 className="text-sm font-bold uppercase tracking-wider text-white mb-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-white mb-4">
               {t.nav.contacts}
             </h4>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-center gap-2">
-                <Phone className="w-4 h-4 text-teal-400" />
-                <a href={`tel:${clinicPhone.replace(/\s+/g, '')}`} className="hover:text-teal-300 transition-colors">
+            <ul className="space-y-3 text-sm text-[#b2c9ca]">
+              <li className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0">
+                  <Phone className="w-3.5 h-3.5" />
+                </div>
+                <a
+                  href={`tel:${clinicPhone.replace(/\s+/g, '')}`}
+                  className="hover:text-white transition-colors font-medium text-white"
+                >
                   {clinicPhone}
                 </a>
               </li>
-              <li className="flex items-center gap-2">
-                <Mail className="w-4 h-4 text-teal-400" />
-                <a href={`mailto:${clinicEmail}`} className="hover:text-teal-300 transition-colors">
+              <li className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0">
+                  <Mail className="w-3.5 h-3.5" />
+                </div>
+                <a
+                  href={`mailto:${clinicEmail}`}
+                  className="hover:text-white transition-colors"
+                >
                   {clinicEmail}
                 </a>
               </li>
-              <li className="flex items-start gap-2">
-                <Clock className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
-                <span className="text-xs">
-                  Dushanba - Shanba: 09:00 - 20:00<br />
-                  Yakshanba: 10:00 - 16:00
+              <li className="flex items-start gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-[#12353b] flex items-center justify-center text-[#2bb49c] shrink-0 mt-0.5">
+                  <Clock className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs leading-relaxed">
+                  {isRu ? 'Пн - Сб: 09:00 - 20:00' : 'Dushanba - Shanba: 09:00 - 20:00'}<br />
+                  {isRu ? 'Вс: 10:00 - 16:00' : 'Yakshanba: 10:00 - 16:00'}
                 </span>
               </li>
             </ul>
@@ -144,17 +180,20 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* Bottom bar */}
-        <div className="pt-8 border-t border-slate-900 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
-          <p>© {new Date().getFullYear()} DentaCare. Barcha huquqlar himoyalangan.</p>
+        <div className="pt-8 border-t border-[#12353b] flex flex-col sm:flex-row items-center justify-between text-xs text-[#b2c9ca]/70 gap-4">
+          <p>© {new Date().getFullYear()} DentaCare. {isRu ? 'Все права защищены.' : 'Barcha huquqlar himoyalangan.'}</p>
           <div className="flex items-center gap-6">
-            <Link href="/privacy" className="hover:text-teal-400 transition-colors">
-              Maxfiylik siyosati
+            <Link href="/about" className="hover:text-white transition-colors">
+              {t.nav.about}
             </Link>
-            <Link href="/terms" className="hover:text-teal-400 transition-colors">
-              Qabul qoidalari
+            <Link href="/faq" className="hover:text-white transition-colors">
+              FAQ
             </Link>
-            <Link href="/admin/login" className="hover:text-teal-400 transition-colors">
-              Xodimlar uchun
+            <Link href="/reviews" className="hover:text-white transition-colors">
+              {t.nav.reviews}
+            </Link>
+            <Link href="/admin/login" className="hover:text-[#2bb49c] transition-colors font-semibold">
+              {t.nav.admin}
             </Link>
           </div>
         </div>

@@ -85,12 +85,25 @@ export interface Translations {
   booking: {
     title: string;
     subtitle: string;
+    stepDate: string;
     stepBranch: string;
     stepService: string;
     stepDoctor: string;
     stepTime: string;
     stepDetails: string;
     stepConfirmation: string;
+    branchRecommendedBadge: string;
+    branchRecommendedDesc: string;
+    branchOtherNote: string;
+    doctorsAvailableOnDate: string;
+    doctorsAvailableOnDateDesc: string;
+    doctorWorksTodayBadge: string;
+    doctorNotWorkingToday: string;
+    selectDoctorFirst: string;
+    selectServiceFirst: string;
+    selectDateFirst: string;
+    selectSlotFirst: string;
+    selectBranchFirst: string;
     selectBranch: string;
     selectService: string;
     selectDoctor: string;
@@ -265,13 +278,26 @@ const translations: Record<Language, Translations> = {
     },
     booking: {
       title: 'Online qabulga yozilish',
-      subtitle: 'Qulay filial, xizmat va shifokorni tanlab, bir necha daqiqada qabulga yoziling',
-      stepBranch: 'Filial',
+      subtitle: 'Qulay sana, xizmat va shifokorni tanlab, bir necha daqiqada qabulga yoziling',
+      stepDate: 'Sana',
       stepService: 'Xizmat',
       stepDoctor: 'Shifokor',
       stepTime: 'Vaqt',
+      stepBranch: 'Filial',
       stepDetails: 'Ma\'lumotlar',
       stepConfirmation: 'Tasdiq',
+      branchRecommendedBadge: 'Tavsiya etiladi (Shifokor ushbu kunda shu filialda qabul qiladi)',
+      branchRecommendedDesc: 'Shifokor ushbu kunda aynan shu filialda qabul qiladi',
+      branchOtherNote: 'Shifokor ushbu kunda tavsiya etilgan filialda qabul olib boradi',
+      doctorsAvailableOnDate: 'Ushbu kunda qabul qiluvchi shifokorlar',
+      doctorsAvailableOnDateDesc: 'Tanlangan sana va xizmatlar bo\'yicha qabul qiluvchi mutaxassislar',
+      doctorWorksTodayBadge: 'Ushbu kunda qabul qiladi',
+      doctorNotWorkingToday: 'Bu kunda qabul qilmaydi',
+      selectDoctorFirst: 'Avval shifokorni tanlang',
+      selectServiceFirst: 'Avval kamida bitta xizmatni tanlang',
+      selectDateFirst: 'Avval qabul sanasini tanlang',
+      selectSlotFirst: 'Avval qabul vaqtini tanlang',
+      selectBranchFirst: 'Avval filialni tanlang',
       selectBranch: 'Klinika filialini tanlang',
       selectService: 'Kerakli xizmatni tanlang',
       selectDoctor: 'Shifokorni tanlang',
@@ -444,13 +470,26 @@ const translations: Record<Language, Translations> = {
     },
     booking: {
       title: 'Онлайн запись на прием',
-      subtitle: 'Выберите удобный филиал, услугу и специалиста, чтобы забронировать время онлайн',
-      stepBranch: 'Филиал',
+      subtitle: 'Выберите удобную дату, услугу и врача, чтобы забронировать время онлайн',
+      stepDate: 'Дата',
       stepService: 'Услуга',
       stepDoctor: 'Специалист',
       stepTime: 'Время',
+      stepBranch: 'Филиал',
       stepDetails: 'Контакты',
       stepConfirmation: 'Подтверждение',
+      branchRecommendedBadge: 'Рекомендуется (Врач принимает в этом филиале в этот день)',
+      branchRecommendedDesc: 'Врач принимает именно в этом филиале в выбранную дату',
+      branchOtherNote: 'В этот день прием врача проходит в рекомендуемом филиале',
+      doctorsAvailableOnDate: 'Врачи, принимающие в этот день',
+      doctorsAvailableOnDateDesc: 'Специалисты, принимающие в выбранную дату по указанным услугам',
+      doctorWorksTodayBadge: 'Принимает в этот день',
+      doctorNotWorkingToday: 'В этот день приема нет',
+      selectDoctorFirst: 'Сначала выберите специалиста',
+      selectServiceFirst: 'Сначала выберите хотя бы одну услугу',
+      selectDateFirst: 'Сначала выберите дату визита',
+      selectSlotFirst: 'Сначала выберите время приёма',
+      selectBranchFirst: 'Сначала выберите филиал',
       selectBranch: 'Выберите филиал клиники',
       selectService: 'Выберите необходимую услугу',
       selectDoctor: 'Выберите лечащего врача',
