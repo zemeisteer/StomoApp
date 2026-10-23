@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { BookOpen, Calendar, Clock, ArrowRight, User, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { formatClinicDate } from '../../lib/dateFormat';
 
 export default function ArticlesPage() {
   const { t, language } = useI18n();
@@ -72,7 +73,7 @@ export default function ArticlesPage() {
                         {article.category || (isRu ? 'Профилактика' : 'Profilaktika')}
                       </span>
                       <span>•</span>
-                      <span>{new Date(article.publishedAt || article.createdAt).toLocaleDateString(isRu ? 'ru-RU' : 'uz-UZ')}</span>
+                      <span>{formatClinicDate(article.publishedAt || article.createdAt, isRu ? 'ru' : 'uz')}</span>
                     </div>
 
                     <h2 className="text-base font-bold text-[#152f34] group-hover:text-[#167b78] transition-colors mb-2 leading-snug">

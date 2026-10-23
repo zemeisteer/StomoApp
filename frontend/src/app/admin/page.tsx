@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { PhoneInput } from '../../components/PhoneInput';
+import { CustomSelect } from '../../components/CustomSelect';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -492,7 +493,7 @@ export default function AdminOverviewPage() {
                   ? (isUz ? 'Shifokor xonasi' : 'Кабинет врача')
                   : (isUz ? 'Qabulxona / Administrator' : 'Регистратура / Администратор')}
               </span>
-              <span className="text-xs text-[#52696e]">
+              <span suppressHydrationWarning className="text-xs text-[#52696e]">
                 {formatClinicDate(new Date().toISOString(), language, { includeWeekday: true })}
               </span>
             </div>
@@ -527,18 +528,22 @@ export default function AdminOverviewPage() {
 
             {/* Doctor Filter (if not doctor) */}
             {!isDoctor && (
-              <select
-                value={filterDoctorId}
-                onChange={(e) => setFilterDoctorId(e.target.value)}
-                className="text-xs py-2 px-3 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] min-w-[150px]"
-              >
-                <option value="">{isUz ? 'Barcha shifokorlar' : 'Все врачи'}</option>
-                {doctors.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {isUz ? `Dr. ${d.firstNameUz} ${d.lastNameUz}` : `Д-р ${d.firstNameRu} ${d.lastNameRu}`}
-                  </option>
-                ))}
-              </select>
+              <div className="min-w-[180px]">
+                <CustomSelect
+                  id="admin-filter-doctor-select"
+                  value={filterDoctorId}
+                  onChange={(val) => setFilterDoctorId(val)}
+                  placeholder={isUz ? 'Barcha shifokorlar' : 'Все врачи'}
+                  options={[
+                    { value: '', label: isUz ? 'Barcha shifokorlar' : 'Все врачи' },
+                    ...doctors.map((d) => ({
+                      value: d.id,
+                      label: isUz ? `Dr. ${d.firstNameUz} ${d.lastNameUz}` : `Д-р ${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}`,
+                    })),
+                  ]}
+                  locale={isUz ? 'uz' : 'ru'}
+                />
+              </div>
             )}
 
             {/* Refresh */}
@@ -1092,7 +1097,7 @@ export default function AdminOverviewPage() {
                     <h2 className="text-base font-extrabold text-[#152f34]">
                       {isUz ? 'Kunlik qabullar taqvimi' : 'Ежедневный календарь приемов'}
                     </h2>
-                    <p className="text-xs text-[#52696e]">
+                    <p suppressHydrationWarning className="text-xs text-[#52696e]">
                       {formatClinicDate(new Date().toISOString(), language, { includeWeekday: false })}
                     </p>
                   </div>
@@ -1179,6 +1184,12 @@ export default function AdminOverviewPage() {
                                   {isUz ? 'Yakunlash' : 'Завершить'}
                                 </button>
                               )}
+                              {appt.status === 'COMPLETED' && (
+                                <span className="px-2.5 py-1 bg-emerald-600/90 text-white rounded-lg text-[11px] font-bold shadow-xs flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>{isUz ? 'Yakunlangan' : 'Завершено'}</span>
+                                </span>
+                              )}
                             </div>
 
                             <Link
@@ -1222,7 +1233,7 @@ export default function AdminOverviewPage() {
                       queueTab === 'ALL' ? 'bg-white text-[#152f34] shadow-xs' : 'text-[#52696e]'
                     }`}
                   >
-                    {isUz ? 'Barchasi' : 'Все'} ({queueItems.length})
+                    {isUz ? 'Barchasi' : 'Все'} ({filteredToday.length})
                   </button>
                   <button
                     type="button"
@@ -1242,6 +1253,15 @@ export default function AdminOverviewPage() {
                   >
                     {isUz ? 'Kresloda' : 'В кресле'} ({inTreatmentCount})
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setQueueTab('COMPLETED')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
+                      queueTab === 'COMPLETED' ? 'bg-white text-[#152f34] shadow-xs' : 'text-[#52696e]'
+                    }`}
+                  >
+                    {isUz ? 'Tugallanganlar' : 'Завершенные'} ({completedTodayCount})
+                  </button>
                 </div>
 
                 {queueItems.length === 0 ? (
@@ -1250,9 +1270,10 @@ export default function AdminOverviewPage() {
                   </p>
                 ) : (
                   <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
-                    {queueItems.slice(0, 10).map((item) => {
+                    {queueItems.slice(0, 15).map((item) => {
                       const isWaiting = item.status === 'CHECKED_IN' && !item.actualStartTime;
                       const isInChair = item.status === 'CHECKED_IN' && Boolean(item.actualStartTime);
+                      const isCompleted = item.status === 'COMPLETED';
 
                       return (
                         <div
@@ -1277,16 +1298,26 @@ export default function AdminOverviewPage() {
 
                           <div className="shrink-0">
                             {isInChair ? (
-                              <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 font-bold text-[11px]">
-                                {isUz ? 'Kresloda' : 'В кресле'}
+                              <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 font-bold text-[11px] flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                                <span>{isUz ? 'Kresloda' : 'В кресле'}</span>
                               </span>
                             ) : isWaiting ? (
                               <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 font-bold text-[11px]">
                                 {isUz ? 'Kutmoqda' : 'Ожидает'}
                               </span>
+                            ) : isCompleted ? (
+                              <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px] flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600 inline" />
+                                <span>{isUz ? 'Tugallandi' : 'Завершено'}</span>
+                              </span>
+                            ) : item.status === 'CONFIRMED' ? (
+                              <span className="px-2.5 py-1 rounded-full bg-teal-100 text-teal-800 font-bold text-[11px]">
+                                {isUz ? 'Kutilmoqda' : 'Ожидается'}
+                              </span>
                             ) : (
-                              <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px]">
-                                {isUz ? 'Yetib keldi' : 'Прибыл(а)'}
+                              <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 font-bold text-[11px]">
+                                {item.status}
                               </span>
                             )}
                           </div>
@@ -1352,19 +1383,17 @@ export default function AdminOverviewPage() {
                     <label className="text-[11px] font-bold text-[#52696e] block mb-1">
                       {isUz ? 'Shifokor' : 'Врач'}
                     </label>
-                    <select
+                    <CustomSelect
+                      id="admin-quickreg-doctor-select"
                       value={regDoctorId}
-                      onChange={(e) => setRegDoctorId(e.target.value)}
-                      className="w-full text-xs py-2 px-3 bg-white border border-[#d8e5e2] rounded-xl text-[#152f34]"
-                      required
-                    >
-                      <option value="">{isUz ? 'Shifokorni tanlang' : 'Выберите врача'}</option>
-                      {doctors.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {isUz ? 'Dr.' : 'Др.'} {isUz ? `${d.firstNameUz} ${d.lastNameUz}` : `${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}`}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setRegDoctorId(val)}
+                      placeholder={isUz ? 'Shifokorni tanlang' : 'Выберите врача'}
+                      options={doctors.map((d) => ({
+                        value: d.id,
+                        label: `${isUz ? 'Dr.' : 'Др.'} ${isUz ? `${d.firstNameUz} ${d.lastNameUz}` : `${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}`}`,
+                      }))}
+                      locale={isUz ? 'uz' : 'ru'}
+                    />
                   </div>
 
                   <button

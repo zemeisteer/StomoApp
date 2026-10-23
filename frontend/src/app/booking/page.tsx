@@ -26,6 +26,7 @@ import {
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { PhoneInput } from '../../components/PhoneInput';
+import { CustomDatePicker } from '../../components/CustomDatePicker';
 import { normalizeUzPhone } from '../../lib/phone';
 import { formatWorkingHours } from '../../lib/dateFormat';
 
@@ -330,6 +331,13 @@ function BookingContent() {
   // Stable Idempotency Key
   const [idempotencyKey, setIdempotencyKey] = useState<string>('');
 
+  // Initial load retry trigger
+  const [loadTrigger, setLoadTrigger] = useState<number>(0);
+  const retryInitialLoad = () => {
+    setErrorMessage(null);
+    setLoadTrigger((prev) => prev + 1);
+  };
+
   // Confirmation result
   const [bookingResult, setBookingResult] = useState<any | null>(null);
   const [copiedToken, setCopiedToken] = useState<boolean>(false);
@@ -342,6 +350,7 @@ function BookingContent() {
     async function loadData() {
       try {
         setIsLoadingData(true);
+        setErrorMessage(null);
         const [branchesRes, servicesRes, doctorsRes, clinicRes] = await Promise.all([
           api.getBranches(),
           api.getServices(),
@@ -399,7 +408,7 @@ function BookingContent() {
       }
     }
     loadData();
-  }, [searchParams, t.common.error]);
+  }, [searchParams, loadTrigger, t.common.error]);
 
   // Derived selected services
   const selectedServices = useMemo(() => {
@@ -441,6 +450,38 @@ function BookingContent() {
   const selectedDoctorObj = useMemo(() => {
     return doctors.find((d) => d.id === selectedDoctorId);
   }, [doctors, selectedDoctorId]);
+
+  // Branches where selected doctor is assigned (assigned branches, active schedules, or overtime exceptions)
+  const doctorAssignedBranchIds = useMemo(() => {
+    if (!selectedDoctorObj) return [];
+    const set = new Set<string>();
+    if (Array.isArray(selectedDoctorObj.branches)) {
+      selectedDoctorObj.branches.forEach((b: any) => {
+        const id = b.branchId || b.id;
+        if (id) set.add(id);
+      });
+    }
+    if (Array.isArray(selectedDoctorObj.schedules)) {
+      selectedDoctorObj.schedules.forEach((s: any) => {
+        if (s.branchId && s.isActive !== false) {
+          set.add(s.branchId);
+        }
+      });
+    }
+    if (Array.isArray(selectedDoctorObj.exceptions)) {
+      selectedDoctorObj.exceptions.forEach((e: any) => {
+        if (e.branchId && e.type === 'OVERTIME') {
+          set.add(e.branchId);
+        }
+      });
+    }
+    return Array.from(set);
+  }, [selectedDoctorObj]);
+
+  const doctorAvailableBranches = useMemo(() => {
+    if (!selectedDoctorObj || doctorAssignedBranchIds.length === 0) return branches;
+    return branches.filter((b) => doctorAssignedBranchIds.includes(b.id));
+  }, [branches, selectedDoctorObj, doctorAssignedBranchIds]);
 
   // Helper to check if doctor provides all selected services
   const doctorProvidesSelectedServices = (doc: any) => {
@@ -506,16 +547,51 @@ function BookingContent() {
     return branches.find((b) => b.id === selectedBranchId) || recommendedBranchObj || null;
   }, [branches, selectedBranchId, recommendedBranchObj]);
 
-  // Slot selection handler: binds slot time, branch, doctor, date, services, and server calculation
+  // Centralized invalidation path for any selection change (date, service, doctor, branch)
+  const invalidateSlotSelection = () => {
+    slotsRequestIdRef.current++;
+    setSelectedSlotTime('');
+    setBoundSelection(null);
+    setServerCalc(null);
+    setAvailableSlots([]);
+    setIdempotencyKey('');
+    setBranchSwitchNotice(null);
+    // Note: patient contact fields (patientName, patientPhone, patientEmail, patientNote) are deliberately preserved!
+  };
+
+  // Slot selection handler: strictly binds slot time, branch, doctor, date, services, and server calculation
   const handleSelectSlot = (slot: any) => {
+    if (!slot || !slot.available || isLoadingSlots) {
+      return;
+    }
+
+    const sortedCurrentServices = [...selectedServiceIds].sort().join(',');
+    const currentReqKey = `${selectedBranchId || ''}|${selectedDoctorId}|${selectedDate}|${sortedCurrentServices}`;
+
+    if (!serverCalc || serverCalc.key !== currentReqKey) {
+      setErrorMessage(t.booking.selectionMismatchWarning);
+      return;
+    }
+
     const slotBranchId = slot.branchId || resolveBranchForSlotTime(slot.startTime, selectedDoctorObj, selectedDate, clinicSettings.timezone) || selectedBranchId;
+    if (!slotBranchId) {
+      setErrorMessage(t.booking.selectBranchFirst);
+      return;
+    }
+
+    if (
+      typeof serverCalc.priceFrom !== 'number' ||
+      typeof serverCalc.durationMinutes !== 'number' ||
+      serverCalc.durationMinutes <= 0
+    ) {
+      setErrorMessage('Hisoblash ma\'lumotlari noto\'g\'ri');
+      return;
+    }
+
     setSelectedSlotTime(slot.startTime);
     setSelectedBranchId(slotBranchId);
     setBranchSwitchNotice(null);
-
-    const calcPrice = typeof serverCalc?.priceFrom === 'number' ? serverCalc.priceFrom : fallbackTotalPrice;
-    const calcDur = serverCalc?.durationMinutes || fallbackTotalDuration;
-    const calcName = serverCalc?.serviceName || selectedServices.map((s) => s.nameUz).join(', ');
+    setErrorMessage(null);
 
     setBoundSelection({
       slotTime: slot.startTime,
@@ -524,10 +600,10 @@ function BookingContent() {
       date: selectedDate,
       serviceIds: [...selectedServiceIds],
       serverCalc: {
-        durationMinutes: calcDur,
-        bufferMinutes: serverCalc?.bufferMinutes ?? 5,
-        priceFrom: calcPrice,
-        serviceName: calcName,
+        durationMinutes: serverCalc.durationMinutes,
+        bufferMinutes: serverCalc.bufferMinutes ?? 0,
+        priceFrom: serverCalc.priceFrom,
+        serviceName: serverCalc.serviceName,
       },
     });
   };
@@ -538,9 +614,8 @@ function BookingContent() {
       goToStep(6);
       return;
     }
-    // Invalidate old slot & calculation
-    setSelectedSlotTime('');
-    setBoundSelection(null);
+    // Invalidate old slot, calculation, pending requests, and submission identity immediately
+    invalidateSlotSelection();
     setSelectedBranchId(newBranchId);
     setBranchSwitchNotice(newBranchId);
     setStep(4);
@@ -604,13 +679,8 @@ function BookingContent() {
 
   // Date selection handler (Step 1)
   const handleSelectDate = (dateStr: string) => {
+    invalidateSlotSelection();
     setSelectedDate(dateStr);
-    setSelectedSlotTime('');
-    setBoundSelection(null);
-    setIdempotencyKey('');
-    setServerCalc(null);
-    slotsRequestIdRef.current++;
-    setAvailableSlots([]);
 
     // Check if previously selected doctor still works on this new date
     if (selectedDoctorObj && !isDoctorWorkingOnDate(dateStr, selectedDoctorObj, selectedBranchId || undefined)) {
@@ -620,12 +690,7 @@ function BookingContent() {
 
   // Service toggle handler (Step 2)
   const toggleService = (serviceId: string) => {
-    setSelectedSlotTime('');
-    setBoundSelection(null);
-    setIdempotencyKey('');
-    setServerCalc(null);
-    slotsRequestIdRef.current++;
-    setAvailableSlots([]);
+    invalidateSlotSelection();
 
     setSelectedServiceIds((prev) => {
       let updated: string[];
@@ -657,13 +722,8 @@ function BookingContent() {
 
   // Doctor selection handler (Step 3) - PRESERVES pre-selected branch if doctor works there!
   const handleSelectDoctor = (doctorId: string) => {
+    invalidateSlotSelection();
     setSelectedDoctorId(doctorId);
-    setSelectedSlotTime('');
-    setBoundSelection(null);
-    setIdempotencyKey('');
-    setServerCalc(null);
-    slotsRequestIdRef.current++;
-    setAvailableSlots([]);
 
     const doc = doctors.find((d) => d.id === doctorId);
     if (doc) {
@@ -697,7 +757,7 @@ function BookingContent() {
 
       try {
         setIsLoadingSlots(true);
-        setErrorMessage(null);
+        setErrorMessage((prev) => (prev === t.booking.slotConflictNotice ? prev : null));
 
         const res = await api.getAvailableSlots(
           selectedDoctorId,
@@ -793,13 +853,20 @@ function BookingContent() {
       return;
     }
 
-    // Require authoritative bound selection matching current state
+    // Require authoritative bound selection matching current state and normalized serviceIds set
+    const sortedBoundServices = boundSelection ? [...boundSelection.serviceIds].sort().join(',') : '';
+    const sortedCurrentServices = [...selectedServiceIds].sort().join(',');
+    const currentReqKey = `${selectedBranchId || ''}|${selectedDoctorId}|${selectedDate}|${sortedCurrentServices}`;
+
     if (
       !boundSelection ||
       boundSelection.slotTime !== selectedSlotTime ||
       boundSelection.branchId !== selectedBranchId ||
       boundSelection.doctorId !== selectedDoctorId ||
-      boundSelection.date !== selectedDate
+      boundSelection.date !== selectedDate ||
+      sortedBoundServices !== sortedCurrentServices ||
+      !serverCalc ||
+      serverCalc.key !== currentReqKey
     ) {
       setErrorMessage(t.booking.selectionMismatchWarning);
       setStep(4);
@@ -826,31 +893,49 @@ function BookingContent() {
         idempotencyKey: currentKey,
       });
 
-      const confirmedBranch = branches.find((b) => b.id === boundSelection.branchId);
-      const branchDisplay = confirmedBranch
-        ? (language === 'ru' && confirmedBranch.nameRu ? confirmedBranch.nameRu : confirmedBranch.nameUz)
-        : (result.branchName || 'Asosiy filial');
+      // Use actual saved appointment from server response as authoritative truth (preserving legitimate zero values)
+      const confirmedPrice =
+        result.servicePriceFrom ??
+        boundSelection.serverCalc.priceFrom;
 
-      const confirmedPrice = typeof boundSelection.serverCalc.priceFrom === 'number'
-        ? boundSelection.serverCalc.priceFrom
-        : (result.servicePriceFrom ?? 0);
+      const confirmedDuration =
+        result.durationMinutes ??
+        boundSelection.serverCalc.durationMinutes;
+
+      const confirmedBuffer =
+        result.bufferMinutes ??
+        boundSelection.serverCalc.bufferMinutes ??
+        0;
+
+      const matchedBranch = branches.find((b) => b.id === boundSelection.branchId);
+      const confirmedBranchName =
+        (matchedBranch
+          ? (language === 'ru' && matchedBranch.nameRu ? matchedBranch.nameRu : matchedBranch.nameUz)
+          : result.branchName) ||
+        result.branchName ||
+        'Asosiy filial';
+
+      const confirmedDoctorName =
+        (selectedDoctorObj
+          ? `Dr. ${language === 'ru' && selectedDoctorObj.firstNameRu ? selectedDoctorObj.firstNameRu : selectedDoctorObj.firstNameUz} ${
+              language === 'ru' && selectedDoctorObj.lastNameRu ? selectedDoctorObj.lastNameRu : selectedDoctorObj.lastNameUz
+            }`
+          : result.doctorName) ||
+        result.doctorName ||
+        'Shifokor';
+
+      const confirmedServiceName =
+        result.serviceName ||
+        boundSelection.serverCalc.serviceName ||
+        selectedServices.map((s) => (language === 'ru' && s.nameRu ? s.nameRu : s.nameUz)).join(', ');
 
       setBookingResult({
         ...result,
-        doctorName:
-          result.doctorName ||
-          (selectedDoctorObj
-            ? `Dr. ${language === 'ru' && selectedDoctorObj.firstNameRu ? selectedDoctorObj.firstNameRu : selectedDoctorObj.firstNameUz} ${
-                language === 'ru' && selectedDoctorObj.lastNameRu ? selectedDoctorObj.lastNameRu : selectedDoctorObj.lastNameUz
-              }`
-            : 'Shifokor'),
-        branchName: branchDisplay,
-        serviceName:
-          result.serviceName ||
-          boundSelection.serverCalc.serviceName ||
-          selectedServices.map((s) => (language === 'ru' && s.nameRu ? s.nameRu : s.nameUz)).join(', '),
-        durationMinutes: result.durationMinutes || boundSelection.serverCalc.durationMinutes,
-        bufferMinutes: result.bufferMinutes || boundSelection.serverCalc.bufferMinutes,
+        doctorName: confirmedDoctorName,
+        branchName: confirmedBranchName,
+        serviceName: confirmedServiceName,
+        durationMinutes: confirmedDuration,
+        bufferMinutes: confirmedBuffer,
         servicePriceFrom: confirmedPrice,
       });
       setStep(7);
@@ -864,11 +949,7 @@ function BookingContent() {
       if (isConflict) {
         // PRESERVE patientName, patientPhone, patientEmail, patientNote!
         setErrorMessage(t.booking.slotConflictNotice);
-        setSelectedSlotTime('');
-        setBoundSelection(null);
-        setIdempotencyKey('');
-        slotsRequestIdRef.current++;
-        setAvailableSlots([]);
+        invalidateSlotSelection();
         setStep(4);
       } else {
         setErrorMessage(err?.message || t.common.error);
@@ -1008,11 +1089,21 @@ function BookingContent() {
 
         {/* Error Banner */}
         {errorMessage && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 text-sm text-red-800 animate-fade-in shadow-sm">
-            <AlertCircle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
-            <div className="flex-1">
+          <div id="booking-error-banner" className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center justify-between gap-3 text-sm text-red-800 animate-fade-in shadow-sm">
+            <div className="flex items-start gap-3 flex-1">
+              <AlertCircle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
               <p className="font-semibold">{errorMessage}</p>
             </div>
+            {services.length === 0 && (
+              <button
+                id="booking-retry-btn"
+                type="button"
+                onClick={retryInitialLoad}
+                className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shrink-0 transition-colors cursor-pointer"
+              >
+                {language === 'ru' ? 'Повторить' : 'Qayta urinish'}
+              </button>
+            )}
           </div>
         )}
 
@@ -1084,21 +1175,24 @@ function BookingContent() {
                 </div>
               </div>
 
-              {/* Native Date Picker Input */}
+              {/* Custom Styled DatePicker Input */}
               <div className="pt-2">
                 <label className="block text-xs font-semibold text-[#152f34] mb-1.5">
                   {language === 'ru'
                     ? 'Или укажите другую дату в календаре:'
                     : 'Yoki taqvimdan boshqa sanani tanlang:'}
                 </label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  min={earliestDateStr}
-                  max={latestDateStr}
-                  onChange={(e) => handleSelectDate(e.target.value)}
-                  className="w-full sm:w-64 px-4 py-2.5 rounded-xl border border-[#d8e5e2] text-sm focus:outline-none focus:ring-2 focus:ring-[#167b78] bg-white text-[#152f34]"
-                />
+                <div className="w-full sm:w-80">
+                  <CustomDatePicker
+                    id="booking-custom-datepicker"
+                    value={selectedDate}
+                    min={earliestDateStr}
+                    max={latestDateStr}
+                    onChange={(val) => handleSelectDate(val)}
+                    locale={language === 'ru' ? 'ru' : 'uz'}
+                    placeholder={language === 'ru' ? 'Выберите дату в календаре...' : 'Taqvimdan sanani tanlang...'}
+                  />
+                </div>
               </div>
 
               {/* Selected date confirmation alert */}
@@ -1551,6 +1645,33 @@ function BookingContent() {
                 </div>
               )}
 
+              {/* Branch Selector in Step 4: ONLY show branches where this doctor is actually assigned */}
+              {doctorAvailableBranches.length > 1 && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs font-semibold text-[#52696e] flex items-center gap-1">
+                    <Building2 className="w-3.5 h-3.5 text-[#167b78]" />
+                    <span>{t.common.branch}:</span>
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {doctorAvailableBranches.map((b) => (
+                      <button
+                        key={b.id}
+                        id={`step4-branch-filter-${b.id}`}
+                        type="button"
+                        onClick={() => handleSwitchBranch(b.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          selectedBranchId === b.id
+                            ? 'bg-[#167b78] text-white shadow-sm'
+                            : 'bg-[#eaf5f2] text-[#167b78] hover:bg-[#167b78]/15 border border-[#d8e5e2]'
+                        }`}
+                      >
+                        {language === 'ru' && b.nameRu ? b.nameRu : b.nameUz}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Slots Grid */}
               <div>
                 <label className="block text-xs font-semibold text-[#152f34] mb-2.5">
@@ -1610,6 +1731,9 @@ function BookingContent() {
                           type="button"
                           key={slot.startTime}
                           disabled={!slot.available}
+                          data-slot-time={slot.startTime}
+                          data-slot-branch-id={slotBranchId}
+                          data-slot-branch-name={slotBranchName}
                           onClick={() => handleSelectSlot(slot)}
                           className={`py-3 px-2 rounded-2xl text-xs font-bold transition-all flex flex-col items-center justify-center cursor-pointer ${
                             !slot.available
@@ -1775,8 +1899,8 @@ function BookingContent() {
                       </div>
                     </div>
 
-                    {/* Alternative Branches Switcher */}
-                    {branches.length > 1 && (
+                    {/* Alternative Branches Switcher (ONLY if doctor works at other branches) */}
+                    {doctorAvailableBranches.length > 1 && (
                       <div className="pt-4 space-y-3">
                         <div className="border-t border-[#d8e5e2] pt-4">
                           <h4 className="text-xs font-bold uppercase tracking-wider text-[#52696e]">
@@ -1788,7 +1912,7 @@ function BookingContent() {
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {branches
+                          {doctorAvailableBranches
                             .filter((b) => b.id !== confirmedBranch.id)
                             .map((otherBranch) => {
                               const oName = language === 'ru' && otherBranch.nameRu ? otherBranch.nameRu : otherBranch.nameUz;
@@ -1962,6 +2086,7 @@ function BookingContent() {
                     {t.common.name} *
                   </label>
                   <input
+                    id="patient-name-input"
                     type="text"
                     required
                     value={patientName}
@@ -1974,6 +2099,7 @@ function BookingContent() {
                 {/* Phone (+998 canonical validated) */}
                 <div>
                   <PhoneInput
+                    id="patient-phone-input"
                     label={t.common.phone}
                     required
                     value={patientPhone}
@@ -1990,6 +2116,7 @@ function BookingContent() {
                     {t.common.email} ({language === 'ru' ? 'необязательно' : 'ixtiyoriy'})
                   </label>
                   <input
+                    id="patient-email-input"
                     type="email"
                     value={patientEmail}
                     onChange={(e) => {
@@ -2018,6 +2145,7 @@ function BookingContent() {
                     {t.common.note}
                   </label>
                   <textarea
+                    id="patient-note-input"
                     rows={2}
                     value={patientNote}
                     onChange={(e) => setPatientNote(e.target.value)}
@@ -2033,6 +2161,7 @@ function BookingContent() {
                 {/* Consent Checkbox */}
                 <label className="flex items-start gap-2.5 cursor-pointer pt-1">
                   <input
+                    id="consent-checkbox"
                     type="checkbox"
                     checked={consentGiven}
                     onChange={(e) => setConsentGiven(e.target.checked)}
@@ -2055,6 +2184,7 @@ function BookingContent() {
                 </button>
 
                 <button
+                  id="booking-submit-btn"
                   type="submit"
                   disabled={
                     isSubmitting ||
@@ -2163,16 +2293,26 @@ function BookingContent() {
                 </div>
                 <div className="flex justify-between border-b border-[#d8e5e2]/60 pb-2">
                   <span className="text-[#52696e]">{t.common.doctor}:</span>
-                  <span className="font-semibold text-[#152f34]">{bookingResult.doctorName}</span>
+                  <span id="confirmation-doctor" className="font-semibold text-[#152f34]">{bookingResult.doctorName}</span>
                 </div>
                 <div className="flex justify-between border-b border-[#d8e5e2]/60 pb-2">
                   <span className="text-[#52696e]">{t.common.branch}:</span>
-                  <span className="font-semibold text-[#152f34]">{bookingResult.branchName}</span>
+                  <span id="confirmation-branch" className="font-semibold text-[#152f34]">{bookingResult.branchName}</span>
+                </div>
+                <div className="flex justify-between border-b border-[#d8e5e2]/60 pb-2">
+                  <span className="text-[#52696e]">{t.booking.estimatedDuration}:</span>
+                  <span id="confirmation-duration" className="font-semibold text-[#152f34]">
+                    {(bookingResult.durationMinutes !== undefined ? bookingResult.durationMinutes : totalDuration)} {t.booking.minutes}
+                  </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#52696e]">{t.booking.estimatedDuration}:</span>
-                  <span className="font-semibold text-[#152f34]">
-                    {bookingResult.durationMinutes || totalDuration} {t.booking.minutes}
+                  <span className="text-[#52696e]">{t.common.price}:</span>
+                  <span id="confirmation-price" className="font-bold text-[#167b78]">
+                    {bookingResult.servicePriceFrom === 0
+                      ? t.booking.freePrice
+                      : bookingResult.servicePriceFrom
+                      ? `${(bookingResult.servicePriceFrom / 100).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ')} ${t.common.uzs}`
+                      : '—'}
                   </span>
                 </div>
               </div>

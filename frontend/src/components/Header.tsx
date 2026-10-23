@@ -29,6 +29,7 @@ export const Header: React.FC = () => {
   const [clinicDropdownOpen, setClinicDropdownOpen] = useState(false);
   const [callbackModalOpen, setCallbackModalOpen] = useState(false);
   const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState(false);
   const [clinicName, setClinicName] = useState<string>('DentaCare');
   const [clinicPhone, setClinicPhone] = useState<string>('');
 
@@ -150,10 +151,11 @@ export const Header: React.FC = () => {
             className="flex items-center gap-2.5 sm:gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] rounded-2xl py-1 pr-1 shrink-0"
             aria-label={`${clinicName} - ${t.nav.home}`}
           >
-            {clinicLogo ? (
+            {clinicLogo && !logoError ? (
               <img
                 src={clinicLogo}
                 alt={clinicName}
+                onError={() => setLogoError(true)}
                 className="h-10 sm:h-11 max-w-[160px] sm:max-w-[190px] object-contain"
               />
             ) : (
@@ -292,8 +294,10 @@ export const Header: React.FC = () => {
               aria-label={t.common.selectLanguage}
             >
               <button
+                id="lang-btn-uz"
                 type="button"
                 onClick={() => setLanguage('uz')}
+                aria-label="O'zbekcha"
                 aria-pressed={language === 'uz'}
                 className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   language === 'uz'
@@ -304,8 +308,10 @@ export const Header: React.FC = () => {
                 UZ
               </button>
               <button
+                id="lang-btn-ru"
                 type="button"
                 onClick={() => setLanguage('ru')}
+                aria-label="Русский"
                 aria-pressed={language === 'ru'}
                 className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   language === 'ru'
@@ -328,6 +334,7 @@ export const Header: React.FC = () => {
 
             {/* Mobile menu trigger */}
             <button
+              id="mobile-menu-trigger-btn"
               ref={menuButtonRef}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="lg:hidden p-2 text-[#152f34] hover:text-[#167b78] rounded-xl hover:bg-[#eaf5f2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] cursor-pointer"

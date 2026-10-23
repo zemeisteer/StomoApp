@@ -15,7 +15,7 @@ export const ClientLayout: React.FC<{ children: React.ReactNode }> = ({ children
     <I18nProvider>
       <AuthProvider>
         {!isAdminRoute && <Header />}
-        <main className="min-h-screen">{children}</main>
+        <main className="min-h-screen" suppressHydrationWarning>{children}</main>
         {!isAdminRoute && <Footer />}
       </AuthProvider>
     </I18nProvider>

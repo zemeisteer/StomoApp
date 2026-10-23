@@ -15,6 +15,7 @@ import {
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
+import { formatClinicDate } from '../../../lib/dateFormat';
 
 export default function AdminPatientsPage() {
   const { user } = useAuth();
@@ -204,7 +205,7 @@ export default function AdminPatientsPage() {
                         </span>
                       </td>
                       <td className="py-4 px-6 text-slate-400">
-                        {new Date(p.createdAt).toLocaleDateString()}
+                        {formatClinicDate(p.createdAt, 'uz')}
                       </td>
                       <td className="py-4 px-6 text-right">
                         <button
@@ -272,7 +273,7 @@ export default function AdminPatientsPage() {
                           <div>
                             <p className="font-bold text-slate-900">{pat.fullName}</p>
                             <p className="text-[11px] text-slate-400">
-                              Yaratilgan: {new Date(pat.createdAt).toLocaleDateString()} • {pat.appointments?.length || 0} qabul
+                              Yaratilgan: {formatClinicDate(pat.createdAt, 'uz')} • {pat.appointments?.length || 0} qabul
                             </p>
                           </div>
 

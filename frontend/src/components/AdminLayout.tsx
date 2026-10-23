@@ -41,6 +41,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState(false);
   const [clinicName, setClinicName] = useState<string>('DentaCare');
   const [branches, setBranches] = useState<any[]>([]);
 
@@ -223,10 +224,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
         {/* Brand Header */}
         <div className="h-16 px-6 border-b border-[#1e464d] flex items-center justify-between">
           <Link href="/admin" className="flex items-center gap-3">
-            {clinicLogo ? (
+            {clinicLogo && !logoError ? (
               <img
                 src={clinicLogo}
                 alt={clinicName}
+                onError={() => setLogoError(true)}
                 className="clinic-logo max-h-9 max-w-[140px] brightness-110"
               />
             ) : (

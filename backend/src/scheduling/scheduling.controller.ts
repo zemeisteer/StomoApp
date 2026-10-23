@@ -126,6 +126,10 @@ class AddExceptionDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
 
 export class QuerySlotsDto {

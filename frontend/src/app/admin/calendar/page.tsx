@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
+import { CustomDatePicker } from '../../../components/CustomDatePicker';
 import { ModalDialog } from '../../../components/ModalDialog';
 import { PhoneInput } from '../../../components/PhoneInput';
 import { api } from '../../../lib/api';
@@ -69,76 +70,21 @@ export default function AdminCalendarPage() {
   const [branches, setBranches] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
 
-  // Navigation & Filter states initialized from URL params
-  const [selectedDoctorId, setSelectedDoctorId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return new URLSearchParams(window.location.search).get('doctorId') || '';
-    }
-    return '';
-  });
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return new URLSearchParams(window.location.search).get('branchId') || '';
-    }
-    return '';
-  });
-  const [selectedServiceId, setSelectedServiceId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return new URLSearchParams(window.location.search).get('serviceId') || '';
-    }
-    return '';
-  });
-  const [selectedStatus, setSelectedStatus] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return new URLSearchParams(window.location.search).get('status') || '';
-    }
-    return '';
-  });
-
-  // Inbox Mode: When true, views all pending website applications across all dates
-  const [isInboxMode, setIsInboxMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const s = new URLSearchParams(window.location.search).get('status');
-      const mode = new URLSearchParams(window.location.search).get('mode');
-      return s === 'PENDING' || mode === 'inbox';
-    }
-    return false;
-  });
-
+  // Navigation & Filter states
+  const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  const [selectedServiceId, setSelectedServiceId] = useState<string>('');
+  const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [isInboxMode, setIsInboxMode] = useState<boolean>(false);
   const [pendingTotal, setPendingTotal] = useState<number>(0);
-  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>(() => {
-    if (typeof window !== 'undefined') {
-      const v = new URLSearchParams(window.location.search).get('view');
-      if (v === 'day' || v === 'week' || v === 'month') return v;
-    }
-    return 'week';
-  });
-
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
   const [daySubView, setDaySubView] = useState<'timeline' | 'list'>('timeline');
   const [showFullDayHours, setShowFullDayHours] = useState<boolean>(false);
   const [monthAggregates, setMonthAggregates] = useState<Record<string, any>>({});
   const [isStartingTreatment, setIsStartingTreatment] = useState<boolean>(false);
   const loadRequestIdRef = useRef<number>(0);
-
-  const [currentDate, setCurrentDate] = useState<Date>(() => {
-    if (typeof window !== 'undefined') {
-      const dParam = new URLSearchParams(window.location.search).get('date');
-      if (dParam) {
-        const parsed = new Date(dParam);
-        if (!isNaN(parsed.getTime())) return parsed;
-      }
-    }
-    return new Date();
-  });
-
-  // Pagination
-  const [currentPage, setCurrentPage] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const p = parseInt(new URLSearchParams(window.location.search).get('page') || '1', 10);
-      return !isNaN(p) && p > 0 ? p : 1;
-    }
-    return 1;
-  });
+  const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 25;
 
   const [isLoading, setIsLoading] = useState(true);
@@ -229,6 +175,32 @@ export default function AdminCalendarPage() {
     setDelayResult(null);
     updateUrlParams({ appointmentId: null });
   }, [updateUrlParams]);
+
+  // Read URL query params safely after client hydration
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const doc = params.get('doctorId');
+    const br = params.get('branchId');
+    const srv = params.get('serviceId');
+    const stat = params.get('status');
+    const mode = params.get('mode');
+    const vm = params.get('view');
+    const dParam = params.get('date');
+    const p = parseInt(params.get('page') || '1', 10);
+
+    if (doc) setSelectedDoctorId(doc);
+    if (br) setSelectedBranchId(br);
+    if (srv) setSelectedServiceId(srv);
+    if (stat) setSelectedStatus(stat);
+    if (stat === 'PENDING' || mode === 'inbox') setIsInboxMode(true);
+    if (vm === 'day' || vm === 'week' || vm === 'month') setViewMode(vm);
+    if (!isNaN(p) && p > 0) setCurrentPage(p);
+    if (dParam) {
+      const parsed = new Date(dParam);
+      if (!isNaN(parsed.getTime())) setCurrentDate(parsed);
+    }
+  }, []);
 
   // Load fixtures
   useEffect(() => {
@@ -1879,12 +1851,12 @@ export default function AdminCalendarPage() {
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="text-[11px] text-slate-500 block mb-1">Sana</label>
-                        <input
-                          type="date"
+                        <CustomDatePicker
+                          id="admin-calendar-reschedule-date"
                           value={rescheduleDate}
                           min={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date())}
-                          onChange={(e) => setRescheduleDate(e.target.value)}
-                          className="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"
+                          onChange={(val) => setRescheduleDate(val)}
+                          placeholder="Sanani tanlang..."
                         />
                       </div>
                       <div>
@@ -2102,12 +2074,12 @@ export default function AdminCalendarPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Sana *
                   </label>
-                  <input
-                    type="date"
+                  <CustomDatePicker
+                    id="admin-calendar-create-date"
                     required
                     value={createForm.date}
-                    onChange={(e) => setCreateForm({ ...createForm, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-teal-600 outline-none"
+                    onChange={(val) => setCreateForm({ ...createForm, date: val })}
+                    placeholder="Sanani tanlang..."
                   />
                 </div>
                 <div>

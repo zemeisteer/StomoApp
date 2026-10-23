@@ -5,40 +5,62 @@ import Link from 'next/link';
 import { ShieldCheck, Sparkles, Microscope, Award, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 
-export const ClinicSection: React.FC = () => {
+interface ClinicSectionProps {
+  sectionData?: any;
+}
+
+export const ClinicSection: React.FC<ClinicSectionProps> = ({ sectionData }) => {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
 
-  const benefits = [
-    {
-      icon: Microscope,
-      title: isRu ? 'Современная цифровая диагностика' : 'Zamonaviy raqamli diagnostika',
-      desc: isRu
-        ? 'Цифровое сканирование и точные снимки для безопасного и обоснованного планирования лечения.'
-        : 'Xavfsiz va aniq davolash rejasini tuzish uchun raqamli tekshiruv va diagnostika.',
-    },
-    {
-      icon: ShieldCheck,
-      title: isRu ? 'Стерильность и инфекционный контроль' : 'Sterillik va sanitariya nazorati',
-      desc: isRu
-        ? 'Строгие санитарные протоколы автоклавирования и индивидуальные стерильные наборы для каждого пациента.'
-        : 'Xalqaro talablar asosidagi avtoklavlash va har bir bemor uchun alohida steril to\'plamlar.',
-    },
-    {
-      icon: Award,
-      title: isRu ? 'Квалифицированная команда' : 'Malakali shifokorlar jamoasi',
-      desc: isRu
-        ? 'Врачи с подтвержденными сертификатами, регулярно проходящие повышение профессиональной квалификации.'
-        : 'Doimiy ravishda o\'z ustida ishlaydigan va amaliy bilimlarini oshirib boradigan shifokorlar.',
-    },
-    {
-      icon: Sparkles,
-      title: isRu ? 'Комфорт и забота' : 'Qulaylik va e\'tibor',
-      desc: isRu
-        ? 'Бережная анестезия и спокойная атмосфера для максимального комфорта взрослых и детей.'
-        : 'Kattalar va bolalar uchun yoqimli muhit hamda bemorning erkin his qilishini ta\'minlash.',
-    },
-  ];
+  const heading = isRu && sectionData?.titleRu
+    ? sectionData.titleRu
+    : (sectionData?.titleUz || (isRu ? 'Стоматологическая помощь для всей семьи' : 'Oilaviy stomatologiya va malakali tibbiy xizmat'));
+
+  const description = isRu && sectionData?.contentRu
+    ? sectionData.contentRu
+    : (sectionData?.contentUz || (isRu
+        ? 'Наша клиника предоставляет широкий спектр стоматологических услуг с внимательным отношением к каждому пациенту и прозрачными ценами.'
+        : 'Klinikamiz har bir bemorga samimiy e\'tibor, shaffof narxlar va qulay sharoitlarda stomatologik yordam ko\'rsatadi.'));
+
+  // Use administrator-managed benefits from CMS if configured, otherwise neutral factual highlights
+  const rawBenefits = sectionData?.data?.benefits || sectionData?.data?.items;
+  const benefits = Array.isArray(rawBenefits) && rawBenefits.length > 0
+    ? rawBenefits.map((b: any) => ({
+        icon: Sparkles,
+        title: isRu && b.titleRu ? b.titleRu : (b.titleUz || b.title || ''),
+        desc: isRu && b.descRu ? b.descRu : (b.descUz || b.desc || ''),
+      }))
+    : [
+        {
+          icon: ShieldCheck,
+          title: isRu ? 'Индивидуальный план лечения' : 'Shaxsiy muolaja rejasi',
+          desc: isRu
+            ? 'Предварительная консультация и подробный расчёт этапов до начала процедур.'
+            : 'Muolaja boshlanishidan oldin to\'liq maslahat va har bir bosqichning shaffof hisobi.',
+        },
+        {
+          icon: Award,
+          title: isRu ? 'Прозрачность и понятные условия' : 'Shaffoflik va aniq shartlar',
+          desc: isRu
+            ? 'Все услуги оказываются на основе утвержденного прейскуранта без скрытых платежей.'
+            : 'Barcha xizmatlar tasdiqlangan narxlar asosida ko\'rsatiladi, yashirin to\'lovlar mavjud emas.',
+        },
+        {
+          icon: Sparkles,
+          title: isRu ? 'Удобная запись и приём' : 'Qulay qabul va yozilish',
+          desc: isRu
+            ? 'Онлайн-выбор удобного времени и филиала с подтверждением и напоминаниями.'
+            : 'Siz uchun mos filial va vaqtni bir necha daqiqada online band qilish imkoniyati.',
+        },
+        {
+          icon: Microscope,
+          title: isRu ? 'Забота о вашем комфорте' : 'Bemorlar uchun qulaylik',
+          desc: isRu
+            ? 'Спокойная обстановка и внимательный персонал для взрослых и детей.'
+            : 'Har bir bemor o\'zini xotirjam va qulay his qilishi uchun samimiy jamoa.',
+        },
+      ];
 
   return (
     <section id="clinic" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
@@ -53,15 +75,11 @@ export const ClinicSection: React.FC = () => {
             </div>
 
             <h2 className="text-2xl sm:text-3xl font-extrabold text-[#152f34] leading-tight">
-              {isRu
-                ? 'Высокие стандарты стоматологии для вашего комфорта'
-                : 'Salomatligingiz va tabassumingiz uchun sifatli xizmat'}
+              {heading}
             </h2>
 
             <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
-              {isRu
-                ? 'Наша клиника объединяет современное стоматологическое оснащение и заботливый подход к пациентам. Мы ориентированы на долговечный результат и прозрачность цен.'
-                : 'Klinikamiz zamonaviy stomatologiya imkoniyatlari va har bir bemorga samimiy e\'tiborni birlashtiradi. Bizning maqsadimiz — uzoq muddatli sifat va narxlarning to\'liq shaffofligi.'}
+              {description}
             </p>
 
             <div className="pt-2">

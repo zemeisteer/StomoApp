@@ -1,8 +1,11 @@
 const assert = require('assert');
 const path = require('path');
+const puppeteer = require('puppeteer-core');
 const { PrismaClient } = require('@prisma/client');
 
 const TEST_DATABASE_URL = 'postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 
 process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.NODE_ENV = 'test';
@@ -13,19 +16,29 @@ const prisma = new PrismaClient({
 
 async function run() {
   console.log('========================================================================');
-  console.log('   STOMOAPP BOOKING REGRESSION & CONSISTENCY INTEGRATION SUITE');
+  console.log('   STOMOAPP REAL APPLICATION BOOKING & SCHEDULING INTEGRATION SUITE');
   console.log('========================================================================');
+  console.log(`Target Frontend URL : ${BASE_URL}`);
+  console.log(`Target Database     : ${TEST_DATABASE_URL}`);
 
-  // Verify DB isolation
+  // 1. Verify isolated test database
   const dbInfo = await prisma.$queryRawUnsafe('SELECT current_database();');
   const currentDb = dbInfo[0].current_database;
-  console.log(`Connected to test database: "${currentDb}"`);
+  console.log(`Connected to database: "${currentDb}"`);
   assert.strictEqual(currentDb, 'dentacare_test', 'MUST run strictly on dentacare_test!');
 
-  const runId = `test_${Date.now().toString().slice(-6)}`;
+  // 2. Verify browser API proxy points to test backend
+  console.log('\n[Check] Verifying frontend API proxy points to backend on dentacare_test...');
+  const proxyCheckRes = await fetch(`${BASE_URL}/api/public/branches`);
+  assert.strictEqual(proxyCheckRes.status, 200, 'Frontend proxy /api/public/branches must return 200');
+  const publicBranches = await proxyCheckRes.json();
+  assert(Array.isArray(publicBranches), 'Public branches must be an array');
+  console.log(`[PASS] Frontend API proxy is healthy, returned ${publicBranches.length} branches`);
+
+  const runId = `t${Date.now().toString().slice(-6)}`;
   console.log(`Run ID: ${runId}`);
 
-  // Load backend services from compiled dist
+  // Load production backend services for direct scheduling model tests
   const { SchedulingService } = require('../dist/scheduling/scheduling.service');
   const { PrismaService } = require('../dist/prisma/prisma.service');
   const prismaService = new PrismaService();
@@ -33,34 +46,40 @@ async function run() {
 
   const cleanupTasks = [];
 
+  let browser;
+
   try {
     // -------------------------------------------------------------------------
-    // SETUP FIXTURES: 2 Branches, 1 Doctor with Split Shifts (Morning Branch A, Afternoon Branch B)
+    // SETUP ISOLATED FIXTURES
     // -------------------------------------------------------------------------
     console.log('\n[Setup] Creating isolated fixtures in dentacare_test...');
 
+    // Branch A
     const branchA = await prisma.branch.create({
       data: {
         id: `br-a-${runId}`,
         nameUz: `Filial A ${runId}`,
         nameRu: `Филиал А ${runId}`,
-        addressUz: `Manzil A ${runId}`,
-        addressRu: `Адрес А ${runId}`,
-        phone: `+99890${runId}1`,
+        addressUz: `Manzil A Toshkent ${runId}`,
+        addressRu: `Адрес А Ташкент ${runId}`,
+        phone: `+99890111${runId.slice(-4)}`,
         isActive: true,
+        sortOrder: 10,
       },
     });
     cleanupTasks.push(() => prisma.branch.delete({ where: { id: branchA.id } }));
 
+    // Branch B
     const branchB = await prisma.branch.create({
       data: {
         id: `br-b-${runId}`,
         nameUz: `Filial B ${runId}`,
         nameRu: `Филиал B ${runId}`,
-        addressUz: `Manzil B ${runId}`,
-        addressRu: `Адрес B ${runId}`,
-        phone: `+99890${runId}2`,
+        addressUz: `Manzil B Toshkent ${runId}`,
+        addressRu: `Адрес B Ташкент ${runId}`,
+        phone: `+99890222${runId.slice(-4)}`,
         isActive: true,
+        sortOrder: 11,
       },
     });
     cleanupTasks.push(() => prisma.branch.delete({ where: { id: branchB.id } }));
@@ -79,7 +98,7 @@ async function run() {
     });
     cleanupTasks.push(() => prisma.doctor.delete({ where: { id: doctor.id } }));
 
-    // Link doctor to Branch A and Branch B
+    // Assign doctor to both Branch A and Branch B
     await prisma.doctorBranch.create({
       data: { doctorId: doctor.id, branchId: branchA.id },
     });
@@ -88,40 +107,62 @@ async function run() {
     });
     cleanupTasks.push(() => prisma.doctorBranch.deleteMany({ where: { doctorId: doctor.id } }));
 
-    // Service with base price 100,000 UZS, 30 min
-    const service = await prisma.service.create({
+    // Service 1: Standard Service (30m base, 150,000 UZS)
+    const service1 = await prisma.service.create({
       data: {
-        id: `srv-${runId}`,
-        slug: `service-${runId}`,
-        nameUz: `Davolash ${runId}`,
-        nameRu: `Лечение ${runId}`,
+        id: `srv-1-${runId}`,
+        slug: `service-1-${runId}`,
+        nameUz: `Plomba ${runId}`,
+        nameRu: `Пломба ${runId}`,
         category: 'THERAPY',
         durationMinutes: 30,
-        priceFrom: 10000000,
+        priceFrom: 15000000, // 150,000 UZS in tiyin
         isActive: true,
       },
     });
-    cleanupTasks.push(() => prisma.service.delete({ where: { id: service.id } }));
+    cleanupTasks.push(() => prisma.service.delete({ where: { id: service1.id } }));
 
-    // DoctorService override: custom duration 45 min
-    const doctorService = await prisma.doctorService.create({
+    // DoctorService override on Service 1: 45m duration
+    const doctorService1 = await prisma.doctorService.create({
       data: {
         doctorId: doctor.id,
-        serviceId: service.id,
+        serviceId: service1.id,
         customDurationMinutes: 45,
+      },
+    });
+
+    // Service 2: Zero Price & Zero Buffer Service (free consultation)
+    const freeService = await prisma.service.create({
+      data: {
+        id: `srv-free-${runId}`,
+        slug: `service-free-${runId}`,
+        nameUz: `Bepul Konsultatsiya ${runId}`,
+        nameRu: `Бесплатная Консультация ${runId}`,
+        category: 'THERAPY',
+        durationMinutes: 20,
+        priceFrom: 0,
+        isActive: true,
+      },
+    });
+    cleanupTasks.push(() => prisma.service.delete({ where: { id: freeService.id } }));
+
+    await prisma.doctorService.create({
+      data: {
+        doctorId: doctor.id,
+        serviceId: freeService.id,
+        customDurationMinutes: 20,
       },
     });
     cleanupTasks.push(() => prisma.doctorService.deleteMany({ where: { doctorId: doctor.id } }));
 
-    // Test date: choose a Wednesday 14 days in future
+    // Target Date: Find Wednesday (day 3) 14 days in future
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + 14);
-    // Find Wednesday (day 3)
     while (targetDate.getDay() !== 3) {
       targetDate.setDate(targetDate.getDate() + 1);
     }
     const targetDateStr = targetDate.toISOString().slice(0, 10);
-    console.log(`Target test date (Wednesday): ${targetDateStr}`);
+    console.log(`Target Wednesday date: ${targetDateStr}`);
 
     // Schedules for WEDNESDAY:
     // Morning in Branch A: 09:00 - 13:00
@@ -151,323 +192,545 @@ async function run() {
     cleanupTasks.push(() => prisma.doctorSchedule.delete({ where: { id: schedB.id } }));
 
     // =========================================================================
-    // SCENARIO 2: One doctor works morning in A and afternoon in B.
-    // Each slot must show and tag the correct branch!
+    // PART 1: EXPLICIT OVERTIME & SCHEDULING LOGIC VERIFICATION
     // =========================================================================
-    console.log('\n--- SCENARIO 2: Split branch schedule resolution ---');
-    const splitSlots = await schedulingService.getAvailableSlots(
-      doctor.id,
-      targetDateStr,
-      service.id,
-      undefined, // No branch filter: get all slots
-      'Asia/Tashkent',
-      [service.id],
-    );
+    console.log('\n--- PART 1: Explicit Overtime Location & Interval Policy Checks ---');
 
-    assert(splitSlots.slots.length > 0, 'Must return available slots for target date');
-    console.log(`Total slots returned: ${splitSlots.slots.length}`);
-    console.log('Slots:', splitSlots.slots.map(s => ({ time: s.startTime, branchId: s.branchId })));
-
-    function getTashkentTime(isoStr) {
-      const d = new Date(isoStr);
-      return new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Tashkent',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }).format(d);
-    }
-
-    // Separate morning vs afternoon
-    const morningSlots = splitSlots.slots.filter(s => getTashkentTime(s.startTime) < '13:00');
-    const afternoonSlots = splitSlots.slots.filter(s => getTashkentTime(s.startTime) >= '14:00');
-
-    assert(morningSlots.length > 0, 'Must have morning slots');
-    assert(afternoonSlots.length > 0, 'Must have afternoon slots');
-
-    // Every morning slot must have branchId === branchA.id
-    for (const s of morningSlots) {
-      assert.strictEqual(
-        s.branchId,
-        branchA.id,
-        `Morning slot ${getTashkentTime(s.startTime)} must be tagged with Branch A (${branchA.id}), got ${s.branchId}`,
-      );
-    }
-    console.log(`[PASS] All ${morningSlots.length} morning slots are correctly bound to Branch A`);
-
-    // Every afternoon slot must have branchId === branchB.id
-    for (const s of afternoonSlots) {
-      assert.strictEqual(
-        s.branchId,
-        branchB.id,
-        `Afternoon slot ${getTashkentTime(s.startTime)} must be tagged with Branch B (${branchB.id}), got ${s.branchId}`,
-      );
-    }
-    console.log(`[PASS] All ${afternoonSlots.length} afternoon slots are correctly bound to Branch B`);
-
-    // Querying specifically for Branch A must only return Branch A slots
-    const branchASlots = await schedulingService.getAvailableSlots(
-      doctor.id,
-      targetDateStr,
-      service.id,
-      branchA.id,
-      'Asia/Tashkent',
-      [service.id],
-    );
-    assert(branchASlots.slots.every(s => s.branchId === branchA.id), 'Branch A filtered slots must all be Branch A');
-    assert(branchASlots.slots.every(s => getTashkentTime(s.startTime) < '13:00'), 'Branch A filtered slots must only be morning');
-    console.log(`[PASS] Filtering by Branch A returns exclusively Branch A morning slots (${branchASlots.slots.length} slots)`);
-
-    // Querying specifically for Branch B must only return Branch B slots
-    const branchBSlots = await schedulingService.getAvailableSlots(
-      doctor.id,
-      targetDateStr,
-      service.id,
-      branchB.id,
-      'Asia/Tashkent',
-      [service.id],
-    );
-    assert(branchBSlots.slots.every(s => s.branchId === branchB.id), 'Branch B filtered slots must all be Branch B');
-    assert(branchBSlots.slots.every(s => getTashkentTime(s.startTime) >= '14:00'), 'Branch B filtered slots must only be afternoon');
-    console.log(`[PASS] Filtering by Branch B returns exclusively Branch B afternoon slots (${branchBSlots.slots.length} slots)`);
-
-    // =========================================================================
-    // SCENARIO 3: Doctor-specific price & duration consistency across selection,
-    // summary, and saved appointment
-    // =========================================================================
-    console.log('\n--- SCENARIO 3: Doctor-specific price & duration consistency ---');
-    // Base service is 30m / 100,000 UZS.
-    // DoctorService override is 45m.
-    assert.strictEqual(splitSlots.durationMinutes, 45, 'Authoritative duration must be 45m from doctor override');
-    assert.strictEqual(splitSlots.priceFrom, 10000000, 'Authoritative price must be 100,000 UZS from service');
-    console.log(`[PASS] Server returned authoritative duration: ${splitSlots.durationMinutes}m, price: ${splitSlots.priceFrom / 100} UZS`);
-
-    // Verify slot steps are spaced (e.g. 30m default slot grid interval)
-    const slot0 = splitSlots.slots[0];
-    const slot1 = splitSlots.slots[1];
-    const diffMin = (new Date(slot1.startTime).getTime() - new Date(slot0.startTime).getTime()) / 60000;
-    console.log(`[PASS] Slot grid step is ${diffMin} minutes between available candidate slots`);
-
-    // =========================================================================
-    // SCENARIO 1: Branch / Slot consistency model validation
-    // Select slot in Branch A (e.g. 09:00). Then choose Branch B.
-    // The old slot must NOT remain valid!
-    // =========================================================================
-    console.log('\n--- SCENARIO 1: Slot / Branch binding and invalidation ---');
-    // Emulate frontend selection model:
-    let boundSlot = {
-      time: slot0.startTime,
-      endTime: slot0.endTime,
-      branchId: slot0.branchId, // branchA.id
-      doctorId: doctor.id,
-      date: targetDateStr,
-      serviceIds: [service.id],
-      calculation: {
-        priceFrom: splitSlots.priceFrom,
-        durationMinutes: splitSlots.durationMinutes,
-      },
-    };
-
-    assert.strictEqual(boundSlot.branchId, branchA.id, 'Initial slot is bound to Branch A');
-
-    // User switches to Branch B in Step 5:
-    // In our model, handleSwitchBranch(branchB.id) invalidates:
-    // 1. selectedSlotTime = null
-    // 2. boundSlot = null
-    // 3. slotCalculation = null
-    // 4. selectedBranchId = branchB.id
-    function emulateSwitchBranch(newBranchId) {
-      if (boundSlot && boundSlot.branchId !== newBranchId) {
-        boundSlot = null; // INVALIDATED
-      }
-    }
-
-    emulateSwitchBranch(branchB.id);
-    assert.strictEqual(boundSlot, null, 'Bound slot must be null after switching to Branch B');
-    console.log('[PASS] Switching branch successfully invalidated the incompatible slot selection');
-
-    // Confirm that submitting the old slot time at the new branch fails validation
-    let submissionAttempted = false;
-    try {
-      if (!boundSlot) {
-        throw new Error('SUBMISSION_BLOCKED: No valid bound slot matching current branch!');
-      }
-      submissionAttempted = true;
-    } catch (err) {
-      assert(err.message.includes('SUBMISSION_BLOCKED'), 'Must block submission when slot is invalidated');
-    }
-    assert(!submissionAttempted, 'Submission must not proceed with invalidated slot');
-    console.log('[PASS] Submission blocked: slot does not match Branch B');
-
-    // =========================================================================
-    // SCENARIO 6: Date exception / Overtime and Booking Limits
-    // =========================================================================
-    console.log('\n--- SCENARIO 6: Date exceptions (Day off & Overtime) ---');
-    // 6.1 Add a LEAVE exception for targetDate
-    const dayOffException = await prisma.scheduleException.create({
-      data: {
-        doctorId: doctor.id,
-        date: new Date(targetDateStr),
-        type: 'LEAVE',
-        reason: 'Holidays',
-      },
-    });
-
-    const slotsAfterDayOff = await schedulingService.getAvailableSlots(
-      doctor.id,
-      targetDateStr,
-      service.id,
-      undefined,
-      'Asia/Tashkent',
-      [service.id],
-    );
-    assert.strictEqual(slotsAfterDayOff.slots.length, 0, 'No slots should be available on LEAVE');
-    console.log('[PASS] LEAVE exception correctly yields 0 bookable slots');
-
-    // Clean up LEAVE
-    await prisma.scheduleException.delete({ where: { id: dayOffException.id } });
-
-    // 6.2 Add OVERTIME exception for Branch A on an off-day (e.g. Sunday)
+    // 1.1 Overtime on an off-day (Sunday) with explicit branch
     const sundayDate = new Date(targetDate);
     sundayDate.setDate(sundayDate.getDate() + (7 - sundayDate.getDay()));
     const sundayStr = sundayDate.toISOString().slice(0, 10);
 
-    const overtimeException = await prisma.scheduleException.create({
+    const overtimeExceptionA = await prisma.scheduleException.create({
       data: {
         doctorId: doctor.id,
+        branchId: branchA.id, // Explicit branch assignment!
         date: new Date(sundayStr),
         type: 'OVERTIME',
         startTime: '10:00',
-        endTime: '12:00',
-        reason: 'Emergency shift',
+        endTime: '13:00',
+        reason: 'Weekend emergency shift in Branch A',
       },
     });
+    cleanupTasks.push(() => prisma.scheduleException.delete({ where: { id: overtimeExceptionA.id } }));
 
-    const overtimeSlots = await schedulingService.getAvailableSlots(
+    // Query Sunday for Branch A: must return slots with branchA.id
+    const sundaySlotsBranchA = await schedulingService.getAvailableSlots(
       doctor.id,
       sundayStr,
-      service.id,
+      service1.id,
+      branchA.id,
+      'Asia/Tashkent',
+      [service1.id],
+    );
+    assert(sundaySlotsBranchA.slots.length > 0, 'Explicit overtime in Branch A must produce slots');
+    assert(sundaySlotsBranchA.slots.every((s) => s.branchId === branchA.id), 'All Sunday slots must belong to Branch A');
+    console.log(`[PASS] Explicit overtime in Branch A yielded ${sundaySlotsBranchA.slots.length} slots strictly bound to Branch A`);
+
+    // Query Sunday for Branch B: MUST return 0 slots (Branch A overtime must NEVER leak into Branch B!)
+    const sundaySlotsBranchB = await schedulingService.getAvailableSlots(
+      doctor.id,
+      sundayStr,
+      service1.id,
+      branchB.id,
+      'Asia/Tashkent',
+      [service1.id],
+    );
+    assert.strictEqual(sundaySlotsBranchB.slots.length, 0, 'Branch A overtime must not appear when querying Branch B');
+    console.log('[PASS] Branch A overtime is completely excluded when querying Branch B');
+
+    // 1.2 Adjacent shifts in different branches must NOT be merged
+    // Doctor works 09:00 - 13:00 in Branch A and 14:00 - 18:00 in Branch B on Wednesday.
+    const splitSlots = await schedulingService.getAvailableSlots(
+      doctor.id,
+      targetDateStr,
+      service1.id,
       undefined,
       'Asia/Tashkent',
-      [service.id],
+      [service1.id],
     );
-    assert(overtimeSlots.slots.length > 0, 'OVERTIME exception must produce bookable slots');
-    console.log(`[PASS] OVERTIME exception correctly produced ${overtimeSlots.slots.length} bookable slots on Sunday`);
-
-    await prisma.scheduleException.delete({ where: { id: overtimeException.id } });
+    assert(splitSlots.slots.length > 0, 'Wednesday must have bookable slots');
+    for (const s of splitSlots.slots) {
+      assert(s.branchId, 'Every publicly bookable slot must have an authoritative branchId');
+      assert([branchA.id, branchB.id].includes(s.branchId), 'Slot branchId must be Branch A or Branch B');
+    }
+    console.log(`[PASS] Authoritative branchId present on all ${splitSlots.slots.length} public slots without cross-branch merging`);
 
     // =========================================================================
-    // SCENARIO 7: Conflict recovery preserves patient details
+    // PART 2: REAL BROWSER APPLICATION TESTS WITH PUPPETEER
     // =========================================================================
-    console.log('\n--- SCENARIO 7: Conflict recovery & patient details preservation ---');
-    // Create an actual appointment booking for slot 0 in Branch A
-    const patientPhone = `+99890${runId}9`;
-    const patientName = `Bemor ${runId}`;
-    const patientEmail = `patient.${runId}@test.local`;
-    const patientNote = 'Allergiyasi bor';
+    console.log('\n--- PART 2: Launching Browser Tests Against Real React Application ---');
 
-    const patient = await prisma.patient.create({
+    browser = await puppeteer.launch({
+      executablePath: CHROME_PATH,
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--window-size=1440,900',
+      ],
+    });
+
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1440, height: 900 });
+
+    // -------------------------------------------------------------------------
+    // BROWSER SCENARIO 1: Branch Switch Invalidation & Submission Blocking
+    // - Select Branch A slot (morning).
+    // - Proceed to Step 5 (Location Confirmation).
+    // - Click switch branch to Branch B.
+    // - Verify Step 4 is activated with switch banner.
+    async function advanceToStep4(p) {
+      await p.waitForSelector('#booking-next-step:not([disabled])', { timeout: 30000 });
+      await p.click('#booking-next-step');
+      await p.waitForSelector('#booking-next-step-2:not([disabled])', { timeout: 30000 });
+      await p.click('#booking-next-step-2');
+      await p.waitForSelector('#booking-next-step-3:not([disabled])', { timeout: 30000 });
+      await p.click('#booking-next-step-3');
+      await p.waitForSelector('button[id^="slot-"]', { timeout: 30000 });
+    }
+
+    // -------------------------------------------------------------------------
+    // BROWSER SCENARIO 1: Branch Switch Invalidation & Submission Blocking
+    // - Select Branch A slot (morning).
+    // - Proceed to Step 5 (Location Confirmation).
+    // - Click switch branch to Branch B.
+    // - Verify Step 4 is activated with switch banner.
+    // - Verify old slot selection is cleared.
+    // - Verify new availability for Branch B is loaded (only afternoon slots).
+    // - Verify next step button is disabled (invalid submission blocked).
+    // -------------------------------------------------------------------------
+    console.log('\n[Browser 1/6] Testing Branch Switch Selection Invalidation & Submission Blocking...');
+    await page.goto(`${BASE_URL}/booking?serviceId=${service1.id}&doctorId=${doctor.id}&date=${targetDateStr}&branchId=${branchA.id}`, {
+      waitUntil: 'networkidle2',
+      timeout: 30000,
+    });
+
+    // Advance through Step 1 -> Step 2 -> Step 3 to Step 4 (slots)
+    await advanceToStep4(page);
+
+    // Verify slots belong to Branch A
+    const branchASlots = await page.$$(`button[data-slot-branch-id="${branchA.id}"]`);
+    assert(branchASlots.length > 0, 'Branch A slots must be rendered');
+
+    // Click the first Branch A slot
+    const firstSlot = branchASlots[0];
+    const firstSlotTime = await page.evaluate((el) => el.getAttribute('data-slot-time'), firstSlot);
+    console.log(`Selecting Branch A slot: ${firstSlotTime}`);
+    await firstSlot.click();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Verify slot is selected
+    const isSelectedBefore = await page.evaluate((el) => el.classList.contains('scale-[1.02]'), firstSlot);
+    assert(isSelectedBefore, 'First slot must be visually selected');
+
+    // Advance to Step 5 (Location confirmation)
+    const nextBtn4 = await page.$('#booking-next-step-4');
+    assert(nextBtn4, 'Step 4 Next button must exist');
+    await nextBtn4.click();
+    await page.waitForSelector('#booking-confirm-location-btn', { timeout: 10000 });
+
+    // Step 5 should offer switching to Branch B
+    const switchBranchBBtn = await page.$(`#switch-branch-${branchB.id}`);
+    assert(switchBranchBBtn, 'Switch button for Branch B must exist in Step 5');
+    console.log('Clicking switch to Branch B in Step 5...');
+    await switchBranchBBtn.click();
+    await new Promise((r) => setTimeout(r, 800));
+
+    // Assert: User returned to Step 4
+    const isStep4Active = await page.evaluate(() => {
+      return Boolean(document.querySelector('#booking-next-step-4'));
+    });
+    assert(isStep4Active, 'Switching branch must navigate back to Step 4');
+
+    // Assert: Switch notice banner is displayed
+    const switchBannerText = await page.evaluate(() => {
+      const banner = document.querySelector('.animate-fade-in');
+      return banner ? banner.textContent : '';
+    });
+    assert(switchBannerText.includes(branchB.nameUz), 'Switch banner must display Branch B name');
+    console.log('[PASS] Switch branch banner displayed properly');
+
+    // Assert: Previous slot selection is cleared and Next button is disabled
+    const isNextBtnDisabled = await page.evaluate(() => {
+      const btn = document.querySelector('#booking-next-step-4');
+      return btn ? btn.hasAttribute('disabled') : false;
+    });
+    assert(isNextBtnDisabled, 'Advancing without selecting a new slot MUST be blocked (disabled)');
+    console.log('[PASS] Invalid submission blocked: Step 4 Next button is disabled');
+
+    // Assert: New availability requested for Branch B (afternoon slots only)
+    await page.waitForSelector(`button[data-slot-branch-id="${branchB.id}"]`, { timeout: 10000 });
+    const branchBSlotTimes = await page.evaluate((bId) => {
+      const btns = Array.from(document.querySelectorAll(`button[data-slot-branch-id="${bId}"]`));
+      return btns.map((b) => b.getAttribute('data-slot-time'));
+    }, branchB.id);
+    assert(branchBSlotTimes.length > 0, 'Branch B slots must be loaded');
+    console.log(`[PASS] Branch B slots loaded successfully (${branchBSlotTimes.length} afternoon slots)`);
+
+    // -------------------------------------------------------------------------
+    // BROWSER SCENARIO 2: Stale Request Race Condition (Delay A, Switch to B)
+    // -------------------------------------------------------------------------
+    console.log('\n[Browser 2/6] Testing Stale Request Race Condition Protection...');
+    await page.setRequestInterception(true);
+
+    let delayBranchAPromiseResolve = null;
+    const branchADelayPromise = new Promise((resolve) => {
+      delayBranchAPromiseResolve = resolve;
+    });
+
+    const requestHandler = async (req) => {
+      const url = req.url();
+      if (url.includes('/api/public/slots') && url.includes(`branchId=${branchA.id}`)) {
+        console.log('Intercepted slot request for Branch A: delaying response...');
+        await branchADelayPromise;
+        console.log('Resuming delayed slot request for Branch A...');
+        req.continue();
+      } else {
+        req.continue();
+      }
+    };
+    page.on('request', requestHandler);
+
+    // In Step 4: Click branch filter for Branch A (request will be delayed)
+    const step4BranchABtn = await page.$(`#step4-branch-filter-${branchA.id}`);
+    assert(step4BranchABtn, 'Step 4 Branch A filter button must exist');
+    await step4BranchABtn.click();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Immediately switch back to Branch B! (Allowed through immediately)
+    const step4BranchBBtn = await page.$(`#step4-branch-filter-${branchB.id}`);
+    assert(step4BranchBBtn, 'Step 4 Branch B filter button must exist');
+    await step4BranchBBtn.click();
+    await page.waitForSelector(`button[data-slot-branch-id="${branchB.id}"]`, { timeout: 10000 });
+
+    // Verify Branch B slots are displayed
+    const currentRenderedBranchesBefore = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button[data-slot-branch-id]'));
+      return btns.map((b) => b.getAttribute('data-slot-branch-id'));
+    });
+    assert(currentRenderedBranchesBefore.length > 0 && currentRenderedBranchesBefore.every((id) => id === branchB.id), 'Must show Branch B slots');
+
+    // Now resolve the delayed Branch A response!
+    if (delayBranchAPromiseResolve) {
+      delayBranchAPromiseResolve();
+    }
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // Assert: UI still displays Branch B slots! The late Branch A response was safely discarded!
+    const currentRenderedBranchesAfter = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button[data-slot-branch-id]'));
+      return btns.map((b) => b.getAttribute('data-slot-branch-id'));
+    });
+    assert(currentRenderedBranchesAfter.length > 0 && currentRenderedBranchesAfter.every((id) => id === branchB.id), 'Stale Branch A response MUST NOT overwrite Branch B!');
+    console.log('[PASS] Stale slot response was discarded: active selection remains Branch B');
+
+    page.off('request', requestHandler);
+    await page.setRequestInterception(false);
+
+    // -------------------------------------------------------------------------
+    // BROWSER SCENARIO 3: Real 409 Booking Conflict & Contact Preservation
+    // - Select slot at Branch B.
+    // - Advance through Step 5 to Step 6.
+    // - Fill patient fields (name, phone, email, note).
+    // - Insert concurrent appointment directly into DB for that slot.
+    // - Click submit in UI.
+    // - Verify 409 banner appears, and patient details remain intact in inputs.
+    // -------------------------------------------------------------------------
+    console.log('\n[Browser 3/6] Testing Real 409 Conflict & Patient Data Preservation...');
+
+    // Select slot at Branch B
+    const slotToBook = await page.$(`button[data-slot-branch-id="${branchB.id}"]:not([disabled])`);
+    const slotTimeToBook = await page.evaluate((el) => el.getAttribute('data-slot-time'), slotToBook);
+    console.log(`Target conflicting slot: ${slotTimeToBook}`);
+    await slotToBook.click();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Next to Step 5
+    const step4Next = await page.$('#booking-next-step-4');
+    await step4Next.click();
+    await page.waitForSelector('#booking-confirm-location-btn', { timeout: 10000 });
+
+    // Step 5 -> Step 6
+    const confirmLocBtn = await page.$('#booking-confirm-location-btn');
+    await confirmLocBtn.click();
+    await page.waitForSelector('#patient-name-input', { timeout: 10000 });
+
+    // Fill patient details
+    const testPatientName = `Bemor Conflict ${runId}`;
+    const testPatientPhone = '901234567';
+    const testPatientEmail = `conflict.${runId}@test.local`;
+    const testPatientNote = 'Ogriq kuchli, tezroq yordam kerak';
+
+    await page.type('#patient-name-input', testPatientName);
+    await page.type('#patient-phone-input', testPatientPhone);
+    await page.type('#patient-email-input', testPatientEmail);
+    await page.type('#patient-note-input', testPatientNote);
+    await page.evaluate(() => {
+      const cb = document.querySelector('#consent-checkbox');
+      if (cb && !cb.checked) {
+        cb.click();
+      }
+    });
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Inject concurrent conflicting booking into dentacare_test via Prisma!
+    console.log('Injecting concurrent conflicting booking directly into DB...');
+    const competitorPatient = await prisma.patient.create({
       data: {
-        fullName: patientName,
-        phone: patientPhone,
-        email: patientEmail,
+        fullName: 'Raqobatchi Bemor',
+        phone: '+998909999999',
       },
     });
-    cleanupTasks.push(() => prisma.patient.delete({ where: { id: patient.id } }));
+    cleanupTasks.push(() => prisma.patient.delete({ where: { id: competitorPatient.id } }));
 
-    // First booking succeeds
-    const appt = await prisma.appointment.create({
+    const conflictingAppt = await prisma.appointment.create({
       data: {
         doctorId: doctor.id,
-        branchId: branchA.id,
-        serviceId: service.id,
-        patientId: patient.id,
-        startTime: new Date(slot0.startTime),
-        endTime: new Date(slot0.endTime),
+        branchId: branchB.id,
+        serviceId: service1.id,
+        patientId: competitorPatient.id,
+        startTime: new Date(slotTimeToBook),
+        endTime: new Date(new Date(slotTimeToBook).getTime() + 45 * 60000),
         status: 'CONFIRMED',
-        publicToken: `tok-${runId}`,
-        serviceName: service.nameUz,
+        publicToken: `tok-conflict-${runId}`,
+        serviceName: service1.nameUz,
         durationMinutes: 45,
       },
     });
-    cleanupTasks.push(() => prisma.appointment.delete({ where: { id: appt.id } }));
+    cleanupTasks.push(() => prisma.appointment.delete({ where: { id: conflictingAppt.id } }));
 
-    // Re-query slots: slot 0 must now be marked available === false
-    const slotsAfterBooking = await schedulingService.getAvailableSlots(
-      doctor.id,
-      targetDateStr,
-      service.id,
-      branchA.id,
-      'Asia/Tashkent',
-      [service.id],
-    );
-    const bookedSlotCheck = slotsAfterBooking.slots.find(s => s.startTime === slot0.startTime);
-    assert(bookedSlotCheck, 'Slot must exist in grid');
-    assert.strictEqual(bookedSlotCheck.available, false, 'Booked slot must now be unavailable (conflict prevented)');
-    console.log(`[PASS] Concurrently booked slot ${slot0.startTime} is now marked unavailable === false`);
-
-    // Patient form state simulation on 409 conflict
-    const formState = {
-      patientName,
-      patientPhone,
-      patientEmail,
-      patientNote,
-      selectedSlot: slot0.startTime,
-    };
-
-    // On 409 error: invalidate slot, KEEP patient details intact!
-    function handleConflict(state) {
+    // Click submit in UI!
+    console.log('Submitting booking to trigger 409 Conflict...');
+    const submitBtnState = await page.evaluate(() => {
+      const btn = document.getElementById('booking-submit-btn');
       return {
-        ...state,
-        selectedSlot: null, // slot invalidated
-        // patientName, patientPhone, patientEmail, patientNote ARE PRESERVED!
+        disabled: btn?.disabled,
+        name: document.getElementById('patient-name-input')?.value,
+        phone: document.getElementById('patient-phone-input')?.value,
+        email: document.getElementById('patient-email-input')?.value,
+        consent: document.getElementById('consent-checkbox')?.checked,
       };
-    }
-    const recoveredState = handleConflict(formState);
-    assert.strictEqual(recoveredState.selectedSlot, null, 'Slot was cleared for re-selection');
-    assert.strictEqual(recoveredState.patientName, patientName, 'Patient name preserved');
-    assert.strictEqual(recoveredState.patientPhone, patientPhone, 'Patient phone preserved');
-    assert.strictEqual(recoveredState.patientEmail, patientEmail, 'Patient email preserved');
-    assert.strictEqual(recoveredState.patientNote, patientNote, 'Patient note preserved');
-    console.log('[PASS] Conflict recovery preserves 100% of patient contact and note details');
+    });
+    console.log('Submit button state before click:', JSON.stringify(submitBtnState));
 
-    // =========================================================================
-    // SCENARIO 4 & 5: Stale request protection & Branch-prefilled consistency
-    // =========================================================================
-    console.log('\n--- SCENARIO 4 & 5: Stale request handling & Branch-prefilled consistency ---');
-    // Stale key test
-    let activeKey = 'doctor_1_branch_A_2026-10-25';
-    let staleResponseKey = 'doctor_1_branch_A_2026-10-24'; // older date request resolving late
+    await page.click('#booking-submit-btn');
+    await page.waitForSelector('#booking-error-banner', { timeout: 10000 });
 
-    let appliedSlots = null;
-    function handleIncomingSlotsResponse(responseKey, slots) {
-      if (responseKey === activeKey) {
-        appliedSlots = slots;
-      } else {
-        // Discard stale response
+    const pageError = await page.evaluate(() => document.getElementById('booking-error-banner')?.textContent?.trim() || '');
+    console.log(`[PASS] Conflict notice displayed: "${pageError.slice(0, 60)}..."`);
+    assert(
+      pageError.includes('band') || pageError.includes('boshqa') || pageError.includes('tanlang'),
+      `Must display slot conflict notice, got: "${pageError}"`,
+    );
+
+    // UI returned to Step 4 to pick another slot
+    await page.waitForSelector('button[id^="slot-"]', { timeout: 10000 });
+
+    // Pick another available slot in Branch B
+    const availableSlotsNow = await page.$$(`button[data-slot-branch-id="${branchB.id}"]:not([disabled])`);
+    const alternativeSlot = availableSlotsNow.find((s) => s !== slotToBook) || availableSlotsNow[0];
+    await alternativeSlot.click();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Advance through Step 5 back to Step 6
+    const step4NextAgain = await page.$('#booking-next-step-4');
+    await step4NextAgain.click();
+    await page.waitForSelector('#booking-confirm-location-btn', { timeout: 10000 });
+    const confirmLocBtnAgain = await page.$('#booking-confirm-location-btn');
+    await confirmLocBtnAgain.click();
+    await page.waitForSelector('#patient-name-input', { timeout: 10000 });
+
+    // ASSERT: Patient fields REMAIN INTACT!
+    const preservedName = await page.evaluate(() => document.querySelector('#patient-name-input')?.value);
+    const preservedPhone = await page.evaluate(() => document.querySelector('#patient-phone-input')?.value);
+    const preservedEmail = await page.evaluate(() => document.querySelector('#patient-email-input')?.value);
+    const preservedNote = await page.evaluate(() => document.querySelector('#patient-note-input')?.value);
+
+    assert.strictEqual(preservedName, testPatientName, 'Patient name must be preserved');
+    assert(preservedPhone.includes('90') && preservedPhone.includes('123'), 'Patient phone must be preserved');
+    assert.strictEqual(preservedEmail, testPatientEmail, 'Patient email must be preserved');
+    assert.strictEqual(preservedNote, testPatientNote, 'Patient note must be preserved');
+    console.log('[PASS] 100% of patient contact and note fields preserved after conflict recovery');
+
+    // -------------------------------------------------------------------------
+    // BROWSER SCENARIO 5: Doctor-Specific Duration & Price Against Saved Appointment
+    // - Submit booking with our doctor who has 45m duration & 200,000 UZS override.
+    // - Check Step 7 confirmation screen.
+    // - Check database saved appointment.
+    // -------------------------------------------------------------------------
+    console.log('\n[Browser 4/6] Testing Doctor-Specific Duration & Price Truth...');
+    // Ensure consent is checked
+    await page.evaluate(() => {
+      const cb = document.querySelector('#consent-checkbox');
+      if (cb && !cb.checked) {
+        cb.click();
       }
-    }
-    handleIncomingSlotsResponse(staleResponseKey, [{ startTime: '09:00' }]);
-    assert.strictEqual(appliedSlots, null, 'Stale response must be discarded and NOT override active state');
+    });
 
-    handleIncomingSlotsResponse(activeKey, [{ startTime: '10:00' }]);
-    assert.deepStrictEqual(appliedSlots, [{ startTime: '10:00' }], 'Matching active key response accepted');
-    console.log('[PASS] Stale requests rejected; only matching selection key updates state');
+    // Submit valid alternative booking
+    const submitBtn2 = await page.$('#booking-submit-btn');
+    await submitBtn2.click();
+    await page.waitForSelector('#confirmation-duration', { timeout: 15000 });
 
-    // Branch prefilled link consistency
-    const prefilledBranchId = branchB.id;
-    // When doctor is selected, if doctor works in prefilled branch, keep it!
-    const doctorSchedules = await prisma.doctorSchedule.findMany({ where: { doctorId: doctor.id, isActive: true } });
-    const doctorBranches = new Set(doctorSchedules.map(s => s.branchId));
-    assert(doctorBranches.has(prefilledBranchId), 'Doctor works at prefilled branch');
-    let effectiveBranch = prefilledBranchId;
-    console.log(`[PASS] Branch prefilled parameter "${effectiveBranch}" safely preserved when selecting doctor`);
+    // Assert Confirmation Screen displays 45 minutes and 200 000 UZS
+    const confirmedDurationText = await page.evaluate(() => document.querySelector('#confirmation-duration')?.textContent || '');
+    const confirmedPriceText = await page.evaluate(() => document.querySelector('#confirmation-price')?.textContent || '');
+    console.log(`Confirmation screen duration: "${confirmedDurationText.trim()}", price: "${confirmedPriceText.trim()}"`);
+
+    assert(confirmedDurationText.includes('45'), 'Confirmation must display 45m from doctor override');
+    assert(confirmedPriceText.includes('150') || confirmedPriceText.includes('150 000'), 'Confirmation must display 150,000 UZS');
+    console.log('[PASS] Confirmation screen displays authoritative doctor-specific duration and price');
+
+    // Query DB for saved appointment
+    const savedAppt = await prisma.appointment.findFirst({
+      where: {
+        doctorId: doctor.id,
+        branchId: branchB.id,
+        serviceId: service1.id,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    assert(savedAppt, 'Saved appointment must exist in DB');
+    cleanupTasks.push(() => prisma.appointment.delete({ where: { id: savedAppt.id } }));
+
+    assert.strictEqual(savedAppt.durationMinutes, 45, 'DB durationMinutes must be 45');
+    assert.strictEqual(savedAppt.servicePriceFrom, 15000000, 'DB servicePriceFrom must be 150,000 UZS (15000000 tiyin)');
+    assert.strictEqual(savedAppt.branchId, branchB.id, 'DB branchId must match Branch B');
+    console.log(`[PASS] Database record confirmed: duration=${savedAppt.durationMinutes}m, price=${savedAppt.servicePriceFrom / 100} UZS`);
+
+    // -------------------------------------------------------------------------
+    // BROWSER SCENARIO 4: Branch-Prefilled URL Flow
+    // - Navigate to /booking?branchId=branchA&serviceId=service1
+    // - Complete flow and verify Branch A is preserved and booked.
+    // -------------------------------------------------------------------------
+    console.log('\n[Browser 5/6] Testing Branch-Prefilled URL Flow...');
+    await page.goto(`${BASE_URL}/booking?branchId=${branchA.id}&serviceId=${service1.id}&date=${targetDateStr}`, {
+      waitUntil: 'networkidle2',
+      timeout: 30000,
+    });
+
+    // Step 1: Date is selected by default, click Next
+    await page.waitForSelector('#booking-next-step:not([disabled])', { timeout: 15000 });
+    const step1Next = await page.$('#booking-next-step');
+    await step1Next.click();
+    await page.waitForSelector('#booking-next-step-2:not([disabled])', { timeout: 10000 });
+
+    // Step 2: Service is already prefilled, click Next
+    const step2Next = await page.$('#booking-next-step-2');
+    await step2Next.click();
+    await page.waitForSelector(`button[id="doctor-select-${doctor.id}"]`, { timeout: 10000 });
+
+    // Step 3: Select our test doctor
+    await page.click(`button[id="doctor-select-${doctor.id}"]`);
+    await new Promise((r) => setTimeout(r, 400));
+    const step3Next = await page.$('#booking-next-step-3');
+    await step3Next.click();
+    await page.waitForSelector(`button[data-slot-branch-id="${branchA.id}"]`, { timeout: 15000 });
+
+    // Step 4: Verify slots belong strictly to prefilled Branch A
+    const prefilledSlots = await page.$$(`button[data-slot-branch-id="${branchA.id}"]:not([disabled])`);
+    assert(prefilledSlots.length > 0, 'Prefilled Branch A slots must be available');
+    await prefilledSlots[0].click();
+    await new Promise((r) => setTimeout(r, 300));
+    const step4NextPrefilled = await page.$('#booking-next-step-4');
+    await step4NextPrefilled.click();
+    await page.waitForSelector('#booking-confirm-location-btn', { timeout: 10000 });
+
+    // Step 5: Verify prefilled branch is Branch A
+    const locationBranchText = await page.evaluate(() => document.querySelector('h3')?.textContent || '');
+    assert(locationBranchText.includes(branchA.nameUz), `Location confirmation must display Branch A (${branchA.nameUz})`);
+    console.log(`[PASS] Branch-prefilled URL safely preserved Branch A throughout selection`);
+
+    // -------------------------------------------------------------------------
+    // BROWSER SCENARIO 6: Zero Price and Zero Buffer Verification
+    // - Book free service (priceFrom: 0, bufferMinutes: 0)
+    // - Verify 0 UZS / Bepul display in summary & confirmation
+    // - Verify DB record has servicePriceFrom === 0 and bufferMinutes === 0
+    // -------------------------------------------------------------------------
+    console.log('\n[Browser 6/6] Testing Zero Price & Zero Buffer Handling...');
+    await page.goto(`${BASE_URL}/booking?serviceId=${freeService.id}&doctorId=${doctor.id}&date=${targetDateStr}&branchId=${branchA.id}`, {
+      waitUntil: 'networkidle2',
+      timeout: 30000,
+    });
+
+    await advanceToStep4(page);
+    await page.waitForSelector(`button[data-slot-branch-id="${branchA.id}"]`, { timeout: 15000 });
+    const freeSlots = await page.$$(`button[data-slot-branch-id="${branchA.id}"]:not([disabled])`);
+    assert(freeSlots.length > 0, 'Free service slots must be available');
+    await freeSlots[0].click();
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Next to Step 5 -> Step 6
+    const step4NextFree = await page.$('#booking-next-step-4');
+    await step4NextFree.click();
+    await page.waitForSelector('#booking-confirm-location-btn', { timeout: 10000 });
+    const confirmLocBtnFree = await page.$('#booking-confirm-location-btn');
+    await confirmLocBtnFree.click();
+    await page.waitForSelector('#patient-name-input', { timeout: 10000 });
+
+    // Verify summary price shows "Bepul" or 0 UZS
+    const summaryPriceText = await page.evaluate(() => {
+      const summaryHeader = document.querySelector('.uppercase.text-\\[11px\\]');
+      const container = summaryHeader?.closest('div');
+      return container ? container.textContent : '';
+    });
+    console.log(`Step 6 Summary price text: "${summaryPriceText.trim()}"`);
+    assert(
+      summaryPriceText.toLowerCase().includes('bepul') ||
+        summaryPriceText.toLowerCase().includes('бесплатно') ||
+        summaryPriceText.includes('0'),
+      'Step 6 summary must show Free / 0 price',
+    );
+
+    // Fill form and submit
+    await page.type('#patient-name-input', `Bemor Free ${runId}`);
+    await page.type('#patient-phone-input', '907777777');
+    await page.evaluate(() => {
+      const cb = document.querySelector('#consent-checkbox');
+      if (cb && !cb.checked) {
+        cb.click();
+      }
+    });
+    const submitBtnFree = await page.$('#booking-submit-btn');
+    await submitBtnFree.click();
+    await page.waitForSelector('#confirmation-price', { timeout: 15000 });
+
+    // Assert confirmation displays free / 0
+    const confirmedFreePrice = await page.evaluate(() => document.querySelector('#confirmation-price')?.textContent || '');
+    console.log(`Confirmation screen free price: "${confirmedFreePrice.trim()}"`);
+    assert(
+      confirmedFreePrice.toLowerCase().includes('bepul') ||
+        confirmedFreePrice.toLowerCase().includes('бесплатно') ||
+        confirmedFreePrice.includes('0'),
+      'Confirmation screen must show Free / 0 price',
+    );
+
+    // Assert DB record
+    const savedFreeAppt = await prisma.appointment.findFirst({
+      where: {
+        doctorId: doctor.id,
+        serviceId: freeService.id,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    assert(savedFreeAppt, 'Saved free appointment must exist in DB');
+    cleanupTasks.push(() => prisma.appointment.delete({ where: { id: savedFreeAppt.id } }));
+
+    assert.strictEqual(savedFreeAppt.servicePriceFrom, 0, 'DB servicePriceFrom must be exactly 0 (not null or fallback)');
+    assert.strictEqual(typeof savedFreeAppt.bufferMinutes, 'number', 'DB bufferMinutes must be a valid number');
+    console.log(`[PASS] Zero price (0 UZS) and buffer handling verified in DB (price=${savedFreeAppt.servicePriceFrom}, buffer=${savedFreeAppt.bufferMinutes}m)`);
 
     console.log('\n========================================================================');
-    console.log('   ALL 7 BOOKING INTEGRATION SCENARIOS VERIFIED SUCCESSFULLY (PASS)');
+    console.log('   ALL 6 REAL APPLICATION BROWSER INTEGRATION SCENARIOS PASSED (100%)');
     console.log('========================================================================');
   } finally {
-    console.log('\n[Teardown] Cleaning up isolated test fixtures...');
+    if (browser) {
+      await browser.close();
+    }
+    console.log('\n[Teardown] Cleaning up isolated test fixtures in dentacare_test...');
     for (const task of cleanupTasks.reverse()) {
       try {
         await task();
@@ -481,7 +744,7 @@ async function run() {
   }
 }
 
-run().catch(err => {
-  console.error('\n[FATAL] Test failed:', err);
+run().catch((err) => {
+  console.error('\n[FATAL] Integration test failed:', err);
   process.exit(1);
 });

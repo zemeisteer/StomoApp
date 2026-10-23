@@ -103,7 +103,7 @@ export const HeroSection: React.FC = () => {
 
           {/* Right Column: 3D Interactive Tooth Model */}
           <div className="lg:col-span-5 flex justify-center">
-            <div className="w-full max-w-md aspect-square rounded-3xl bg-white/70 backdrop-blur-md p-4 sm:p-6 border border-[#d8e5e2] shadow-[0_8px_30px_rgba(22,123,120,0.06)] relative flex items-center justify-center">
+            <div className="w-full max-w-lg lg:max-w-xl h-[380px] sm:h-[440px] lg:h-[480px] rounded-3xl bg-white/75 backdrop-blur-md p-3 sm:p-5 border border-[#d8e5e2] shadow-[0_8px_30px_rgba(22,123,120,0.06)] relative flex items-center justify-center">
               <Tooth3D />
             </div>
           </div>

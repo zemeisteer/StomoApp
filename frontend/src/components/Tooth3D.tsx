@@ -309,7 +309,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
           const fovH = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
           const distV = modelRadius / Math.tan(fovRad / 2);
           const distH = modelRadius / Math.tan(fovH / 2);
-          const fitDistance = Math.max(distV, distH) * 1.35; // 35% comfortable anatomical margin
+          const fitDistance = Math.max(distV, distH) * 1.06; // Prominent, enlarged anatomical tooth model
 
           camera.position.set(0, 0.05, fitDistance);
           camera.lookAt(0, 0, 0);

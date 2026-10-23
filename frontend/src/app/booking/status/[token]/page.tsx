@@ -23,6 +23,8 @@ import {
 import { useI18n } from '../../../../lib/i18n';
 import { api } from '../../../../lib/api';
 import { formatClinicDate, formatClinicTime } from '../../../../lib/dateFormat';
+import { CustomDatePicker } from '../../../../components/CustomDatePicker';
+import { CustomSelect } from '../../../../components/CustomSelect';
 
 function getTashkentDateString(d: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -420,12 +422,13 @@ export default function BookingStatusPage() {
                 <label className="font-semibold text-[#52696e] block mb-1">
                   {isUz ? 'Yangi sanani tanlang:' : 'Выберите новую дату:'}
                 </label>
-                <input
-                  type="date"
+                <CustomDatePicker
+                  id="reschedule-datepicker"
                   value={newDate}
                   min={getTashkentDateString(new Date())}
-                  onChange={(e) => setNewDate(e.target.value)}
-                  className="w-full px-3 py-2 bg-white rounded-xl border border-[#d8e5e2] text-[#152f34]"
+                  onChange={(val) => setNewDate(val)}
+                  locale={isUz ? 'uz' : 'ru'}
+                  placeholder={isUz ? 'Sanani tanlang...' : 'Выберите дату...'}
                   required
                 />
               </div>
@@ -443,19 +446,17 @@ export default function BookingStatusPage() {
                     {isUz ? "Ushbu kunda bo'sh vaqt yo'q" : 'На этот день нет свободного времени'}
                   </p>
                 ) : (
-                  <select
+                  <CustomSelect
+                    id="reschedule-slot-select"
                     value={selectedSlotTime}
-                    onChange={(e) => setSelectedSlotTime(e.target.value)}
-                    className="w-full px-3 py-2 bg-white rounded-xl border border-[#d8e5e2] text-[#152f34]"
-                    required
-                  >
-                    <option value="">{isUz ? 'Vaqtni tanlang' : 'Выберите время'}</option>
-                    {availableSlots.map((slot, idx) => (
-                      <option key={idx} value={slot.startTime}>
-                        {formatClinicTime(slot.startTime)}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setSelectedSlotTime(val)}
+                    placeholder={isUz ? 'Vaqtni tanlang' : 'Выберите время'}
+                    options={availableSlots.map((slot) => ({
+                      value: slot.startTime,
+                      label: formatClinicTime(slot.startTime),
+                    }))}
+                    locale={isUz ? 'uz' : 'ru'}
+                  />
                 )}
               </div>
             </div>

@@ -14,12 +14,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="uz" className="scroll-smooth">
+    <html lang="uz" className="scroll-smooth" suppressHydrationWarning>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>
-      <body className="bg-[var(--app-bg)] text-[var(--text)] antialiased selection:bg-[#167b78] selection:text-white">
+      <body
+        className="bg-[var(--app-bg)] text-[var(--text)] antialiased selection:bg-[#167b78] selection:text-white"
+        suppressHydrationWarning
+      >
         <ClientLayout>{children}</ClientLayout>
       </body>
     </html>

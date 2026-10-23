@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
+import { formatClinicDate } from '../../../lib/dateFormat';
 
 export default function ArticleDetailPage() {
   const { t, language } = useI18n();
@@ -76,11 +77,7 @@ export default function ArticleDetailPage() {
   const title = language === 'uz' ? article.titleUz : article.titleRu || article.titleUz;
   const content = language === 'uz' ? article.contentUz : article.contentRu || article.contentUz;
   const publishedDate = article.publishedAt
-    ? new Date(article.publishedAt).toLocaleDateString(language === 'uz' ? 'uz-UZ' : 'ru-RU', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
+    ? formatClinicDate(article.publishedAt, language === 'uz' ? 'uz' : 'ru', { includeYear: true })
     : '';
 
   return (

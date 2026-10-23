@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { Star, MessageSquare, ArrowRight, User, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { formatClinicDate } from '../../lib/dateFormat';
 
 interface ReviewsSectionProps {
   reviews: any[];
@@ -109,7 +110,7 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
           {reviews.slice(0, 3).map((r) => {
             const author = r.authorName || (isRu ? 'Пациент клиники' : 'Klinika bemori');
             const dateStr = r.createdAt
-              ? new Date(r.createdAt).toLocaleDateString(isRu ? 'ru-RU' : 'uz-UZ')
+              ? formatClinicDate(r.createdAt, isRu ? 'ru' : 'uz')
               : '';
 
             return (

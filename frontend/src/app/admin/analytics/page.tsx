@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
+import { CustomDatePicker } from '../../../components/CustomDatePicker';
 import { api } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
 import {
@@ -307,14 +308,15 @@ export default function AdminAnalyticsPage() {
               <label className="text-[11px] font-bold text-[#52696e] block mb-1">
                 {isUz ? 'Boshlanish sanasi' : 'Дата начала'}
               </label>
-              <input
-                type="date"
+              <CustomDatePicker
+                id="analytics-start-date"
                 value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
+                onChange={(val) => {
+                  setStartDate(val);
                   setActivePreset('custom');
                 }}
-                className="w-full px-3 py-2 rounded-xl border border-[#d8e5e2] text-xs bg-[#f3f8f7] focus:bg-white focus:ring-2 focus:ring-[#167b78] outline-none text-[#152f34]"
+                locale={isUz ? 'uz' : 'ru'}
+                placeholder={isUz ? 'Boshlanish sanasi' : 'Дата начала'}
               />
             </div>
 
@@ -322,14 +324,15 @@ export default function AdminAnalyticsPage() {
               <label className="text-[11px] font-bold text-[#52696e] block mb-1">
                 {isUz ? 'Tugash sanasi' : 'Дата окончания'}
               </label>
-              <input
-                type="date"
+              <CustomDatePicker
+                id="analytics-end-date"
                 value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
+                onChange={(val) => {
+                  setEndDate(val);
                   setActivePreset('custom');
                 }}
-                className="w-full px-3 py-2 rounded-xl border border-[#d8e5e2] text-xs bg-[#f3f8f7] focus:bg-white focus:ring-2 focus:ring-[#167b78] outline-none text-[#152f34]"
+                locale={isUz ? 'uz' : 'ru'}
+                placeholder={isUz ? 'Tugash sanasi' : 'Дата окончания'}
               />
             </div>
 
@@ -604,9 +607,48 @@ export default function AdminAnalyticsPage() {
                 })}
               </div>
             </div>
+
+            {/* Retention & Patient Loyalty Card (Placed in Left Column to fill empty space) */}
+            <div className="ui-card space-y-3">
+              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-2">
+                <h2 className="text-sm font-bold text-[#152f34]">
+                  {isUz ? 'Bemorlar sadoqati va tahlili' : 'Лояльность и аналитика пациентов'}
+                </h2>
+                <span className="text-xs text-[#167b78] font-bold bg-[#e0f2ed] px-2.5 py-0.5 rounded-md">
+                  {isUz ? 'Mijozlar bazasi' : 'База клиентов'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2]">
+                  <span className="text-[11px] text-[#52696e] block">{isUz ? 'Yangi bemorlar:' : 'Новые пациенты:'}</span>
+                  <strong className="text-base font-black text-[#152f34] mt-0.5 block">
+                    {summary.newPatients} {isUz ? 'ta' : ''}
+                  </strong>
+                </div>
+                <div className="p-3 bg-[#eaf5f2] rounded-xl border border-[#b8ded5]">
+                  <span className="text-[11px] text-[#167b78] block">{isUz ? 'Qayta murojaat:' : 'Повторные:'}</span>
+                  <strong className="text-base font-black text-[#167b78] mt-0.5 block">
+                    {summary.returningPatients} {isUz ? 'ta' : ''}
+                  </strong>
+                </div>
+                <div className="p-3 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2]">
+                  <span className="text-[11px] text-[#52696e] block">{isUz ? 'Jami bemorlar:' : 'Всего пациентов:'}</span>
+                  <strong className="text-base font-black text-[#152f34] mt-0.5 block">
+                    {summary.uniquePatientsCount} {isUz ? 'nafar' : 'чел.'}
+                  </strong>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-[#52696e] italic pt-1">
+                {isUz
+                  ? "* Qayta murojaat qilganlar — klinikada ilgari kamida bitta yakunlangan qabulga ega bo'lgan bemorlar."
+                  : '* Повторные пациенты — пациенты, имеющие как минимум один завершенный прием в клинике ранее.'}
+              </p>
+            </div>
           </div>
 
-          {/* Right 5 Cols: Doctor Performance & Workload (Image 4 Style) */}
+          {/* Right 5 Cols: Doctor Performance & Workload (Compact & Scrollable) */}
           <div className="lg:col-span-5 space-y-6">
             {/* Doctor Utilization & Workload Card */}
             <div className="ui-card space-y-4">
@@ -623,36 +665,36 @@ export default function AdminAnalyticsPage() {
               </div>
 
               {doctorUtilization.length === 0 ? (
-                <p className="text-xs text-[#52696e] text-center p-6">
+                <p className="text-xs text-[#52696e] text-center p-6 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
                   {isUz ? "Shifokorlar bandligi ma'lumoti yo'q" : 'Нет данных о занятости врачей'}
                 </p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
                   {doctorUtilization.map((doc, idx) => (
                     <div
                       key={idx}
-                      className="p-3.5 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] space-y-2 text-xs"
+                      className="p-3 bg-[#f3f8f7] hover:bg-[#eaf5f2]/50 rounded-xl border border-[#d8e5e2] space-y-1.5 text-xs transition-colors"
                     >
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-[#e0f2ed] text-[#167b78] font-bold flex items-center justify-center text-xs">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-7 h-7 rounded-full bg-[#e0f2ed] text-[#167b78] font-bold flex items-center justify-center text-xs shrink-0">
                             {doc.doctorName.charAt(0)}
                           </div>
-                          <div>
-                            <span className="font-bold text-[#152f34] block">{doc.doctorName}</span>
-                            <span className="text-[11px] text-[#52696e]">
+                          <div className="min-w-0">
+                            <span className="font-bold text-[#152f34] block truncate">{doc.doctorName}</span>
+                            <span className="text-[10px] text-[#52696e]">
                               {doc.appointmentsCount} {isUz ? 'ta qabul' : 'приемов'}
                             </span>
                           </div>
                         </div>
 
-                        <span className="font-black text-xs text-[#167b78] bg-[#e0f2ed] px-2.5 py-1 rounded-lg">
+                        <span className="font-black text-xs text-[#167b78] bg-[#e0f2ed] px-2.5 py-0.5 rounded-lg shrink-0">
                           {doc.utilizationRate}%
                         </span>
                       </div>
 
                       {/* Progress bar */}
-                      <div className="w-full h-2 bg-white rounded-full overflow-hidden border border-[#d8e5e2]">
+                      <div className="w-full h-1.5 bg-white rounded-full overflow-hidden border border-[#d8e5e2]">
                         <div
                           className="h-full bg-[#167b78] rounded-full transition-all duration-500"
                           style={{ width: `${Math.min(doc.utilizationRate, 100)}%` }}
@@ -662,40 +704,6 @@ export default function AdminAnalyticsPage() {
                   ))}
                 </div>
               )}
-            </div>
-
-            {/* Retention & Patient Loyalty Card */}
-            <div className="ui-card space-y-3">
-              <h2 className="text-sm font-bold text-[#152f34] border-b border-[#d8e5e2] pb-2">
-                {isUz ? 'Bemorlar sadoqati' : 'Лояльность пациентов'}
-              </h2>
-
-              <div className="p-3.5 bg-[#eaf5f2] rounded-xl border border-[#d8e5e2] space-y-2.5 text-xs">
-                <div className="flex justify-between items-center pb-2 border-b border-[#d8e5e2]">
-                  <span className="text-[#52696e]">{isUz ? 'Yangi bemorlar:' : 'Новые пациенты:'}</span>
-                  <span className="font-bold text-[#152f34]">
-                    {summary.newPatients} {isUz ? 'ta' : ''}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center pb-2 border-b border-[#d8e5e2]">
-                  <span className="text-[#52696e]">{isUz ? 'Qayta murojaat qilganlar:' : 'Повторные пациенты:'}</span>
-                  <span className="font-bold text-[#167b78]">
-                    {summary.returningPatients} {isUz ? 'ta' : ''}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#52696e]">{isUz ? 'Jami bemorlar:' : 'Всего пациентов:'}</span>
-                  <span className="font-black text-[#152f34]">
-                    {summary.uniquePatientsCount} {isUz ? 'nafar' : 'чел.'}
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-[11px] text-[#52696e] italic">
-                {isUz
-                  ? "* Qayta murojaat qilganlar — klinikada ilgari kamida bitta yakunlangan qabulga ega bo'lgan bemorlar."
-                  : '* Повторные пациенты — пациенты, имеющие как минимум один завершенный прием в клинике ранее.'}
-              </p>
             </div>
           </div>
         </div>

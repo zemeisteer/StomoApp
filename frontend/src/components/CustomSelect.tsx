@@ -128,7 +128,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   useEffect(() => {
     if (isOpen) {
       if (isSearchable && searchInputRef.current) {
-        searchInputRef.current.focus();
+        searchInputRef.current.focus({ preventScroll: true });
       }
       // Highlight selected option or first non-disabled option
       const selectedIdx = filteredOptions.findIndex((opt) => opt.value === value);
@@ -144,12 +144,19 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     }
   }, [isOpen, searchQuery, isSearchable, value, filteredOptions.length]);
 
-  // Scroll active option into view
+  // Scroll active option into view inside the listbox ONLY, never scrolling the page window
   useEffect(() => {
     if (isOpen && highlightedIndex >= 0 && listboxRef.current) {
-      const activeElement = listboxRef.current.children[highlightedIndex] as HTMLElement;
-      if (activeElement && typeof activeElement.scrollIntoView === 'function') {
-        activeElement.scrollIntoView({ block: 'nearest' });
+      const container = listboxRef.current;
+      const activeElement = container.children[highlightedIndex] as HTMLElement;
+      if (activeElement) {
+        const elTop = activeElement.offsetTop;
+        const elBottom = elTop + activeElement.offsetHeight;
+        if (elTop < container.scrollTop) {
+          container.scrollTop = elTop;
+        } else if (elBottom > container.scrollTop + container.clientHeight) {
+          container.scrollTop = elBottom - container.clientHeight;
+        }
       }
     }
   }, [highlightedIndex, isOpen]);
@@ -258,7 +265,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
             if (!targetOpt.disabled) {
               onChange(targetOpt.value);
               setIsOpen(false);
-              triggerRef.current?.focus();
+              triggerRef.current?.focus({ preventScroll: true });
             }
           }
         }
@@ -274,7 +281,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     if (isOptDisabled) return;
     onChange(optValue);
     setIsOpen(false);
-    triggerRef.current?.focus();
+    triggerRef.current?.focus({ preventScroll: true });
   };
 
   const activeOptionId =

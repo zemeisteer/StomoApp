@@ -54,7 +54,7 @@ export function mergeIntervals(intervals: TimeInterval[]): TimeInterval[] {
   for (let i = 1; i < sorted.length; i++) {
     const prev = merged[merged.length - 1];
     const curr = sorted[i];
-    if (curr.start <= prev.end && prev.branchId === curr.branchId) {
+    if (curr.start <= prev.end && prev.branchId === curr.branchId && prev.branchId !== undefined) {
       prev.end = Math.max(prev.end, curr.end);
     } else {
       merged.push({ ...curr });
@@ -311,6 +311,13 @@ export class SchedulingService {
       return [];
     }
 
+    // Query doctor's assigned branches to resolve legacy single-branch doctor overtime
+    const docBranches = await client.doctorBranch.findMany({
+      where: { doctorId },
+      select: { branchId: true },
+    });
+    const uniqueBranchIds = Array.from(new Set(docBranches.map((b) => b.branchId)));
+
     // Deterministic Precedence:
     // 1. Add all OVERTIME intervals (even if no regular schedule existed)
     for (const ex of exceptions) {
@@ -318,7 +325,25 @@ export class SchedulingService {
         const otStart = this.parseTime(ex.startTime);
         const otEnd = this.parseTime(ex.endTime);
         if (otEnd > otStart) {
-          dayIntervals.push({ start: otStart, end: otEnd });
+          let otBranchId = (ex as any).branchId;
+          if (!otBranchId) {
+            // Legacy record without branchId:
+            // "Never guess the first branch for ambiguous legacy overtime. Handle legacy records without silently rewriting historical data."
+            if (uniqueBranchIds.length === 1) {
+              otBranchId = uniqueBranchIds[0];
+            } else {
+              // Ambiguous! More than 1 branch (or 0). Leave otBranchId undefined so it cannot be booked.
+              otBranchId = undefined;
+            }
+          }
+
+          if (otBranchId) {
+            // If caller requested a specific branchId, only include overtime matching that branch!
+            if (branchId && otBranchId !== branchId) {
+              continue;
+            }
+            dayIntervals.push({ start: otStart, end: otEnd, branchId: otBranchId });
+          }
         }
       }
     }
@@ -652,7 +677,20 @@ export class SchedulingService {
           continue;
         }
 
-        const slotBranchId = interval.branchId || branchId;
+        const slotBranchId = interval.branchId;
+        if (!slotBranchId) {
+          // If interval has no authoritative branch (e.g. ambiguous legacy overtime), skip it!
+          continue;
+        }
+        if (branchId && slotBranchId !== branchId) {
+          continue;
+        }
+
+        const slotIso = slotStartUtc.toISOString();
+        if (slots.some((s) => s.startTime === slotIso && s.branchId === slotBranchId)) {
+          continue; // Prevent duplicate slots across overlapping queries
+        }
+
         const available = await this.isTimeSlotAvailable(
           doctorId,
           slotStartUtc,
@@ -663,7 +701,7 @@ export class SchedulingService {
         );
 
         slots.push({
-          startTime: slotStartUtc.toISOString(),
+          startTime: slotIso,
           endTime: slotEndUtc.toISOString(),
           available,
           branchId: slotBranchId,
@@ -1170,6 +1208,7 @@ export class SchedulingService {
     startTime?: string;
     endTime?: string;
     reason?: string;
+    branchId?: string;
   }) {
     const lockKey = this.hashStringToInt(`doc_${data.doctorId}`);
 
@@ -1214,6 +1253,42 @@ export class SchedulingService {
         }
       }
 
+      // Explicit Overtime Branch Policy & Validation
+      let resolvedBranchId = data.branchId;
+      if (data.type === ExceptionType.OVERTIME) {
+        if (!data.startTime || !data.endTime) {
+          throw new BadRequestException('Qo\'shimcha ish vaqti (OVERTIME) uchun boshlanish va tugash vaqti ko\'rsatilishi shart');
+        }
+
+        // Query doctor branch assignments
+        const docBranches = await tx.doctorBranch.findMany({
+          where: { doctorId: data.doctorId },
+          select: { branchId: true },
+        });
+        const assignedBranchIds = new Set(docBranches.map((b) => b.branchId));
+
+        const docSchedules = await tx.doctorSchedule.findMany({
+          where: { doctorId: data.doctorId },
+          select: { branchId: true },
+          distinct: ['branchId'],
+        });
+        docSchedules.forEach((s) => assignedBranchIds.add(s.branchId));
+
+        if (resolvedBranchId) {
+          if (!assignedBranchIds.has(resolvedBranchId)) {
+            throw new BadRequestException('Shifokor ushbu filialga biriktirilmagan');
+          }
+        } else {
+          if (assignedBranchIds.size === 1) {
+            resolvedBranchId = Array.from(assignedBranchIds)[0];
+          } else if (assignedBranchIds.size > 1) {
+            throw new BadRequestException('Shifokor bir nechta filialda ishlaydi. Qo\'shimcha ish vaqti uchun filialni ko\'rsatish shart');
+          } else {
+            throw new BadRequestException('Shifokor hech qaysi filialga biriktirilmagan');
+          }
+        }
+      }
+
       return tx.scheduleException.create({
         data: {
           doctorId: data.doctorId,
@@ -1222,6 +1297,7 @@ export class SchedulingService {
           startTime: data.startTime,
           endTime: data.endTime,
           reason: data.reason,
+          branchId: resolvedBranchId || null,
         },
       });
     });

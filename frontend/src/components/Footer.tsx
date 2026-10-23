@@ -12,6 +12,7 @@ export const Footer: React.FC = () => {
   const isRu = language === 'ru';
 
   const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState(false);
   const [clinicName, setClinicName] = useState<string>('DentaCare');
   const [clinicPhone, setClinicPhone] = useState<string>('');
   const [clinicEmail, setClinicEmail] = useState<string>('');
@@ -53,10 +54,11 @@ export const Footer: React.FC = () => {
           {/* Brand Info */}
           <div className="space-y-4">
             <Link href="/" className="inline-flex items-center gap-2.5">
-              {clinicLogo ? (
+              {clinicLogo && !logoError ? (
                 <img
                   src={clinicLogo}
                   alt={clinicName}
+                  onError={() => setLogoError(true)}
                   className="max-h-10 max-w-[190px] object-contain brightness-110"
                 />
               ) : (

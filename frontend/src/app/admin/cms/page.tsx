@@ -24,7 +24,17 @@ export default function AdminCmsPage() {
   const [activeTab, setActiveTab] = useState<'articles' | 'faqs' | 'policies'>('articles');
   const [articles, setArticles] = useState<any[]>([]);
   const [faqs, setFaqs] = useState<any[]>([]);
-  const [policies, setPolicies] = useState<any>({ privacyPolicy: '', bookingPolicy: '' });
+  const [policies, setPolicies] = useState<{
+    privacyPolicyUz: string;
+    privacyPolicyRu: string;
+    bookingPolicyUz: string;
+    bookingPolicyRu: string;
+  }>({
+    privacyPolicyUz: '',
+    privacyPolicyRu: '',
+    bookingPolicyUz: '',
+    bookingPolicyRu: '',
+  });
 
   const [isLoading, setIsLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -70,9 +80,38 @@ export default function AdminCmsPage() {
       setArticles(artRes.items || []);
       setFaqs(faqRes || []);
       if (polRes) {
+        const parsePolicyField = (field: any): { uz: string; ru: string } => {
+          if (!field) return { uz: '', ru: '' };
+          if (typeof field === 'object' && field !== null) {
+            return {
+              uz: typeof field.uz === 'string' ? field.uz : '',
+              ru: typeof field.ru === 'string' ? field.ru : '',
+            };
+          }
+          if (typeof field === 'string') {
+            try {
+              const parsed = JSON.parse(field);
+              if (parsed && typeof parsed === 'object') {
+                return {
+                  uz: typeof parsed.uz === 'string' ? parsed.uz : '',
+                  ru: typeof parsed.ru === 'string' ? parsed.ru : '',
+                };
+              }
+            } catch {
+              return { uz: field, ru: field };
+            }
+          }
+          return { uz: '', ru: '' };
+        };
+
+        const priv = parsePolicyField(polRes.privacyPolicy);
+        const book = parsePolicyField(polRes.bookingPolicy);
+
         setPolicies({
-          privacyPolicy: typeof polRes.privacyPolicy === 'string' ? polRes.privacyPolicy : JSON.stringify(polRes.privacyPolicy || '', null, 2),
-          bookingPolicy: typeof polRes.bookingPolicy === 'string' ? polRes.bookingPolicy : JSON.stringify(polRes.bookingPolicy || '', null, 2),
+          privacyPolicyUz: priv.uz,
+          privacyPolicyRu: priv.ru,
+          bookingPolicyUz: book.uz,
+          bookingPolicyRu: book.ru,
         });
       }
     } catch (e: any) {
@@ -190,8 +229,14 @@ export default function AdminCmsPage() {
     try {
       setStatusMessage(null);
       await api.updatePolicies({
-        privacyPolicy: policies.privacyPolicy,
-        bookingPolicy: policies.bookingPolicy,
+        privacyPolicy: {
+          uz: policies.privacyPolicyUz.trim(),
+          ru: policies.privacyPolicyRu.trim(),
+        },
+        bookingPolicy: {
+          uz: policies.bookingPolicyUz.trim(),
+          ru: policies.bookingPolicyRu.trim(),
+        },
       });
       setStatusMessage({ type: 'success', text: 'Klinika qoidalari va siyosatlari muvaffaqiyatli saqlandi' });
     } catch (err: any) {
@@ -492,40 +537,101 @@ export default function AdminCmsPage() {
 
         {/* Tab 3: Policies */}
         {activeTab === 'policies' && (
-          <form onSubmit={handleSavePolicies} className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
-            <h2 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-teal-700" />
-              <span>Maxfiylik va Qabul Qoidalari Matnlari</span>
-            </h2>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Maxfiylik Siyosati (Privacy Policy)
-              </label>
-              <textarea
-                rows={6}
-                value={policies.privacyPolicy}
-                onChange={(e) => setPolicies({ ...policies, privacyPolicy: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-teal-600"
-              />
+          <form onSubmit={handleSavePolicies} className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-8">
+            <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-teal-700" />
+                <span>Maxfiylik va Qabul Qoidalari Matnlari</span>
+              </h2>
+              <span className="text-xs text-slate-500 font-medium">
+                Mijozlar saytda va bron qilishda ko&apos;radigan matnlar
+              </span>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Qabul va Bronlash Qoidalari (Booking Terms & Conditions)
-              </label>
-              <textarea
-                rows={6}
-                value={policies.bookingPolicy}
-                onChange={(e) => setPolicies({ ...policies, bookingPolicy: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-teal-600"
-              />
+            {/* 1. Maxfiylik Siyosati */}
+            <div className="p-5 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-teal-600" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  Maxfiylik Siyosati (Privacy Policy)
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-black">UZ</span>
+                    <span>O&apos;zbekcha matn</span>
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={policies.privacyPolicyUz}
+                    onChange={(e) => setPolicies({ ...policies, privacyPolicyUz: e.target.value })}
+                    placeholder="DentaCare klinikasi bemorlarning shaxsiy ma'lumotlari xavfsizligini to'liq kafolatlaydi..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-black">RU</span>
+                    <span>Русский текст</span>
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={policies.privacyPolicyRu}
+                    onChange={(e) => setPolicies({ ...policies, privacyPolicyRu: e.target.value })}
+                    placeholder="Клиника DentaCare гарантирует полную безопасность персональных данных пациентов..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Qabul va Bronlash Qoidalari */}
+            <div className="p-5 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  Qabul va Bronlash Qoidalari (Booking Terms & Conditions)
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-black">UZ</span>
+                    <span>O&apos;zbekcha matn</span>
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={policies.bookingPolicyUz}
+                    onChange={(e) => setPolicies({ ...policies, bookingPolicyUz: e.target.value })}
+                    placeholder="Qabulga kamida 2 soat oldin yozilish mumkin. Bekor qilish kamida 1 soat oldin..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-black">RU</span>
+                    <span>Русский текст</span>
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={policies.bookingPolicyRu}
+                    onChange={(e) => setPolicies({ ...policies, bookingPolicyRu: e.target.value })}
+                    placeholder="Запись на прием возможна минимум за 2 часа. Отмена приема должна производиться..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end pt-2">
               <button
                 type="submit"
-                className="px-6 py-2.5 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold shadow-md shadow-teal-700/20"
+                className="px-6 py-3 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold shadow-md shadow-teal-700/20 transition-all cursor-pointer"
               >
                 Siyosatlarni saqlash
               </button>

@@ -122,8 +122,11 @@ export function isAppointmentOverlapping(
 export function serializeAppointmentResponse(appointment: any) {
   const doc = appointment.doctor;
   const branch = appointment.branch;
-  const docName = appointment.doctorName || (doc ? `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`.trim() : undefined);
+  const docNameUz = doc ? `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`.trim() : undefined;
+  const docNameRu = doc ? `Др. ${doc.firstNameRu || doc.firstNameUz} ${doc.lastNameRu || doc.lastNameUz}`.trim() : undefined;
+  const docName = appointment.doctorName || docNameUz;
   const branchName = appointment.branchName || branch?.nameUz || '';
+  const branchNameRu = branch?.nameRu || branchName;
 
   const serviceItems = (appointment.serviceItems || []).map((item: any) => ({
     id: item.id,
@@ -154,9 +157,13 @@ export function serializeAppointmentResponse(appointment: any) {
     durationMinutes: appointment.durationMinutes,
     serviceItemsDurationMinutes: serviceItemsTotalDuration,
     durationAdjustmentMinutes,
-    bufferMinutes: appointment.bufferMinutes ?? 5,
+    bufferMinutes: appointment.bufferMinutes ?? 0,
     doctorName: docName,
+    doctorNameRu: docNameRu || docName,
     branchName: branchName,
+    branchNameRu: branchNameRu,
+    branchAddressUz: branch?.addressUz || '',
+    branchAddressRu: branch?.addressRu || branch?.addressUz || '',
     branchId: appointment.branchId,
     serviceId: appointment.serviceId,
     doctorId: appointment.doctorId,
@@ -522,7 +529,10 @@ export class AppointmentsService {
           }
 
           const publicToken = nanoid(32);
-          const expiresAt = new Date(nowUtc.getTime() + txPendingExpiryMinutes * 60 * 1000);
+          const isStaffCreated = dto.source === 'admin' || dto.source === 'reception';
+          const initialStatus = isStaffCreated ? AppointmentStatus.CONFIRMED : AppointmentStatus.PENDING;
+          const effectivePendingMinutes = txPendingExpiryMinutes > 30 ? txPendingExpiryMinutes : 1440;
+          const expiresAt = isStaffCreated ? null : new Date(nowUtc.getTime() + effectivePendingMinutes * 60 * 1000);
           const tokenExpiresAt = new Date(txEndTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
           const appointment = await tx.appointment.create({
@@ -532,7 +542,7 @@ export class AppointmentsService {
               doctorId: dto.doctorId,
               serviceId: txAuthoritative.services[0].id,
               branchId: txBranchId || null,
-              status: AppointmentStatus.PENDING,
+              status: initialStatus,
               startTime: startTimeUtc,
               endTime: txEndTimeUtc,
               serviceName: txAuthoritative.combinedNameUz,
@@ -1754,7 +1764,8 @@ export class AppointmentsService {
     const candidates = await this.prisma.appointment.findMany({
       where: {
         status: AppointmentStatus.PENDING,
-        expiresAt: { lte: now },
+        source: { notIn: ['admin', 'reception'] },
+        expiresAt: { not: null, lte: now },
       },
       select: { id: true },
       take: 50,

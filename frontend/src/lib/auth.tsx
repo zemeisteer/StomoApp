@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { api } from './api';
 
 export type StaffRole = 'OWNER' | 'ADMIN' | 'DOCTOR' | 'EDITOR';
@@ -34,6 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<StaffUserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
 
   const checkAuth = async () => {
     try {
@@ -48,8 +49,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    checkAuth();
-  }, []);
+    // Only check auth immediately if accessing admin pages
+    if (pathname && pathname.startsWith('/admin')) {
+      checkAuth();
+    } else {
+      setIsLoading(false);
+    }
+  }, [pathname]);
 
   const login = async (email: string, pass: string) => {
     await api.login(email, pass);

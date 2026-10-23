@@ -21,7 +21,9 @@ import {
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect } from '../../../components/CustomSelect';
+import { CustomDatePicker } from '../../../components/CustomDatePicker';
 import { api } from '../../../lib/api';
+import { formatClinicDate } from '../../../lib/dateFormat';
 
 const DAYS_OF_WEEK = [
   { value: 'MONDAY', label: 'Dushanba' },
@@ -656,7 +658,7 @@ export default function AdminDoctorsManagePage() {
                   >
                     <div>
                       <span className="font-bold text-amber-950 block">
-                        {new Date(exc.date).toLocaleDateString()} — {EXCEPTION_TYPE_LABELS[exc.type] || exc.type}
+                        {formatClinicDate(exc.date, 'uz')} — {EXCEPTION_TYPE_LABELS[exc.type] || exc.type}
                       </span>
                       {exc.startTime && exc.endTime && (
                         <span className="text-[11px] text-amber-900 block font-mono">
@@ -1049,13 +1051,13 @@ export default function AdminDoctorsManagePage() {
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Sana *</label>
-                <input
-                  type="date"
+                <CustomDatePicker
+                  id="admin-doctor-exception-date"
                   required
                   value={exceptionDate}
                   min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setExceptionDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                  onChange={(val) => setExceptionDate(val)}
+                  placeholder="Sanani tanlang..."
                 />
               </div>
 

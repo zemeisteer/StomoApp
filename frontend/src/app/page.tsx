@@ -112,6 +112,23 @@ export default function HomePage() {
     }
   }, [t.common.error]);
 
+  const [sectionsState, setSectionsState] = useState<SectionState<any[]>>({
+    data: [],
+    isLoading: true,
+    error: null,
+  });
+
+  const fetchSections = useCallback(async () => {
+    setSectionsState((prev) => ({ ...prev, isLoading: true, error: null }));
+    try {
+      const res = await api.getSections();
+      const list = Array.isArray(res) ? res : [];
+      setSectionsState({ data: list, isLoading: false, error: null });
+    } catch {
+      setSectionsState({ data: [], isLoading: false, error: null });
+    }
+  }, []);
+
   const fetchFaqs = useCallback(async () => {
     setFaqsState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
@@ -134,7 +151,12 @@ export default function HomePage() {
     fetchReviews();
     fetchBranches();
     fetchFaqs();
-  }, [fetchServices, fetchDoctors, fetchReviews, fetchBranches, fetchFaqs]);
+    fetchSections();
+  }, [fetchServices, fetchDoctors, fetchReviews, fetchBranches, fetchFaqs, fetchSections]);
+
+  const clinicSectionData = sectionsState.data.find(
+    (s: any) => s.sectionKey === 'clinic' || s.sectionKey === 'about' || s.sectionKey === 'standards'
+  );
 
   return (
     <div className="space-y-4 pb-16 overflow-hidden">
@@ -163,7 +185,7 @@ export default function HomePage() {
 
       {/* 4. Clinic Standards & Quality Section */}
       <ScrollReveal durationMs={240} distancePx={16}>
-        <ClinicSection />
+        <ClinicSection sectionData={clinicSectionData} />
       </ScrollReveal>
 
       {/* 5. Patient Reviews Section */}

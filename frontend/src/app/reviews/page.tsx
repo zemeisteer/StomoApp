@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Star, MessageSquare, Send, CheckCircle2, AlertCircle, User } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { formatClinicDate } from '../../lib/dateFormat';
 
 export default function ReviewsPage() {
   const { t, language } = useI18n();
@@ -115,7 +116,7 @@ export default function ReviewsPage() {
             reviews.map((r) => {
               const author = r.authorName || (isRu ? 'Пациент клиники' : 'Klinika bemori');
               const dateStr = r.createdAt
-                ? new Date(r.createdAt).toLocaleDateString(isRu ? 'ru-RU' : 'uz-UZ')
+                ? formatClinicDate(r.createdAt, isRu ? 'ru' : 'uz')
                 : '';
 
               return (
