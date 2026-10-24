@@ -94,6 +94,47 @@ async function fetcher<T>(url: string, options: RequestInit = {}, isRetry = fals
   return res.json();
 }
 
+export interface BookingResponse {
+  message: string;
+  id: string;
+  appointmentId: string;
+  publicToken: string;
+  token?: string;
+  status: string;
+  startTime: string;
+  endTime: string;
+  serviceName: string;
+  servicePriceFrom: number;
+  price: number;
+  priceFrom: number;
+  durationMinutes: number;
+  bufferMinutes: number;
+  branchId?: string;
+  doctorId: string;
+  serviceId?: string;
+  doctorName: string;
+  doctorNameUz?: string;
+  doctorNameRu?: string;
+  branchName: string;
+  branchNameUz?: string;
+  branchNameRu?: string;
+  branchAddressUz?: string;
+  branchAddressRu?: string;
+  serviceItems?: Array<{
+    id?: string;
+    serviceId: string;
+    sortOrder: number;
+    serviceNameUz: string;
+    serviceNameRu?: string;
+    durationMinutes: number;
+    priceFrom?: number;
+    price?: number;
+    isLegacyBundle?: boolean;
+  }>;
+  doctor?: any;
+  branch?: any;
+}
+
 export const api = {
   // Public Information
   getClinicInfo: () => fetcher<any>('/api/public/clinic'),
@@ -147,33 +188,11 @@ export const api = {
     consentGiven: boolean;
     idempotencyKey?: string;
   }) =>
-    fetcher<{
-      message: string;
-      appointmentId: string;
-      publicToken: string;
-      status: string;
-      startTime: string;
-      endTime: string;
-      doctorName?: string;
-      branchName?: string;
-      serviceName?: string;
-      durationMinutes?: number;
-      bufferMinutes?: number;
-      servicePriceFrom?: number;
-      serviceItems?: Array<{
-        id: string;
-        serviceId: string;
-        sortOrder: number;
-        serviceNameUz: string;
-        serviceNameRu?: string;
-        durationMinutes: number;
-        priceFrom?: number;
-      }>;
-    }>('/api/booking', {
+    fetcher<BookingResponse>('/api/booking', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  getBookingByToken: (token: string) => fetcher<any>(`/api/booking/status/${token}`),
+  getBookingByToken: (token: string) => fetcher<BookingResponse>(`/api/booking/status/${token}`),
   getRescheduleSlots: (token: string, date: string, timezone?: string) => {
     const q = new URLSearchParams({ date });
     if (timezone) q.set('timezone', timezone);
@@ -188,7 +207,7 @@ export const api = {
     }>(`/api/booking/reschedule/${token}/slots?${q.toString()}`);
   },
   rescheduleBooking: (token: string, startTime: string) =>
-    fetcher<any>(`/api/booking/reschedule/${token}`, {
+    fetcher<BookingResponse>(`/api/booking/reschedule/${token}`, {
       method: 'POST',
       body: JSON.stringify({ startTime }),
     }),

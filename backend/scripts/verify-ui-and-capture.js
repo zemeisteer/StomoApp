@@ -122,12 +122,14 @@ async function run() {
     // 3. Mobile Navigation Drawer Accessibility (Focus trap, Tab & Shift+Tab, Escape & Restoration)
     // -------------------------------------------------------------------------
     console.log('\n[3/8] Testing Mobile Navigation Drawer Accessibility (Tab/Shift+Tab wrapping & focus restoration)...');
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await new Promise((r) => setTimeout(r, 300));
-    const hamburgerBtn = await page.$('#mobile-menu-trigger-btn, button[aria-label*="Menyu"], button[aria-label*="menu" i]');
-    assert(hamburgerBtn, 'Mobile hamburger button must exist');
-    await hamburgerBtn.focus();
-    await hamburgerBtn.click();
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+      const btn = document.getElementById('mobile-menu-trigger-btn') || document.querySelector('button[aria-label*="Menyu"]');
+      if (btn) {
+        btn.focus();
+        btn.click();
+      }
+    });
     await new Promise((r) => setTimeout(r, 600));
 
     // Verify drawer dialog

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   UserCheck,
   Clock,
@@ -39,6 +39,7 @@ const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   LEAVE: "Ta'til",
   HOLIDAY: 'Bayram kuni',
   BLOCKED: 'Band soat',
+  OVERTIME: "Qo'shimcha ish vaqti (Overtime)",
 };
 
 export default function AdminDoctorsManagePage() {
@@ -135,8 +136,37 @@ export default function AdminDoctorsManagePage() {
   const [exceptionStartTime, setExceptionStartTime] = useState('');
   const [exceptionEndTime, setExceptionEndTime] = useState('');
   const [exceptionReason, setExceptionReason] = useState('');
+  const [exceptionBranchId, setExceptionBranchId] = useState('');
   const [isSubmittingException, setIsSubmittingException] = useState(false);
   const [exceptionError, setExceptionError] = useState<string | null>(null);
+
+  const selectedDoctor = useMemo(() => {
+    return doctors.find((d) => d.id === selectedDoctorId);
+  }, [doctors, selectedDoctorId]);
+
+  const eligibleDoctorBranches = useMemo(() => {
+    if (!selectedDoctor) return [];
+    const branchMap = new Map<string, any>();
+    if (Array.isArray(selectedDoctor.branches)) {
+      selectedDoctor.branches.forEach((b: any) => {
+        const br = b.branch || branches.find((branch) => branch.id === (b.branchId || b.id));
+        if (br && br.isActive !== false) {
+          branchMap.set(br.id, br);
+        }
+      });
+    }
+    if (Array.isArray(selectedDoctor.schedules)) {
+      selectedDoctor.schedules.forEach((s: any) => {
+        if (s.isActive !== false) {
+          const br = s.branch || branches.find((branch) => branch.id === s.branchId);
+          if (br && br.isActive !== false) {
+            branchMap.set(br.id, br);
+          }
+        }
+      });
+    }
+    return Array.from(branchMap.values());
+  }, [selectedDoctor, branches]);
 
   const loadDoctorsAndBranches = async () => {
     try {
@@ -369,9 +399,25 @@ export default function AdminDoctorsManagePage() {
     e.preventDefault();
     if (!exceptionDate || !selectedDoctorId) return;
 
+    if (exceptionType === 'OVERTIME') {
+      if (!exceptionStartTime || !exceptionEndTime) {
+        setExceptionError("Qo'shimcha ish vaqti uchun boshlanish va tugash soatini kiriting");
+        return;
+      }
+      if (eligibleDoctorBranches.length > 1 && !exceptionBranchId) {
+        setExceptionError("Shifokor bir nechta filialda ishlaydi. Iltimos filialni tanlang");
+        return;
+      }
+    }
+
     try {
       setIsSubmittingException(true);
       setExceptionError(null);
+      const chosenBranchId =
+        exceptionType === 'OVERTIME'
+          ? (exceptionBranchId || (eligibleDoctorBranches.length === 1 ? eligibleDoctorBranches[0].id : undefined))
+          : undefined;
+
       await api.addDoctorException({
         doctorId: selectedDoctorId,
         type: exceptionType,
@@ -379,11 +425,13 @@ export default function AdminDoctorsManagePage() {
         startTime: exceptionStartTime || undefined,
         endTime: exceptionEndTime || undefined,
         reason: exceptionReason || undefined,
+        branchId: chosenBranchId,
       });
       setShowExceptionModal(false);
       setExceptionReason('');
       setExceptionStartTime('');
       setExceptionEndTime('');
+      setExceptionBranchId('');
       await loadDoctorScheduleData(selectedDoctorId);
     } catch (err: any) {
       setExceptionError(err?.message || 'Ta\'til qo\'shishda xatolik yuz berdi');
@@ -663,6 +711,11 @@ export default function AdminDoctorsManagePage() {
                       {exc.startTime && exc.endTime && (
                         <span className="text-[11px] text-amber-900 block font-mono">
                           Soat: {exc.startTime} - {exc.endTime}
+                        </span>
+                      )}
+                      {exc.branchId && (
+                        <span className="text-[11px] text-teal-800 font-semibold block mt-0.5">
+                          Filial: {exc.branch?.nameUz || branches.find((b) => b.id === exc.branchId)?.nameUz || exc.branchId}
                         </span>
                       )}
                       {exc.reason && (
@@ -1042,12 +1095,39 @@ export default function AdminDoctorsManagePage() {
                     { value: 'LEAVE', label: "Ta'til (Butun kun)" },
                     { value: 'HOLIDAY', label: 'Bayram kuni' },
                     { value: 'BLOCKED', label: 'Band qilingan soatlar' },
+                    { value: 'OVERTIME', label: "Qo'shimcha ish vaqti (Overtime)" },
                   ]}
                   value={exceptionType}
-                  onChange={(val) => setExceptionType(val)}
+                  onChange={(val) => {
+                    setExceptionType(val);
+                    if (val === 'OVERTIME' && eligibleDoctorBranches.length === 1) {
+                      setExceptionBranchId(eligibleDoctorBranches[0].id);
+                    }
+                  }}
                   placeholder="Turini tanlang..."
                 />
               </div>
+
+              {exceptionType === 'OVERTIME' && (
+                <div>
+                  <CustomSelect
+                    id="admin-doctor-exception-branch"
+                    label="Filial *"
+                    options={eligibleDoctorBranches.map((b) => ({
+                      value: b.id,
+                      label: `${b.nameUz} (${b.addressUz || ''})`,
+                    }))}
+                    value={exceptionBranchId || (eligibleDoctorBranches.length === 1 ? eligibleDoctorBranches[0].id : '')}
+                    onChange={(val) => setExceptionBranchId(val)}
+                    placeholder="Filialni tanlang..."
+                  />
+                  {eligibleDoctorBranches.length > 1 && !exceptionBranchId && (
+                    <p className="text-[11px] text-amber-700 mt-1">
+                      Shifokor bir nechta filialda ishlaydi. Qaysi filialda overtime bo&apos;lishini aniq tanlang.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Sana *</label>
@@ -1061,21 +1141,27 @@ export default function AdminDoctorsManagePage() {
                 />
               </div>
 
-              {exceptionType === 'BLOCKED' && (
+              {(exceptionType === 'BLOCKED' || exceptionType === 'OVERTIME') && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Boshlanish soati</label>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Boshlanish soati {exceptionType === 'OVERTIME' && '*'}
+                    </label>
                     <input
                       type="time"
+                      required={exceptionType === 'OVERTIME'}
                       value={exceptionStartTime}
                       onChange={(e) => setExceptionStartTime(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Tugash soati</label>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Tugash soati {exceptionType === 'OVERTIME' && '*'}
+                    </label>
                     <input
                       type="time"
+                      required={exceptionType === 'OVERTIME'}
                       value={exceptionEndTime}
                       onChange={(e) => setExceptionEndTime(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"

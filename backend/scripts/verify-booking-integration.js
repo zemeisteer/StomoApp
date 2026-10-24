@@ -18,25 +18,50 @@ async function run() {
   console.log('========================================================================');
   console.log('   STOMOAPP REAL APPLICATION BOOKING & SCHEDULING INTEGRATION SUITE');
   console.log('========================================================================');
+  const maskedDbUrl = TEST_DATABASE_URL.replace(/:\/\/[^:]+:[^@]+@/, '://***:***@');
   console.log(`Target Frontend URL : ${BASE_URL}`);
-  console.log(`Target Database     : ${TEST_DATABASE_URL}`);
+  console.log(`Target Database     : ${maskedDbUrl}`);
 
   // 1. Verify isolated test database
   const dbInfo = await prisma.$queryRawUnsafe('SELECT current_database();');
-  const currentDb = dbInfo[0].current_database;
+  const currentDb = dbInfo[0]?.current_database;
   console.log(`Connected to database: "${currentDb}"`);
-  assert.strictEqual(currentDb, 'dentacare_test', 'MUST run strictly on dentacare_test!');
-
-  // 2. Verify browser API proxy points to test backend
-  console.log('\n[Check] Verifying frontend API proxy points to backend on dentacare_test...');
-  const proxyCheckRes = await fetch(`${BASE_URL}/api/public/branches`);
-  assert.strictEqual(proxyCheckRes.status, 200, 'Frontend proxy /api/public/branches must return 200');
-  const publicBranches = await proxyCheckRes.json();
-  assert(Array.isArray(publicBranches), 'Public branches must be an array');
-  console.log(`[PASS] Frontend API proxy is healthy, returned ${publicBranches.length} branches`);
+  if (currentDb !== 'dentacare_test') {
+    throw new Error(`FAIL-CLOSED: Expected test database 'dentacare_test', connected to '${currentDb}'`);
+  }
 
   const runId = `t${Date.now().toString().slice(-6)}`;
   console.log(`Run ID: ${runId}`);
+
+  // 2. Verify frontend proxy points to test backend using a run-specific probe fixture BEFORE any mutation
+  console.log('\n[Check] Verifying frontend API proxy points to backend on dentacare_test...');
+  const probeBranch = await prisma.branch.create({
+    data: {
+      id: `probe-br-${runId}`,
+      nameUz: `Probe Filial ${runId}`,
+      nameRu: `Пробный Филиал ${runId}`,
+      addressUz: `Probe Manzil ${runId}`,
+      addressRu: `Probe Адрес ${runId}`,
+      phone: `+99890999${runId.slice(-4)}`,
+      isActive: true,
+      sortOrder: 999,
+    },
+  });
+
+  try {
+    const proxyCheckRes = await fetch(`${BASE_URL}/api/public/branches`);
+    assert.strictEqual(proxyCheckRes.status, 200, 'Frontend proxy /api/public/branches must return 200');
+    const publicBranches = await proxyCheckRes.json();
+    assert(Array.isArray(publicBranches), 'Public branches must be an array');
+    const foundProbe = publicBranches.some((b) => b.id === probeBranch.id);
+    assert(
+      foundProbe,
+      `FAIL-CLOSED: Probe branch '${probeBranch.id}' was NOT found in frontend proxy response (${publicBranches.length} branches returned). Frontend is not routing to dentacare_test!`,
+    );
+    console.log(`[PASS] Frontend API proxy verified: probe fixture successfully queried through frontend proxy`);
+  } finally {
+    await prisma.branch.delete({ where: { id: probeBranch.id } }).catch(() => {});
+  }
 
   // Load production backend services for direct scheduling model tests
   const { SchedulingService } = require('../dist/scheduling/scheduling.service');
@@ -239,6 +264,19 @@ async function run() {
     assert.strictEqual(sundaySlotsBranchB.slots.length, 0, 'Branch A overtime must not appear when querying Branch B');
     console.log('[PASS] Branch A overtime is completely excluded when querying Branch B');
 
+    // Also verify via public HTTP API
+    const pubSlotsResA = await fetch(`${BASE_URL}/api/scheduling/slots?doctorId=${doctor.id}&date=${sundayStr}&serviceId=${service1.id}&branchId=${branchA.id}`);
+    assert.strictEqual(pubSlotsResA.status, 200, 'Public slots API for Branch A overtime must return 200');
+    const pubSlotsDataA = await pubSlotsResA.json();
+    assert(pubSlotsDataA.slots && pubSlotsDataA.slots.length > 0, 'Public slots API for Branch A overtime must produce slots');
+    assert(pubSlotsDataA.slots.every((s) => s.branchId === branchA.id), 'All public slots must belong to Branch A');
+
+    const pubSlotsResB = await fetch(`${BASE_URL}/api/scheduling/slots?doctorId=${doctor.id}&date=${sundayStr}&serviceId=${service1.id}&branchId=${branchB.id}`);
+    assert.strictEqual(pubSlotsResB.status, 200, 'Public slots API for Branch B overtime must return 200');
+    const pubSlotsDataB = await pubSlotsResB.json();
+    assert(pubSlotsDataB.slots && pubSlotsDataB.slots.length === 0, 'Public slots API for Branch B must return 0 slots');
+    console.log('[PASS] Overtime branch isolation verified via public HTTP slots API');
+
     // 1.2 Adjacent shifts in different branches must NOT be merged
     // Doctor works 09:00 - 13:00 in Branch A and 14:00 - 18:00 in Branch B on Wednesday.
     const splitSlots = await schedulingService.getAvailableSlots(
@@ -255,6 +293,121 @@ async function run() {
       assert([branchA.id, branchB.id].includes(s.branchId), 'Slot branchId must be Branch A or Branch B');
     }
     console.log(`[PASS] Authoritative branchId present on all ${splitSlots.slots.length} public slots without cross-branch merging`);
+
+    // 1.3 Configured Pending Expiry (15, 30, 60 minutes) & Staff-Created Status
+    console.log('\n--- PART 1.3: Configured Pending-Expiry (15, 30, 60 min) & Staff-Created Checks ---');
+    for (const expMin of [15, 30, 60]) {
+      await prisma.clinicSettings.upsert({
+        where: { id: 'default' },
+        update: { pendingExpiryMinutes: expMin },
+        create: { id: 'default', pendingExpiryMinutes: expMin, name: 'DentaCare' },
+      });
+
+      const futureWed = new Date(targetDate);
+      const weekMultiplier = expMin === 15 ? 1 : expMin === 30 ? 2 : 3;
+      futureWed.setDate(futureWed.getDate() + 7 * weekMultiplier);
+      const futureDateIso = `${futureWed.toISOString().slice(0, 10)}T05:00:00.000Z`;
+
+      const expRes = await fetch(`${BASE_URL}/api/booking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          doctorId: doctor.id,
+          branchId: branchA.id,
+          serviceId: service1.id,
+          startTime: futureDateIso,
+          patientName: `Bemor Expiry ${expMin}m ${runId}`,
+          patientPhone: `+99890${String(expMin).padStart(2, '0')}${runId.slice(-5)}`,
+          consentGiven: true,
+        }),
+      });
+      if (expRes.status !== 201) {
+        const errBody = await expRes.text();
+        throw new Error(`Booking for expiry ${expMin}m failed (HTTP ${expRes.status}): ${errBody}`);
+      }
+      const expData = await expRes.json();
+      const savedExpAppt = await prisma.appointment.findUnique({
+        where: { id: expData.id },
+        include: { statusHistory: true },
+      });
+      assert(savedExpAppt, 'Saved appointment must exist in DB');
+      cleanupTasks.push(() => prisma.appointment.delete({ where: { id: savedExpAppt.id } }));
+
+      assert.strictEqual(savedExpAppt.status, 'PENDING', 'Website appointment must start as PENDING');
+      assert(savedExpAppt.expiresAt, `expiresAt must be set for pendingExpiryMinutes=${expMin}`);
+      const diffMin = (new Date(savedExpAppt.expiresAt).getTime() - Date.now()) / 60000;
+      assert(
+        diffMin >= expMin - 2 && diffMin <= expMin + 2,
+        `expiresAt should be approx now + ${expMin}m, got diff=${diffMin.toFixed(2)}m`,
+      );
+      assert.strictEqual(
+        savedExpAppt.statusHistory[0]?.toStatus,
+        'PENDING',
+        'Initial status history must record PENDING',
+      );
+      console.log(`[PASS] Configured pendingExpiryMinutes=${expMin} verified: expiresAt set to ~${diffMin.toFixed(1)}m from now`);
+    }
+
+    // Staff-created appointment (admin source)
+    const bcrypt = require('bcrypt');
+    let adminUser = await prisma.staffUser.findUnique({ where: { email: 'admin@dentacare.local' } });
+    if (!adminUser) {
+      const hash = await bcrypt.hash('DentacareAdmin2026!', 10);
+      adminUser = await prisma.staffUser.create({
+        data: {
+          email: 'admin@dentacare.local',
+          passwordHash: hash,
+          fullName: 'Test Admin',
+          role: 'OWNER',
+          isActive: true,
+        },
+      });
+    }
+    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@dentacare.local', password: 'DentacareAdmin2026!' }),
+    });
+    assert.strictEqual(adminLoginRes.status, 200, 'Admin login must succeed');
+    const { accessToken } = await adminLoginRes.json();
+
+    const staffWed = new Date(targetDate);
+    staffWed.setDate(staffWed.getDate() + 28);
+    const staffDateIso = `${staffWed.toISOString().slice(0, 10)}T05:00:00.000Z`;
+
+    const adminBookingRes = await fetch(`${BASE_URL}/api/admin/appointments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        doctorId: doctor.id,
+        branchId: branchA.id,
+        serviceId: service1.id,
+        startTime: staffDateIso,
+        patientName: `Staff Bemor ${runId}`,
+        patientPhone: `+99890988${runId.slice(-4)}`,
+        consentGiven: true,
+      }),
+    });
+    assert.strictEqual(adminBookingRes.status, 201, 'Staff appointment creation must return 201');
+    const adminBookingData = await adminBookingRes.json();
+    const savedStaffAppt = await prisma.appointment.findUnique({
+      where: { id: adminBookingData.id },
+      include: { statusHistory: true },
+    });
+    assert(savedStaffAppt, 'Saved staff appointment must exist in DB');
+    cleanupTasks.push(() => prisma.appointment.delete({ where: { id: savedStaffAppt.id } }));
+
+    assert.strictEqual(savedStaffAppt.status, 'CONFIRMED', 'Staff-created appointment must have status CONFIRMED');
+    assert.strictEqual(savedStaffAppt.expiresAt, null, 'Staff-created appointment must have expiresAt null');
+    assert.strictEqual(
+      savedStaffAppt.statusHistory[0]?.toStatus,
+      'CONFIRMED',
+      'Initial status history for staff appointment must be CONFIRMED',
+    );
+    console.log('[PASS] Staff-created appointment is CONFIRMED with expiresAt=null and statusHistory toStatus=CONFIRMED');
 
     // =========================================================================
     // PART 2: REAL BROWSER APPLICATION TESTS WITH PUPPETEER
@@ -570,19 +723,39 @@ async function run() {
       }
     });
 
+    // ITEM 1 REGRESSION TEST:
+    // Update service1 price in DB right before submission!
+    // The pre-submission quote in frontend was 150,000 UZS.
+    // We update DB to 185,000 UZS (18500000 tiyin).
+    // The server will calculate and save 185,000 UZS and return servicePriceFrom: 18500000.
+    // The frontend must display 185 000 so'm on confirmation, NOT falling back to 150,000 UZS!
+    const updatedPriceTiyin = 18500000;
+    console.log('Updating service1 price in DB to 185,000 UZS (18500000 tiyin) before submission to test response contract truth...');
+    await prisma.service.update({
+      where: { id: service1.id },
+      data: { priceFrom: updatedPriceTiyin },
+    });
+
     // Submit valid alternative booking
     const submitBtn2 = await page.$('#booking-submit-btn');
     await submitBtn2.click();
     await page.waitForSelector('#confirmation-duration', { timeout: 15000 });
 
-    // Assert Confirmation Screen displays 45 minutes and 200 000 UZS
+    // Assert Confirmation Screen displays 45 minutes and exact updated saved price (185 000 UZS)
     const confirmedDurationText = await page.evaluate(() => document.querySelector('#confirmation-duration')?.textContent || '');
     const confirmedPriceText = await page.evaluate(() => document.querySelector('#confirmation-price')?.textContent || '');
     console.log(`Confirmation screen duration: "${confirmedDurationText.trim()}", price: "${confirmedPriceText.trim()}"`);
 
     assert(confirmedDurationText.includes('45'), 'Confirmation must display 45m from doctor override');
-    assert(confirmedPriceText.includes('150') || confirmedPriceText.includes('150 000'), 'Confirmation must display 150,000 UZS');
-    console.log('[PASS] Confirmation screen displays authoritative doctor-specific duration and price');
+
+    // Exact monetary comparison:
+    const normalizedPrice = parseInt(confirmedPriceText.replace(/\D/g, ''), 10);
+    assert.strictEqual(
+      normalizedPrice,
+      185000,
+      `Confirmation must strictly display updated saved price (185,000 UZS), not stale pre-submission quote (150,000 UZS). Got ${normalizedPrice} (raw: "${confirmedPriceText}")`,
+    );
+    console.log('[PASS] Item 1 Regression Verified: confirmation screen displays authoritative saved price (185,000 UZS)');
 
     // Query DB for saved appointment
     const savedAppt = await prisma.appointment.findFirst({
@@ -597,7 +770,7 @@ async function run() {
     cleanupTasks.push(() => prisma.appointment.delete({ where: { id: savedAppt.id } }));
 
     assert.strictEqual(savedAppt.durationMinutes, 45, 'DB durationMinutes must be 45');
-    assert.strictEqual(savedAppt.servicePriceFrom, 15000000, 'DB servicePriceFrom must be 150,000 UZS (15000000 tiyin)');
+    assert.strictEqual(savedAppt.servicePriceFrom, updatedPriceTiyin, `DB servicePriceFrom must be ${updatedPriceTiyin} tiyin (185,000 UZS)`);
     assert.strictEqual(savedAppt.branchId, branchB.id, 'DB branchId must match Branch B');
     console.log(`[PASS] Database record confirmed: duration=${savedAppt.durationMinutes}m, price=${savedAppt.servicePriceFrom / 100} UZS`);
 
@@ -651,6 +824,11 @@ async function run() {
     // - Verify DB record has servicePriceFrom === 0 and bufferMinutes === 0
     // -------------------------------------------------------------------------
     console.log('\n[Browser 6/6] Testing Zero Price & Zero Buffer Handling...');
+    await prisma.clinicSettings.upsert({
+      where: { id: 'default' },
+      update: { bufferMinutes: 0 },
+      create: { id: 'default', bufferMinutes: 0, name: 'DentaCare' },
+    });
     await page.goto(`${BASE_URL}/booking?serviceId=${freeService.id}&doctorId=${doctor.id}&date=${targetDateStr}&branchId=${branchA.id}`, {
       waitUntil: 'networkidle2',
       timeout: 30000,
@@ -720,8 +898,8 @@ async function run() {
     cleanupTasks.push(() => prisma.appointment.delete({ where: { id: savedFreeAppt.id } }));
 
     assert.strictEqual(savedFreeAppt.servicePriceFrom, 0, 'DB servicePriceFrom must be exactly 0 (not null or fallback)');
-    assert.strictEqual(typeof savedFreeAppt.bufferMinutes, 'number', 'DB bufferMinutes must be a valid number');
-    console.log(`[PASS] Zero price (0 UZS) and buffer handling verified in DB (price=${savedFreeAppt.servicePriceFrom}, buffer=${savedFreeAppt.bufferMinutes}m)`);
+    assert.strictEqual(savedFreeAppt.bufferMinutes, 0, 'DB bufferMinutes must be strictly 0');
+    console.log(`[PASS] Zero price (0 UZS) and buffer=0 handling verified in DB (price=${savedFreeAppt.servicePriceFrom}, buffer=${savedFreeAppt.bufferMinutes}m)`);
 
     console.log('\n========================================================================');
     console.log('   ALL 6 REAL APPLICATION BROWSER INTEGRATION SCENARIOS PASSED (100%)');

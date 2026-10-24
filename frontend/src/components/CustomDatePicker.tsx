@@ -17,6 +17,7 @@ export interface CustomDatePickerProps {
   className?: string;
   id?: string;
   inline?: boolean;
+  timezone?: string;
 }
 
 const MONTH_NAMES_UZ = [
@@ -32,11 +33,28 @@ const MONTH_NAMES_RU = [
 const WEEKDAY_NAMES_UZ = ['Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh', 'Ya'];
 const WEEKDAY_NAMES_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
+function isValidDate(year: number, month: number, day: number): boolean {
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
+  if (year < 1900 || year > 2100) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() + 1 === month &&
+    d.getUTCDate() === day
+  );
+}
+
 function parseYMD(str?: string): { year: number; month: number; day: number } | null {
-  if (!str) return null;
-  const parts = str.split('-').map(Number);
-  if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) return null;
-  return { year: parts[0], month: parts[1], day: parts[2] };
+  if (!str || typeof str !== 'string') return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str.trim());
+  if (!match) return null;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  if (!isValidDate(year, month, day)) return null;
+  return { year, month, day };
 }
 
 function pad2(n: number): string {
@@ -60,6 +78,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   className = '',
   id,
   inline = false,
+  timezone = 'Asia/Tashkent',
 }) => {
   const generatedId = useId();
   const inputId = id || generatedId;
@@ -68,18 +87,24 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   const defaultPlaceholder = isRu ? 'Выберите дату...' : 'Sanani tanlang...';
   const effectivePlaceholder = placeholder || defaultPlaceholder;
 
-  // Internal view year and month (1-12)
+  // Clinic timezone-anchored current date
   const todayParts = (() => {
     const now = new Date();
-    // Default clinic timezone Asia/Tashkent (+5 UTC)
-    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' });
-    const [y, m, d] = formatter.format(now).split('-').map(Number);
-    return { year: y, month: m, day: d };
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+      const parts = formatter.format(now).split('-').map(Number);
+      return { year: parts[0], month: parts[1], day: parts[2] };
+    } catch {
+      return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+    }
   })();
 
   const parsedValue = parseYMD(value);
   const [viewYear, setViewYear] = useState<number>(parsedValue ? parsedValue.year : todayParts.year);
   const [viewMonth, setViewMonth] = useState<number>(parsedValue ? parsedValue.month : todayParts.month);
+
+  // Active keyboard focus inside calendar grid
+  const [focusedDay, setFocusedDay] = useState<number>(parsedValue ? parsedValue.day : todayParts.day);
 
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -88,20 +113,22 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const dayButtonsRef = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Update view when value changes from outside
+  // Sync internal view when value changes
   useEffect(() => {
     if (parsedValue) {
       setViewYear(parsedValue.year);
       setViewMonth(parsedValue.month);
+      setFocusedDay(parsedValue.day);
     }
   }, [value]);
 
-  // Position calculation for popover
+  // Position calculation with viewport clamping and mobile short-viewport handling
   const updatePosition = useCallback(() => {
     if (inline || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
@@ -109,12 +136,15 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     const viewportWidth = window.innerWidth;
 
     const popoverWidth = Math.min(320, viewportWidth - 24);
-    const popoverHeight = 360;
+    const popoverMaxHeight = Math.min(420, viewportHeight - 24);
+    const estimatedHeight = 360;
 
     let top = rect.bottom + 6;
-    if (top + popoverHeight > viewportHeight - 12 && rect.top > popoverHeight) {
-      top = rect.top - popoverHeight - 6;
+    if (top + estimatedHeight > viewportHeight - 12 && rect.top > estimatedHeight) {
+      top = rect.top - estimatedHeight - 6;
     }
+    // Prevent clipping off top
+    if (top < 12) top = 12;
 
     let left = rect.left;
     if (left + popoverWidth > viewportWidth - 12) {
@@ -127,28 +157,43 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       top: `${Math.round(top)}px`,
       left: `${Math.round(left)}px`,
       width: `${popoverWidth}px`,
-      zIndex: 9999,
+      maxHeight: `${popoverMaxHeight}px`,
+      overflowY: 'auto',
+      zIndex: 99999,
     });
   }, [inline]);
 
-  // Re-calc position on open / scroll
+  // Open/close side effects & focus management
   useEffect(() => {
     if (isOpen && !inline) {
       updatePosition();
       const handleScroll = () => updatePosition();
       window.addEventListener('scroll', handleScroll, true);
       window.addEventListener('resize', handleScroll);
+
+      // Move focus into the grid after opening
+      const timer = setTimeout(() => {
+        const btn = dayButtonsRef.current.get(focusedDay);
+        if (btn) {
+          btn.focus();
+        } else {
+          popoverRef.current?.focus();
+        }
+      }, 50);
+
       return () => {
+        clearTimeout(timer);
         window.removeEventListener('scroll', handleScroll, true);
         window.removeEventListener('resize', handleScroll);
       };
     }
-  }, [isOpen, inline, updatePosition]);
+  }, [isOpen, inline, updatePosition, focusedDay]);
 
-  // Outside click handler
+  // Outside click & escape handling
   useEffect(() => {
     if (!isOpen || inline) return;
-    const handleClickOutside = (e: MouseEvent) => {
+
+    const handlePointerDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (
         containerRef.current?.contains(target) ||
@@ -159,13 +204,32 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       }
       setIsOpen(false);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
   }, [isOpen, inline]);
 
+  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
+  const firstDayOfWeek = new Date(viewYear, viewMonth - 1, 1).getDay();
+  // Monday = 0, Sunday = 6
+  const startOffset = (firstDayOfWeek + 6) % 7;
+
   // Month navigation
-  const prevMonth = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const prevMonth = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (viewMonth === 1) {
       setViewYear((y) => y - 1);
       setViewMonth(12);
@@ -174,8 +238,8 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     }
   };
 
-  const nextMonth = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const nextMonth = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (viewMonth === 12) {
       setViewYear((y) => y + 1);
       setViewMonth(1);
@@ -184,14 +248,182 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     }
   };
 
-  // Days matrix for the calendar month
-  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
-  // Day of week for first day (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
-  const firstDayOfWeek = new Date(viewYear, viewMonth - 1, 1).getDay();
-  // Convert so Monday = 0, Sunday = 6
-  const startOffset = (firstDayOfWeek + 6) % 7;
+  const isDateDisabled = (year: number, month: number, dayNum: number): boolean => {
+    const curStr = toYMD(year, month, dayNum);
+    if (min && curStr < min) return true;
+    if (max && curStr > max) return true;
+    return false;
+  };
 
-  // Format display string
+  const handleDaySelect = (dayNum: number) => {
+    if (isDateDisabled(viewYear, viewMonth, dayNum) || disabled) return;
+    const dateStr = toYMD(viewYear, viewMonth, dayNum);
+    onChange(dateStr);
+    setFocusedDay(dayNum);
+    if (!inline) {
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    }
+  };
+
+  // Keyboard navigation within the calendar grid
+  const handleGridKeyDown = (e: React.KeyboardEvent) => {
+    let handled = false;
+    let targetDay = focusedDay;
+
+    switch (e.key) {
+      case 'ArrowLeft':
+        if (targetDay > 1) {
+          targetDay -= 1;
+        } else {
+          // Wrap to previous month
+          if (viewMonth === 1) {
+            setViewYear((y) => y - 1);
+            setViewMonth(12);
+            targetDay = new Date(viewYear - 1, 12, 0).getDate();
+          } else {
+            setViewMonth((m) => m - 1);
+            targetDay = new Date(viewYear, viewMonth - 1, 0).getDate();
+          }
+        }
+        handled = true;
+        break;
+
+      case 'ArrowRight':
+        if (targetDay < daysInMonth) {
+          targetDay += 1;
+        } else {
+          // Wrap to next month
+          if (viewMonth === 12) {
+            setViewYear((y) => y + 1);
+            setViewMonth(1);
+          } else {
+            setViewMonth((m) => m + 1);
+          }
+          targetDay = 1;
+        }
+        handled = true;
+        break;
+
+      case 'ArrowUp':
+        if (targetDay > 7) {
+          targetDay -= 7;
+        } else {
+          // Previous month
+          const prevDays = new Date(viewYear, viewMonth - 1, 0).getDate();
+          if (viewMonth === 1) {
+            setViewYear((y) => y - 1);
+            setViewMonth(12);
+          } else {
+            setViewMonth((m) => m - 1);
+          }
+          targetDay = Math.max(1, prevDays - (7 - targetDay));
+        }
+        handled = true;
+        break;
+
+      case 'ArrowDown':
+        if (targetDay + 7 <= daysInMonth) {
+          targetDay += 7;
+        } else {
+          // Next month
+          const remaining = daysInMonth - targetDay;
+          if (viewMonth === 12) {
+            setViewYear((y) => y + 1);
+            setViewMonth(1);
+          } else {
+            setViewMonth((m) => m + 1);
+          }
+          targetDay = 7 - remaining;
+        }
+        handled = true;
+        break;
+
+      case 'Home':
+        targetDay = 1;
+        handled = true;
+        break;
+
+      case 'End':
+        targetDay = daysInMonth;
+        handled = true;
+        break;
+
+      case 'PageUp':
+        if (e.shiftKey) {
+          setViewYear((y) => y - 1);
+        } else {
+          prevMonth();
+        }
+        handled = true;
+        break;
+
+      case 'PageDown':
+        if (e.shiftKey) {
+          setViewYear((y) => y + 1);
+        } else {
+          nextMonth();
+        }
+        handled = true;
+        break;
+
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        e.stopPropagation();
+        handleDaySelect(focusedDay);
+        return;
+
+      default:
+        break;
+    }
+
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation();
+      setFocusedDay(targetDay);
+      setTimeout(() => {
+        const btn = dayButtonsRef.current.get(targetDay);
+        btn?.focus();
+      }, 20);
+    }
+  };
+
+  // Quick shortcuts
+  const todayStr = toYMD(todayParts.year, todayParts.month, todayParts.day);
+  const isTodayDisabled = Boolean((min && todayStr < min) || (max && todayStr > max));
+
+  const selectToday = () => {
+    if (isTodayDisabled) return;
+    onChange(todayStr);
+    setViewYear(todayParts.year);
+    setViewMonth(todayParts.month);
+    setFocusedDay(todayParts.day);
+    if (!inline) {
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    }
+  };
+
+  const tomorrowStr = (() => {
+    const d = new Date(Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day + 1));
+    return toYMD(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  })();
+  const isTomorrowDisabled = Boolean((min && tomorrowStr < min) || (max && tomorrowStr > max));
+
+  const selectTomorrow = () => {
+    if (isTomorrowDisabled) return;
+    const parts = parseYMD(tomorrowStr)!;
+    onChange(tomorrowStr);
+    setViewYear(parts.year);
+    setViewMonth(parts.month);
+    setFocusedDay(parts.day);
+    if (!inline) {
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    }
+  };
+
   const formatFormattedDisplay = (ymdStr?: string) => {
     if (!ymdStr) return '';
     const p = parseYMD(ymdStr);
@@ -200,88 +432,52 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     return isRu ? `${p.day} ${mName} ${p.year}` : `${p.day}-${mName}, ${p.year}`;
   };
 
-  const isDateDisabled = (dayNum: number): boolean => {
-    const curStr = toYMD(viewYear, viewMonth, dayNum);
-    if (min && curStr < min) return true;
-    if (max && curStr > max) return true;
-    return false;
-  };
-
-  const handleDaySelect = (dayNum: number) => {
-    if (isDateDisabled(dayNum) || disabled) return;
-    const dateStr = toYMD(viewYear, viewMonth, dayNum);
-    onChange(dateStr);
-    if (!inline) {
-      setIsOpen(false);
-      triggerRef.current?.focus();
-    }
-  };
-
-  // Quick select: Today
-  const selectToday = () => {
-    const todayStr = toYMD(todayParts.year, todayParts.month, todayParts.day);
-    if (min && todayStr < min) return;
-    if (max && todayStr > max) return;
-    onChange(todayStr);
-    setViewYear(todayParts.year);
-    setViewMonth(todayParts.month);
-    if (!inline) setIsOpen(false);
-  };
-
-  // Quick select: Tomorrow
-  const selectTomorrow = () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' });
-    const [y, m, day] = formatter.format(d).split('-').map(Number);
-    const tomorrowStr = toYMD(y, m, day);
-    if (min && tomorrowStr < min) return;
-    if (max && tomorrowStr > max) return;
-    onChange(tomorrowStr);
-    setViewYear(y);
-    setViewMonth(m);
-    if (!inline) setIsOpen(false);
-  };
-
   const calendarBody = (
     <div
       ref={popoverRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={isRu ? 'Выбор даты' : 'Sana tanlash'}
+      tabIndex={-1}
       className={`bg-white rounded-3xl border border-[#d8e5e2] p-4 text-[#152f34] select-none ${
         inline
           ? 'w-full shadow-sm'
-          : 'shadow-[0_12px_40px_rgba(21,47,52,0.12)] ring-1 ring-[#167b78]/15 animate-fade-in'
+          : 'shadow-[0_12px_40px_rgba(21,47,52,0.14)] ring-1 ring-[#167b78]/15 animate-fade-in'
       }`}
+      onKeyDown={handleGridKeyDown}
     >
-      {/* Calendar Header */}
+      {/* Calendar Header with Localized Month Controls */}
       <div className="flex items-center justify-between mb-3 px-1">
         <button
           type="button"
           onClick={prevMonth}
-          className="w-8 h-8 rounded-xl bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#167b78] flex items-center justify-center transition-colors cursor-pointer"
-          aria-label="Oldingi oy"
+          className="w-8 h-8 rounded-xl bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#167b78] flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#167b78]"
+          aria-label={isRu ? 'Предыдущий месяц' : 'Oldingi oy'}
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
 
-        <span className="font-extrabold text-sm text-[#152f34]">
+        <span className="font-extrabold text-sm text-[#152f34]" aria-live="polite">
           {isRu ? MONTH_NAMES_RU[viewMonth - 1] : MONTH_NAMES_UZ[viewMonth - 1]} {viewYear}
         </span>
 
         <button
           type="button"
           onClick={nextMonth}
-          className="w-8 h-8 rounded-xl bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#167b78] flex items-center justify-center transition-colors cursor-pointer"
-          aria-label="Keyingi oy"
+          className="w-8 h-8 rounded-xl bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#167b78] flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#167b78]"
+          aria-label={isRu ? 'Следующий месяц' : 'Keyingi oy'}
         >
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
 
       {/* Weekdays Row */}
-      <div className="grid grid-cols-7 gap-1 mb-1 text-center">
+      <div className="grid grid-cols-7 gap-1 mb-1 text-center" role="row">
         {(isRu ? WEEKDAY_NAMES_RU : WEEKDAY_NAMES_UZ).map((dayName, idx) => (
           <span
             key={idx}
+            role="columnheader"
+            aria-label={dayName}
             className={`text-[11px] font-bold uppercase py-1 ${
               idx >= 5 ? 'text-[#167b78]/70' : 'text-[#52696e]'
             }`}
@@ -292,10 +488,10 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       </div>
 
       {/* Days Grid */}
-      <div className="grid grid-cols-7 gap-1 text-center">
+      <div className="grid grid-cols-7 gap-1 text-center" role="grid" aria-label={isRu ? 'Календарь' : 'Taqvim'}>
         {/* Leading empty cells */}
         {Array.from({ length: startOffset }).map((_, i) => (
-          <div key={`empty-${i}`} className="h-8 sm:h-9" />
+          <div key={`empty-${i}`} className="h-8 sm:h-9" role="presentation" />
         ))}
 
         {/* Days of the month */}
@@ -307,15 +503,27 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
             todayParts.year === viewYear &&
             todayParts.month === viewMonth &&
             todayParts.day === dayNum;
-          const isDisabled = isDateDisabled(dayNum);
+          const isDisabled = isDateDisabled(viewYear, viewMonth, dayNum);
+          const isFocused = focusedDay === dayNum;
+          const monthName = isRu ? MONTH_NAMES_RU[viewMonth - 1] : MONTH_NAMES_UZ[viewMonth - 1];
 
           return (
             <button
               key={`day-${dayNum}`}
+              ref={(el) => {
+                if (el) dayButtonsRef.current.set(dayNum, el);
+                else dayButtonsRef.current.delete(dayNum);
+              }}
               type="button"
+              role="gridcell"
+              tabIndex={isFocused ? 0 : -1}
               disabled={isDisabled}
+              aria-selected={isSelected}
+              aria-current={isToday ? 'date' : undefined}
+              aria-disabled={isDisabled}
+              aria-label={`${dayNum} ${monthName} ${viewYear}${isToday ? (isRu ? ' (Сегодня)' : ' (Bugun)') : ''}`}
               onClick={() => handleDaySelect(dayNum)}
-              className={`h-8 sm:h-9 w-full rounded-xl text-xs font-bold transition-all flex items-center justify-center relative cursor-pointer ${
+              className={`h-8 sm:h-9 w-full rounded-xl text-xs font-bold transition-all flex items-center justify-center relative cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#167b78] ${
                 isSelected
                   ? 'bg-[#167b78] text-white shadow-md shadow-[#167b78]/30 scale-105 font-extrabold'
                   : isDisabled
@@ -339,28 +547,42 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
+            disabled={isTodayDisabled}
             onClick={selectToday}
-            className="px-2.5 py-1 rounded-lg bg-[#eaf5f2] hover:bg-[#d8ebe7] text-[#167b78] font-bold transition-colors cursor-pointer"
+            className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
+              isTodayDisabled
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
+                : 'bg-[#eaf5f2] hover:bg-[#d8ebe7] text-[#167b78]'
+            }`}
           >
             {isRu ? 'Сегодня' : 'Bugun'}
           </button>
           <button
             type="button"
+            disabled={isTomorrowDisabled}
             onClick={selectTomorrow}
-            className="px-2.5 py-1 rounded-lg bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#52696e] hover:text-[#167b78] font-semibold transition-colors cursor-pointer"
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+              isTomorrowDisabled
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
+                : 'bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#52696e] hover:text-[#167b78]'
+            }`}
           >
             {isRu ? 'Завтра' : 'Ertaga'}
           </button>
         </div>
 
+        {/* Clear action: strictly disabled when required */}
         {value && !required && (
           <button
             type="button"
             onClick={() => {
               onChange('');
-              if (!inline) setIsOpen(false);
+              if (!inline) {
+                setIsOpen(false);
+                triggerRef.current?.focus();
+              }
             }}
-            className="text-rose-500 hover:text-rose-600 font-semibold px-2 py-1"
+            className="text-rose-500 hover:text-rose-600 font-semibold px-2 py-1 rounded hover:bg-rose-50 transition-colors focus:outline-none focus:ring-1 focus:ring-rose-400 cursor-pointer"
           >
             {isRu ? 'Очистить' : 'Tozalash'}
           </button>
@@ -398,40 +620,53 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
           ref={triggerRef}
           type="button"
           disabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={isOpen}
           onClick={() => setIsOpen((prev) => !prev)}
-          className={`w-full pl-10 pr-10 py-2.5 sm:py-3 text-left rounded-2xl border text-xs sm:text-sm font-medium transition-all flex items-center justify-between cursor-pointer ${
+          className={`w-full pl-10 pr-10 py-2.5 sm:py-3 text-left rounded-2xl border text-xs sm:text-sm font-medium transition-all flex items-center justify-between cursor-pointer focus:outline-none ${
             disabled
               ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
               : isOpen
               ? 'border-[#167b78] ring-2 ring-[#167b78]/15 bg-white text-[#152f34] shadow-sm'
-              : 'border-[#d8e5e2] bg-[#f9fcfa] hover:bg-white text-[#152f34] hover:border-[#167b78]/40'
+              : 'border-[#d8e5e2] bg-[#f9fcfa] hover:bg-white text-[#152f34] hover:border-[#167b78]/40 focus:border-[#167b78] focus:ring-2 focus:ring-[#167b78]/15'
           }`}
         >
-          <CalendarIcon className="absolute left-3.5 top-3 sm:top-3.5 w-4 h-4 text-[#167b78]" />
+          <CalendarIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#167b78]" />
 
           <span className={value ? 'font-bold text-[#152f34]' : 'text-[#52696e]'}>
             {value ? formatFormattedDisplay(value) : effectivePlaceholder}
           </span>
 
-          {value && !disabled ? (
-            <span
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange('');
-              }}
-              className="absolute right-3.5 top-3 sm:top-3.5 text-[#52696e] hover:text-[#152f34] p-0.5 rounded-full hover:bg-slate-100 transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </span>
-          ) : (
-            <span className="absolute right-3.5 top-3 sm:top-3.5 text-[#52696e]">
+          {(!value || required || disabled) && (
+            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#52696e] pointer-events-none">
               <Clock className="w-3.5 h-3.5 text-[#167b78]/60" />
             </span>
           )}
         </button>
+
+        {/* Accessible clear button: sibling to trigger, strictly rendered ONLY if !required && !disabled && value */}
+        {value && !required && !disabled && (
+          <button
+            type="button"
+            aria-label={isRu ? 'Очистить дату' : 'Sanani tozalash'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange('');
+              triggerRef.current?.focus();
+            }}
+            className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-[#52696e] hover:text-rose-600 p-1 rounded-full hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-[#167b78] cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
-      {isOpen && mounted && createPortal(<div style={popoverStyle}>{calendarBody}</div>, document.body)}
+      {isOpen && mounted && createPortal(
+        <div style={popoverStyle} onClick={(e) => e.stopPropagation()}>
+          {calendarBody}
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

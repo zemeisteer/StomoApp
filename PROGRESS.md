@@ -3,144 +3,108 @@
 ## Overall Status: VERIFIED & COMPLETED LOCALLY (No push, merge, deploy, or database reset)
 
 - **Branch**: `dev`
-- **Reviewed Baseline**: `528c36a8a7e9905e7268cf9f8dac37a098777ad1`
+- **Reviewed Baseline**: `010a311b3b3a1ceeac6b5a4c9a050af1499ae070`
 - **Repository**: `zemeisteer/StomoApp`
 - **Local Path**: `c:\Users\user\Documents\GitHub\StomoApp`
-- **Design Direction**: Pale Mint / Teal public redesign preserved with responsive polish
-- **Language / Localization**: Bilingual Uzbek (`uz`) & Russian (`ru`) verified across public booking and marketing pages
+- **Design Direction**: Modern Pale Mint / Teal public redesign preserved with full responsive polish
+- **Language / Localization**: Bilingual Uzbek (`uz`) & Russian (`ru`) verified across public booking, admin calendar, and marketing pages
 - **Active Preview URL**: `http://localhost:3000` (Next.js server proxying `/api/*` to NestJS at `http://localhost:4000/api`)
-- **Test Database**: `postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public`
+- **Test Database**: `postgresql://dentacare:****@localhost:5432/dentacare_test?schema=public`
 
 ---
 
-## 1. Categorized Verification Status
+## 1. Concrete Fixes Implemented & Verified
 
-### A. Tested Through Actual Application Behavior (Automated Browser Tests against Live App & PostgreSQL `dentacare_test`)
-1. **Branch Switch Selection Invalidation & Submission Blocking (`verify-booking-integration.js` Scenario 1)**:
-   - Selecting Branch A slot, navigating to Step 5, and switching to Branch B properly returns user to Step 4, clears the old slot, displays amber notice with Branch B name, blocks advancing via disabled Next button, and requests availability strictly for Branch B.
-2. **Stale Request Race Condition Protection (`verify-booking-integration.js` Scenario 2)**:
-   - When request for Branch A availability is artificially delayed via network interception and user immediately switches to Branch B, resolving the delayed Branch A response does NOT overwrite Branch B slots. UI remains bound strictly to active selection.
-3. **Real 409 Conflict & Contact Preservation (`verify-booking-integration.js` Scenario 3)**:
-   - When a concurrent appointment is inserted directly into `dentacare_test` for the selected slot, submitting the booking triggers a real HTTP 409 Conflict. The UI surfaces the conflict banner (`t.booking.slotConflictNotice`), navigates to Step 4, preserves 100% of patient contact fields (`patientName`, `patientPhone`, `patientEmail`, `patientNote`), and allows selecting an alternative slot without re-entering data.
-4. **Doctor-Specific Duration & Price Consistency Against Saved DB Record (`verify-booking-integration.js` Scenario 4)**:
-   - Booking submitted with a doctor possessing custom duration (45m) and price (150,000 UZS) override displays 45 minutes and 150,000 UZS on Step 7 confirmation screen, and creates an authoritative appointment in `dentacare_test` with `durationMinutes: 45` and `servicePriceFrom: 15000000` tiyin.
-5. **Branch-Prefilled URL Flow (`verify-booking-integration.js` Scenario 5)**:
-   - Direct navigation to `/booking?branchId=...&serviceId=...&date=...` safely preserves the prefilled branch throughout date, service, doctor, and slot selection, confirming Branch A in Step 5 location confirmation.
-6. **Zero Price & Zero Buffer Verification (`verify-booking-integration.js` Scenario 6)**:
-   - Booking a free service (`priceFrom: 0`, `bufferMinutes: 0`) explicitly displays "Bepul" (0 UZS) in Step 6 summary and Step 7 confirmation, saving `servicePriceFrom: 0` and non-null buffer in PostgreSQL without falling back to defaults.
-7. **Explicit Overtime Location & Scheduling Boundaries (`verify-booking-integration.js` Part 1)**:
-   - Sunday overtime exception created in Branch A produces slots strictly assigned to Branch A; querying Branch B yields 0 slots. Adjacent shifts in different branches (morning Branch A, afternoon Branch B) are never merged across branch boundaries.
-8. **UI Responsive Assertions & Screenshot Capture (`verify-ui-and-capture.js` Scenarios 1-8)**:
-   - Desktop 1440px homepage sections verified functionally.
-   - Tablet 768px, Mobile 390px, and Mobile 360px fit verified without horizontal scroll overflow.
-   - Mobile navigation drawer focus trap (Tab / Shift+Tab wrapping) and Escape key restoration verified.
-   - Bilingual language switch (UZ -> RU -> UZ) asserted with Cyrillic text checks on H1 and navigation links.
-   - Booking flow Steps 1 to 6 verified, including exact branch badge strings on slot elements.
-   - API failure (500) error banner and successful retry recovery verified.
-   - Reduced motion (`prefers-reduced-motion: reduce`) media evaluation verified active.
+### 1. Public Booking Response Contract (`appointments.service.ts`, `appointments.controller.ts`, `api.ts`, `booking/page.tsx`)
+- **Root Problem**: `frontend/src/app/booking/page.tsx` read `result.servicePriceFrom`, but `PublicBookingController.createBooking` and `rescheduleByToken` returned `price` without explicit `servicePriceFrom` or complete persisted fields, causing the confirmation screen to fall back to stale pre-submission quotes.
+- **Implementation**:
+  - `serializeAppointmentResponse` in `backend/src/appointments/appointments.service.ts` and both controllers return the complete, authoritative persisted dataset: `servicePriceFrom`, `price`, `priceFrom`, `durationMinutes`, `bufferMinutes`, `branchId`, `doctorId`, `serviceId`, localized names (`doctorNameUz/Ru`, `branchNameUz/Ru`), and `serviceItems`.
+  - Defined explicit shared `BookingResponse` interface in `frontend/src/lib/api.ts`.
+  - In `frontend/src/app/booking/page.tsx`, Step 7 confirmation screen strictly uses server response values (`result.servicePriceFrom`, `result.durationMinutes`) as the single source of truth without falling back to pre-submission quotes.
+  - Preserves legitimate zeros (`price === 0` / "Bepul").
+- **Verification**:
+  - Exact monetary equality test in `verify-booking-integration.js`: service price was updated directly in DB to 185,000 UZS (18500000 tiyin) right before submission. The confirmation screen strictly displayed `185,000 so'm`, and the DB record persisted `servicePriceFrom: 18500000`.
 
-### B. Implemented in Codebase
-1. **Additive Database Migration (`20261023130000_explicit_overtime_branch`)**:
-   - Added optional `branch_id` column to `schedule_exceptions` table with index `schedule_exceptions_branch_id_idx` and foreign key constraint.
-2. **Scheduling Module Overtime Enforcement**:
-   - `AddExceptionDto` supports `branchId`.
-   - `SchedulingService.addException` validates doctor branch assignment and requires branch for overtime.
-   - `mergeIntervals` enforces `prev.branchId === curr.branchId && prev.branchId !== undefined`.
-3. **Centralized Booking Invalidation in Frontend (`frontend/src/app/booking/page.tsx`)**:
-   - `invalidateSlotSelection` resets `selectedSlotTime`, `boundSelection`, `serverCalc`, `availableSlots`, and `idempotencyKey` while preserving contact inputs.
-   - Triggered consistently on date, service, doctor, or branch change.
-4. **Authoritative Confirmation Screen**:
-   - Confirmation step directly renders returned saved appointment properties using nullish coalescing (`??`) to preserve legitimate zeros.
-5. **CMS & Clinic Content Integration**:
-   - `ClinicSection.tsx` connected to backend CMS section content with fallback to neutral clinic highlights, completely removing unverified hardcoded marketing claims.
+### 2. Explicit Pending-Expiry Settings (`appointments.service.ts`)
+- **Root Problem**: `AppointmentsService.createBooking` had a silent clamp `txPendingExpiryMinutes > 30 ? txPendingExpiryMinutes : 1440` which ignored configured boundaries.
+- **Implementation**:
+  - Removed silent clamp: `txPendingExpiryMinutes` is now honored directly (clamped safely between 1 and 10,080 minutes, default 30).
+  - Explicit boundaries 15, 30, and 60 minutes are respected.
+  - Staff-created appointments created via admin API are saved with `status: 'CONFIRMED'`, `expiresAt: null`, and initial status history `toStatus: 'CONFIRMED'`. Website bookings default to `status: 'PENDING'` with explicit expiry and `toStatus: 'PENDING'`.
+- **Verification**:
+  - Automated assertions in `verify-booking-integration.js` Part 1.3 verified `expiresAt` calculated to ~15.0m, ~30.0m, and ~60.0m for respective clinic configurations. Staff appointment asserted `status === 'CONFIRMED'`, `expiresAt === null`, and `statusHistory[0].toStatus === 'CONFIRMED'`.
 
-### C. Source-Reviewed
-1. **Prisma Schema & Migrations**:
-   - Reviewed schema relationships for `DoctorSchedule`, `ScheduleException`, `Appointment`, and `DoctorBranch`. Confirmed zero destructive schema changes.
-2. **NestJS Architecture**:
-   - Reviewed `AppointmentsService`, `SchedulingService`, `PublicController`, and DTO validation rules.
+### 3. Overtime Branch Support End-to-End (`admin/doctors/page.tsx`, `public.service.ts`, `scheduling.service.ts`, `appointments.service.ts`)
+- **Root Problem**: Admin exception modal lacked an explicit branch selector for overtime shifts when doctors have multiple branches, and public projections lacked `branchId`.
+- **Implementation**:
+  - In `frontend/src/app/admin/doctors/page.tsx`: added `OVERTIME: "Qo'shimcha ish vaqti (Overtime)"` to `EXCEPTION_TYPE_LABELS`. Rendered branch selector dropdown for overtime exceptions when the doctor is associated with multiple branches.
+  - In `backend/src/public/public.service.ts`: added `branchId: true` to `exceptions.select` in both `getDoctors` and `getDoctorBySlug`.
+  - In `backend/src/scheduling/scheduling.service.ts` and `appointments.service.ts`: doctor branch validation verifies active branches (`branch: { isActive: true }`) and active schedules (`isActive: true, branch: { isActive: true }`).
+  - **Migration Note**: Accurately noted that migration `20261023130000_explicit_overtime_branch` added column `branch_id TEXT` and foreign key constraint `schedule_exceptions_branch_id_fkey`, but did NOT create `schedule_exceptions_branch_id_idx`.
+- **Verification**:
+  - Sunday overtime created for Branch A produced slots strictly bound to Branch A; querying Branch B returned 0 slots. Verified over public HTTP slots API (`/api/scheduling/slots`).
+
+### 4. Custom Date Picker WAI-ARIA & Hydration Fix (`CustomDatePicker.tsx`)
+- **Root Problem**: Invalid HTML nesting (clear button inside trigger `<button>`) caused React hydration warning `In HTML, <button> cannot be a descendant of <button>`. Keyboard navigation and focus restoration required WAI-ARIA grid conformance.
+- **Implementation**:
+  - Refactored `frontend/src/components/CustomDatePicker.tsx`: clear button is now a sibling element within `.relative`.
+  - Implemented full WAI-ARIA grid navigation: Arrow keys (Up, Down, Left, Right), Home/End, PageUp/PageDown, Enter/Space for selection.
+  - Escape key dismisses the popover and restores focus to the trigger button.
+  - Localized Uzbek/Russian month and weekday headers.
+  - Timezone prop defaults to `Asia/Tashkent`.
+- **Verification**:
+  - Hydration check in browser: 0 console warnings, 0 hydration errors.
+
+### 5. Real Tests Hardening (`verify-booking-integration.js`, `browser-workflow.js`)
+- **Implementation**:
+  - Masked database credentials in stdout logs (`replace(/:[^:@]+@/, ':****@')`).
+  - Added run-specific probe branch fixture creation and verified routing through frontend proxy `/api/public/branches` before any mutation; fails closed on mismatch.
+  - Asserted `bufferMinutes === 0` in zero-buffer scenario with explicit zero-buffer fixture.
+  - Strict exact monetary equality comparisons (`=== 18500000`).
+  - Clean teardown in `finally` blocks for all fixtures, appointments, status history, audit logs, and test patients.
+  - Updated `backend/test/browser-workflow.js` Workflow 2 to match the 7-step redesigned booking flow (Date -> Services -> Doctor -> Slots -> Location Confirmation -> Patient Details).
+
+### 6. Tooth Framing & Hydration (`Tooth3D.tsx`, `ClientLayout.tsx`)
+- **Implementation**:
+  - In `frontend/src/components/Tooth3D.tsx`, unified `computeCameraFitDistance` with safe margin factor `1.28` across initial model load and `ResizeObserver` callbacks. Prevents tooth clipping at any pitch/yaw angle and narrow viewports.
+  - Removed `suppressHydrationWarning` from `<main>` in `frontend/src/app/ClientLayout.tsx`.
+- **Verification**:
+  - Verified 0 hydration warnings and clean browser console on `/` and `/booking`.
 
 ---
 
-## 2. 3D Tooth Model Status (Honest Assessment)
-- **Current Implementation**: The tooth component in `frontend/src/components/Tooth3D.tsx` is an interactive procedural Canvas render with ambient lighting, mouse drag interaction, and touch controls.
-- **Performance & Accessibility**: It is lazy-loaded with an intersection observer, pauses animation when scrolled offscreen, and respects `@media (prefers-reduced-motion)`.
-- **Status of Realistic Asset**: A production GLTF/GLB replacement model remains pending licensing and asset optimization; the existing procedural Canvas model is maintained as the honest, functional implementation without making false marketing claims.
+## 2. Test Execution & Build Verification
+
+| Test Suite | Command | Result | Details |
+|---|---|---|---|
+| **E2E Browser Workflow Runner** | `node backend/test/run-browser-tests.js` | **PASS (0)** | 7/7 complete workflows passed (Homepage, Redesigned 7-step booking, Admin login, Admin calendar, Reschedule with revision check, Legacy review with audit log, Responsive viewports). |
+| **Real Booking & Scheduling Integration** | `node backend/scripts/verify-booking-integration.js` | **PASS (0)** | 100% of 6 real browser scenarios and API tests passed (Overtime isolation, Expiry 15/30/60m, Staff appointments, Branch switch invalidation, Stale race protection, Real 409 conflict & contact preservation, Exact price equality, Zero price & buffer=0). |
+| **UI Responsive & Accessibility Suite** | `node backend/scripts/verify-ui-and-capture.js` | **PASS (0)** | 8/8 responsive UI scenarios passed (Desktop 1440px, Tablet 768px, Mobile 390px, Mobile 360px without overflow, Mobile drawer focus trap & Escape, Russian Cyrillic switch, Booking flow, API retry, Reduced motion). |
+| **Backend TypeScript Build** | `npm run build` in `backend/` | **PASS (0)** | `nest build` completed cleanly with zero compilation errors. |
+| **Frontend Next.js Build** | `npm run build` in `frontend/` | **PASS (0)** | All 28 static & dynamic routes compiled cleanly. |
 
 ---
 
-## 3. Verification Artifacts & Screenshots
+## 3. Visual Artifacts & Screenshots
 
-Screenshots captured from live preview and stored in:
+Screenshots captured and saved in:
 `C:\Users\user\.gemini\antigravity-ide\brain\5994479d-6fb5-4b40-95ef-f1cfaf06f457\screenshots\`
 
-| File Name | Dimensions | Verification Scope |
-|---|---|---|
-| `homepage-desktop-1440.png` | 1440x900 | Desktop header, hero, services, doctors, clinic, reviews, branches, faq |
-| `homepage-tablet-768.png` | 768x1024 | Tablet 2-column layout adaptation |
-| `homepage-mobile-390.png` | 390x844 | Mobile responsive stacked hero and cards |
-| `homepage-mobile-360.png` | 360x800 | Narrow mobile fit with 0 horizontal overflow |
-| `mobile-drawer-open-360.png` | 360x800 | Drawer focus trap, close button, language toggle |
-| `homepage-ru-1440.png` | 1440x900 | Russian Cyrillic translated homepage |
-| `booking-step1-date-1440.png` | 1440x900 | Step 1 interactive date chips & picker |
-| `booking-step2-services-1440.png` | 1440x900 | Step 2 service catalog with duration & price |
-| `booking-step3-doctors-1440.png` | 1440x900 | Step 3 doctors on chosen date |
-| `booking-step4-slots-branch-badges-1440.png` | 1440x900 | Step 4 slot grid with explicit branch badges |
-| `booking-step5-location-confirmation-1440.png` | 1440x900 | Step 5 location confirmation & branch switchers |
-| `booking-step6-summary-patient-1440.png` | 1440x900 | Step 6 summary & patient details form |
-| `booking-step6-mobile-360.png` | 360x800 | Step 6 mobile 360px layout & form fields |
-
----
-
-## 4. Test & Build Execution Results
-
-- **`node backend/scripts/verify-booking-integration.js`**: **PASS (Exit code: 0, 100% real browser scenarios passed)**
-- **`node backend/scripts/verify-ui-and-capture.js`**: **PASS (Exit code: 0, 8/8 assertions passed)**
-- **Frontend Build (`npm run build` in `frontend/`)**: **PASS (Exit code: 0, 28/28 routes compiled)**
-- **Backend Build (`npm run build` in `backend/`)**: **PASS (Exit code: 0)**
-
----
-
-## 5. User Feedback Resolutions (8 Tasks Completed)
-
-1. **Hydration Error Resolution (Photo 1)**:
-   - Eliminated `Unhandled Runtime Error: Text content does not match server-rendered HTML`.
-   - Added `suppressHydrationWarning` to `<html>` and `<body>` in `frontend/src/app/layout.tsx`.
-   - Replaced non-deterministic browser-localized `toLocaleDateString()` with deterministic, timezone-authoritative `formatClinicDate` in `ReviewsSection.tsx`, `reviews/page.tsx`, `articles/page.tsx`, and `articles/[slug]/page.tsx`.
-
-2. **FAQ Upgrade & Database Integration (Photo 2)**:
-   - Populated 6 comprehensive baseline dental questions in both Uzbek and Russian in both `dentacare` and `dentacare_test` via `seed-faqs.js`.
-   - Upgraded `frontend/src/components/home/FaqAndCtaSection.tsx` and `frontend/src/app/faq/page.tsx`: dynamically fetches from `/api/faqs` with baseline fallback, redesigned accordion rows with spacious cards (`p-6 sm:p-7`, `space-y-4 sm:space-y-5`), numbered tags (`01`, `02`), mint accent borders (`#167b78`), and instant live search.
-
-3. **Elimination of Button Click Lag / Freezing**:
-   - Diagnosed root causes:
-     a) Unauthenticated cascading requests to `GET /api/auth/me` and `POST /api/auth/refresh` on public navigation triggering 401 response waterfalls. Fixed in `frontend/src/lib/auth.tsx` by verifying existing access tokens before dispatching network calls.
-     b) Clamped `Three.js` canvas `devicePixelRatio` in `frontend/src/components/Tooth3D.tsx` to `Math.min(devicePixelRatio, 1.2)` to prevent main-thread GPU stalls on interaction.
-
-4. **Prices Page Multi-Filter & Sorting (Photo 3)**:
-   - Completely redesigned `frontend/src/app/prices/page.tsx`:
-     - Added branch filter dropdown via `CustomSelect`.
-     - Added doctor filter dropdown via `CustomSelect`.
-     - Added price sorting toggle (`Arzondan qimmatga ↑` / `Qimmatdan arzonga ↓`).
-     - Added instant text search and service category chips.
-
-5. & 8. **Custom Calendar/DatePicker & Dropdowns Across All Pages (Photos 4 & 8)**:
-   - Built modern mint/teal themed `frontend/src/components/CustomDatePicker.tsx`:
-     - Month and year navigation, UZ/RU localized weekday headers, today indicator, active day pill (`bg-[#167b78]`), min/max horizon guards, and quick chips (`Bugun`, `Ertaga`).
-   - Replaced all raw HTML `<input type="date">` and all raw `<select>` elements across customer and admin pages:
-     - `frontend/src/app/booking/page.tsx`
-     - `frontend/src/app/booking/status/[token]/page.tsx`
-     - `frontend/src/app/admin/calendar/page.tsx`
-     - `frontend/src/app/admin/doctors/page.tsx`
-     - `frontend/src/app/admin/analytics/page.tsx`
-     - Verified 0 remaining raw `<select>` or `<input type="date">` in `frontend/src`.
-
-6. **Constrain Step 4 Branch Chips strictly by Doctor (Photo 5)**:
-   - In `frontend/src/app/booking/page.tsx`, computed `doctorAssignedBranchIds` from doctor's assigned branches and schedules.
-   - Constrained Step 4 branch chips: branches where the selected doctor does not work are never rendered (`agar shifokor u filialda ishlamasa boshqa filialni chiqarma`).
-   - In Step 5 location confirmation, alternative branch switchers only offer branches where that doctor actually operates.
-
-7. **Hero 3D Tooth Model Enlargement**:
-   - In `frontend/src/components/Tooth3D.tsx`, adjusted `fitDistance` to `1.06`, magnifying tooth framing by ~27%.
-   - In `frontend/src/components/home/HeroSection.tsx`, enlarged canvas wrapper to `max-w-lg lg:max-w-xl h-[380px] sm:h-[440px] lg:h-[480px]`.
-
+- `homepage-desktop-1440.png`: Desktop homepage with 3D tooth framing, header, and sections.
+- `homepage-tablet-768.png`: Tablet 768px layout adaptation.
+- `homepage-mobile-390.png`: Mobile 390px responsive cards.
+- `homepage-mobile-360.png`: Mobile 360px fit with zero horizontal overflow.
+- `mobile-drawer-open-360.png`: Mobile navigation drawer focus trap and visible close button.
+- `homepage-ru-1440.png`: Russian localization with Cyrillic typography.
+- `booking-step1-date-1440.png`: Step 1 interactive CustomDatePicker.
+- `booking-step2-services-1440.png`: Step 2 multi-service selection with duration and prices.
+- `booking-step3-doctors-1440.png`: Step 3 doctor cards on selected date.
+- `booking-step4-slots-branch-badges-1440.png`: Step 4 slot grid with explicit branch badges.
+- `booking-step5-location-confirmation-1440.png`: Step 5 location card and branch switchers.
+- `booking-step6-summary-patient-1440.png`: Step 6 patient details form and summary card.
+- `booking-step6-mobile-360.png`: Step 6 mobile 360px layout.
+- `desktop_booking_confirmation.png`: Step 7 authoritative confirmation screen.
+- `desktop_admin_calendar_modal.png`: Admin calendar appointment detail modal.
+- `desktop_rescheduled.png`: Admin calendar after appointment rescheduling.
+- `desktop_legacy_review.png`: Admin historical service bundle review.
+- `desktop_legacy_action.png`: Admin legacy reconciliation action dialog.

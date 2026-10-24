@@ -217,42 +217,24 @@ async function run() {
     // -------------------------------------------------------------
     // WORKFLOW 2: MULTI-SERVICE BOOKING WITH ISOLATED FIXTURES
     // -------------------------------------------------------------
-    console.log('[2/7] Navigating to Booking page http://localhost:3000/booking ...');
-    await page.goto(`${BASE_URL}/booking`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForSelector('button', { timeout: 15000 });
+    console.log(`[2/7] Navigating to Booking page with isolated branch ${BASE_URL}/booking?branchId=${testBranch.id} ...`);
+    await page.goto(`${BASE_URL}/booking?branchId=${testBranch.id}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // Step 1: Select the isolated test branch
-    console.log(`Step 1: Selecting isolated branch "Filial Test ${runKey}"...`);
-    await page.waitForFunction(
-      (bName) => Array.from(document.querySelectorAll('div.grid button')).some((b) => b.textContent && b.textContent.includes(bName)),
-      { timeout: 15000 },
-      `Filial Test ${runKey}`,
-    );
-
-    await page.evaluate((bName) => {
-      const buttons = Array.from(document.querySelectorAll('div.grid button'));
-      const branchBtn = buttons.find((b) => b.textContent && b.textContent.includes(bName));
-      if (branchBtn) branchBtn.click();
-    }, `Filial Test ${runKey}`);
-    await new Promise((r) => setTimeout(r, 600));
-
-    // Click Next
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
-      if (nextBtn) nextBtn.click();
-    });
+    // Step 1: Select date and advance
+    console.log('Step 1: Selecting date and advancing...');
+    await page.waitForSelector('#booking-next-step:not([disabled])', { timeout: 30000 });
+    await page.click('#booking-next-step');
 
     // Step 2: Select EXACTLY the TWO isolated test services
     console.log(`Step 2: Selecting isolated test services "Xizmat A ${runKey}" and "Xizmat B ${runKey}"...`);
     await page.waitForFunction(
-      (nameA) => Array.from(document.querySelectorAll('div.grid button')).some((b) => b.textContent && b.textContent.includes(nameA)),
+      (nameA) => Array.from(document.querySelectorAll('div.grid button, button')).some((b) => b.textContent && b.textContent.includes(nameA)),
       { timeout: 15000 },
       `Xizmat A ${runKey}`,
     );
 
     const selectionResult = await page.evaluate((nameA, nameB) => {
-      const buttons = Array.from(document.querySelectorAll('div.grid button'));
+      const buttons = Array.from(document.querySelectorAll('div.grid button, button'));
       const s1 = buttons.find((b) => b.textContent && b.textContent.includes(nameA));
       const s2 = buttons.find((b) => b.textContent && b.textContent.includes(nameB));
 
@@ -275,23 +257,20 @@ async function run() {
     });
     assert(twoSelected, 'UI must confirm exactly 2 services selected');
 
-    // Click Next
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
-      if (nextBtn) nextBtn.click();
-    });
+    // Click Next (Step 2 -> Step 3)
+    await page.waitForSelector('#booking-next-step-2:not([disabled])', { timeout: 15000 });
+    await page.click('#booking-next-step-2');
 
     // Step 3: Select isolated doctor
     console.log(`Step 3: Selecting isolated doctor "Test ${runKey}"...`);
     await page.waitForFunction(
-      (docLastName) => Array.from(document.querySelectorAll('div.grid button:not([disabled])')).some((b) => b.textContent && b.textContent.includes(docLastName)),
+      (docLastName) => Array.from(document.querySelectorAll('button:not([disabled])')).some((b) => b.textContent && b.textContent.includes(docLastName)),
       { timeout: 15000 },
       `Test ${runKey}`,
     );
 
     const doctorSelected = await page.evaluate((docLastName) => {
-      const buttons = Array.from(document.querySelectorAll('div.grid button:not([disabled])'));
+      const buttons = Array.from(document.querySelectorAll('button:not([disabled])'));
       const docBtn = buttons.find((b) => b.textContent && b.textContent.includes(docLastName));
       if (docBtn) {
         docBtn.click();
@@ -302,69 +281,73 @@ async function run() {
     assert(doctorSelected, `Isolated doctor "Test ${runKey}" must be selectable`);
     await new Promise((r) => setTimeout(r, 600));
 
-    // Click Next
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
-      if (nextBtn) nextBtn.click();
-    });
+    // Click Next (Step 3 -> Step 4)
+    await page.waitForSelector('#booking-next-step-3:not([disabled])', { timeout: 15000 });
+    await page.click('#booking-next-step-3');
 
     // Step 4: Pick slot
     console.log('Step 4: Picking an available working time slot...');
-    await page.waitForSelector('button', { timeout: 15000 });
-    let slotSelected = false;
+    await page.waitForSelector('button[id^="slot-"]:not([disabled])', { timeout: 30000 });
 
-    for (let attempt = 0; attempt < 8; attempt++) {
-      await new Promise((r) => setTimeout(r, 800));
-      slotSelected = await page.evaluate(() => {
-        const slotButtons = Array.from(document.querySelectorAll('div.grid button:not([disabled])'));
-        const validSlot = slotButtons.find((b) => /\d{1,2}:\d{2}/.test(b.textContent || ''));
-        if (validSlot) {
-          validSlot.click();
-          return true;
-        }
-        return false;
-      });
-
-      if (slotSelected) break;
-
-      // Jump to next date chip
-      await page.evaluate((idx) => {
-        const chips = Array.from(document.querySelectorAll('button')).filter((b) =>
-          b.textContent && (b.textContent.includes('Ish kuni') || b.textContent.includes('Прием')),
-        );
-        if (chips[idx]) chips[idx].click();
-      }, attempt + 1);
-    }
-    assert(slotSelected, 'An available time slot must be selectable');
-
-    // Click Next to Patient Info
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const nextBtn = btns.find((b) => b.textContent && (b.textContent.includes('Keyingisi') || b.textContent.includes('Далее') || b.textContent.includes('Next')));
-      if (nextBtn) nextBtn.click();
+    const slotSelected = await page.evaluate(() => {
+      const slotBtn = document.querySelector('button[id^="slot-"]:not([disabled])');
+      if (slotBtn) {
+        slotBtn.click();
+        return true;
+      }
+      return false;
     });
+    assert(slotSelected, 'An available time slot must be selectable');
+    await new Promise((r) => setTimeout(r, 600));
 
-    // Step 5: Fill isolated patient fixture details
-    console.log('Step 5: Filling patient details with safe masked phone input...');
-    await page.waitForSelector('input[type="text"]', { timeout: 15000 });
-    const nameInput = await page.$('input[type="text"]');
+    // Click Next (Step 4 -> Step 5)
+    await page.waitForSelector('#booking-next-step-4:not([disabled])', { timeout: 15000 });
+    await page.click('#booking-next-step-4');
+
+    // Step 5: Location confirmation
+    console.log('Step 5: Confirming branch location...');
+    await page.waitForSelector('#booking-confirm-location-btn:not([disabled])', { timeout: 15000 });
+    await page.click('#booking-confirm-location-btn');
+
+    // Step 6: Fill isolated patient fixture details
+    console.log('Step 6: Filling patient details with safe masked phone input...');
+    await page.waitForSelector('#patient-name-input', { timeout: 15000 });
+    const nameInput = await page.$('#patient-name-input');
     assert(nameInput, 'Patient name input must exist');
     await nameInput.type(testPatientName);
 
-    const phoneInput = await page.$('input[type="tel"]');
-    assert(phoneInput, 'Patient phone input must exist');
+    await page.waitForSelector('#patient-phone-input', { timeout: 15000 });
+    await page.type('#patient-phone-input', testPatientPhoneDigits);
 
-    // Populate masked phone input safely:
-    // Focus and select all content, then type the 9 digits: '90' + 7 digits
-    await phoneInput.click({ clickCount: 3 });
-    await page.keyboard.press('Backspace');
-    await phoneInput.type(testPatientPhoneDigits, { delay: 30 });
-
-    const emailInput = await page.$('input[type="email"]');
+    const emailInput = (await page.$('#patient-email-input')) || (await page.$('input[type="email"]'));
     if (emailInput) {
       await emailInput.type(testPatientEmail);
     }
+
+    // Check consent checkbox
+    await page.evaluate(() => {
+      const cb = document.querySelector('#consent-checkbox');
+      if (cb && !cb.checked) {
+        cb.click();
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const submitState = await page.evaluate(() => {
+      const btn = document.getElementById('booking-submit-btn');
+      return {
+        disabled: btn ? btn.disabled : null,
+        name: document.getElementById('patient-name-input')?.value,
+        phone: document.getElementById('patient-phone-input')?.value,
+        email: document.getElementById('patient-email-input')?.value,
+        consent: document.getElementById('consent-checkbox')?.checked,
+      };
+    });
+    console.log('Submit button state before click:', JSON.stringify(submitState));
+
+    // Wait for submit button to be enabled
+    await page.waitForSelector('#booking-submit-btn:not([disabled])', { timeout: 15000 });
 
     // Set up network listener to capture EXACT booking request and response
     let capturedBookingPayload = null;
@@ -382,16 +365,7 @@ async function run() {
 
     // Submit booking
     console.log('Submitting booking mutation...');
-    const submitBtn = await page.$('button[type="submit"]');
-    if (submitBtn) {
-      await submitBtn.click();
-    } else {
-      await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button'));
-        const sBtn = btns.find((b) => b.textContent && (b.textContent.includes('Tasdiqlash') || b.textContent.includes('Band qilish')));
-        if (sBtn) sBtn.click();
-      });
-    }
+    await page.click('#booking-submit-btn');
 
     await bookingResponsePromise;
     assert(capturedBookingPayload && capturedBookingPayload.id, 'Booking API must return created appointment payload with id');
@@ -409,6 +383,8 @@ async function run() {
     // Wait for confirmation view
     await page.waitForFunction(
       (apptId) =>
+        document.body.innerText.includes('muvaffaqiyatli') ||
+        document.body.innerText.includes('успешно') ||
         document.body.innerText.includes('qabul qilindi') ||
         document.body.innerText.includes('принята') ||
         (apptId && document.body.innerText.includes(apptId)),
@@ -506,8 +482,12 @@ async function run() {
 
     // Wait for detail modal
     await page.waitForFunction(
-      () => document.querySelector('div.fixed') && document.querySelector('div.fixed').textContent.includes('Qabul boshqaruvi'),
-      { timeout: 10000 },
+      () =>
+        document.querySelector('div.fixed') &&
+        (document.querySelector('div.fixed').textContent.includes("Qabul ma'lumotlari") ||
+          document.querySelector('div.fixed').textContent.includes('Qabul boshqaruvi') ||
+          document.querySelector('div.fixed').textContent.includes('Telefon:')),
+      { timeout: 15000 },
     );
 
     const modalShot = path.join(ARTIFACTS_DIR, 'desktop_admin_calendar_modal.png');

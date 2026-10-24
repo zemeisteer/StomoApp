@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SchedulingService, resolveServiceIds } from '../scheduling/scheduling.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
-import { AppointmentStatus, NotificationChannel, NotificationStatus, Prisma, StaffRole } from '@prisma/client';
+import { AppointmentStatus, ExceptionType, NotificationChannel, NotificationStatus, Prisma, StaffRole } from '@prisma/client';
 import { nanoid } from 'nanoid';
 import * as crypto from 'crypto';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
@@ -126,6 +126,7 @@ export function serializeAppointmentResponse(appointment: any) {
   const docNameRu = doc ? `Др. ${doc.firstNameRu || doc.firstNameUz} ${doc.lastNameRu || doc.lastNameUz}`.trim() : undefined;
   const docName = appointment.doctorName || docNameUz;
   const branchName = appointment.branchName || branch?.nameUz || '';
+  const branchNameUz = branch?.nameUz || branchName;
   const branchNameRu = branch?.nameRu || branchName;
 
   const serviceItems = (appointment.serviceItems || []).map((item: any) => ({
@@ -147,6 +148,7 @@ export function serializeAppointmentResponse(appointment: any) {
     id: appointment.id,
     appointmentId: appointment.id,
     publicToken: appointment.publicToken,
+    token: appointment.publicToken,
     status: appointment.status,
     startTime: appointment.startTime,
     endTime: appointment.endTime,
@@ -159,8 +161,10 @@ export function serializeAppointmentResponse(appointment: any) {
     durationAdjustmentMinutes,
     bufferMinutes: appointment.bufferMinutes ?? 0,
     doctorName: docName,
+    doctorNameUz: docNameUz || docName,
     doctorNameRu: docNameRu || docName,
     branchName: branchName,
+    branchNameUz: branchNameUz,
     branchNameRu: branchNameRu,
     branchAddressUz: branch?.addressUz || '',
     branchAddressRu: branch?.addressRu || branch?.addressUz || '',
@@ -413,7 +417,12 @@ export class AppointmentsService {
           // Revalidate doctor inside transaction lock
           const txDoctor = await tx.doctor.findFirst({
             where: { id: dto.doctorId, isActive: true, isArchived: false },
-            include: { branches: true },
+            include: {
+              branches: {
+                where: { branch: { isActive: true } },
+                include: { branch: true },
+              },
+            },
           });
           if (!txDoctor) {
             throw new BadRequestException('Shifokor topilmadi yoki faol emas');
@@ -434,7 +443,14 @@ export class AppointmentsService {
             if (!branch) {
               throw new BadRequestException('Filial topilmadi yoki faol emas');
             }
-            const isAssigned = txDoctor.branches.some((b) => b.branchId === txBranchId);
+            const isAssigned =
+              txDoctor.branches.some((b) => b.branchId === txBranchId) ||
+              (await tx.doctorSchedule.findFirst({
+                where: { doctorId: dto.doctorId, branchId: txBranchId, isActive: true, branch: { isActive: true } },
+              })) !== null ||
+              (await tx.scheduleException.findFirst({
+                where: { doctorId: dto.doctorId, branchId: txBranchId, type: ExceptionType.OVERTIME },
+              })) !== null;
             if (!isAssigned) {
               throw new BadRequestException('Shifokor bu filialda ishlamaydi');
             }
@@ -531,7 +547,10 @@ export class AppointmentsService {
           const publicToken = nanoid(32);
           const isStaffCreated = dto.source === 'admin' || dto.source === 'reception';
           const initialStatus = isStaffCreated ? AppointmentStatus.CONFIRMED : AppointmentStatus.PENDING;
-          const effectivePendingMinutes = txPendingExpiryMinutes > 30 ? txPendingExpiryMinutes : 1440;
+          const effectivePendingMinutes =
+            txPendingExpiryMinutes !== null && txPendingExpiryMinutes !== undefined && !isNaN(txPendingExpiryMinutes)
+              ? Math.max(1, Math.min(10080, txPendingExpiryMinutes))
+              : 30;
           const expiresAt = isStaffCreated ? null : new Date(nowUtc.getTime() + effectivePendingMinutes * 60 * 1000);
           const tokenExpiresAt = new Date(txEndTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
@@ -582,9 +601,9 @@ export class AppointmentsService {
             data: {
               appointmentId: appointment.id,
               fromStatus: null,
-              toStatus: AppointmentStatus.PENDING,
-              changedBy: dto.source === 'admin' ? 'admin' : 'website',
-              reason: 'Boshlang\'ich buyurtma',
+              toStatus: initialStatus,
+              changedBy: dto.source === 'admin' ? 'admin' : (dto.source === 'reception' ? 'reception' : 'website'),
+              reason: isStaffCreated ? 'Xodim tomonidan yaratildi' : 'Boshlang\'ich buyurtma',
             },
           });
 

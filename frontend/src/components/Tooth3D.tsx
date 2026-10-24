@@ -10,6 +10,20 @@ interface Tooth3DProps {
   className?: string;
 }
 
+function computeCameraFitDistance(radius: number, fovDegrees: number, aspect: number): number {
+  const fovRad = (fovDegrees * Math.PI) / 180;
+  const sinHalfV = Math.sin(fovRad / 2);
+  const tanHalfV = Math.tan(fovRad / 2);
+  const tanHalfH = tanHalfV * aspect;
+  const sinHalfH = Math.sin(Math.atan(tanHalfH));
+
+  const distV = radius / Math.max(0.001, sinHalfV);
+  const distH = radius / Math.max(0.001, sinHalfH);
+
+  // Safe margin of 1.28 ensures the entire model remains visible at all pitch/yaw rotations and viewport aspect ratios
+  return Math.max(distV, distH) * 1.28;
+}
+
 export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -304,12 +318,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
 
         if (engineRef.current) {
           const { camera } = engineRef.current;
-          const fovRad = (camera.fov * Math.PI) / 180;
-          const aspect = camera.aspect;
-          const fovH = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
-          const distV = modelRadius / Math.tan(fovRad / 2);
-          const distH = modelRadius / Math.tan(fovH / 2);
-          const fitDistance = Math.max(distV, distH) * 1.06; // Prominent, enlarged anatomical tooth model
+          const fitDistance = computeCameraFitDistance(modelRadius, camera.fov, camera.aspect);
 
           camera.position.set(0, 0.05, fitDistance);
           camera.lookAt(0, 0, 0);
@@ -375,11 +384,11 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
           const aspect = newW / newH;
           engineRef.current.camera.aspect = aspect;
           const modelRadius = (engineRef.current as any).modelRadius || 1.0;
-          const fovRad = (engineRef.current.camera.fov * Math.PI) / 180;
-          const fovH = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
-          const distV = modelRadius / Math.tan(fovRad / 2);
-          const distH = modelRadius / Math.tan(fovH / 2);
-          engineRef.current.camera.position.z = Math.max(distV, distH) * 1.35;
+          engineRef.current.camera.position.z = computeCameraFitDistance(
+            modelRadius,
+            engineRef.current.camera.fov,
+            aspect,
+          );
           engineRef.current.camera.updateProjectionMatrix();
           engineRef.current.renderer.setSize(newW, newH);
           renderSingleFrame();

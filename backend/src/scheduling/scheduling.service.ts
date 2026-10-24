@@ -1260,15 +1260,16 @@ export class SchedulingService {
           throw new BadRequestException('Qo\'shimcha ish vaqti (OVERTIME) uchun boshlanish va tugash vaqti ko\'rsatilishi shart');
         }
 
-        // Query doctor branch assignments
+        // Query doctor branch assignments: active branches only
         const docBranches = await tx.doctorBranch.findMany({
-          where: { doctorId: data.doctorId },
+          where: { doctorId: data.doctorId, branch: { isActive: true } },
           select: { branchId: true },
         });
         const assignedBranchIds = new Set(docBranches.map((b) => b.branchId));
 
+        // Active schedules on active branches only (do not treat stale or inactive schedules as sufficient assignment)
         const docSchedules = await tx.doctorSchedule.findMany({
-          where: { doctorId: data.doctorId },
+          where: { doctorId: data.doctorId, isActive: true, branch: { isActive: true } },
           select: { branchId: true },
           distinct: ['branchId'],
         });
@@ -1312,6 +1313,7 @@ export class SchedulingService {
     }
     return this.prisma.scheduleException.findMany({
       where,
+      include: { branch: true },
       orderBy: { date: 'asc' },
     });
   }

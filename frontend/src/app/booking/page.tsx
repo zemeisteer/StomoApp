@@ -893,40 +893,49 @@ function BookingContent() {
         idempotencyKey: currentKey,
       });
 
-      // Use actual saved appointment from server response as authoritative truth (preserving legitimate zero values)
-      const confirmedPrice =
-        result.servicePriceFrom ??
-        boundSelection.serverCalc.priceFrom;
+      // Authoritative validation of saved appointment from server response (do not silently substitute pre-submission quote)
+      if (result.servicePriceFrom === undefined && result.price === undefined) {
+        throw new Error('Serverdan qabul narxi tasdiqlanmadi');
+      }
+      if (result.durationMinutes === undefined) {
+        throw new Error('Serverdan qabul davomiyligi tasdiqlanmadi');
+      }
 
-      const confirmedDuration =
-        result.durationMinutes ??
-        boundSelection.serverCalc.durationMinutes;
+      // Preserve legitimate zeros
+      const confirmedPrice = (result.servicePriceFrom !== undefined ? result.servicePriceFrom : result.price) as number;
+      const confirmedDuration = result.durationMinutes;
+      const confirmedBuffer = result.bufferMinutes ?? 0;
 
-      const confirmedBuffer =
-        result.bufferMinutes ??
-        boundSelection.serverCalc.bufferMinutes ??
-        0;
+      // Ensure localized server fields are actively used
+      const serverBranchName =
+        language === 'ru'
+          ? (result.branchNameRu || result.branch?.nameRu || result.branchName)
+          : (result.branchNameUz || result.branchName || result.branch?.nameUz);
 
-      const matchedBranch = branches.find((b) => b.id === boundSelection.branchId);
+      const serverDoctorName =
+        language === 'ru'
+          ? (result.doctorNameRu || result.doctorName)
+          : (result.doctorNameUz || result.doctorName);
+
+      const matchedBranch = branches.find((b) => b.id === (result.branchId || boundSelection.branchId));
       const confirmedBranchName =
+        serverBranchName ||
         (matchedBranch
           ? (language === 'ru' && matchedBranch.nameRu ? matchedBranch.nameRu : matchedBranch.nameUz)
-          : result.branchName) ||
-        result.branchName ||
+          : '') ||
         'Asosiy filial';
 
       const confirmedDoctorName =
+        serverDoctorName ||
         (selectedDoctorObj
           ? `Dr. ${language === 'ru' && selectedDoctorObj.firstNameRu ? selectedDoctorObj.firstNameRu : selectedDoctorObj.firstNameUz} ${
               language === 'ru' && selectedDoctorObj.lastNameRu ? selectedDoctorObj.lastNameRu : selectedDoctorObj.lastNameUz
             }`
-          : result.doctorName) ||
-        result.doctorName ||
+          : '') ||
         'Shifokor';
 
       const confirmedServiceName =
         result.serviceName ||
-        boundSelection.serverCalc.serviceName ||
         selectedServices.map((s) => (language === 'ru' && s.nameRu ? s.nameRu : s.nameUz)).join(', ');
 
       setBookingResult({
