@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { Play, Pause, Rotate3d, AlertCircle } from 'lucide-react';
+import { Rotate3d, AlertCircle } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 
 interface Tooth3DProps {
@@ -27,27 +27,21 @@ function computeCameraFitDistance(radius: number, fovDegrees: number, aspect: nu
 export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const isRu = language === 'ru';
 
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
 
   // References for live rendering state without triggering effect re-binds
-  const isPausedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const isIntersectingRef = useRef(true);
   const isTabVisibleRef = useRef(true);
   const prefersReducedMotionRef = useRef(false);
   const modelLoadedRef = useRef(false);
   const animationFrameIdRef = useRef<number | null>(null);
-
-  // Synchronize state to refs
-  useEffect(() => {
-    isPausedRef.current = isPaused;
-  }, [isPaused]);
 
   useEffect(() => {
     isDraggingRef.current = isDragging;
@@ -72,7 +66,6 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
   // Helper: check if continuous 60fps loop should be running
   const shouldAnimateContinuous = useCallback(() => {
     return (
-      !isPausedRef.current &&
       isIntersectingRef.current &&
       isTabVisibleRef.current &&
       !prefersReducedMotionRef.current &&
@@ -174,20 +167,6 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
 
     animationFrameIdRef.current = requestAnimationFrame(loop);
   }, [shouldAnimateContinuous, renderSingleFrame]);
-
-  // Handle pause toggle button
-  const togglePause = () => {
-    const nextPaused = !isPaused;
-    setIsPaused(nextPaused);
-    isPausedRef.current = nextPaused;
-
-    if (nextPaused) {
-      stopAnimationLoop();
-      renderSingleFrame();
-    } else {
-      startAnimationLoop();
-    }
-  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -443,8 +422,6 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
       setReducedMotion(prefersReduced);
 
       if (prefersReduced) {
-        setIsPaused(true);
-        isPausedRef.current = true;
         stopAnimationLoop();
         renderSingleFrame();
       }
@@ -620,7 +597,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
             }}
             className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
           >
-            Old ko&apos;rinish
+            {isRu ? 'Спереди' : 'Old ko\'rinish'}
           </button>
           <button
             type="button"
@@ -634,7 +611,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
             }}
             className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
           >
-            Toj (tepadan)
+            {isRu ? 'Коронка (сверху)' : 'Toj (tepadan)'}
           </button>
           <button
             type="button"
@@ -648,7 +625,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
             }}
             className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
           >
-            Ildiz (pastdan)
+            {isRu ? 'Корень (снизу)' : 'Ildiz (pastdan)'}
           </button>
         </div>
       )}

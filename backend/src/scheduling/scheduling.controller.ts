@@ -14,7 +14,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
 import { DayOfWeek, ExceptionType, StaffRole } from '@prisma/client';
-import { IsString, IsEnum, IsOptional, IsDateString, Matches, IsArray, IsIn } from 'class-validator';
+import { IsString, IsEnum, IsOptional, IsDateString, Matches, IsArray, IsIn, IsBoolean } from 'class-validator';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -55,6 +55,10 @@ export class BatchScheduleDto {
 
   @IsIn(['replace', 'merge'])
   mode!: 'replace' | 'merge';
+
+  @IsOptional()
+  @IsBoolean()
+  preview?: boolean;
 }
 
 export class CopyScheduleDto {
@@ -71,6 +75,10 @@ export class CopyScheduleDto {
 
   @IsIn(['replace', 'merge'])
   mode!: 'replace' | 'merge';
+
+  @IsOptional()
+  @IsBoolean()
+  preview?: boolean;
 }
 
 class SetScheduleDto {
@@ -204,11 +212,35 @@ export class SchedulingController {
     });
   }
 
+  @Post(['schedule/batch/preview', 'schedules/batch/preview'])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  async previewBatchSchedule(@Body() dto: BatchScheduleDto) {
+    const doctorIds = dto.doctorIds && dto.doctorIds.length > 0
+      ? dto.doctorIds
+      : (dto.doctorId ? [dto.doctorId] : []);
+    return this.service.setBatchSchedules({
+      ...dto,
+      doctorIds,
+      preview: true,
+    });
+  }
+
   @Post(['schedule/copy', 'schedules/copy'])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
   async copySchedule(@Body() dto: CopyScheduleDto) {
     return this.service.copyDoctorSchedules(dto);
+  }
+
+  @Post(['schedule/copy/preview', 'schedules/copy/preview'])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  async previewCopySchedule(@Body() dto: CopyScheduleDto) {
+    return this.service.copyDoctorSchedules({
+      ...dto,
+      preview: true,
+    });
   }
 
   @Post(['exception', 'exceptions'])

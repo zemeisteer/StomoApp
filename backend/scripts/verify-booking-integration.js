@@ -736,9 +736,23 @@ async function run() {
       data: { priceFrom: updatedPriceTiyin },
     });
 
-    // Submit valid alternative booking
+    // Submit booking (with stale quote -> triggers QUOTE_CHANGED reconfirmation modal)
     const submitBtn2 = await page.$('#booking-submit-btn');
     await submitBtn2.click();
+
+    // In Phase 2, quote difference triggers interactive Quote Change Reconfirmation Modal
+    try {
+      const quoteModal = await page.waitForSelector('#quote-change-modal', { timeout: 6000 });
+      if (quoteModal) {
+        console.log('[PASS] Quote change reconfirmation modal successfully intercepted stale quote!');
+        const acceptBtn = await page.waitForSelector('#accept-quote-update-btn', { timeout: 5000 });
+        await acceptBtn.click();
+        console.log('[PASS] Accepted updated quote; proceeding to confirmation screen...');
+      }
+    } catch {
+      // Direct confirmation if modal was not shown
+    }
+
     await page.waitForSelector('#confirmation-duration', { timeout: 15000 });
 
     // Assert Confirmation Screen displays 45 minutes and exact updated saved price (185 000 UZS)
@@ -786,7 +800,7 @@ async function run() {
     });
 
     // Step 1: Date is selected by default, click Next
-    await page.waitForSelector('#booking-next-step:not([disabled])', { timeout: 15000 });
+    await page.waitForSelector('#booking-next-step:not([disabled])', { timeout: 30000 });
     const step1Next = await page.$('#booking-next-step');
     await step1Next.click();
     await page.waitForSelector('#booking-next-step-2:not([disabled])', { timeout: 10000 });

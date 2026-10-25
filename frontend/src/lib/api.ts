@@ -69,8 +69,9 @@ async function fetcher<T>(url: string, options: RequestInit = {}, isRetry = fals
 
   if (!res.ok) {
     let errorMsg = 'Xatolik yuz berdi';
+    let errJson: any = null;
     try {
-      const errJson = await res.json();
+      errJson = await res.json();
       errorMsg = errJson.message || errJson.error || errorMsg;
       if (Array.isArray(errorMsg)) {
         errorMsg = errorMsg.join(', ');
@@ -78,6 +79,12 @@ async function fetcher<T>(url: string, options: RequestInit = {}, isRetry = fals
     } catch {}
     const error: any = new Error(errorMsg);
     error.status = res.status;
+    error.code = errJson?.code;
+    error.quoteChanged = errJson?.quoteChanged;
+    error.expectedQuote = errJson?.expectedQuote;
+    error.currentQuote = errJson?.currentQuote;
+    error.materialChanges = errJson?.materialChanges;
+    error.data = errJson;
     throw error;
   }
 
@@ -187,6 +194,12 @@ export const api = {
     note?: string;
     consentGiven: boolean;
     idempotencyKey?: string;
+    expectedQuote?: {
+      priceFrom?: number;
+      price?: number;
+      durationMinutes?: number;
+      bufferMinutes?: number;
+    };
   }) =>
     fetcher<BookingResponse>('/api/booking', {
       method: 'POST',
@@ -430,6 +443,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  previewBatchSchedules: (payload: {
+    doctorIds: string[];
+    daysOfWeek: string[];
+    startTime: string;
+    endTime: string;
+    breakStart?: string;
+    breakEnd?: string;
+    branchId: string;
+    mode: 'replace' | 'merge';
+  }) =>
+    fetcher<any>('/api/scheduling/schedules/batch/preview', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, preview: true }),
+    }),
   copyDoctorSchedules: (payload: {
     fromDoctorId: string;
     toDoctorIds: string[];
@@ -439,6 +466,16 @@ export const api = {
     fetcher<any>('/api/scheduling/schedules/copy', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  previewCopyDoctorSchedules: (payload: {
+    fromDoctorId: string;
+    toDoctorIds: string[];
+    mode: 'replace' | 'merge';
+    targetBranchId?: string;
+  }) =>
+    fetcher<any>('/api/scheduling/schedules/copy/preview', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, preview: true }),
     }),
   getDoctorExceptions: (doctorId: string) =>
     fetcher<any[]>(`/api/scheduling/exceptions/${doctorId}`),

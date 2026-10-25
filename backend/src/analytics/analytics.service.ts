@@ -154,13 +154,20 @@ export class AnalyticsService {
     const timezone = clinicSettings?.timezone || 'Asia/Tashkent';
 
     // Parse start and end dates with exact clinic timezone boundaries
+    // Default to current calendar month in the clinic timezone
+    const nowInTz = toZonedTime(new Date(), timezone);
+    const curYear = nowInTz.getFullYear();
+    const curMonth = nowInTz.getMonth();
+    const startOfMonthStr = `${curYear}-${String(curMonth + 1).padStart(2, '0')}-01`;
+    const lastDayOfMonth = new Date(Date.UTC(curYear, curMonth + 1, 0)).getUTCDate();
+    const endOfMonthStr = `${curYear}-${String(curMonth + 1).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
+
     let start: Date;
     if (startDate) {
       const datePart = startDate.split('T')[0];
       start = fromZonedTime(`${datePart} 00:00:00`, timezone);
     } else {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      start = thirtyDaysAgo;
+      start = fromZonedTime(`${startOfMonthStr} 00:00:00`, timezone);
     }
 
     let end: Date;
@@ -168,8 +175,7 @@ export class AnalyticsService {
       const datePart = endDate.split('T')[0];
       end = fromZonedTime(`${datePart} 23:59:59.999`, timezone);
     } else {
-      const thirtyDaysAhead = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      end = thirtyDaysAhead;
+      end = fromZonedTime(`${endOfMonthStr} 23:59:59.999`, timezone);
     }
 
     if (start.getTime() > end.getTime()) {
@@ -190,7 +196,12 @@ export class AnalyticsService {
 
     if (branchId) appointmentWhere.branchId = branchId;
     if (doctorId) appointmentWhere.doctorId = doctorId;
-    if (serviceId) appointmentWhere.serviceId = serviceId;
+    if (serviceId) {
+      appointmentWhere.OR = [
+        { serviceId: serviceId },
+        { serviceItems: { some: { serviceId: serviceId } } },
+      ];
+    }
 
     // 1. Status breakdown
     const statusCounts = await this.prisma.appointment.groupBy({
@@ -222,42 +233,130 @@ export class AnalyticsService {
     const cancellationRate = totalAppointments > 0 ? (cancelled / totalAppointments) * 100 : 0;
     const noShowRate = totalAppointments > 0 ? (noShow / totalAppointments) * 100 : 0;
 
-    // 2. Popular services: Group by distinct service item name snapshots to count individual services performed
-    // Strictly exclude unresolved legacy bundles from falsely inflating individual catalog service stats
-    const totalServiceItems = await this.prisma.appointmentServiceItem.count({
-      where: {
-        appointment: appointmentWhere,
-        isLegacyBundle: false,
-      },
-    });
-
-    const popularServicesRaw = await this.prisma.appointmentServiceItem.groupBy({
-      by: ['serviceNameUz'],
-      where: {
-        appointment: appointmentWhere,
-        isLegacyBundle: false,
-      },
-      _count: true,
-      orderBy: {
-        _count: {
-          serviceNameUz: 'desc',
+    // 2. Multi-Service Appointments, Service Usage, and Service-Specific Revenue
+    // Query all appointments matching filter to count:
+    // a) Distinct appointment counts vs individual service usages
+    // b) Service items from multi-service appointments without double-counting appointments
+    // c) Single-service legacy appointments lacking appointmentServiceItem rows
+    // d) Service-specific revenue (item price or proportionate share of recorded payments)
+    const serviceAppointments = await this.prisma.appointment.findMany({
+      where: appointmentWhere,
+      select: {
+        id: true,
+        serviceId: true,
+        serviceName: true,
+        servicePriceFrom: true,
+        serviceItems: {
+          select: {
+            id: true,
+            serviceId: true,
+            serviceNameUz: true,
+            serviceNameRu: true,
+            priceFrom: true,
+            durationMinutes: true,
+            isLegacyBundle: true,
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
+        payments: {
+          select: {
+            amount: true,
+            isRefund: true,
+          },
         },
       },
-      take: 7,
     });
 
-    const popularServices = popularServicesRaw.map((s) => ({
-      name: s.serviceNameUz,
-      count: s._count,
-      percentage: totalServiceItems > 0 ? Math.round((s._count / totalServiceItems) * 100) : 0,
-    }));
+    const serviceStatsMap = new Map<
+      string,
+      {
+        serviceId?: string;
+        nameUz: string;
+        nameRu?: string | null;
+        usageCount: number;
+        distinctAppointmentIds: Set<string>;
+        revenueMinor: number;
+      }
+    >();
 
-    const legacyBundlesCount = await this.prisma.appointmentServiceItem.count({
-      where: {
-        appointment: appointmentWhere,
-        isLegacyBundle: true,
-      },
-    });
+    let totalServiceUsage = 0;
+    let legacyBundlesCount = 0;
+
+    for (const appt of serviceAppointments) {
+      const netPayment = appt.payments.reduce(
+        (acc, p) => (p.isRefund ? acc - p.amount : acc + p.amount),
+        0,
+      );
+
+      if (appt.serviceItems && appt.serviceItems.length > 0) {
+        const validItems = appt.serviceItems.filter((i) => !i.isLegacyBundle);
+        const legacyItems = appt.serviceItems.filter((i) => i.isLegacyBundle);
+        legacyBundlesCount += legacyItems.length;
+
+        const totalItemsPrice = validItems.reduce((acc, i) => acc + (i.priceFrom || 0), 0);
+
+        for (const item of validItems) {
+          const key = item.serviceId || item.serviceNameUz;
+          const current = serviceStatsMap.get(key) || {
+            serviceId: item.serviceId || undefined,
+            nameUz: item.serviceNameUz,
+            nameRu: item.serviceNameRu,
+            usageCount: 0,
+            distinctAppointmentIds: new Set<string>(),
+            revenueMinor: 0,
+          };
+
+          current.usageCount += 1;
+          current.distinctAppointmentIds.add(appt.id);
+          totalServiceUsage += 1;
+
+          if (netPayment > 0 && totalItemsPrice > 0) {
+            current.revenueMinor += Math.round(((item.priceFrom || 0) / totalItemsPrice) * netPayment);
+          } else {
+            current.revenueMinor += item.priceFrom || 0;
+          }
+
+          serviceStatsMap.set(key, current);
+        }
+      } else {
+        // Legacy single-service appointment without separate service items
+        const key = appt.serviceId || appt.serviceName;
+        const current = serviceStatsMap.get(key) || {
+          serviceId: appt.serviceId,
+          nameUz: appt.serviceName,
+          usageCount: 0,
+          distinctAppointmentIds: new Set<string>(),
+          revenueMinor: 0,
+        };
+
+        current.usageCount += 1;
+        current.distinctAppointmentIds.add(appt.id);
+        totalServiceUsage += 1;
+
+        if (netPayment > 0) {
+          current.revenueMinor += netPayment;
+        } else {
+          current.revenueMinor += appt.servicePriceFrom || 0;
+        }
+
+        serviceStatsMap.set(key, current);
+      }
+    }
+
+    const popularServices = Array.from(serviceStatsMap.values())
+      .sort((a, b) => b.usageCount - a.usageCount)
+      .slice(0, 10)
+      .map((s) => ({
+        serviceId: s.serviceId,
+        name: s.nameUz,
+        nameUz: s.nameUz,
+        nameRu: s.nameRu,
+        count: s.usageCount,
+        usageCount: s.usageCount,
+        appointmentsCount: s.distinctAppointmentIds.size,
+        revenueMinor: s.revenueMinor,
+        percentage: totalServiceUsage > 0 ? Math.round((s.usageCount / totalServiceUsage) * 100) : 0,
+      }));
 
     // 3. Exact Interval-Based Doctor Utilization Calculation
     // Query active doctors matching filter (include zero-appointment doctors!)
@@ -285,6 +384,14 @@ export class AnalyticsService {
               gte: new Date(formatInTimeZone(start, timezone, 'yyyy-MM-dd') + 'T00:00:00.000Z'),
               lte: new Date(formatInTimeZone(end, timezone, 'yyyy-MM-dd') + 'T23:59:59.999Z'),
             },
+          },
+          select: {
+            id: true,
+            type: true,
+            date: true,
+            startTime: true,
+            endTime: true,
+            branchId: true,
           },
         },
       },
@@ -361,13 +468,17 @@ export class AnalyticsService {
           dayIntervals.push(...currentList);
         }
 
-        // Apply exceptions for this doctor on this specific calendar date
+        // Apply exceptions for this doctor on this specific calendar date using clinic timezone
         const dayExceptions = doc.exceptions.filter(
-          (ex) => ex.date.toISOString().split('T')[0] === dateString,
+          (ex) => formatInTimeZone(ex.date, timezone, 'yyyy-MM-dd') === dateString,
         );
 
         let isWholeDayOff = false;
         for (const ex of dayExceptions) {
+          // If exception is branch-specific and doesn't match selected branch, skip it
+          if (branchId && ex.branchId && ex.branchId !== branchId) {
+            continue;
+          }
           if (
             ex.type === ExceptionType.HOLIDAY ||
             ((ex.type === ExceptionType.LEAVE || ex.type === ExceptionType.BLOCKED) && (!ex.startTime || !ex.endTime))
@@ -383,9 +494,12 @@ export class AnalyticsService {
         }
 
         // Deterministic Exception Precedence:
-        // 1. Add OVERTIME intervals (applies even if daySchedules was empty!)
+        // 1. Add OVERTIME intervals (branch-scoped: only count overtime belonging to selected branch)
         for (const ex of dayExceptions) {
           if (ex.type === ExceptionType.OVERTIME && ex.startTime && ex.endTime) {
+            if (branchId && ex.branchId && ex.branchId !== branchId) {
+              continue;
+            }
             const otStart = parseTimeToMinutes(ex.startTime);
             const otEnd = parseTimeToMinutes(ex.endTime);
             if (otEnd > otStart) {
@@ -397,9 +511,12 @@ export class AnalyticsService {
         // 2. Merge additions
         dayIntervals = mergeIntervals(dayIntervals);
 
-        // 3. Subtract BLOCKED intervals
+        // 3. Subtract BLOCKED intervals (respecting branch scope)
         for (const ex of dayExceptions) {
           if (ex.type === ExceptionType.BLOCKED && ex.startTime && ex.endTime) {
+            if (branchId && ex.branchId && ex.branchId !== branchId) {
+              continue;
+            }
             const blStart = parseTimeToMinutes(ex.startTime);
             const blEnd = parseTimeToMinutes(ex.endTime);
             const remaining: TimeInterval[] = [];
@@ -410,9 +527,12 @@ export class AnalyticsService {
           }
         }
 
-        // 4. Subtract partial LEAVE intervals
+        // 4. Subtract partial LEAVE intervals (respecting branch scope)
         for (const ex of dayExceptions) {
           if (ex.type === ExceptionType.LEAVE && ex.startTime && ex.endTime) {
+            if (branchId && ex.branchId && ex.branchId !== branchId) {
+              continue;
+            }
             const lvStart = parseTimeToMinutes(ex.startTime);
             const lvEnd = parseTimeToMinutes(ex.endTime);
             const remaining: TimeInterval[] = [];
@@ -520,7 +640,12 @@ export class AnalyticsService {
       paymentWhere.appointment = {};
       if (branchId) paymentWhere.appointment.branchId = branchId;
       if (doctorId) paymentWhere.appointment.doctorId = doctorId;
-      if (serviceId) paymentWhere.appointment.serviceId = serviceId;
+      if (serviceId) {
+        paymentWhere.appointment.OR = [
+          { serviceId: serviceId },
+          { serviceItems: { some: { serviceId: serviceId } } },
+        ];
+      }
     }
 
     const payments = await this.prisma.payment.findMany({
@@ -529,6 +654,20 @@ export class AnalyticsService {
         amount: true,
         isRefund: true,
         method: true,
+        appointment: {
+          select: {
+            id: true,
+            serviceId: true,
+            servicePriceFrom: true,
+            serviceItems: {
+              select: {
+                serviceId: true,
+                priceFrom: true,
+                isLegacyBundle: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -542,11 +681,27 @@ export class AnalyticsService {
     };
 
     for (const p of payments) {
+      let effectiveAmount = p.amount;
+
+      // When serviceId filter is active, apportion payment proportionately to this service
+      if (serviceId && p.appointment) {
+        const appt = p.appointment;
+        if (appt.serviceItems && appt.serviceItems.length > 0) {
+          const validItems = appt.serviceItems.filter((i) => !i.isLegacyBundle);
+          const totalItemsPrice = validItems.reduce((acc, i) => acc + (i.priceFrom || 0), 0);
+          const matchingItems = validItems.filter((i) => i.serviceId === serviceId);
+          const matchingPrice = matchingItems.reduce((acc, i) => acc + (i.priceFrom || 0), 0);
+          if (totalItemsPrice > 0) {
+            effectiveAmount = Math.round(p.amount * (matchingPrice / totalItemsPrice));
+          }
+        }
+      }
+
       if (p.isRefund) {
-        totalRefunds += p.amount;
+        totalRefunds += effectiveAmount;
       } else {
-        totalIncome += p.amount;
-        paymentMethods[p.method] = (paymentMethods[p.method] || 0) + p.amount;
+        totalIncome += effectiveAmount;
+        paymentMethods[p.method] = (paymentMethods[p.method] || 0) + effectiveAmount;
       }
     }
 
@@ -560,6 +715,9 @@ export class AnalyticsService {
       },
       summary: {
         totalAppointments,
+        totalServiceUsage,
+        servicesPerAppointment:
+          totalAppointments > 0 ? Number((totalServiceUsage / totalAppointments).toFixed(2)) : 0,
         completed,
         cancelled,
         noShow,
@@ -572,6 +730,7 @@ export class AnalyticsService {
       },
       statusBreakdown: statusMap,
       popularServices,
+      totalServiceUsage,
       legacyBundlesCount,
       unresolvedRecords: {
         unresolvedCount: legacyBundlesCount,

@@ -264,6 +264,12 @@ function findNextWorkingDate(startDateStr: string, doctor: any, branchId?: strin
   return startDateStr;
 }
 
+function formatPrice(amountTiyin: number | undefined | null): string {
+  if (amountTiyin === 0) return "0 so'm";
+  if (typeof amountTiyin !== 'number') return '—';
+  return `${(amountTiyin / 100).toLocaleString('uz-UZ')} so'm`;
+}
+
 function BookingContent() {
   const { t, language } = useI18n();
   const searchParams = useSearchParams();
@@ -341,6 +347,13 @@ function BookingContent() {
   // Confirmation result
   const [bookingResult, setBookingResult] = useState<any | null>(null);
   const [copiedToken, setCopiedToken] = useState<boolean>(false);
+
+  // Quote Change Reconfirmation Notice
+  const [quoteChangeNotice, setQuoteChangeNotice] = useState<{
+    expectedQuote: { priceFrom?: number; durationMinutes?: number; bufferMinutes?: number };
+    currentQuote: { priceFrom?: number; durationMinutes?: number; bufferMinutes?: number };
+    materialChanges?: { priceChanged?: boolean; durationChanged?: boolean; bufferChanged?: boolean };
+  } | null>(null);
 
   // Race condition protection for slots fetching
   const slotsRequestIdRef = useRef<number>(0);
@@ -608,7 +621,7 @@ function BookingContent() {
     });
   };
 
-  // Branch switcher from Step 5: invalidates incompatible slot and takes user back to Step 4 for that branch
+  // Branch switcher: invalidates incompatible slot and takes user back to Step 4 (or Step 3 if doctor doesn't work at branch)
   const handleSwitchBranch = (newBranchId: string) => {
     if (newBranchId === selectedBranchId && selectedSlotTime && boundSelection) {
       goToStep(6);
@@ -618,6 +631,15 @@ function BookingContent() {
     invalidateSlotSelection();
     setSelectedBranchId(newBranchId);
     setBranchSwitchNotice(newBranchId);
+
+    // If currently selected doctor is not assigned to the new branch, clear doctor selection and redirect to Step 3
+    const isDoctorAssigned = selectedDoctorObj?.branches?.some((b: any) => b.branchId === newBranchId);
+    if (selectedDoctorId && !isDoctorAssigned) {
+      setSelectedDoctorId('');
+      setStep(3);
+      return;
+    }
+
     setStep(4);
   };
 
@@ -891,6 +913,12 @@ function BookingContent() {
         note: patientNote.trim() || undefined,
         consentGiven,
         idempotencyKey: currentKey,
+        expectedQuote: boundSelection.serverCalc ? {
+          priceFrom: boundSelection.serverCalc.priceFrom,
+          price: boundSelection.serverCalc.priceFrom,
+          durationMinutes: boundSelection.serverCalc.durationMinutes,
+          bufferMinutes: boundSelection.serverCalc.bufferMinutes,
+        } : undefined,
       });
 
       // Authoritative validation of saved appointment from server response (do not silently substitute pre-submission quote)
@@ -949,6 +977,16 @@ function BookingContent() {
       });
       setStep(7);
     } catch (err: any) {
+      if (err?.code === 'QUOTE_CHANGED' || err?.data?.code === 'QUOTE_CHANGED' || err?.quoteChanged) {
+        const qData = err.data || err;
+        setQuoteChangeNotice({
+          expectedQuote: qData.expectedQuote,
+          currentQuote: qData.currentQuote,
+          materialChanges: qData.materialChanges,
+        });
+        return;
+      }
+
       const isConflict =
         err?.status === 409 ||
         err?.message?.includes('band') ||
@@ -962,6 +1000,133 @@ function BookingContent() {
         setStep(4);
       } else {
         setErrorMessage(err?.message || t.common.error);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Reconfirm and accept updated quote explicitly
+  const handleAcceptQuoteUpdate = async () => {
+    if (!quoteChangeNotice || !boundSelection) return;
+    const newQuote = quoteChangeNotice.currentQuote;
+
+    const updatedBoundSelection = {
+      ...boundSelection,
+      serverCalc: {
+        ...boundSelection.serverCalc,
+        priceFrom: typeof newQuote.priceFrom === 'number' ? newQuote.priceFrom : boundSelection.serverCalc.priceFrom,
+        durationMinutes: typeof newQuote.durationMinutes === 'number' ? newQuote.durationMinutes : boundSelection.serverCalc.durationMinutes,
+        bufferMinutes: typeof newQuote.bufferMinutes === 'number' ? newQuote.bufferMinutes : boundSelection.serverCalc.bufferMinutes,
+      },
+    };
+    setBoundSelection(updatedBoundSelection);
+
+    if (serverCalc) {
+      setServerCalc({
+        ...serverCalc,
+        priceFrom: typeof newQuote.priceFrom === 'number' ? newQuote.priceFrom : serverCalc.priceFrom,
+        durationMinutes: typeof newQuote.durationMinutes === 'number' ? newQuote.durationMinutes : serverCalc.durationMinutes,
+        bufferMinutes: typeof newQuote.bufferMinutes === 'number' ? newQuote.bufferMinutes : serverCalc.bufferMinutes,
+      });
+    }
+
+    const newIdempotencyKey = `bk_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    setIdempotencyKey(newIdempotencyKey);
+    setQuoteChangeNotice(null);
+
+    try {
+      setIsSubmitting(true);
+      setErrorMessage(null);
+      const phoneValidation = normalizeUzPhone(patientPhone, true);
+
+      const result = await api.createBooking({
+        branchId: updatedBoundSelection.branchId,
+        serviceId: updatedBoundSelection.serviceIds[0],
+        serviceIds: updatedBoundSelection.serviceIds,
+        doctorId: updatedBoundSelection.doctorId,
+        startTime: updatedBoundSelection.slotTime,
+        patientName: patientName.trim(),
+        patientPhone: phoneValidation.normalized,
+        patientEmail: patientEmail.trim() || undefined,
+        note: patientNote.trim() || undefined,
+        consentGiven,
+        idempotencyKey: newIdempotencyKey,
+        expectedQuote: {
+          priceFrom: newQuote.priceFrom,
+          price: newQuote.priceFrom,
+          durationMinutes: newQuote.durationMinutes,
+          bufferMinutes: newQuote.bufferMinutes,
+        },
+      });
+
+      const confirmedPrice = (result.servicePriceFrom !== undefined ? result.servicePriceFrom : result.price) as number;
+      const confirmedDuration = result.durationMinutes;
+      const confirmedBuffer = result.bufferMinutes ?? 0;
+
+      const serverBranchName =
+        language === 'ru'
+          ? (result.branchNameRu || result.branch?.nameRu || result.branchName)
+          : (result.branchNameUz || result.branchName || result.branch?.nameUz);
+
+      const serverDoctorName =
+        language === 'ru'
+          ? (result.doctorNameRu || result.doctorName)
+          : (result.doctorNameUz || result.doctorName);
+
+      const matchedBranch = branches.find((b) => b.id === (result.branchId || updatedBoundSelection.branchId));
+      const confirmedBranchName =
+        serverBranchName ||
+        (matchedBranch
+          ? (language === 'ru' && matchedBranch.nameRu ? matchedBranch.nameRu : matchedBranch.nameUz)
+          : '') ||
+        'Asosiy filial';
+
+      const confirmedDoctorName =
+        serverDoctorName ||
+        (selectedDoctorObj
+          ? `Dr. ${language === 'ru' && selectedDoctorObj.firstNameRu ? selectedDoctorObj.firstNameRu : selectedDoctorObj.firstNameUz} ${
+              language === 'ru' && selectedDoctorObj.lastNameRu ? selectedDoctorObj.lastNameRu : selectedDoctorObj.lastNameUz
+            }`
+          : '') ||
+        'Shifokor';
+
+      const confirmedServiceName =
+        result.serviceName ||
+        selectedServices.map((s) => (language === 'ru' && s.nameRu ? s.nameRu : s.nameUz)).join(', ');
+
+      setBookingResult({
+        ...result,
+        doctorName: confirmedDoctorName,
+        branchName: confirmedBranchName,
+        serviceName: confirmedServiceName,
+        durationMinutes: confirmedDuration,
+        bufferMinutes: confirmedBuffer,
+        servicePriceFrom: confirmedPrice,
+      });
+      setStep(7);
+    } catch (err: any) {
+      if (err?.code === 'QUOTE_CHANGED' || err?.data?.code === 'QUOTE_CHANGED' || err?.quoteChanged) {
+        const qData = err.data || err;
+        setQuoteChangeNotice({
+          expectedQuote: qData.expectedQuote,
+          currentQuote: qData.currentQuote,
+          materialChanges: qData.materialChanges,
+        });
+      } else {
+        const isConflict =
+          err?.status === 409 ||
+          err?.message?.includes('band') ||
+          err?.message?.includes('conflict') ||
+          err?.message?.includes('allaqachon');
+
+        if (isConflict) {
+          setErrorMessage(t.booking.slotConflictNotice);
+          invalidateSlotSelection();
+          setStep(4);
+        } else {
+          setErrorMessage(err?.message || t.common.error);
+        }
       }
     } finally {
       setIsSubmitting(false);
@@ -2370,6 +2535,106 @@ function BookingContent() {
                 >
                   {t.nav.home}
                 </Link>
+              </div>
+            </div>
+          )}
+
+          {/* Quote Change Reconfirmation Modal */}
+          {quoteChangeNotice && (
+            <div
+              id="quote-change-modal"
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="quote-change-title"
+            >
+              <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-[#d8e5e2] space-y-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 border border-amber-200">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 id="quote-change-title" className="text-xl font-bold text-[#152f34]">
+                      {language === 'ru' ? 'Условия приема обновлены' : 'Qabul shartlari yangilandi'}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {language === 'ru'
+                        ? 'Стоимость или длительность услуги была скорректирована'
+                        : 'Xizmat narxi yoki davomiyligi tizimda yangilandi'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-[#f8fbfb] p-4 sm:p-5 rounded-2xl border border-[#e2eeee] space-y-4">
+                  {/* Price comparison */}
+                  {quoteChangeNotice.materialChanges?.priceChanged && (
+                    <div className="flex items-center justify-between pb-3 border-b border-[#e2eeee]">
+                      <span className="text-sm font-medium text-slate-600">
+                        {language === 'ru' ? 'Стоимость приема:' : 'Qabul narxi:'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm line-through text-slate-400">
+                          {formatPrice(quoteChangeNotice.expectedQuote.priceFrom)}
+                        </span>
+                        <span className="text-xs text-slate-400">→</span>
+                        <span className="text-base font-bold text-[#167b78] bg-[#eaf5f2] px-2.5 py-0.5 rounded-full border border-[#2bb49c]/30">
+                          {formatPrice(quoteChangeNotice.currentQuote.priceFrom)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Duration comparison */}
+                  {quoteChangeNotice.materialChanges?.durationChanged && (
+                    <div className="flex items-center justify-between pb-3 border-b border-[#e2eeee]">
+                      <span className="text-sm font-medium text-slate-600">
+                        {language === 'ru' ? 'Длительность:' : 'Davomiyligi:'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm line-through text-slate-400">
+                          {quoteChangeNotice.expectedQuote.durationMinutes} {language === 'ru' ? 'мин' : 'daq'}
+                        </span>
+                        <span className="text-xs text-slate-400">→</span>
+                        <span className="text-base font-bold text-[#167b78] bg-[#eaf5f2] px-2.5 py-0.5 rounded-full border border-[#2bb49c]/30">
+                          {quoteChangeNotice.currentQuote.durationMinutes} {language === 'ru' ? 'мин' : 'daq'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    {language === 'ru'
+                      ? 'Все ваши данные (ФИО, телефон, выбранный врач и филиал) сохранены. Нажмите «Принять новые условия», чтобы подтвердить запись по актуальным условиям.'
+                      : 'Barcha ma\'lumotlaringiz (ism, telefon, shifokor va filial) saqlanib qoldi. Yangilangan shartlar bilan qabulni yakunlash uchun «Yangi shartlarni qabul qilish» tugmasini bosing.'}
+                  </p>
+                </div>
+
+                <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 pt-2">
+                  <button
+                    id="cancel-quote-update-btn"
+                    type="button"
+                    onClick={() => setQuoteChangeNotice(null)}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium text-sm transition-colors cursor-pointer"
+                  >
+                    {language === 'ru' ? 'Отмена' : 'Bekor qilish'}
+                  </button>
+                  <button
+                    id="accept-quote-update-btn"
+                    type="button"
+                    onClick={handleAcceptQuoteUpdate}
+                    disabled={isSubmitting}
+                    className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#167b78] hover:bg-[#126462] disabled:opacity-50 text-white font-bold text-sm shadow-md shadow-[#167b78]/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>{language === 'ru' ? 'Запись...' : 'Yozilmoqda...'}</span>
+                      </>
+                    ) : (
+                      <span>{language === 'ru' ? 'Принять новые условия' : 'Yangi shartlarni qabul qilish'}</span>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           )}

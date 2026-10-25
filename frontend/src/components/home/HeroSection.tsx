@@ -2,9 +2,18 @@
 
 import React from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { Calendar, ArrowRight, ShieldCheck, Award, HeartPulse } from 'lucide-react';
-import { Tooth3D } from '../Tooth3D';
 import { useI18n } from '../../lib/i18n';
+
+const Tooth3D = dynamic(() => import('../Tooth3D').then((mod) => mod.Tooth3D), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center min-h-[300px]">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#167b78]" />
+    </div>
+  ),
+});
 
 export const HeroSection: React.FC = () => {
   const { t, language } = useI18n();

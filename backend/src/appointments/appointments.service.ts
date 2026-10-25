@@ -32,6 +32,12 @@ const TIME_RESERVING_STATUSES: AppointmentStatus[] = [
   AppointmentStatus.CONFIRMED,
   AppointmentStatus.CHECKED_IN,
 ];
+export interface ExpectedQuote {
+  priceFrom?: number;
+  price?: number;
+  durationMinutes?: number;
+  bufferMinutes?: number;
+}
 
 export interface CreateBookingDto {
   serviceId?: string;
@@ -47,6 +53,7 @@ export interface CreateBookingDto {
   consentGiven: boolean;
   idempotencyKey?: string;
   source?: string;
+  expectedQuote?: ExpectedQuote;
 }
 
 export function computeBookingFingerprint(params: {
@@ -150,6 +157,8 @@ export function serializeAppointmentResponse(appointment: any) {
     publicToken: appointment.publicToken,
     token: appointment.publicToken,
     status: appointment.status,
+    expiresAt: appointment.expiresAt,
+    tokenExpiresAt: appointment.tokenExpiresAt,
     startTime: appointment.startTime,
     endTime: appointment.endTime,
     serviceName: appointment.serviceName,
@@ -484,8 +493,46 @@ export class AppointmentsService {
 
           // Calculate consistent duration, buffer, and end time from transaction read
           const txDurationMinutes = txAuthoritative.totalDurationMinutes;
+          const txPriceFrom = txAuthoritative.totalPriceFrom;
           const txTotalMinutes = txDurationMinutes + txBufferMinutes;
           const txEndTimeUtc = new Date(startTimeUtc.getTime() + txTotalMinutes * 60 * 1000);
+
+          // Authoritative Quote Consistency Check
+          if (dto.expectedQuote) {
+            const exp = dto.expectedQuote;
+            const expPrice = exp.priceFrom !== undefined ? exp.priceFrom : exp.price;
+
+            const priceChanged = expPrice !== undefined && expPrice !== txPriceFrom;
+            const durationChanged = exp.durationMinutes !== undefined && exp.durationMinutes !== txDurationMinutes;
+            const bufferChanged = exp.bufferMinutes !== undefined && exp.bufferMinutes !== txBufferMinutes;
+
+            if (priceChanged || durationChanged || bufferChanged) {
+              throw new ConflictException({
+                statusCode: 409,
+                error: 'Conflict',
+                code: 'QUOTE_CHANGED',
+                message: 'Xizmat shartlari (narx yoki davomiylik) o\'zgargan. Iltimos, yangi shartlarni tasdiqlang.',
+                quoteChanged: true,
+                expectedQuote: {
+                  priceFrom: expPrice,
+                  price: expPrice,
+                  durationMinutes: exp.durationMinutes,
+                  bufferMinutes: exp.bufferMinutes,
+                },
+                currentQuote: {
+                  priceFrom: txPriceFrom,
+                  price: txPriceFrom,
+                  durationMinutes: txDurationMinutes,
+                  bufferMinutes: txBufferMinutes,
+                },
+                materialChanges: {
+                  priceChanged,
+                  durationChanged,
+                  bufferChanged,
+                },
+              });
+            }
+          }
 
           // Revalidate working hours inside protected transaction lock using the exact txEndTimeUtc
           const isWorkingInLock = await this.schedulingService.isDoctorWorkingAt(
@@ -513,9 +560,13 @@ export class AppointmentsService {
             },
           });
 
-          const conflicting = candidateAppts.find((a) =>
-            isAppointmentOverlapping(a, startTimeUtc, txEndTimeUtc),
-          );
+          const conflicting = candidateAppts.find((a) => {
+            // Ignore expired pending appointments; their slot reservation has lapsed
+            if (a.status === AppointmentStatus.PENDING && a.expiresAt && a.expiresAt <= nowUtc) {
+              return false;
+            }
+            return isAppointmentOverlapping(a, startTimeUtc, txEndTimeUtc);
+          });
 
           if (conflicting) {
             if (conflicting.overrunActive) {
@@ -547,10 +598,18 @@ export class AppointmentsService {
           const publicToken = nanoid(32);
           const isStaffCreated = dto.source === 'admin' || dto.source === 'reception';
           const initialStatus = isStaffCreated ? AppointmentStatus.CONFIRMED : AppointmentStatus.PENDING;
-          const effectivePendingMinutes =
-            txPendingExpiryMinutes !== null && txPendingExpiryMinutes !== undefined && !isNaN(txPendingExpiryMinutes)
-              ? Math.max(1, Math.min(10080, txPendingExpiryMinutes))
-              : 30;
+          let effectivePendingMinutes = 30;
+          if (txPendingExpiryMinutes !== null && txPendingExpiryMinutes !== undefined && !isNaN(txPendingExpiryMinutes)) {
+            if (txPendingExpiryMinutes < 5) {
+              this.logger.warn(`Clinic pendingExpiryMinutes setting (${txPendingExpiryMinutes}) is below minimum (5 min). Clamping to 5.`);
+              effectivePendingMinutes = 5;
+            } else if (txPendingExpiryMinutes > 10080) {
+              this.logger.warn(`Clinic pendingExpiryMinutes setting (${txPendingExpiryMinutes}) exceeds maximum (10080 min / 7 days). Clamping to 10080.`);
+              effectivePendingMinutes = 10080;
+            } else {
+              effectivePendingMinutes = txPendingExpiryMinutes;
+            }
+          }
           const expiresAt = isStaffCreated ? null : new Date(nowUtc.getTime() + effectivePendingMinutes * 60 * 1000);
           const tokenExpiresAt = new Date(txEndTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
@@ -1389,7 +1448,11 @@ export class AppointmentsService {
       throw new NotFoundException('Qabul topilmadi');
     }
 
-    if (appointment.tokenRevokedAt || (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date())) {
+    if (
+      appointment.tokenRevokedAt ||
+      (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date()) ||
+      (appointment.status === AppointmentStatus.PENDING && appointment.expiresAt && appointment.expiresAt < new Date())
+    ) {
       throw new BadRequestException('Boshqaruv tokenining amal qilish muddati tugagan yoki bekor qilingan');
     }
 
@@ -1419,7 +1482,11 @@ export class AppointmentsService {
       throw new NotFoundException('Qabul topilmadi');
     }
 
-    if (appointment.tokenRevokedAt || (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date())) {
+    if (
+      appointment.tokenRevokedAt ||
+      (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date()) ||
+      (appointment.status === AppointmentStatus.PENDING && appointment.expiresAt && appointment.expiresAt < new Date())
+    ) {
       throw new BadRequestException('Boshqaruv tokenining amal qilish muddati tugagan');
     }
 
@@ -1438,7 +1505,11 @@ export class AppointmentsService {
       throw new NotFoundException('Qabul topilmadi');
     }
 
-    if (appointment.tokenRevokedAt || (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date())) {
+    if (
+      appointment.tokenRevokedAt ||
+      (appointment.tokenExpiresAt && appointment.tokenExpiresAt < new Date()) ||
+      (appointment.status === AppointmentStatus.PENDING && appointment.expiresAt && appointment.expiresAt < new Date())
+    ) {
       throw new BadRequestException('Boshqaruv tokenining muddati tugagan');
     }
 
@@ -1778,16 +1849,18 @@ export class AppointmentsService {
    * Background runner for expiring abandoned pending bookings
    */
   @Cron(CronExpression.EVERY_MINUTE)
-  async expirePending() {
+  async expirePending(): Promise<number> {
     const now = new Date();
     const candidates = await this.prisma.appointment.findMany({
       where: {
         status: AppointmentStatus.PENDING,
-        source: { notIn: ['admin', 'reception'] },
         expiresAt: { not: null, lte: now },
+        NOT: {
+          source: { in: ['admin', 'reception'] },
+        },
       },
       select: { id: true },
-      take: 50,
+      take: 100,
     });
 
     let expiredCount = 0;
@@ -1845,6 +1918,8 @@ export class AppointmentsService {
     if (expiredCount > 0) {
       this.logger.log(`Expired ${expiredCount} abandoned pending appointments with status history and reminder cancellation`);
     }
+
+    return expiredCount;
   }
 
   /**

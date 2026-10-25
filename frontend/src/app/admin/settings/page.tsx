@@ -29,6 +29,7 @@ import { api } from '../../../lib/api';
 import { normalizeUzPhone, formatUzPhoneDisplay } from '../../../lib/phone';
 import { PhoneInput } from '../../../components/PhoneInput';
 import { CustomSelect } from '../../../components/CustomSelect';
+import { useI18n } from '../../../lib/i18n';
 
 interface ContactPhoneItem {
   id: string;
@@ -38,6 +39,9 @@ interface ContactPhoneItem {
 }
 
 export default function AdminSettingsPage() {
+  const { t, language } = useI18n();
+  const isRu = language === 'ru';
+
   const [settings, setSettings] = useState<any>({
     name: '',
     nameRu: '',
@@ -108,6 +112,8 @@ export default function AdminSettingsPage() {
           maxBookingHorizonDays: settingsRes.maxBookingHorizonDays ?? 60,
           bufferMinutes: settingsRes.bufferMinutes ?? 5,
           pendingExpiryMinutes: settingsRes.pendingExpiryMinutes ?? 30,
+          pendingExpiryOutOfRange: Boolean(settingsRes.pendingExpiryOutOfRange),
+          rawPendingExpiryMinutes: settingsRes.rawPendingExpiryMinutes,
         });
 
         if (settingsRes.logo) {
@@ -321,6 +327,23 @@ export default function AdminSettingsPage() {
       const primaryExists = validatedPhones.some((p) => p.isPrimary);
       if (!primaryExists && validatedPhones.length > 0) {
         validatedPhones[0].isPrimary = true;
+      }
+
+      // Validate booking rules range (5..10080 minutes for pending expiry)
+      if (
+        settings.pendingExpiryMinutes === undefined ||
+        settings.pendingExpiryMinutes === null ||
+        isNaN(settings.pendingExpiryMinutes) ||
+        settings.pendingExpiryMinutes < 5 ||
+        settings.pendingExpiryMinutes > 10080
+      ) {
+        throw new Error(
+          'Kutilayotgan qabul eskirish vaqti 5 daqiqadan 10080 daqiqagacha (7 kun) bo\'lishi lozim.',
+        );
+      }
+
+      if (settings.bufferMinutes < 0 || settings.bufferMinutes > 120) {
+        throw new Error('Qabullar orasidagi tanaffus 0 dan 120 daqiqagacha bo\'lishi lozim.');
       }
 
       const payload = {
@@ -776,27 +799,47 @@ export default function AdminSettingsPage() {
             <div>
               <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 text-teal-700" />
-                <span>Bronlash va Vaqt Qoidalari</span>
+                <span>{isRu ? 'Правила онлайн-записи и расписания' : 'Bronlash va Vaqt Qoidalari'}</span>
               </h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Bemorlar uchun qabulga yozilish qoidalari, oraliqlar va avtomatik bekor bo&apos;lish muddatlari
+                {isRu
+                  ? 'Правила предварительной записи, допустимый горизонт, перерывы и авто-отмена неподтвержденных заявок'
+                  : 'Bemorlar uchun qabulga yozilish qoidalari, oraliqlar va avtomatik bekor bo\'lish muddatlari'}
               </p>
             </div>
+
+            {/* Out-of-range alert banner if legacy setting in DB was invalid */}
+            {settings.pendingExpiryOutOfRange && (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold">
+                    {isRu ? 'Коррекция устаревших настроек' : 'Eski sozlamalar to\'g\'rilandi'}
+                  </p>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    {isRu
+                      ? `Предыдущее значение удержания слота (${settings.rawPendingExpiryMinutes} мин) находилось вне допустимого диапазона (5..10080 мин) и было автоматически нормализовано до ${settings.pendingExpiryMinutes} мин.`
+                      : `Eski kutilayotgan qabul eskirish vaqti (${settings.rawPendingExpiryMinutes} daq) ruxsat etilgan oraliqdan (5..10080 daq) tashqarida edi va avtomatik ravishda xavfsiz qiymatga (${settings.pendingExpiryMinutes} daq) to'g'rilandi.`}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Field 1: minBookingNoticeHours */}
               <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800">
-                    Qabulga kamida necha soat oldin yozilish kerak?
+                    {isRu ? 'Минимальное время предварительной записи' : 'Qabulga kamida necha soat oldin yozilish kerak?'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
-                    soat
+                    {isRu ? 'часов' : 'soat'}
                   </span>
                 </div>
                 <input
                   type="number"
                   min={0}
+                  max={720}
                   step={1}
                   required
                   value={settings.minBookingNoticeHours}
@@ -804,7 +847,15 @@ export default function AdminSettingsPage() {
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  <strong>Masalan:</strong> 2 soat. Agar hozir soat 10:00 bo&apos;lsa, bemor eng erta 12:00 dagi bo&apos;sh qabulga yozila oladi.
+                  {isRu ? (
+                    <>
+                      <strong>Например:</strong> 2 часа (0 часов разрешает запись сразу на ближайшее время). Если сейчас 10:00, пациент сможет записаться минимум на 12:00.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Masalan:</strong> 2 soat (0 soat kiritilsa, joriy vaqtdan darhol yozilish mumkin). Agar hozir soat 10:00 bo&apos;lsa, bemor eng erta 12:00 dagi bo&apos;sh qabulga yozila oladi.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -812,15 +863,16 @@ export default function AdminSettingsPage() {
               <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800">
-                    Necha kun oldingacha yozilish mumkin?
+                    {isRu ? 'На сколько дней вперед можно записаться?' : 'Necha kun oldingacha yozilish mumkin?'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
-                    kun
+                    {isRu ? 'дней' : 'kun'}
                   </span>
                 </div>
                 <input
                   type="number"
                   min={1}
+                  max={365}
                   step={1}
                   required
                   value={settings.maxBookingHorizonDays}
@@ -828,7 +880,15 @@ export default function AdminSettingsPage() {
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  <strong>Masalan:</strong> 60 kun. Bemor taqvimdan bugundan boshlab 60 kungacha bo&apos;lgan muddatdagi sanalarni tanlashi mumkin.
+                  {isRu ? (
+                    <>
+                      <strong>Например:</strong> 60 дней. Пациент может выбрать дату в календаре максимум на 60 дней вперед от текущей даты.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Masalan:</strong> 60 kun. Bemor taqvimdan bugundan boshlab 60 kungacha bo&apos;lgan muddatdagi sanalarni tanlashi mumkin.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -836,15 +896,16 @@ export default function AdminSettingsPage() {
               <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800">
-                    Qabullar orasidagi tanaffus
+                    {isRu ? 'Перерыв между приемами (буфер)' : 'Qabullar orasidagi tanaffus'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
-                    daqiqa
+                    {isRu ? 'минут' : 'daqiqa'}
                   </span>
                 </div>
                 <input
                   type="number"
                   min={0}
+                  max={120}
                   step={5}
                   required
                   value={settings.bufferMinutes}
@@ -852,7 +913,15 @@ export default function AdminSettingsPage() {
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  <strong>Masalan:</strong> 5 yoki 10 daqiqa. Shifokor xonasini tozalash, asboblarni sterilizatsiya qilish va tayyorlash uchun ajratiladi.
+                  {isRu ? (
+                    <>
+                      <strong>Например:</strong> 5 или 10 минут (0 минут означает прием без перерыва). Время для проветривания кабинета, стерилизации инструментов и подготовки.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Masalan:</strong> 5 yoki 10 daqiqa (0 daqiqa ham kiritilishi mumkin — tanaffussiz ishlash). Shifokor xonasini tozalash, asboblarni sterilizatsiya qilish va tayyorlash uchun ajratiladi.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -860,15 +929,16 @@ export default function AdminSettingsPage() {
               <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800">
-                    Tasdiqlanmagan ariza uchun joy qancha vaqt saqlanadi?
+                    {isRu ? 'Время на подтверждение заявки (удержание слота)' : 'Tasdiqlanmagan ariza uchun joy qancha vaqt saqlanadi?'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
-                    daqiqa
+                    {isRu ? 'минут' : 'daqiqa'}
                   </span>
                 </div>
                 <input
                   type="number"
                   min={5}
+                  max={10080}
                   step={5}
                   required
                   value={settings.pendingExpiryMinutes}
@@ -876,7 +946,15 @@ export default function AdminSettingsPage() {
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  <strong>Masalan:</strong> 30 daqiqa. Agar bemor arizani tasdiqlamasa yoki to&apos;lov qilmasa, vaqt oralig&apos;i avtomatik bekor bo&apos;lib boshqalarga ochiladi.
+                  {isRu ? (
+                    <>
+                      <strong>Например:</strong> 30 минут (допустимый диапазон: от 5 минут до 10080 минут / 7 дней). Если заявка не подтверждена за это время, слот автоматически освобождается для других пациентов.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Masalan:</strong> 30 daqiqa (ruxsat etilgan oraliq: 5 daqiqadan 10080 daqiqagacha / 7 kun). Agar bemor arizani tasdiqlamasa yoki to&apos;lov qilmasa, vaqt oralig&apos;i avtomatik bekor bo&apos;lib boshqalarga ochiladi.
+                    </>
+                  )}
                 </p>
               </div>
             </div>

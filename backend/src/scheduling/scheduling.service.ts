@@ -199,9 +199,43 @@ export interface AuthoritativeDurationResult {
   combinedNameUz: string;
 }
 
+export interface ScheduleConflictItem {
+  doctorId: string;
+  doctorName: string;
+  appointmentId: string;
+  patientName: string;
+  patientPhone: string;
+  appointmentTime: string;
+  formattedTime: string;
+  dayOfWeek: DayOfWeek;
+  branchName: string;
+  reason: string;
+}
+
+export interface SchedulePreviewResult {
+  preview: true;
+  canApply: boolean;
+  affectedDoctors: Array<{ id: string; nameUz: string; nameRu: string }>;
+  affectedBranches: Array<{ id: string; nameUz: string; nameRu: string }>;
+  affectedDays: DayOfWeek[];
+  conflicts: ScheduleConflictItem[];
+  summary: {
+    totalDoctors: number;
+    totalSchedulesToCreate: number;
+    totalSchedulesToUpdate: number;
+    totalSchedulesToPreserve: number;
+    totalConflicts: number;
+  };
+  warnings: string[];
+}
+
 @Injectable()
 export class SchedulingService {
   constructor(private readonly prisma: PrismaService) {}
+
+  public getDoctorLockKey(doctorId: string): number {
+    return this.hashStringToInt(`doc_${doctorId}`);
+  }
 
   private hashStringToInt(str: string): number {
     let hash = 0;
@@ -475,7 +509,11 @@ export class SchedulingService {
       where: whereClause,
     });
 
+    const nowUtc = new Date();
     const hasConflict = candidateAppts.some((a) => {
+      if (a.status === AppointmentStatus.PENDING && a.expiresAt && a.expiresAt <= nowUtc) {
+        return false;
+      }
       const buffer = a.bufferMinutes ?? 5;
       const effectiveEnd = (a.overrunActive && a.overrunEstimatedEndTime)
         ? new Date(new Date(a.overrunEstimatedEndTime).getTime() + buffer * 60000)
@@ -728,7 +766,110 @@ export class SchedulingService {
   }
 
   /**
-   * Transactional schedule update with advisory locking
+   * Authoritative appointment interval and buffer conflict checker for a doctor on a specific weekday.
+   * Examines all upcoming active appointments without arbitrary limit, converts to clinic timezone,
+   * checks against schedule bounds [schedStart, schedEnd], breaks [breakStart, breakEnd],
+   * cross-branch overlaps, and appointment buffer policy.
+   */
+  public async findAppointmentConflictsForDoctorDay(params: {
+    tx: Prisma.TransactionClient;
+    doctorId: string;
+    doctorName: string;
+    dayOfWeek: DayOfWeek;
+    branchId: string;
+    branchName: string;
+    schedStart: number;
+    schedEnd: number;
+    breakStart?: number | null;
+    breakEnd?: number | null;
+    timezone: string;
+    defaultBufferMinutes: number;
+  }): Promise<ScheduleConflictItem[]> {
+    const conflicts: ScheduleConflictItem[] = [];
+    const now = new Date();
+
+    const upcomingAppts = await params.tx.appointment.findMany({
+      where: {
+        doctorId: params.doctorId,
+        status: { in: TIME_RESERVING_STATUSES },
+        startTime: { gte: now },
+      },
+      select: {
+        id: true,
+        startTime: true,
+        endTime: true,
+        bufferMinutes: true,
+        branchId: true,
+        branch: { select: { nameUz: true, nameRu: true } },
+        patient: { select: { fullName: true, phone: true } },
+      },
+      orderBy: { startTime: 'asc' },
+    });
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const fmt = (min: number) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
+
+    for (const appt of upcomingAppts) {
+      const zonedStart = toZonedTime(new Date(appt.startTime), params.timezone);
+      const zonedEnd = toZonedTime(new Date(appt.endTime), params.timezone);
+      const apptDayOfWeek = DAY_MAP[zonedStart.getDay()];
+
+      if (apptDayOfWeek !== params.dayOfWeek) {
+        continue;
+      }
+
+      const apptStartMin = zonedStart.getHours() * 60 + zonedStart.getMinutes();
+      const apptEndMin = zonedEnd.getHours() * 60 + zonedEnd.getMinutes();
+      const apptBuf = appt.bufferMinutes ?? params.defaultBufferMinutes;
+      const apptEndWithBuf = apptEndMin + apptBuf;
+
+      const dateStr = `${zonedStart.getFullYear()}-${pad(zonedStart.getMonth() + 1)}-${pad(zonedStart.getDate())}`;
+      const formattedTime = `${dateStr} ${fmt(apptStartMin)} - ${fmt(apptEndMin)}`;
+
+      let conflictReason: string | null = null;
+
+      if (appt.branchId && appt.branchId !== params.branchId) {
+        // Cross-branch conflict: doctor has an appointment at a different branch during the working hours
+        if (apptStartMin < params.schedEnd && apptEndWithBuf > params.schedStart) {
+          conflictReason = `Bemorning boshqa filialda (${appt.branch?.nameUz || 'Boshqa filial'}) qabuli mavjud (${fmt(apptStartMin)}-${fmt(apptEndMin)})`;
+        }
+      } else {
+        // Same branch: check start, end+buffer, and breaks
+        if (apptStartMin < params.schedStart) {
+          conflictReason = `Qabul shifokorning yangi ish vaqtidan (${fmt(params.schedStart)}) oldin boshlanadi (${fmt(apptStartMin)})`;
+        } else if (apptEndWithBuf > params.schedEnd) {
+          conflictReason = `Qabul va uning buferi (${apptBuf} daq) yangi ish vaqtidan (${fmt(params.schedEnd)}) keyin tugaydi (${fmt(apptEndWithBuf)})`;
+        } else if (
+          params.breakStart != null &&
+          params.breakEnd != null &&
+          apptStartMin < params.breakEnd &&
+          apptEndWithBuf > params.breakStart
+        ) {
+          conflictReason = `Qabul yangi tanaffus vaqtiga (${fmt(params.breakStart)}-${fmt(params.breakEnd)}) to'g'ri keladi`;
+        }
+      }
+
+      if (conflictReason) {
+        conflicts.push({
+          doctorId: params.doctorId,
+          doctorName: params.doctorName,
+          appointmentId: appt.id,
+          patientName: appt.patient?.fullName || 'Bemor',
+          patientPhone: appt.patient?.phone || '',
+          appointmentTime: appt.startTime.toISOString(),
+          formattedTime,
+          dayOfWeek: params.dayOfWeek,
+          branchName: params.branchName,
+          reason: conflictReason,
+        });
+      }
+    }
+
+    return conflicts;
+  }
+
+  /**
+   * Transactional schedule update with advisory locking and appointment conflict detection
    */
   async setDoctorSchedule(data: {
     doctorId: string;
@@ -765,18 +906,93 @@ export class SchedulingService {
       throw new BadRequestException('Tugash vaqti boshlanish vaqtidan keyin bo\'lishi kerak');
     }
 
+    let bStart: number | null = null;
+    let bEnd: number | null = null;
     if (data.breakStart && data.breakEnd) {
-      const bStart = this.parseTime(data.breakStart);
-      const bEnd = this.parseTime(data.breakEnd);
+      bStart = this.parseTime(data.breakStart);
+      bEnd = this.parseTime(data.breakEnd);
       if (bEnd <= bStart || bStart < schedStart || bEnd > schedEnd) {
         throw new BadRequestException('Tanaffus vaqti ish soatlari oralig\'ida bo\'lishi kerak');
       }
     }
 
-    const lockKey = this.hashStringToInt(`doc_${data.doctorId}`);
+    const lockKey = this.getDoctorLockKey(data.doctorId);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+      // 1. Verify doctor and branch are active
+      const doc = await tx.doctor.findUnique({
+        where: { id: data.doctorId },
+      });
+      if (!doc || !doc.isActive || doc.isArchived) {
+        throw new BadRequestException('Shifokor topilmadi yoki faol emas');
+      }
+
+      const branch = await tx.branch.findUnique({
+        where: { id: branchId! },
+      });
+      if (!branch || !branch.isActive) {
+        throw new BadRequestException('Tanlangan filial mavjud emas yoki nofaol');
+      }
+
+      // Ensure doctor is assigned to branch
+      await tx.doctorBranch.upsert({
+        where: { doctorId_branchId: { doctorId: data.doctorId, branchId: branchId! } },
+        create: { doctorId: data.doctorId, branchId: branchId! },
+        update: {},
+      });
+
+      // 2. Cross-branch overlap check inside transaction
+      const otherBranchSchedules = await tx.doctorSchedule.findMany({
+        where: {
+          doctorId: data.doctorId,
+          branchId: { not: branchId! },
+          dayOfWeek: data.dayOfWeek,
+          isActive: true,
+        },
+        include: { branch: true },
+      });
+      for (const obs of otherBranchSchedules) {
+        const obsStart = this.parseTime(obs.startTime);
+        const obsEnd = this.parseTime(obs.endTime);
+        if (obsStart < schedEnd && obsEnd > schedStart) {
+          throw new ConflictException(
+            `Shifokor Dr. ${doc.firstNameUz} ${doc.lastNameUz} uchun ${obs.dayOfWeek} kuni boshqa filialda (${obs.branch?.nameUz || 'Filial'}) ${obs.startTime}-${obs.endTime} vaqtida jadval mavjud bo'lib, yangi kiritilayotgan vaqt bilan kesishmoqda`,
+          );
+        }
+      }
+
+      // 3. Check existing upcoming appointments for this doctor on this dayOfWeek
+      const clinicSettings = await tx.clinicSettings.findFirst();
+      const tz = clinicSettings?.timezone || 'Asia/Tashkent';
+      const defaultBuffer = clinicSettings?.bufferMinutes ?? 5;
+
+      const conflicts = await this.findAppointmentConflictsForDoctorDay({
+        tx,
+        doctorId: data.doctorId,
+        doctorName: `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`,
+        dayOfWeek: data.dayOfWeek,
+        branchId: branchId!,
+        branchName: branch.nameUz,
+        schedStart,
+        schedEnd,
+        breakStart: bStart,
+        breakEnd: bEnd,
+        timezone: tz,
+        defaultBufferMinutes: defaultBuffer,
+      });
+
+      if (conflicts.length > 0) {
+        const conflictDetails = conflicts
+          .slice(0, 5)
+          .map((c) => `${c.patientName} (${c.formattedTime}) - ${c.reason}`)
+          .join('; ');
+        throw new ConflictException({
+          message: `Jadvalni o'zgartirishda ${conflicts.length} ta mavjud qabul bilan to'qnashuv aniqlandi: ${conflictDetails}. Iltimos avval qabullarni boshqa vaqtga ko'chiring.`,
+          conflicts,
+        });
+      }
 
       return tx.doctorSchedule.upsert({
         where: {
@@ -809,7 +1025,8 @@ export class SchedulingService {
    * Bulk weekly schedules:
    * Select multiple weekdays, single working interval & break applied to selected days.
    * Supports 'replace' or 'merge' mode with cross-branch overlap detection,
-   * active doctor validation, and affected appointment auditing.
+   * active doctor validation, full appointment interval and buffer conflict auditing.
+   * Supports preview mode and transactional rollback.
    */
   async setBatchSchedules(data: {
     doctorIds: string[];
@@ -820,6 +1037,7 @@ export class SchedulingService {
     breakEnd?: string;
     branchId: string;
     mode: 'replace' | 'merge';
+    preview?: boolean;
   }) {
     // 1. Deduplicate & validate doctorIds
     const rawDoctorIds = Array.isArray(data.doctorIds) ? data.doctorIds : [];
@@ -835,41 +1053,25 @@ export class SchedulingService {
       throw new BadRequestException('Kamida bitta hafta kuni tanlanishi shart');
     }
 
-    // 3. Validate branch
-    const branch = await this.prisma.branch.findUnique({
-      where: { id: data.branchId },
-    });
-    if (!branch || !branch.isActive) {
-      throw new BadRequestException('Tanlangan filial mavjud emas yoki nofaol');
-    }
-
-    // 4. Validate all doctors exist and are active
-    const activeDoctors = await this.prisma.doctor.findMany({
-      where: { id: { in: uniqueDoctorIds }, isActive: true, isArchived: false },
-    });
-    if (activeDoctors.length !== uniqueDoctorIds.length) {
-      const activeIds = new Set(activeDoctors.map((d) => d.id));
-      const missingIds = uniqueDoctorIds.filter((id) => !activeIds.has(id));
-      throw new BadRequestException(`Shifokor topilmadi yoki nofaol: ${missingIds.join(', ')}`);
-    }
-
-    // 5. Validate working hours
+    // 3. Validate working hours
     const schedStart = this.parseTime(data.startTime);
     const schedEnd = this.parseTime(data.endTime);
     if (schedEnd <= schedStart) {
       throw new BadRequestException('Tugash vaqti boshlanish vaqtidan keyin bo\'lishi kerak');
     }
 
-    // 6. Validate break hours: require both together and validate bounds
+    // 4. Validate break hours
     const hasBreakStart = Boolean(data.breakStart && data.breakStart.trim());
     const hasBreakEnd = Boolean(data.breakEnd && data.breakEnd.trim());
     if (hasBreakStart !== hasBreakEnd) {
       throw new BadRequestException('Tanaffus boshlanishi va tugashi birgalikda ko\'rsatilishi shart');
     }
 
+    let bStart: number | null = null;
+    let bEnd: number | null = null;
     if (hasBreakStart && hasBreakEnd) {
-      const bStart = this.parseTime(data.breakStart!);
-      const bEnd = this.parseTime(data.breakEnd!);
+      bStart = this.parseTime(data.breakStart!);
+      bEnd = this.parseTime(data.breakEnd!);
       if (bEnd <= bStart) {
         throw new BadRequestException('Tanaffus tugash vaqti boshlanishidan keyin bo\'lishi kerak');
       }
@@ -881,41 +1083,170 @@ export class SchedulingService {
     const cleanBreakStart = hasBreakStart ? data.breakStart!.trim() : null;
     const cleanBreakEnd = hasBreakEnd ? data.breakEnd!.trim() : null;
 
-    // 7. Check cross-branch schedule overlaps before transaction
-    for (const doc of activeDoctors) {
-      const otherBranchSchedules = await this.prisma.doctorSchedule.findMany({
-        where: {
-          doctorId: doc.id,
-          branchId: { not: data.branchId },
-          dayOfWeek: { in: uniqueDays },
-          isActive: true,
-        },
-        include: { branch: true },
-      });
+    // Stable sorted doctor IDs for deadlock-free locking
+    const sortedDoctorIds = [...uniqueDoctorIds].sort();
 
-      for (const obs of otherBranchSchedules) {
-        const obsStart = this.parseTime(obs.startTime);
-        const obsEnd = this.parseTime(obs.endTime);
-        if (obsStart < schedEnd && obsEnd > schedStart) {
-          throw new ConflictException(
-            `Shifokor Dr. ${doc.firstNameUz} ${doc.lastNameUz} uchun ${obs.dayOfWeek} kuni boshqa filialda (${obs.branch?.nameUz || 'Filial'}) ${obs.startTime}-${obs.endTime} vaqtida jadval mavjud bo'lib, yangi kiritilayotgan vaqt bilan kesishmoqda`,
-          );
+    return this.prisma.$transaction(async (tx) => {
+      // 5. Acquire PostgreSQL transactional advisory locks in strictly sorted order
+      for (const doctorId of sortedDoctorIds) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${this.getDoctorLockKey(doctorId)})`;
+      }
+
+      // 6. Validate branch inside transaction
+      const branch = await tx.branch.findUnique({
+        where: { id: data.branchId },
+      });
+      if (!branch || !branch.isActive) {
+        throw new BadRequestException('Tanlangan filial mavjud emas yoki nofaol');
+      }
+
+      // 7. Validate all doctors exist and are active inside transaction
+      const activeDoctors = await tx.doctor.findMany({
+        where: { id: { in: sortedDoctorIds }, isActive: true, isArchived: false },
+        include: { branches: true },
+      });
+      if (activeDoctors.length !== sortedDoctorIds.length) {
+        const activeIds = new Set(activeDoctors.map((d) => d.id));
+        const missingIds = sortedDoctorIds.filter((id) => !activeIds.has(id));
+        throw new BadRequestException(`Shifokor topilmadi yoki nofaol: ${missingIds.join(', ')}`);
+      }
+
+      // 8. Cross-branch schedule overlaps check inside transaction
+      for (const doc of activeDoctors) {
+        const otherBranchSchedules = await tx.doctorSchedule.findMany({
+          where: {
+            doctorId: doc.id,
+            branchId: { not: data.branchId },
+            dayOfWeek: { in: uniqueDays },
+            isActive: true,
+          },
+          include: { branch: true },
+        });
+
+        for (const obs of otherBranchSchedules) {
+          const obsStart = this.parseTime(obs.startTime);
+          const obsEnd = this.parseTime(obs.endTime);
+          if (obsStart < schedEnd && obsEnd > schedStart) {
+            throw new ConflictException(
+              `Shifokor Dr. ${doc.firstNameUz} ${doc.lastNameUz} uchun ${obs.dayOfWeek} kuni boshqa filialda (${obs.branch?.nameUz || 'Filial'}) ${obs.startTime}-${obs.endTime} vaqtida jadval mavjud bo'lib, yangi kiritilayotgan vaqt bilan kesishmoqda`,
+            );
+          }
         }
       }
-    }
 
-    const warnings: string[] = [];
+      // 9. Load clinic timezone and default buffer policy inside transaction
+      const clinicSettings = await tx.clinicSettings.findFirst();
+      const tz = clinicSettings?.timezone || 'Asia/Tashkent';
+      const defaultBuffer = clinicSettings?.bufferMinutes ?? 5;
 
-    // 8. Execute in protected transaction with advisory locks
-    return this.prisma.$transaction(async (tx) => {
+      const warnings: string[] = [];
+      const conflicts: ScheduleConflictItem[] = [];
+
+      let willCreateCount = 0;
+      let willUpdateCount = 0;
+      let willPreserveCount = 0;
+
+      // 10. Check each doctor and each day for existing schedules and appointment conflicts
+      for (const doctorId of sortedDoctorIds) {
+        const doc = activeDoctors.find((d) => d.id === doctorId)!;
+        const doctorName = `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`;
+
+        const existingSchedules = await tx.doctorSchedule.findMany({
+          where: {
+            doctorId,
+            branchId: data.branchId,
+            dayOfWeek: { in: uniqueDays },
+          },
+        });
+        const existingMap = new Map(existingSchedules.map((s) => [s.dayOfWeek, s]));
+
+        for (const dayOfWeek of uniqueDays) {
+          const existing = existingMap.get(dayOfWeek);
+
+          if (data.mode === 'merge' && existing) {
+            willPreserveCount++;
+            warnings.push(
+              `${doctorName}: ${dayOfWeek} kuni uchun jadval allaqachon mavjud (${existing.startTime}-${existing.endTime}), merge rejimida o'zgarishsiz saqlab qolindi`,
+            );
+            // In merge mode, preserved schedules are untouched, so they don't produce new conflicts
+            continue;
+          }
+
+          if (existing) {
+            willUpdateCount++;
+          } else {
+            willCreateCount++;
+          }
+
+          // Full appointment interval conflict check without 50 limit!
+          const dayConflicts = await this.findAppointmentConflictsForDoctorDay({
+            tx,
+            doctorId,
+            doctorName,
+            dayOfWeek,
+            branchId: data.branchId,
+            branchName: branch.nameUz,
+            schedStart,
+            schedEnd,
+            breakStart: bStart,
+            breakEnd: bEnd,
+            timezone: tz,
+            defaultBufferMinutes: defaultBuffer,
+          });
+
+          conflicts.push(...dayConflicts);
+        }
+      }
+
+      // 11. Handle preview mode
+      if (data.preview) {
+        return {
+          preview: true,
+          canApply: conflicts.length === 0,
+          affectedDoctors: activeDoctors.map((d) => ({
+            id: d.id,
+            nameUz: `Dr. ${d.firstNameUz} ${d.lastNameUz}`,
+            nameRu: `Д-р ${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}`,
+          })),
+          affectedBranches: [
+            {
+              id: branch.id,
+              nameUz: branch.nameUz,
+              nameRu: branch.nameRu || branch.nameUz,
+            },
+          ],
+          affectedDays: uniqueDays,
+          conflicts,
+          summary: {
+            totalDoctors: sortedDoctorIds.length,
+            totalSchedulesToCreate: willCreateCount,
+            totalSchedulesToUpdate: willUpdateCount,
+            totalSchedulesToPreserve: willPreserveCount,
+            totalConflicts: conflicts.length,
+          },
+          warnings,
+        };
+      }
+
+      // 12. If conflicts exist and not preview, REJECT with informative error
+      if (conflicts.length > 0) {
+        const readableList = conflicts
+          .slice(0, 5)
+          .map((c) => `${c.doctorName}: ${c.patientName} (${c.formattedTime}) - ${c.reason}`)
+          .join('; ');
+        throw new ConflictException({
+          message: `Jadvalni qo'llashda ${conflicts.length} ta mavjud qabul bilan to'qnashuv aniqlandi: ${readableList}. Iltimos avval qabullarni boshqa vaqtga ko'chiring yoki bekor qiling.`,
+          conflicts,
+        });
+      }
+
+      // 13. Apply schedule changes atomically
       let createdCount = 0;
       let updatedCount = 0;
       let preservedCount = 0;
 
-      for (const doctorId of uniqueDoctorIds) {
+      for (const doctorId of sortedDoctorIds) {
         const doc = activeDoctors.find((d) => d.id === doctorId)!;
-        const lockKey = this.hashStringToInt(`batch_sched_${doctorId}`);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
         // Ensure doctor is assigned to branch
         await tx.doctorBranch.upsert({
@@ -924,7 +1255,6 @@ export class SchedulingService {
           update: {},
         });
 
-        // Find existing schedules for this doctor at this branch on the target days
         const existingSchedules = await tx.doctorSchedule.findMany({
           where: {
             doctorId,
@@ -935,7 +1265,6 @@ export class SchedulingService {
         const existingMap = new Map(existingSchedules.map((s) => [s.dayOfWeek, s]));
 
         if (data.mode === 'replace') {
-          // Scope replace strictly to the selected days and branch
           await tx.doctorSchedule.deleteMany({
             where: {
               doctorId,
@@ -949,15 +1278,10 @@ export class SchedulingService {
           const existing = existingMap.get(dayOfWeek);
 
           if (data.mode === 'merge' && existing) {
-            // MERGE MODE: Preserve existing conflicting record
             preservedCount++;
-            warnings.push(
-              `Dr. ${doc.firstNameUz} ${doc.lastNameUz}: ${dayOfWeek} kuni uchun jadval allaqachon mavjud (${existing.startTime}-${existing.endTime}), merge rejimida o'zgarishsiz saqlab qolindi`,
-            );
             continue;
           }
 
-          // Insert fresh record
           await tx.doctorSchedule.create({
             data: {
               doctorId,
@@ -977,40 +1301,6 @@ export class SchedulingService {
             createdCount++;
           }
         }
-
-        // Check for upcoming active appointments that may fall outside new hours
-        const upcomingAppts = await tx.appointment.findMany({
-          where: {
-            doctorId,
-            branchId: data.branchId,
-            status: { in: TIME_RESERVING_STATUSES },
-            startTime: { gte: new Date() },
-          },
-          select: {
-            id: true,
-            startTime: true,
-            endTime: true,
-            patient: { select: { fullName: true } },
-          },
-          take: 50,
-        });
-
-        const daysMapRev: Record<string, number> = {
-          SUNDAY: 0, MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4, FRIDAY: 5, SATURDAY: 6,
-        };
-        for (const appt of upcomingAppts) {
-          const apptDate = toZonedTime(new Date(appt.startTime), 'Asia/Tashkent');
-          const apptDayOfWeek = apptDate.getDay();
-          const dayMatch = uniqueDays.some((d) => daysMapRev[d] === apptDayOfWeek);
-          if (dayMatch) {
-            const apptStartMin = apptDate.getHours() * 60 + apptDate.getMinutes();
-            if (apptStartMin < schedStart || apptStartMin >= schedEnd) {
-              warnings.push(
-                `Dr. ${doc.firstNameUz}: Bemor ${appt.patient?.fullName || 'bemor'} ning qabuli (${appt.startTime.toISOString()}) yangi ish soatlaridan tashqarida qoldi`,
-              );
-            }
-          }
-        }
       }
 
       return {
@@ -1019,7 +1309,7 @@ export class SchedulingService {
         updatedCount,
         preservedCount,
         totalApplied: createdCount + updatedCount,
-        doctorCount: uniqueDoctorIds.length,
+        doctorCount: sortedDoctorIds.length,
         daysCount: uniqueDays.length,
         mode: data.mode,
         warnings,
@@ -1028,15 +1318,18 @@ export class SchedulingService {
   }
 
   /**
-   * Copy schedule from one doctor to one or more other doctors
+   * Copy schedule from one doctor to one or more other doctors.
    * Strictly scopes replace mode to copied branches and days,
-   * prevents multi-branch target collisions, and checks cross-branch conflicts.
+   * prevents multi-branch target collisions, checks cross-branch conflicts,
+   * and checks complete appointment intervals and buffers inside the transaction.
+   * Supports preview mode and atomic rollback.
    */
   async copyDoctorSchedules(data: {
     fromDoctorId: string;
     toDoctorIds: string[];
     mode: 'replace' | 'merge';
     targetBranchId?: string;
+    preview?: boolean;
   }) {
     if (!data.fromDoctorId) {
       throw new BadRequestException('Manba shifokor ko\'rsatilmagan');
@@ -1048,64 +1341,197 @@ export class SchedulingService {
       throw new BadRequestException('Nusxa olinadigan maqsadli shifokorlar tanlanmagan');
     }
 
-    // Source doctor validation
-    const sourceDoctor = await this.prisma.doctor.findUnique({
-      where: { id: data.fromDoctorId },
-    });
-    if (!sourceDoctor || !sourceDoctor.isActive || sourceDoctor.isArchived) {
-      throw new BadRequestException('Manba shifokor topilmadi yoki faol emas');
-    }
-
-    const sourceSchedules = await this.prisma.doctorSchedule.findMany({
-      where: { doctorId: data.fromDoctorId, isActive: true },
-      include: { branch: true },
-    });
-    if (sourceSchedules.length === 0) {
-      throw new BadRequestException('Manba shifokorning faol ish jadvali topilmadi');
-    }
-
-    // Target branch validation if specified
-    if (data.targetBranchId) {
-      const targetBranch = await this.prisma.branch.findUnique({
-        where: { id: data.targetBranchId },
-      });
-      if (!targetBranch || !targetBranch.isActive) {
-        throw new BadRequestException('Tanlangan maqsadli filial mavjud emas yoki nofaol');
-      }
-
-      // Check collision: if source doctor has multiple branches mapping to the same targetBranchId on the same weekday
-      const seenDays = new Set<string>();
-      for (const s of sourceSchedules) {
-        if (seenDays.has(s.dayOfWeek)) {
-          throw new ConflictException(
-            `Manba shifokor ${s.dayOfWeek} kuni bir nechta filialda ishlaydi. Ularni yagona filialga nusxalab bo'lmaydi`,
-          );
-        }
-        seenDays.add(s.dayOfWeek);
-      }
-    }
-
-    // Target doctors validation
-    const targetDoctors = await this.prisma.doctor.findMany({
-      where: { id: { in: uniqueTargetIds }, isActive: true, isArchived: false },
-    });
-    if (targetDoctors.length !== uniqueTargetIds.length) {
-      const activeTargetIds = new Set(targetDoctors.map((d) => d.id));
-      const missing = uniqueTargetIds.filter((id) => !activeTargetIds.has(id));
-      throw new BadRequestException(`Maqsadli shifokor topilmadi yoki nofaol: ${missing.join(', ')}`);
-    }
-
-    const warnings: string[] = [];
+    // Stable sorted doctor IDs for all doctors involved
+    const allDoctorIds = Array.from(new Set([data.fromDoctorId, ...uniqueTargetIds])).sort();
 
     return this.prisma.$transaction(async (tx) => {
+      // 1. Acquire advisory locks in strictly sorted order
+      for (const doctorId of allDoctorIds) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${this.getDoctorLockKey(doctorId)})`;
+      }
+
+      // 2. Validate source doctor inside transaction
+      const sourceDoctor = await tx.doctor.findUnique({
+        where: { id: data.fromDoctorId },
+      });
+      if (!sourceDoctor || !sourceDoctor.isActive || sourceDoctor.isArchived) {
+        throw new BadRequestException('Manba shifokor topilmadi yoki faol emas');
+      }
+
+      const sourceSchedules = await tx.doctorSchedule.findMany({
+        where: { doctorId: data.fromDoctorId, isActive: true },
+        include: { branch: true },
+      });
+      if (sourceSchedules.length === 0) {
+        throw new BadRequestException('Manba shifokorning faol ish jadvali topilmadi');
+      }
+
+      // 3. Target branch validation if specified
+      let targetBranch: any = null;
+      if (data.targetBranchId) {
+        targetBranch = await tx.branch.findUnique({
+          where: { id: data.targetBranchId },
+        });
+        if (!targetBranch || !targetBranch.isActive) {
+          throw new BadRequestException('Tanlangan maqsadli filial mavjud emas yoki nofaol');
+        }
+
+        const seenDays = new Set<string>();
+        for (const s of sourceSchedules) {
+          if (seenDays.has(s.dayOfWeek)) {
+            throw new ConflictException(
+              `Manba shifokor ${s.dayOfWeek} kuni bir nechta filialda ishlaydi. Ularni yagona filialga nusxalab bo'lmaydi`,
+            );
+          }
+          seenDays.add(s.dayOfWeek);
+        }
+      }
+
+      // 4. Validate target doctors inside transaction
+      const targetDoctors = await tx.doctor.findMany({
+        where: { id: { in: uniqueTargetIds }, isActive: true, isArchived: false },
+        include: { branches: true },
+      });
+      if (targetDoctors.length !== uniqueTargetIds.length) {
+        const activeTargetIds = new Set(targetDoctors.map((d) => d.id));
+        const missing = uniqueTargetIds.filter((id) => !activeTargetIds.has(id));
+        throw new BadRequestException(`Maqsadli shifokor topilmadi yoki nofaol: ${missing.join(', ')}`);
+      }
+
+      // 5. Load clinic timezone and default buffer policy
+      const clinicSettings = await tx.clinicSettings.findFirst();
+      const tz = clinicSettings?.timezone || 'Asia/Tashkent';
+      const defaultBuffer = clinicSettings?.bufferMinutes ?? 5;
+
+      const warnings: string[] = [];
+      const conflicts: ScheduleConflictItem[] = [];
+
+      let willCopyCount = 0;
+      let willPreserveCount = 0;
+
+      // 6. Check each target doctor for cross-branch overlaps and appointment conflicts
+      for (const targetDoctor of targetDoctors) {
+        const targetDoctorName = `Dr. ${targetDoctor.firstNameUz} ${targetDoctor.lastNameUz}`;
+
+        for (const sched of sourceSchedules) {
+          const effectiveBranchId = data.targetBranchId || sched.branchId;
+          const branchName = targetBranch ? targetBranch.nameUz : (sched.branch?.nameUz || 'Filial');
+
+          const schedStart = this.parseTime(sched.startTime);
+          const schedEnd = this.parseTime(sched.endTime);
+          const bStart = sched.breakStart ? this.parseTime(sched.breakStart) : null;
+          const bEnd = sched.breakEnd ? this.parseTime(sched.breakEnd) : null;
+
+          // Cross-branch schedule overlap check for target doctor
+          const otherBranchSchedules = await tx.doctorSchedule.findMany({
+            where: {
+              doctorId: targetDoctor.id,
+              branchId: { not: effectiveBranchId },
+              dayOfWeek: sched.dayOfWeek,
+              isActive: true,
+            },
+            include: { branch: true },
+          });
+
+          for (const obs of otherBranchSchedules) {
+            const obsStart = this.parseTime(obs.startTime);
+            const obsEnd = this.parseTime(obs.endTime);
+            if (obsStart < schedEnd && obsEnd > schedStart) {
+              throw new ConflictException(
+                `${targetDoctorName} uchun ${obs.dayOfWeek} kuni boshqa filialda (${obs.branch?.nameUz || 'Filial'}) ${obs.startTime}-${obs.endTime} vaqtida jadval mavjud bo'lib, nusxalanayotgan vaqt bilan kesishmoqda`,
+              );
+            }
+          }
+
+          // Check if existing schedule exists on this day and branch
+          const existing = await tx.doctorSchedule.findUnique({
+            where: {
+              doctorId_dayOfWeek_branchId: {
+                doctorId: targetDoctor.id,
+                dayOfWeek: sched.dayOfWeek,
+                branchId: effectiveBranchId,
+              },
+            },
+          });
+
+          if (data.mode === 'merge' && existing) {
+            willPreserveCount++;
+            warnings.push(
+              `${targetDoctorName}: ${sched.dayOfWeek} kuni uchun jadval allaqachon mavjud, merge rejimida saqlab qolindi`,
+            );
+            continue;
+          }
+
+          willCopyCount++;
+
+          // Appointment conflict check for target doctor
+          const doctorConflicts = await this.findAppointmentConflictsForDoctorDay({
+            tx,
+            doctorId: targetDoctor.id,
+            doctorName: targetDoctorName,
+            dayOfWeek: sched.dayOfWeek,
+            branchId: effectiveBranchId,
+            branchName,
+            schedStart,
+            schedEnd,
+            breakStart: bStart,
+            breakEnd: bEnd,
+            timezone: tz,
+            defaultBufferMinutes: defaultBuffer,
+          });
+
+          conflicts.push(...doctorConflicts);
+        }
+      }
+
+      // 7. Preview mode
+      if (data.preview) {
+        const uniqueDays = Array.from(new Set(sourceSchedules.map((s) => s.dayOfWeek)));
+        return {
+          preview: true,
+          canApply: conflicts.length === 0,
+          affectedDoctors: targetDoctors.map((d) => ({
+            id: d.id,
+            nameUz: `Dr. ${d.firstNameUz} ${d.lastNameUz}`,
+            nameRu: `Д-р ${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}`,
+          })),
+          affectedBranches: targetBranch
+            ? [{ id: targetBranch.id, nameUz: targetBranch.nameUz, nameRu: targetBranch.nameRu || targetBranch.nameUz }]
+            : Array.from(new Map(sourceSchedules.map((s) => [s.branchId, s.branch])).values()).filter(Boolean).map((b: any) => ({
+                id: b.id,
+                nameUz: b.nameUz,
+                nameRu: b.nameRu || b.nameUz,
+              })),
+          affectedDays: uniqueDays,
+          conflicts,
+          summary: {
+            totalDoctors: targetDoctors.length,
+            totalSchedulesToCreate: willCopyCount,
+            totalSchedulesToUpdate: 0,
+            totalSchedulesToPreserve: willPreserveCount,
+            totalConflicts: conflicts.length,
+          },
+          warnings,
+        };
+      }
+
+      // 8. If conflicts exist and not preview, REJECT
+      if (conflicts.length > 0) {
+        const readableList = conflicts
+          .slice(0, 5)
+          .map((c) => `${c.doctorName}: ${c.patientName} (${c.formattedTime}) - ${c.reason}`)
+          .join('; ');
+        throw new ConflictException({
+          message: `Jadvalni nusxalashda ${conflicts.length} ta mavjud qabul bilan to'qnashuv aniqlandi: ${readableList}. Iltimos avval qabullarni boshqa vaqtga ko'chiring yoki bekor qiling.`,
+          conflicts,
+        });
+      }
+
+      // 9. Apply changes
       let totalCopied = 0;
       let totalPreserved = 0;
 
       for (const targetDoctor of targetDoctors) {
-        const lockKey = this.hashStringToInt(`copy_sched_${targetDoctor.id}`);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
-
-        // Target branches and days involved
         const copiedDaysByBranch = new Map<string, DayOfWeek[]>();
         for (const s of sourceSchedules) {
           const effBranchId = data.targetBranchId || s.branchId;
@@ -1114,7 +1540,6 @@ export class SchedulingService {
           copiedDaysByBranch.set(effBranchId, list);
         }
 
-        // Scope replace strictly to the copied branches and days! Never delete unrelated branches!
         if (data.mode === 'replace') {
           for (const [branchId, days] of copiedDaysByBranch.entries()) {
             await tx.doctorSchedule.deleteMany({
@@ -1130,14 +1555,12 @@ export class SchedulingService {
         for (const sched of sourceSchedules) {
           const effectiveBranchId = data.targetBranchId || sched.branchId;
 
-          // Assign doctor to branch if not already
           await tx.doctorBranch.upsert({
             where: { doctorId_branchId: { doctorId: targetDoctor.id, branchId: effectiveBranchId } },
             create: { doctorId: targetDoctor.id, branchId: effectiveBranchId },
             update: {},
           });
 
-          // In merge mode, check if schedule already exists
           if (data.mode === 'merge') {
             const existing = await tx.doctorSchedule.findUnique({
               where: {
@@ -1150,9 +1573,6 @@ export class SchedulingService {
             });
             if (existing) {
               totalPreserved++;
-              warnings.push(
-                `Dr. ${targetDoctor.firstNameUz}: ${sched.dayOfWeek} kuni uchun jadval allaqachon mavjud, merge rejimida saqlab qolindi`,
-              );
               continue;
             }
           }
@@ -1210,7 +1630,7 @@ export class SchedulingService {
     reason?: string;
     branchId?: string;
   }) {
-    const lockKey = this.hashStringToInt(`doc_${data.doctorId}`);
+    const lockKey = this.getDoctorLockKey(data.doctorId);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
@@ -1323,7 +1743,7 @@ export class SchedulingService {
     if (!exc) {
       throw new NotFoundException('Istisno topilmadi');
     }
-    const lockKey = this.hashStringToInt(`doc_${exc.doctorId}`);
+    const lockKey = this.getDoctorLockKey(exc.doctorId);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;

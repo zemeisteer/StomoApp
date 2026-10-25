@@ -14,7 +14,27 @@ import { JwtPayload } from '../auth/auth.service';
 import { AppointmentStatus, StaffRole } from '@prisma/client';
 import {
   IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min, Max, IsArray, Matches, IsEmail, ValidateIf,
+  IsNotEmpty, ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class ExpectedQuoteDto {
+  @IsOptional()
+  @IsInt()
+  priceFrom?: number;
+
+  @IsOptional()
+  @IsInt()
+  price?: number;
+
+  @IsOptional()
+  @IsInt()
+  durationMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  bufferMinutes?: number;
+}
 
 export class PublicBookingDto {
   @IsOptional()
@@ -29,9 +49,9 @@ export class PublicBookingDto {
   @IsString()
   doctorId!: string;
 
-  @IsOptional()
-  @IsString()
-  branchId?: string;
+  @IsString({ message: 'Filial tanlanishi shart' })
+  @IsNotEmpty({ message: 'Filial tanlanishi shart' })
+  branchId!: string;
 
   @IsDateString()
   startTime!: string;
@@ -60,6 +80,11 @@ export class PublicBookingDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ExpectedQuoteDto)
+  expectedQuote?: ExpectedQuoteDto;
 }
 
 export class OverrideDurationDto {
@@ -356,6 +381,14 @@ export class AppointmentsController {
       ...dto,
       source: 'admin',
     });
+  }
+
+  @Post('expire-pending')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async triggerExpirePending() {
+    const expiredCount = await this.service.expirePending();
+    return { success: true, expiredCount };
   }
 
   @Patch(':id/duration')

@@ -12,6 +12,7 @@ import {
   IsEmail,
   IsInt,
   Min,
+  Max,
   IsBoolean,
   IsNumber,
 } from 'class-validator';
@@ -32,6 +33,9 @@ export class UpdateClinicSettingsDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @IsOptional()
+  phones?: any;
 
   @IsOptional()
   @IsEmail()
@@ -65,21 +69,25 @@ export class UpdateClinicSettingsDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(365)
   maxBookingHorizonDays?: number;
 
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(5, { message: 'Kutilayotgan qabul eskirish vaqti kamida 5 daqiqa bo\'lishi lozim' })
+  @Max(10080, { message: 'Kutilayotgan qabul eskirish vaqti ko\'pi bilan 10080 daqiqa (7 kun) bo\'lishi lozim' })
   pendingExpiryMinutes?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(120)
   slotIntervalMinutes?: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(120)
   bufferMinutes?: number;
 
   @IsOptional()

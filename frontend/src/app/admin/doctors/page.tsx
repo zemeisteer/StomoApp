@@ -102,6 +102,7 @@ export default function AdminDoctorsManagePage() {
   const [bulkSuccessMsg, setBulkSuccessMsg] = useState<string | null>(null);
   const [bulkTab, setBulkTab] = useState<'batch' | 'copy'>('batch');
   const [bulkForm, setBulkForm] = useState({
+    doctorIds: [] as string[],
     daysOfWeek: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
     startTime: '09:00',
     endTime: '18:00',
@@ -112,9 +113,12 @@ export default function AdminDoctorsManagePage() {
   });
   const [copyForm, setCopyForm] = useState({
     fromDoctorId: '',
+    toDoctorIds: [] as string[],
     mode: 'merge' as 'replace' | 'merge',
     targetBranchId: '',
   });
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [previewResult, setPreviewResult] = useState<any | null>(null);
 
   // Single Schedule Modal
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
@@ -306,17 +310,26 @@ export default function AdminDoctorsManagePage() {
     }
   };
 
-  const handleSaveBulkSchedule = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDoctorId) return;
+  const handlePreviewBulkSchedule = async () => {
+    const targetDocIds = bulkForm.doctorIds.length > 0
+      ? bulkForm.doctorIds
+      : (selectedDoctorId ? [selectedDoctorId] : []);
+    if (targetDocIds.length === 0) {
+      setBulkError('Kamida bitta shifokor tanlanishi shart');
+      return;
+    }
+    if (bulkForm.daysOfWeek.length === 0) {
+      setBulkError('Kamida bitta hafta kuni tanlanishi shart');
+      return;
+    }
 
     try {
-      setIsSavingBulk(true);
+      setIsPreviewing(true);
       setBulkError(null);
-      setBulkSuccessMsg(null);
+      setPreviewResult(null);
 
-      const res = await api.setBatchSchedules({
-        doctorIds: [selectedDoctorId],
+      const res = await api.previewBatchSchedules({
+        doctorIds: targetDocIds,
         daysOfWeek: bulkForm.daysOfWeek,
         startTime: bulkForm.startTime,
         endTime: bulkForm.endTime,
@@ -326,10 +339,78 @@ export default function AdminDoctorsManagePage() {
         mode: bulkForm.mode,
       });
 
-      setBulkSuccessMsg(`Haftalik jadval muvaffaqiyatli saqlandi (${res.updatedCount || bulkForm.daysOfWeek.length} ta yozuv)`);
+      setPreviewResult(res);
+    } catch (err: any) {
+      setBulkError(err?.message || 'Jadvalni tekshirishda xatolik yuz berdi');
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handlePreviewCopySchedule = async () => {
+    if (!copyForm.fromDoctorId) {
+      setBulkError('Manba shifokorni tanlang');
+      return;
+    }
+    const targetDocIds = copyForm.toDoctorIds.length > 0
+      ? copyForm.toDoctorIds.filter((id) => id !== copyForm.fromDoctorId)
+      : (selectedDoctorId && selectedDoctorId !== copyForm.fromDoctorId ? [selectedDoctorId] : []);
+    if (targetDocIds.length === 0) {
+      setBulkError('Nusxa olinadigan maqsadli shifokorlarni tanlang');
+      return;
+    }
+
+    try {
+      setIsPreviewing(true);
+      setBulkError(null);
+      setPreviewResult(null);
+
+      const res = await api.previewCopyDoctorSchedules({
+        fromDoctorId: copyForm.fromDoctorId,
+        toDoctorIds: targetDocIds,
+        mode: copyForm.mode,
+        targetBranchId: copyForm.targetBranchId || undefined,
+      });
+
+      setPreviewResult(res);
+    } catch (err: any) {
+      setBulkError(err?.message || 'Jadval nusxasini tekshirishda xatolik yuz berdi');
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handleSaveBulkSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetDocIds = bulkForm.doctorIds.length > 0
+      ? bulkForm.doctorIds
+      : (selectedDoctorId ? [selectedDoctorId] : []);
+    if (targetDocIds.length === 0) {
+      setBulkError('Kamida bitta shifokor tanlanishi shart');
+      return;
+    }
+
+    try {
+      setIsSavingBulk(true);
+      setBulkError(null);
+      setBulkSuccessMsg(null);
+
+      const res = await api.setBatchSchedules({
+        doctorIds: targetDocIds,
+        daysOfWeek: bulkForm.daysOfWeek,
+        startTime: bulkForm.startTime,
+        endTime: bulkForm.endTime,
+        breakStart: bulkForm.breakStart || undefined,
+        breakEnd: bulkForm.breakEnd || undefined,
+        branchId: bulkForm.branchId || branches[0]?.id,
+        mode: bulkForm.mode,
+      });
+
+      setBulkSuccessMsg(`Haftalik jadval muvaffaqiyatli saqlandi (${res.totalApplied || res.updatedCount || bulkForm.daysOfWeek.length} ta yozuv)`);
       setTimeout(() => {
         setIsBulkModalOpen(false);
         setBulkSuccessMsg(null);
+        setPreviewResult(null);
       }, 1200);
       await loadDoctorScheduleData(selectedDoctorId);
     } catch (err: any) {
@@ -341,7 +422,17 @@ export default function AdminDoctorsManagePage() {
 
   const handleCopySchedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDoctorId || !copyForm.fromDoctorId) return;
+    if (!copyForm.fromDoctorId) {
+      setBulkError('Manba shifokor tanlanmagan');
+      return;
+    }
+    const targetDocIds = copyForm.toDoctorIds.length > 0
+      ? copyForm.toDoctorIds.filter((id) => id !== copyForm.fromDoctorId)
+      : (selectedDoctorId && selectedDoctorId !== copyForm.fromDoctorId ? [selectedDoctorId] : []);
+    if (targetDocIds.length === 0) {
+      setBulkError('Maqsadli shifokorlar tanlanmagan');
+      return;
+    }
 
     try {
       setIsSavingBulk(true);
@@ -350,7 +441,7 @@ export default function AdminDoctorsManagePage() {
 
       const res = await api.copyDoctorSchedules({
         fromDoctorId: copyForm.fromDoctorId,
-        toDoctorIds: [selectedDoctorId],
+        toDoctorIds: targetDocIds,
         mode: copyForm.mode,
         targetBranchId: copyForm.targetBranchId || undefined,
       });
@@ -359,6 +450,7 @@ export default function AdminDoctorsManagePage() {
       setTimeout(() => {
         setIsBulkModalOpen(false);
         setBulkSuccessMsg(null);
+        setPreviewResult(null);
       }, 1200);
       await loadDoctorScheduleData(selectedDoctorId);
     } catch (err: any) {
@@ -615,6 +707,18 @@ export default function AdminDoctorsManagePage() {
                     setIsBulkModalOpen(true);
                     setBulkError(null);
                     setBulkSuccessMsg(null);
+                    setPreviewResult(null);
+                    if (selectedDoctorId) {
+                      setBulkForm((prev) => ({
+                        ...prev,
+                        doctorIds: prev.doctorIds.length > 0 ? prev.doctorIds : [selectedDoctorId],
+                        branchId: prev.branchId || branches[0]?.id || '',
+                      }));
+                      setCopyForm((prev) => ({
+                        ...prev,
+                        toDoctorIds: prev.toDoctorIds.length > 0 ? prev.toDoctorIds : [selectedDoctorId],
+                      }));
+                    }
                   }}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
                   title="Bir nechta kunga birdaniga jadval kiritish yoki boshqa shifokordan nusxalash"
@@ -1261,6 +1365,73 @@ export default function AdminDoctorsManagePage() {
 
             {bulkTab === 'batch' ? (
               <form onSubmit={handleSaveBulkSchedule} className="space-y-4 text-xs">
+                {/* Doctor Multi-Select */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="font-bold text-slate-700">
+                      Shifokorlarni tanlang * ({bulkForm.doctorIds.length} ta tanlandi)
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewResult(null);
+                          setBulkForm((prev) => ({
+                            ...prev,
+                            doctorIds: doctors.filter((d) => d.isActive).map((d) => d.id),
+                          }));
+                        }}
+                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                      >
+                        Barchasi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewResult(null);
+                          setBulkForm((prev) => ({ ...prev, doctorIds: [] }));
+                        }}
+                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                      >
+                        Tozalash
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-28 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap gap-1.5 scrollbar-thin">
+                    {doctors.filter((d) => d.isActive).map((doc) => {
+                      const isChecked = bulkForm.doctorIds.includes(doc.id);
+                      return (
+                        <label
+                          key={doc.id}
+                          className={`px-2.5 py-1 rounded-lg border text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
+                            isChecked
+                              ? 'bg-teal-700 border-teal-700 text-white shadow-xs'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="hidden"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              setPreviewResult(null);
+                              if (e.target.checked) {
+                                setBulkForm((prev) => ({ ...prev, doctorIds: [...prev.doctorIds, doc.id] }));
+                              } else {
+                                setBulkForm((prev) => ({
+                                  ...prev,
+                                  doctorIds: prev.doctorIds.filter((id) => id !== doc.id),
+                                }));
+                              }
+                            }}
+                          />
+                          <span>Dr. {doc.firstNameUz} {doc.lastNameUz}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Weekdays Multi-select */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
@@ -1268,21 +1439,36 @@ export default function AdminDoctorsManagePage() {
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => setBulkForm((prev) => ({ ...prev, daysOfWeek: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] }))}
+                        onClick={() => {
+                          setPreviewResult(null);
+                          setBulkForm((prev) => ({
+                            ...prev,
+                            daysOfWeek: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
+                          }));
+                        }}
                         className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
                       >
                         Du-Ju
                       </button>
                       <button
                         type="button"
-                        onClick={() => setBulkForm((prev) => ({ ...prev, daysOfWeek: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'] }))}
+                        onClick={() => {
+                          setPreviewResult(null);
+                          setBulkForm((prev) => ({
+                            ...prev,
+                            daysOfWeek: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'],
+                          }));
+                        }}
                         className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
                       >
                         Du-Sha
                       </button>
                       <button
                         type="button"
-                        onClick={() => setBulkForm((prev) => ({ ...prev, daysOfWeek: DAYS_OF_WEEK.map((d) => d.value) }))}
+                        onClick={() => {
+                          setPreviewResult(null);
+                          setBulkForm((prev) => ({ ...prev, daysOfWeek: DAYS_OF_WEEK.map((d) => d.value) }));
+                        }}
                         className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
                       >
                         Hammasi
@@ -1306,6 +1492,7 @@ export default function AdminDoctorsManagePage() {
                             type="checkbox"
                             checked={isChecked}
                             onChange={(e) => {
+                              setPreviewResult(null);
                               if (e.target.checked) {
                                 setBulkForm((prev) => ({ ...prev, daysOfWeek: [...prev.daysOfWeek, day.value] }));
                               } else {
@@ -1331,6 +1518,7 @@ export default function AdminDoctorsManagePage() {
                     onClick={() => {
                       const mondaySched = schedules.find((s) => s.dayOfWeek === 'MONDAY');
                       if (mondaySched) {
+                        setPreviewResult(null);
                         setBulkForm((prev) => ({
                           ...prev,
                           startTime: mondaySched.startTime,
@@ -1358,7 +1546,10 @@ export default function AdminDoctorsManagePage() {
                       label: `${b.nameUz} (${b.addressUz})`,
                     }))}
                     value={bulkForm.branchId}
-                    onChange={(val) => setBulkForm({ ...bulkForm, branchId: val })}
+                    onChange={(val) => {
+                      setPreviewResult(null);
+                      setBulkForm({ ...bulkForm, branchId: val });
+                    }}
                     placeholder="Filialni tanlang..."
                   />
                 </div>
@@ -1371,7 +1562,10 @@ export default function AdminDoctorsManagePage() {
                       type="time"
                       required
                       value={bulkForm.startTime}
-                      onChange={(e) => setBulkForm({ ...bulkForm, startTime: e.target.value })}
+                      onChange={(e) => {
+                        setPreviewResult(null);
+                        setBulkForm({ ...bulkForm, startTime: e.target.value });
+                      }}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
@@ -1381,7 +1575,10 @@ export default function AdminDoctorsManagePage() {
                       type="time"
                       required
                       value={bulkForm.endTime}
-                      onChange={(e) => setBulkForm({ ...bulkForm, endTime: e.target.value })}
+                      onChange={(e) => {
+                        setPreviewResult(null);
+                        setBulkForm({ ...bulkForm, endTime: e.target.value });
+                      }}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
@@ -1394,7 +1591,10 @@ export default function AdminDoctorsManagePage() {
                     <input
                       type="time"
                       value={bulkForm.breakStart}
-                      onChange={(e) => setBulkForm({ ...bulkForm, breakStart: e.target.value })}
+                      onChange={(e) => {
+                        setPreviewResult(null);
+                        setBulkForm({ ...bulkForm, breakStart: e.target.value });
+                      }}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
@@ -1403,67 +1603,163 @@ export default function AdminDoctorsManagePage() {
                     <input
                       type="time"
                       value={bulkForm.breakEnd}
-                      onChange={(e) => setBulkForm({ ...bulkForm, breakEnd: e.target.value })}
+                      onChange={(e) => {
+                        setPreviewResult(null);
+                        setBulkForm({ ...bulkForm, breakEnd: e.target.value });
+                      }}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200"
                     />
                   </div>
                 </div>
 
-                {/* Mode: Replace vs Merge */}
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                  <div className="font-bold text-slate-800">Qo&apos;llash rejimi:</div>
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="bulkMode"
-                        value="merge"
-                        checked={bulkForm.mode === 'merge'}
-                        onChange={() => setBulkForm({ ...bulkForm, mode: 'merge' })}
-                        className="text-teal-600"
-                      />
-                      <span><strong>Birlashtirish (Merge)</strong> — mavjud kunlarni yangilaydi</span>
+                {/* Mode: Replace vs Merge with Simple Bilingual Explanations */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+                  <div className="font-bold text-slate-800 text-xs">Qo&apos;llash rejimi / Режим применения:</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        bulkForm.mode === 'merge'
+                          ? 'border-teal-500 bg-teal-50/50 shadow-xs'
+                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="radio"
+                          name="bulkMode"
+                          value="merge"
+                          checked={bulkForm.mode === 'merge'}
+                          onChange={() => {
+                            setPreviewResult(null);
+                            setBulkForm({ ...bulkForm, mode: 'merge' });
+                          }}
+                          className="text-teal-600"
+                        />
+                        <span className="font-bold text-slate-900">Birlashtirish (Merge)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-tight">
+                        <strong>UZ:</strong> Mavjud jadvallarni saqlab, faqat jadvali yo&apos;q kunlarga yangisini qo&apos;shadi.<br />
+                        <strong>RU:</strong> Сохраняет существующие дни без изменений, добавляя график только на пустые дни.
+                      </p>
                     </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="bulkMode"
-                        value="replace"
-                        checked={bulkForm.mode === 'replace'}
-                        onChange={() => setBulkForm({ ...bulkForm, mode: 'replace' })}
-                        className="text-teal-600"
-                      />
-                      <span><strong>To&apos;liq almashtirish (Replace)</strong></span>
+
+                    <label
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        bulkForm.mode === 'replace'
+                          ? 'border-teal-500 bg-teal-50/50 shadow-xs'
+                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="radio"
+                          name="bulkMode"
+                          value="replace"
+                          checked={bulkForm.mode === 'replace'}
+                          onChange={() => {
+                            setPreviewResult(null);
+                            setBulkForm({ ...bulkForm, mode: 'replace' });
+                          }}
+                          className="text-teal-600"
+                        />
+                        <span className="font-bold text-slate-900">To&apos;liq almashtirish (Replace)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-tight">
+                        <strong>UZ:</strong> Tanlangan filial va kunlar bo&apos;yicha eski jadvallarni yangisiga almashtiradi.<br />
+                        <strong>RU:</strong> Полностью заменяет графики на выбранные дни и филиал новыми часами.
+                      </p>
                     </label>
                   </div>
                 </div>
 
-                {/* Preview */}
-                <div className="p-3 bg-teal-50/50 border border-teal-100 rounded-xl text-[11px] text-teal-900">
-                  <div className="font-bold mb-1">Jadval xulosasi:</div>
-                  <div>Kunlar: {bulkForm.daysOfWeek.map((d) => DAYS_OF_WEEK.find((x) => x.value === d)?.label).join(', ') || 'Tanlanmagan'}</div>
-                  <div>Ish vaqti: {bulkForm.startTime} - {bulkForm.endTime} (Tanaffus: {bulkForm.breakStart} - {bulkForm.breakEnd})</div>
-                </div>
+                {/* Preview / Conflict Results Display */}
+                {previewResult && (
+                  <div
+                    className={`p-3.5 rounded-2xl border text-xs space-y-2.5 animate-fade-in ${
+                      previewResult.canApply
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : 'bg-rose-50 border-rose-200 text-rose-950'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="flex items-center gap-1.5">
+                        {previewResult.canApply ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-rose-600" />
+                        )}
+                        {previewResult.canApply
+                          ? "To'qnashuvlar topilmadi. Jadval xavfsiz qo'llanilishi mumkin:"
+                          : `To'qnashuv aniqlandi (${previewResult.conflicts.length} ta qabul):`}
+                      </span>
+                    </div>
 
-                <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                    {previewResult.canApply && previewResult.summary && (
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        <span className="px-2 py-0.5 rounded bg-emerald-100/80 font-bold text-emerald-900">
+                          Shifokorlar: {previewResult.summary.totalDoctors} ta
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100/80 font-bold text-emerald-900">
+                          Yaratiladi: {previewResult.summary.totalSchedulesToCreate} ta
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100/80 font-bold text-emerald-900">
+                          Yangilanadi: {previewResult.summary.totalSchedulesToUpdate} ta
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100/80 font-bold text-emerald-900">
+                          Saqlanadi: {previewResult.summary.totalSchedulesToPreserve} ta
+                        </span>
+                      </div>
+                    )}
+
+                    {!previewResult.canApply && previewResult.conflicts.length > 0 && (
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto scrollbar-thin">
+                        <p className="text-[11px] text-rose-800 font-semibold">
+                          Quyidagi qabullar yangi ish soatlari yoki tanaffusga to&apos;g&apos;ri keladi. Qabullarni avval ko&apos;chirish yoki bekor qilish lozim:
+                        </p>
+                        {previewResult.conflicts.map((c: any, idx: number) => (
+                          <div key={idx} className="p-2 bg-white rounded-xl border border-rose-200 text-[11px] text-rose-900">
+                            <div className="font-bold">{c.doctorName}: {c.patientName} ({c.patientPhone || "Tel yo'q"})</div>
+                            <div className="text-slate-600">Vaqt: {c.formattedTime} • Filial: {c.branchName}</div>
+                            <div className="text-rose-700 font-semibold">Sabab: {c.reason}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-100">
                   <button
                     type="button"
-                    onClick={() => setIsBulkModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                    onClick={handlePreviewBulkSchedule}
+                    disabled={isPreviewing || bulkForm.daysOfWeek.length === 0}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center justify-center gap-1.5 transition-all"
                   >
-                    Bekor qilish
+                    <RefreshCw className={`w-3.5 h-3.5 ${isPreviewing ? 'animate-spin' : ''}`} />
+                    <span>{isPreviewing ? 'Tekshirilmoqda...' : 'Ko\'rib chiqish (Preview)'}</span>
                   </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingBulk || bulkForm.daysOfWeek.length === 0}
-                    className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
-                  >
-                    {isSavingBulk ? 'Saqlanmoqda...' : 'Jadvalni qo\'llash'}
-                  </button>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsBulkModalOpen(false)}
+                      className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                    >
+                      Bekor qilish
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingBulk || bulkForm.daysOfWeek.length === 0 || (previewResult && !previewResult.canApply)}
+                      className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
+                    >
+                      {isSavingBulk ? 'Saqlanmoqda...' : 'Jadvalni qo\'llash'}
+                    </button>
+                  </div>
                 </div>
               </form>
             ) : (
               <form onSubmit={handleCopySchedule} className="space-y-4 text-xs">
+                {/* Source Doctor */}
                 <div>
                   <CustomSelect
                     label="Qaysi shifokordan nusxa olinadi? *"
@@ -1477,11 +1773,86 @@ export default function AdminDoctorsManagePage() {
                         })),
                     ]}
                     value={copyForm.fromDoctorId}
-                    onChange={(val) => setCopyForm({ ...copyForm, fromDoctorId: val })}
+                    onChange={(val) => {
+                      setPreviewResult(null);
+                      setCopyForm({ ...copyForm, fromDoctorId: val });
+                    }}
                     placeholder="Shifokorni tanlang..."
                   />
                 </div>
 
+                {/* Target Doctors Multi-select */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="font-bold text-slate-700">
+                      Maqsadli shifokorlar ({copyForm.toDoctorIds.length} ta tanlandi) *
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewResult(null);
+                          setCopyForm((prev) => ({
+                            ...prev,
+                            toDoctorIds: doctors
+                              .filter((d) => d.isActive && d.id !== copyForm.fromDoctorId)
+                              .map((d) => d.id),
+                          }));
+                        }}
+                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                      >
+                        Barchasi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewResult(null);
+                          setCopyForm((prev) => ({ ...prev, toDoctorIds: [] }));
+                        }}
+                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                      >
+                        Tozalash
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-28 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap gap-1.5 scrollbar-thin">
+                    {doctors
+                      .filter((d) => d.isActive && d.id !== copyForm.fromDoctorId)
+                      .map((doc) => {
+                        const isChecked = copyForm.toDoctorIds.includes(doc.id);
+                        return (
+                          <label
+                            key={doc.id}
+                            className={`px-2.5 py-1 rounded-lg border text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
+                              isChecked
+                                ? 'bg-teal-700 border-teal-700 text-white shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                setPreviewResult(null);
+                                if (e.target.checked) {
+                                  setCopyForm((prev) => ({ ...prev, toDoctorIds: [...prev.toDoctorIds, doc.id] }));
+                                } else {
+                                  setCopyForm((prev) => ({
+                                    ...prev,
+                                    toDoctorIds: prev.toDoctorIds.filter((id) => id !== doc.id),
+                                  }));
+                                }
+                              }}
+                            />
+                            <span>Dr. {doc.firstNameUz} {doc.lastNameUz}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Target Branch */}
                 <div>
                   <CustomSelect
                     label="Maqsadli filial (ixtiyoriy)"
@@ -1493,54 +1864,154 @@ export default function AdminDoctorsManagePage() {
                       })),
                     ]}
                     value={copyForm.targetBranchId}
-                    onChange={(val) => setCopyForm({ ...copyForm, targetBranchId: val })}
+                    onChange={(val) => {
+                      setPreviewResult(null);
+                      setCopyForm({ ...copyForm, targetBranchId: val });
+                    }}
                     placeholder="Filialni tanlang..."
                   />
                 </div>
 
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                  <div className="font-bold text-slate-800">Nusxalash rejimi:</div>
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="copyMode"
-                        value="merge"
-                        checked={copyForm.mode === 'merge'}
-                        onChange={() => setCopyForm({ ...copyForm, mode: 'merge' })}
-                        className="text-teal-600"
-                      />
-                      <span><strong>Birlashtirish (Merge)</strong> — mavjud kunlarni saqlaydi</span>
+                {/* Copy Mode */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+                  <div className="font-bold text-slate-800 text-xs">Nusxalash rejimi / Режим копирования:</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        copyForm.mode === 'merge'
+                          ? 'border-teal-500 bg-teal-50/50 shadow-xs'
+                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="radio"
+                          name="copyMode"
+                          value="merge"
+                          checked={copyForm.mode === 'merge'}
+                          onChange={() => {
+                            setPreviewResult(null);
+                            setCopyForm({ ...copyForm, mode: 'merge' });
+                          }}
+                          className="text-teal-600"
+                        />
+                        <span className="font-bold text-slate-900">Birlashtirish (Merge)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-tight">
+                        <strong>UZ:</strong> Mavjud jadvallarni saqlaydi, faqat bo&apos;sh kunlarga qo&apos;shadi.<br />
+                        <strong>RU:</strong> Сохраняет существующие графики, добавляя только на свободные дни.
+                      </p>
                     </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="copyMode"
-                        value="replace"
-                        checked={copyForm.mode === 'replace'}
-                        onChange={() => setCopyForm({ ...copyForm, mode: 'replace' })}
-                        className="text-teal-600"
-                      />
-                      <span><strong>Almashtirish (Replace)</strong></span>
+
+                    <label
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        copyForm.mode === 'replace'
+                          ? 'border-teal-500 bg-teal-50/50 shadow-xs'
+                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <input
+                          type="radio"
+                          name="copyMode"
+                          value="replace"
+                          checked={copyForm.mode === 'replace'}
+                          onChange={() => {
+                            setPreviewResult(null);
+                            setCopyForm({ ...copyForm, mode: 'replace' });
+                          }}
+                          className="text-teal-600"
+                        />
+                        <span className="font-bold text-slate-900">Almashtirish (Replace)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-tight">
+                        <strong>UZ:</strong> Nusxalanayotgan kunlar va filial bo&apos;yicha eski jadvallarni almashtiradi.<br />
+                        <strong>RU:</strong> Заменяет графики на целевых днях и филиалах новыми.
+                      </p>
                     </label>
                   </div>
                 </div>
 
-                <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                {/* Preview / Conflict Results Display */}
+                {previewResult && (
+                  <div
+                    className={`p-3.5 rounded-2xl border text-xs space-y-2.5 animate-fade-in ${
+                      previewResult.canApply
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : 'bg-rose-50 border-rose-200 text-rose-950'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="flex items-center gap-1.5">
+                        {previewResult.canApply ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-rose-600" />
+                        )}
+                        {previewResult.canApply
+                          ? "To'qnashuvlar topilmadi. Nusxa olish xavfsiz:"
+                          : `To'qnashuv aniqlandi (${previewResult.conflicts.length} ta qabul):`}
+                      </span>
+                    </div>
+
+                    {previewResult.canApply && previewResult.summary && (
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        <span className="px-2 py-0.5 rounded bg-emerald-100/80 font-bold text-emerald-900">
+                          Shifokorlar: {previewResult.summary.totalDoctors} ta
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100/80 font-bold text-emerald-900">
+                          Nusxalanadi: {previewResult.summary.totalSchedulesToCreate} ta
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100/80 font-bold text-emerald-900">
+                          Saqlanadi: {previewResult.summary.totalSchedulesToPreserve} ta
+                        </span>
+                      </div>
+                    )}
+
+                    {!previewResult.canApply && previewResult.conflicts.length > 0 && (
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto scrollbar-thin">
+                        <p className="text-[11px] text-rose-800 font-semibold">
+                          Quyidagi qabullar yangi ish soatlari yoki tanaffusga to&apos;g&apos;ri keladi:
+                        </p>
+                        {previewResult.conflicts.map((c: any, idx: number) => (
+                          <div key={idx} className="p-2 bg-white rounded-xl border border-rose-200 text-[11px] text-rose-900">
+                            <div className="font-bold">{c.doctorName}: {c.patientName} ({c.patientPhone || "Tel yo'q"})</div>
+                            <div className="text-slate-600">Vaqt: {c.formattedTime} • Filial: {c.branchName}</div>
+                            <div className="text-rose-700 font-semibold">Sabab: {c.reason}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-100">
                   <button
                     type="button"
-                    onClick={() => setIsBulkModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                    onClick={handlePreviewCopySchedule}
+                    disabled={isPreviewing || !copyForm.fromDoctorId}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center justify-center gap-1.5 transition-all"
                   >
-                    Bekor qilish
+                    <RefreshCw className={`w-3.5 h-3.5 ${isPreviewing ? 'animate-spin' : ''}`} />
+                    <span>{isPreviewing ? 'Tekshirilmoqda...' : 'Ko\'rib chiqish (Preview)'}</span>
                   </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingBulk || !copyForm.fromDoctorId}
-                    className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
-                  >
-                    {isSavingBulk ? 'Nusxalanmoqda...' : 'Nusxa olish'}
-                  </button>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsBulkModalOpen(false)}
+                      className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                    >
+                      Bekor qilish
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingBulk || !copyForm.fromDoctorId || (previewResult && !previewResult.canApply)}
+                      className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
+                    >
+                      {isSavingBulk ? 'Nusxalanmoqda...' : 'Nusxa olish'}
+                    </button>
+                  </div>
                 </div>
               </form>
             )}

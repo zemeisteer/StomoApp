@@ -430,6 +430,7 @@ export default function AdminAnalyticsPage() {
             </p>
             <span className="text-[11px] text-blue-700 font-semibold mt-1 block">
               {summary.uniquePatientsCount} {isUz ? 'nafar alohida bemor' : 'уникальных пациентов'}
+              {summary.totalServiceUsage ? ` • ${summary.totalServiceUsage} ${isUz ? 'ta xizmat ko‘rsatildi' : 'оказано услуг'}` : ''}
             </span>
           </div>
 
@@ -645,6 +646,60 @@ export default function AdminAnalyticsPage() {
                   ? "* Qayta murojaat qilganlar — klinikada ilgari kamida bitta yakunlangan qabulga ega bo'lgan bemorlar."
                   : '* Повторные пациенты — пациенты, имеющие как минимум один завершенный прием в клинике ранее.'}
               </p>
+            </div>
+
+            {/* Popular Services & Service-Specific Revenue Card */}
+            <div className="ui-card space-y-4">
+              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+                <div>
+                  <h2 className="text-sm font-bold text-[#152f34]">
+                    {isUz ? 'Xizmatlar tahlili va ko‘rsatkichlari' : 'Аналитика услуг и показатели'}
+                  </h2>
+                  <span className="text-[11px] text-[#52696e]">
+                    {isUz
+                      ? `Jami ${data?.totalServiceUsage || summary.totalAppointments} ta xizmat ko‘rsatildi (${summary.servicesPerAppointment || 1} xizmat/qabul)`
+                      : `Всего оказано ${data?.totalServiceUsage || summary.totalAppointments} услуг (${summary.servicesPerAppointment || 1} услуг/прием)`}
+                  </span>
+                </div>
+                <Layers className="w-4 h-4 text-[#167b78]" />
+              </div>
+
+              {popularServices.length === 0 ? (
+                <p className="text-xs text-[#52696e] text-center p-6 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
+                  {isUz ? "Xizmatlar bo'yicha ma'lumot yo'q" : 'Нет данных по услугам'}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {popularServices.map((srv: any, idx) => (
+                    <div key={idx} className="space-y-1.5 p-3 bg-[#f8fbfb] rounded-xl border border-[#e2eeee]">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-5 h-5 rounded-md bg-[#e0f2ed] text-[#167b78] font-bold text-[11px] flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-[#152f34] truncate">{srv.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] text-[#52696e]">
+                            {srv.count} {isUz ? 'ta xizmat' : 'услуг'} ({srv.appointmentsCount || srv.count} {isUz ? 'qabul' : 'приемов'})
+                          </span>
+                          {srv.revenueMinor > 0 && (
+                            <span className="font-bold text-xs text-[#167b78] bg-[#e0f2ed] px-2 py-0.5 rounded-md">
+                              {srv.revenueMinor.toLocaleString(isUz ? 'uz-UZ' : 'ru-RU')} {isUz ? "so'm" : "сум"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="w-full h-2 bg-white rounded-full overflow-hidden border border-[#d8e5e2]">
+                        <div
+                          className="h-full bg-[#167b78] rounded-full transition-all duration-500"
+                          style={{ width: `${Math.min(srv.percentage, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

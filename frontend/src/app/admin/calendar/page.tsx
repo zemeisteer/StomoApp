@@ -29,6 +29,7 @@ import { ModalDialog } from '../../../components/ModalDialog';
 import { PhoneInput } from '../../../components/PhoneInput';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
+import { useI18n } from '../../../lib/i18n';
 import {
   formatClinicDate,
   formatClinicTime,
@@ -64,6 +65,35 @@ const STATUS_LABELS: Record<string, { label: string; color: string; desc: string
 
 export default function AdminCalendarPage() {
   const { user } = useAuth();
+  const { t, language } = useI18n();
+  const isRu = language === 'ru';
+
+  const getStatusInfo = useCallback(
+    (status: string) => {
+      const uz = STATUS_LABELS[status] || {
+        label: status,
+        color: 'bg-slate-100 text-slate-800 border-slate-300',
+        desc: '',
+      };
+      if (!isRu) return uz;
+      const ruMap: Record<string, { label: string; desc: string }> = {
+        PENDING: { label: 'Ожидает подтверждения', desc: 'Заявка с сайта, требуется подтверждение' },
+        CONFIRMED: { label: 'Ожидается визит', desc: 'Прием подтвержден, ожидается приход пациента' },
+        CHECKED_IN: { label: 'Прибыл в клинику', desc: 'Пациент прибыл и ожидает в приемной' },
+        COMPLETED: { label: 'Завершен', desc: 'Лечение успешно завершено' },
+        CANCELLED: { label: 'Отменен', desc: 'Прием отменен' },
+        NO_SHOW: { label: 'Не явился', desc: 'Пациент не явился на прием' },
+      };
+      const ru = ruMap[status];
+      return {
+        label: ru?.label || uz.label,
+        color: uz.color,
+        desc: ru?.desc || uz.desc,
+      };
+    },
+    [isRu],
+  );
+
   const [appointments, setAppointments] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [doctors, setDoctors] = useState<any[]>([]);
@@ -734,52 +764,53 @@ export default function AdminCalendarPage() {
 
   // Human-readable date range label without Windows ICU tokens
   const currentRangeLabel = () => {
+    const loc = isRu ? 'ru' : 'uz';
     if (viewMode === 'day') {
-      return formatClinicDate(currentDate, 'uz', { includeWeekday: true, includeYear: true });
+      return formatClinicDate(currentDate, loc, { includeWeekday: true, includeYear: true });
     }
     if (viewMode === 'week') {
       const { startDate, endDate } = getDateRange();
-      return formatRangeTitle(startDate, endDate, 'uz');
+      return formatRangeTitle(startDate, endDate, loc);
     }
-    return formatMonthYear(currentDate, 'uz');
+    return formatMonthYear(currentDate, loc);
   };
 
   const validTransitions = selectedAppt ? ALLOWED_TRANSITIONS[selectedAppt.status] || [] : [];
 
   // Options for CustomSelect filters
   const doctorOptions: SelectOption[] = [
-    { value: '', label: 'Barcha shifokorlar' },
+    { value: '', label: isRu ? 'Все врачи' : 'Barcha shifokorlar' },
     ...doctors.map((d) => ({
       value: d.id,
-      label: `Dr. ${d.firstNameUz} ${d.lastNameUz}`,
-      badge: d.specialtyUz || undefined,
+      label: `Dr. ${isRu && d.firstNameRu ? d.firstNameRu : d.firstNameUz} ${isRu && d.lastNameRu ? d.lastNameRu : d.lastNameUz}`,
+      badge: (isRu && d.specialtyRu ? d.specialtyRu : d.specialtyUz) || undefined,
     })),
   ];
 
   const serviceOptions: SelectOption[] = [
-    { value: '', label: 'Barcha xizmatlar' },
+    { value: '', label: isRu ? 'Все услуги' : 'Barcha xizmatlar' },
     ...services.map((s) => ({
       value: s.id,
-      label: s.nameUz,
+      label: isRu && s.nameRu ? s.nameRu : s.nameUz,
     })),
   ];
 
   const branchOptions: SelectOption[] = [
-    { value: '', label: 'Barcha filiallar' },
+    { value: '', label: isRu ? 'Все филиалы' : 'Barcha filiallar' },
     ...branches.map((b) => ({
       value: b.id,
-      label: b.nameUz,
+      label: isRu && b.nameRu ? b.nameRu : b.nameUz,
     })),
   ];
 
   const statusOptions: SelectOption[] = [
-    { value: '', label: 'Barcha holatlar' },
-    { value: 'PENDING', label: 'Kutilmoqda' },
-    { value: 'CONFIRMED', label: 'Tasdiqlangan' },
-    { value: 'CHECKED_IN', label: 'Klinikada' },
-    { value: 'COMPLETED', label: 'Yakunlangan' },
-    { value: 'CANCELLED', label: 'Bekor qilingan' },
-    { value: 'NO_SHOW', label: 'Kelmadi' },
+    { value: '', label: isRu ? 'Все статусы' : 'Barcha holatlar' },
+    { value: 'PENDING', label: isRu ? 'Ожидает' : 'Kutilmoqda' },
+    { value: 'CONFIRMED', label: isRu ? 'Подтвержден' : 'Tasdiqlangan' },
+    { value: 'CHECKED_IN', label: isRu ? 'В клинике' : 'Klinikada' },
+    { value: 'COMPLETED', label: isRu ? 'Завершен' : 'Yakunlangan' },
+    { value: 'CANCELLED', label: isRu ? 'Отменен' : 'Bekor qilingan' },
+    { value: 'NO_SHOW', label: isRu ? 'Не явился' : 'Kelmadi' },
   ];
 
   const totalPages = Math.ceil(totalCount / pageSize);
@@ -792,19 +823,23 @@ export default function AdminCalendarPage() {
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">Qabullar taqvimi</h1>
+            <h1 className="text-2xl font-extrabold text-slate-900">
+              {isRu ? 'Календарь приемов' : 'Qabullar taqvimi'}
+            </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Kunlik, haftalik jadval monitoringi va yangi arizalarni tasdiqlash
+              {isRu
+                ? 'Ежедневное и еженедельное расписание, мониторинг визитов и подтверждение заявок'
+                : 'Kunlik, haftalik jadval monitoringi va yangi arizalarni tasdiqlash'}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsCreateOpen(true)}
-              className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 transition-all"
+              className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Yangi qabul</span>
+              <span>{isRu ? 'Новый прием' : 'Yangi qabul'}</span>
             </button>
 
             <button
@@ -832,7 +867,7 @@ export default function AdminCalendarPage() {
             }`}
           >
             <CalendarIcon className="w-4 h-4" />
-            <span>Taqvim jadvali</span>
+            <span>{isRu ? 'Расписание' : 'Taqvim jadvali'}</span>
           </button>
 
           <button
@@ -842,14 +877,14 @@ export default function AdminCalendarPage() {
               setSelectedStatus('PENDING');
               setCurrentPage(1);
             }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
               isInboxMode
                 ? 'bg-amber-500 text-white shadow-sm'
                 : 'text-slate-700 hover:text-slate-900 hover:bg-white/50'
             }`}
           >
             <Inbox className="w-4 h-4" />
-            <span>Kutilayotgan arizalar</span>
+            <span>{isRu ? 'Входящие заявки' : 'Kutilayotgan arizalar'}</span>
             {pendingTotal > 0 && (
               <span
                 className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
@@ -875,21 +910,21 @@ export default function AdminCalendarPage() {
               </button>
               <button
                 onClick={handleToday}
-                className="px-3 py-1.5 border border-slate-200 rounded-xl hover:bg-slate-50 text-xs font-bold text-slate-700"
+                className="px-3 py-1.5 border border-slate-200 rounded-xl hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
               >
-                Bugun
+                {isRu ? 'Сегодня' : 'Bugun'}
               </button>
               <button
                 onClick={handleTomorrow}
-                className="px-3 py-1.5 border border-teal-200 bg-teal-50/50 hover:bg-teal-100/50 text-xs font-bold text-teal-800 rounded-xl transition-colors"
-                title="Ertangi kun jadvaliga o'tish"
+                className="px-3 py-1.5 border border-teal-200 bg-teal-50/50 hover:bg-teal-100/50 text-xs font-bold text-teal-800 rounded-xl transition-colors cursor-pointer"
+                title={isRu ? "Перейти к завтрашнему дню" : "Ertangi kun jadvaliga o'tish"}
               >
-                Ertaga
+                {isRu ? 'Завтра' : 'Ertaga'}
               </button>
               <button
                 onClick={handleNextDate}
-                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600"
-                title="Keyingi"
+                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer"
+                title={isRu ? "Вперед" : "Keyingi"}
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -907,13 +942,13 @@ export default function AdminCalendarPage() {
                     setViewMode(mode);
                     setCurrentPage(1);
                   }}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold capitalize transition-all ${
+                  className={`px-3 py-1 rounded-lg text-xs font-bold capitalize transition-all cursor-pointer ${
                     viewMode === mode
                       ? 'bg-white text-teal-800 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {mode === 'day' ? 'Kunlik' : mode === 'week' ? 'Haftalik' : 'Oylik'}
+                  {mode === 'day' ? (isRu ? 'День' : 'Kunlik') : mode === 'week' ? (isRu ? 'Неделя' : 'Haftalik') : (isRu ? 'Месяц' : 'Oylik')}
                 </button>
               ))}
             </div>
@@ -923,7 +958,10 @@ export default function AdminCalendarPage() {
             <div className="flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
-                <strong>Kutilayotgan arizalar (Tasdiqlash kutilmoqda):</strong> Saytdan bemorlar tomonidan yuborilgan barcha tasdiqlash kutayotgan arizalar ro‘yxati.
+                <strong>{isRu ? 'Ожидающие заявки:' : 'Kutilayotgan arizalar:'}</strong>{' '}
+                {isRu
+                  ? 'Список всех заявок пациентов с сайта, ожидающих подтверждения администратором.'
+                  : 'Saytdan bemorlar tomonidan yuborilgan barcha tasdiqlash kutayotgan arizalar ro‘yxati.'}
               </span>
             </div>
             <button
@@ -933,9 +971,9 @@ export default function AdminCalendarPage() {
                 setSelectedStatus('');
                 setCurrentPage(1);
               }}
-              className="text-xs font-bold text-amber-800 underline hover:text-amber-950 shrink-0"
+              className="text-xs font-bold text-amber-800 underline hover:text-amber-950 shrink-0 cursor-pointer"
             >
-              Taqvim jadvaliga qaytish
+              {isRu ? 'Вернуться к календарю' : 'Taqvim jadvaliga qaytish'}
             </button>
           </div>
         )}
@@ -944,7 +982,7 @@ export default function AdminCalendarPage() {
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
             <Filter className="w-4 h-4 text-teal-700" />
-            <span>Filtrlash va qidirish:</span>
+            <span>{isRu ? 'Фильтрация и поиск:' : 'Filtrlash va qidirish:'}</span>
           </div>
 
           {/* Search Box by Name OR Phone */}
@@ -957,7 +995,11 @@ export default function AdminCalendarPage() {
                 setSearch(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Bemor ismi (F.I.SH) yoki telefon raqami bo'yicha qidirish..."
+              placeholder={
+                isRu
+                  ? 'Поиск по имени пациента (Ф.И.О.) или номеру телефона...'
+                  : 'Bemor ismi (F.I.SH) yoki telefon raqami bo\'yicha qidirish...'
+              }
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
             />
           </div>
@@ -972,11 +1014,12 @@ export default function AdminCalendarPage() {
                   setSelectedDoctorId(val);
                   setCurrentPage(1);
                 }}
-                placeholder="Shifokor..."
+                placeholder={isRu ? 'Врач...' : 'Shifokor...'}
+                locale={isRu ? 'ru' : 'uz'}
               />
             ) : (
               <div className="flex items-center px-3 py-2 bg-teal-50 text-teal-800 rounded-xl text-xs font-bold border border-teal-200 min-h-[44px]">
-                Shaxsiy qabullaringiz
+                {isRu ? 'Ваши личные приемы' : 'Shaxsiy qabullaringiz'}
               </div>
             )}
 
@@ -988,7 +1031,8 @@ export default function AdminCalendarPage() {
                 setSelectedServiceId(val);
                 setCurrentPage(1);
               }}
-              placeholder="Xizmat..."
+              placeholder={isRu ? 'Услуга...' : 'Xizmat...'}
+              locale={isRu ? 'ru' : 'uz'}
             />
 
             {/* Branch filter */}
@@ -999,7 +1043,8 @@ export default function AdminCalendarPage() {
                 setSelectedBranchId(val);
                 setCurrentPage(1);
               }}
-              placeholder="Filial..."
+              placeholder={isRu ? 'Филиал...' : 'Filial...'}
+              locale={isRu ? 'ru' : 'uz'}
             />
 
             {/* Status filter (hidden when in inbox mode) */}
@@ -1011,11 +1056,14 @@ export default function AdminCalendarPage() {
                   setSelectedStatus(val);
                   setCurrentPage(1);
                 }}
-                placeholder="Holat..."
+                placeholder={isRu ? 'Статус...' : 'Holat...'}
+                locale={isRu ? 'ru' : 'uz'}
               />
             ) : (
               <div className="flex items-center px-3 py-2 bg-amber-50 text-amber-900 rounded-xl text-xs font-bold border border-amber-200 min-h-[44px]">
-                Faqat tasdiqlash kutilayotganlar ({pendingTotal})
+                {isRu
+                  ? `Только ожидающие (${pendingTotal})`
+                  : `Faqat tasdiqlash kutilayotganlar (${pendingTotal})`}
               </div>
             )}
           </div>
@@ -1275,10 +1323,7 @@ export default function AdminCalendarPage() {
                               const aStart = new Date(appt.startTime).getTime();
                               const isContinuing = aStart < slotStartMs;
                               const timeStr = `${formatClinicTime(appt.startTime)} - ${formatClinicTime(appt.endTime)}`;
-                              const badge = STATUS_LABELS[appt.status] || {
-                                label: appt.status,
-                                color: 'bg-slate-100 text-slate-700 border-slate-200',
-                              };
+                              const badge = getStatusInfo(appt.status);
                               return (
                                 <div
                                   key={appt.id}
@@ -1340,11 +1385,7 @@ export default function AdminCalendarPage() {
                   includeYear: false,
                 });
                 const timeFormatted = formatClinicTime(appt.startTime);
-
-                const badge = STATUS_LABELS[appt.status] || {
-                  label: appt.status,
-                  color: 'bg-slate-100 text-slate-700 border-slate-200',
-                };
+                const badge = getStatusInfo(appt.status);
 
                 return (
                   <div
@@ -1427,19 +1468,22 @@ export default function AdminCalendarPage() {
         <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-xs space-y-2">
           <div className="font-bold text-slate-800 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-teal-700" />
-            <span>Qabullar holatlari va ma&apos;nolari:</span>
+            <span>{isRu ? 'Статусы приемов и их значения:' : 'Qabullar holatlari va ma\'nolari:'}</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
-            {Object.entries(STATUS_LABELS).map(([k, s]) => (
-              <div key={k} className="flex items-start gap-2">
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border shrink-0 mt-0.5 ${s.color}`}>
-                  {s.label}
-                </span>
-                <span className="text-[11px] text-slate-500 leading-tight">
-                  {s.desc}
-                </span>
-              </div>
-            ))}
+            {Object.keys(STATUS_LABELS).map((k) => {
+              const s = getStatusInfo(k);
+              return (
+                <div key={k} className="flex items-start gap-2">
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border shrink-0 mt-0.5 ${s.color}`}>
+                    {s.label}
+                  </span>
+                  <span className="text-[11px] text-slate-500 leading-tight">
+                    {s.desc}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -1577,9 +1621,9 @@ export default function AdminCalendarPage() {
                   </div>
                 )}
                 <div className="flex justify-between pt-1 border-t border-slate-200/60">
-                  <span className="text-slate-500 font-semibold">Joriy holat:</span>
+                  <span className="text-slate-500 font-semibold">{isRu ? 'Текущий статус:' : 'Joriy holat:'}</span>
                   <span className="font-bold text-teal-800">
-                    {STATUS_LABELS[selectedAppt.status]?.label || selectedAppt.status}
+                    {getStatusInfo(selectedAppt.status).label}
                   </span>
                 </div>
               </div>

@@ -41,10 +41,28 @@ export class ClinicService {
 
     const primaryNumber = parsedPhones.find((p) => p.isPrimary)?.number || parsedPhones[0]?.number || settings.phone;
 
+    // Explicitly handle out-of-range pendingExpiryMinutes
+    let sanitizedPendingExpiry = settings.pendingExpiryMinutes;
+    let pendingExpiryOutOfRange = false;
+    if (sanitizedPendingExpiry !== null && sanitizedPendingExpiry !== undefined && !isNaN(sanitizedPendingExpiry)) {
+      if (sanitizedPendingExpiry < 5) {
+        sanitizedPendingExpiry = 5;
+        pendingExpiryOutOfRange = true;
+      } else if (sanitizedPendingExpiry > 10080) {
+        sanitizedPendingExpiry = 10080;
+        pendingExpiryOutOfRange = true;
+      }
+    } else {
+      sanitizedPendingExpiry = 30;
+    }
+
     return {
       ...settings,
       phone: primaryNumber,
       phones: parsedPhones,
+      pendingExpiryMinutes: sanitizedPendingExpiry,
+      rawPendingExpiryMinutes: settings.pendingExpiryMinutes,
+      pendingExpiryOutOfRange,
     };
   }
 
@@ -131,6 +149,42 @@ export class ClinicService {
     if (normalizedPhones) {
       payload.phones = normalizedPhones;
       payload.phone = primaryPhoneString;
+    }
+
+    // Explicit validation of booking rules and pendingExpiryMinutes (range: 5..10080)
+    if (payload.pendingExpiryMinutes !== undefined && payload.pendingExpiryMinutes !== null) {
+      const pem = Number(payload.pendingExpiryMinutes);
+      if (isNaN(pem) || pem < 5 || pem > 10080) {
+        throw new BadRequestException('Kutilayotgan qabul eskirish vaqti 5 daqiqadan 10080 daqiqagacha (7 kun) bo\'lishi lozim');
+      }
+      payload.pendingExpiryMinutes = Math.round(pem);
+    }
+
+    // Preserve valid zero for bufferMinutes (range: 0..120)
+    if (payload.bufferMinutes !== undefined && payload.bufferMinutes !== null) {
+      const bm = Number(payload.bufferMinutes);
+      if (isNaN(bm) || bm < 0 || bm > 120) {
+        throw new BadRequestException('Qabullar orasidagi tanaffus 0 dan 120 daqiqagacha bo\'lishi lozim');
+      }
+      payload.bufferMinutes = Math.round(bm);
+    }
+
+    // Preserve valid zero for minBookingNoticeHours (range: 0..720)
+    if (payload.minBookingNoticeHours !== undefined && payload.minBookingNoticeHours !== null) {
+      const nh = Number(payload.minBookingNoticeHours);
+      if (isNaN(nh) || nh < 0 || nh > 720) {
+        throw new BadRequestException('Minimal oldindan yozilish vaqti 0 dan 720 soatgacha bo\'lishi lozim');
+      }
+      payload.minBookingNoticeHours = Math.round(nh);
+    }
+
+    // Validate maxBookingHorizonDays (range: 1..365)
+    if (payload.maxBookingHorizonDays !== undefined && payload.maxBookingHorizonDays !== null) {
+      const hd = Number(payload.maxBookingHorizonDays);
+      if (isNaN(hd) || hd < 1 || hd > 365) {
+        throw new BadRequestException('Maksimal oldindan yozilish muddati 1 dan 365 kungacha bo\'lishi lozim');
+      }
+      payload.maxBookingHorizonDays = Math.round(hd);
     }
 
     const updated = await this.prisma.clinicSettings.upsert({
