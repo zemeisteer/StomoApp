@@ -517,7 +517,7 @@ export class SchedulingService {
       const buffer = a.bufferMinutes ?? 5;
       const effectiveEnd = (a.overrunActive && a.overrunEstimatedEndTime)
         ? new Date(new Date(a.overrunEstimatedEndTime).getTime() + buffer * 60000)
-        : a.endTime;
+        : new Date(new Date(a.endTime).getTime() + buffer * 60000);
       return a.startTime < endTimeUtc && effectiveEnd > startTimeUtc;
     });
 

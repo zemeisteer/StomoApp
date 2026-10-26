@@ -121,7 +121,7 @@ export function isAppointmentOverlapping(
   const buffer = appt.bufferMinutes ?? 5;
   const effectiveEnd = (appt.overrunActive && appt.overrunEstimatedEndTime)
     ? new Date(new Date(appt.overrunEstimatedEndTime).getTime() + buffer * 60000)
-    : apptEnd;
+    : new Date(apptEnd.getTime() + buffer * 60000);
 
   return apptStart < slotEnd && effectiveEnd > slotStart;
 }
@@ -491,11 +491,11 @@ export class AppointmentsService {
             tx,
           );
 
-          // Calculate consistent duration, buffer, and end time from transaction read
+          // Calculate consistent duration, buffer, treatment end, and occupied end
           const txDurationMinutes = txAuthoritative.totalDurationMinutes;
           const txPriceFrom = txAuthoritative.totalPriceFrom;
-          const txTotalMinutes = txDurationMinutes + txBufferMinutes;
-          const txEndTimeUtc = new Date(startTimeUtc.getTime() + txTotalMinutes * 60 * 1000);
+          const txTreatmentEndTimeUtc = new Date(startTimeUtc.getTime() + txDurationMinutes * 60 * 1000);
+          const txOccupiedEndUtc = new Date(startTimeUtc.getTime() + (txDurationMinutes + txBufferMinutes) * 60 * 1000);
 
           // Authoritative Quote Consistency Check
           if (dto.expectedQuote) {
@@ -534,11 +534,11 @@ export class AppointmentsService {
             }
           }
 
-          // Revalidate working hours inside protected transaction lock using the exact txEndTimeUtc
+          // Revalidate working hours inside protected transaction lock using the full occupied interval
           const isWorkingInLock = await this.schedulingService.isDoctorWorkingAt(
             dto.doctorId,
             startTimeUtc,
-            txEndTimeUtc,
+            txOccupiedEndUtc,
             txTimezone,
             txBranchId,
             tx,
@@ -547,12 +547,12 @@ export class AppointmentsService {
             throw new BadRequestException('Tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
-          // Double check overlap within lock using the exact txEndTimeUtc and active overruns
+          // Double check overlap within lock using the occupied interval and active overruns
           const candidateAppts = await tx.appointment.findMany({
             where: {
               doctorId: dto.doctorId,
               status: { in: TIME_RESERVING_STATUSES },
-              startTime: { lt: new Date(txEndTimeUtc.getTime() + 24 * 60 * 60000) },
+              startTime: { lt: new Date(txOccupiedEndUtc.getTime() + 24 * 60 * 60000) },
               OR: [
                 { endTime: { gt: startTimeUtc } },
                 { overrunActive: true },
@@ -565,7 +565,7 @@ export class AppointmentsService {
             if (a.status === AppointmentStatus.PENDING && a.expiresAt && a.expiresAt <= nowUtc) {
               return false;
             }
-            return isAppointmentOverlapping(a, startTimeUtc, txEndTimeUtc);
+            return isAppointmentOverlapping(a, startTimeUtc, txOccupiedEndUtc);
           });
 
           if (conflicting) {
@@ -611,7 +611,7 @@ export class AppointmentsService {
             }
           }
           const expiresAt = isStaffCreated ? null : new Date(nowUtc.getTime() + effectivePendingMinutes * 60 * 1000);
-          const tokenExpiresAt = new Date(txEndTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const tokenExpiresAt = new Date(txTreatmentEndTimeUtc.getTime() + 7 * 24 * 60 * 60 * 1000);
 
           const appointment = await tx.appointment.create({
             data: {
@@ -622,7 +622,7 @@ export class AppointmentsService {
               branchId: txBranchId || null,
               status: initialStatus,
               startTime: startTimeUtc,
-              endTime: txEndTimeUtc,
+              endTime: txTreatmentEndTimeUtc,
               serviceName: txAuthoritative.combinedNameUz,
               servicePriceFrom: txAuthoritative.totalPriceFrom,
               durationMinutes: txDurationMinutes,
@@ -765,6 +765,8 @@ export class AppointmentsService {
       // 2. Row lock on appointment FOR UPDATE second
       const [locked] = await tx.$queryRaw<any[]>`
         SELECT id, status, "doctor_id" as "doctorId", "service_id" as "serviceId", "service_name" as "serviceName",
+               "start_time" as "startTime", "end_time" as "endTime", "buffer_minutes" as "bufferMinutes",
+               "expires_at" as "expiresAt", "branch_id" as "branchId",
                "arrived_at" as "arrivedAt", "actual_start_time" as "actualStartTime"
         FROM "appointments"
         WHERE id = ${appointmentId}
@@ -787,6 +789,42 @@ export class AppointmentsService {
         throw new BadRequestException(
           `${currentStatus} statusidan ${newStatus} statusiga o'tish taqiqlangan`,
         );
+      }
+
+      // When confirming an appointment from PENDING:
+      // Verify that this slot has not expired and been booked by another patient in the meantime!
+      if (currentStatus === AppointmentStatus.PENDING && newStatus === AppointmentStatus.CONFIRMED) {
+        const apptStart = new Date(locked.startTime);
+        const apptEnd = new Date(locked.endTime);
+        const apptBuf = locked.bufferMinutes ?? 5;
+        const apptOccupiedEnd = new Date(apptEnd.getTime() + apptBuf * 60000);
+
+        const candidateConflicting = await tx.appointment.findMany({
+          where: {
+            doctorId: locked.doctorId,
+            id: { not: appointmentId },
+            status: { in: TIME_RESERVING_STATUSES },
+            startTime: { lt: new Date(apptOccupiedEnd.getTime() + 24 * 60 * 60000) },
+            OR: [
+              { endTime: { gt: apptStart } },
+              { overrunActive: true },
+            ],
+          },
+        });
+
+        const nowUtc = new Date();
+        const hasConflict = candidateConflicting.some((other) => {
+          if (other.status === AppointmentStatus.PENDING && other.expiresAt && other.expiresAt <= nowUtc) {
+            return false;
+          }
+          return isAppointmentOverlapping(other, apptStart, apptOccupiedEnd);
+        });
+
+        if (hasConflict) {
+          throw new ConflictException(
+            'Ushbu vaqt oralig\'i allaqachon boshqa bemor tomonidan band qilingan. Kutilayotgan qabulni tasdiqlab bo\'lmaydi.',
+          );
+        }
       }
 
       const now = new Date();
@@ -1065,8 +1103,8 @@ export class AppointmentsService {
           // 6. Calculate new end strictly from current stored duration and buffer (recomputed on every retry)
           const txBufferMinutes = currentAppt.bufferMinutes ?? settings?.bufferMinutes ?? 5;
           const txDurationMinutes = currentAppt.durationMinutes;
-          const txTotalMinutes = txDurationMinutes + txBufferMinutes;
-          const txNewEndTime = new Date(newStartTime.getTime() + txTotalMinutes * 60 * 1000);
+          const txTreatmentEndTime = new Date(newStartTime.getTime() + txDurationMinutes * 60 * 1000);
+          const txOccupiedEndTime = new Date(newStartTime.getTime() + (txDurationMinutes + txBufferMinutes) * 60 * 1000);
 
           // 7. Explicit policy for unresolved legacy bundles: do not claim eligibility verified when component services are unknown
           const hasUnresolvedBundle =
@@ -1114,11 +1152,11 @@ export class AppointmentsService {
             }
           }
 
-          // 10. Validate working hours inside transaction lock using tx and txNewEndTime!
+          // 10. Validate working hours inside transaction lock using tx and txOccupiedEndTime!
           const isWorking = await this.schedulingService.isDoctorWorkingAt(
             currentAppt.doctorId,
             newStartTime,
-            txNewEndTime,
+            txOccupiedEndTime,
             timezone,
             currentAppt.branchId || undefined,
             tx,
@@ -1127,13 +1165,13 @@ export class AppointmentsService {
             throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
-          // 11. Double-check conflicting slots (excluding current appointment) using txNewEndTime and active overruns
+          // 11. Double-check conflicting slots (excluding current appointment) using txOccupiedEndTime and active overruns
           const candidateConflicting = await tx.appointment.findMany({
             where: {
               doctorId: currentAppt.doctorId,
               status: { in: TIME_RESERVING_STATUSES },
               id: { not: appointmentId },
-              startTime: { lt: new Date(txNewEndTime.getTime() + 24 * 60 * 60000) },
+              startTime: { lt: new Date(txOccupiedEndTime.getTime() + 24 * 60 * 60000) },
               OR: [
                 { endTime: { gt: newStartTime } },
                 { overrunActive: true },
@@ -1142,7 +1180,7 @@ export class AppointmentsService {
           });
 
           const conflicting = candidateConflicting.find((a) =>
-            isAppointmentOverlapping(a, newStartTime, txNewEndTime),
+            isAppointmentOverlapping(a, newStartTime, txOccupiedEndTime),
           );
 
           if (conflicting) {
@@ -1150,7 +1188,7 @@ export class AppointmentsService {
           }
 
           // 12. Adjust management token expiry when moving appointment into future
-          const newExtendedExpiry = new Date(txNewEndTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const newExtendedExpiry = new Date(txTreatmentEndTime.getTime() + 7 * 24 * 60 * 60 * 1000);
           const newRevision = currentAppt.revision + 1;
           const newScheduleRevision = (currentAppt.scheduleRevision ?? 1) + 1;
 
@@ -1158,7 +1196,7 @@ export class AppointmentsService {
             where: { id: appointmentId },
             data: {
               startTime: newStartTime,
-              endTime: txNewEndTime,
+              endTime: txTreatmentEndTime,
               bufferMinutes: txBufferMinutes,
               revision: newRevision,
               scheduleRevision: newScheduleRevision,
@@ -1195,7 +1233,7 @@ export class AppointmentsService {
                 newStartTime,
                 durationMinutes: txDurationMinutes,
                 bufferMinutes: txBufferMinutes,
-                newEndTime: txNewEndTime,
+                newEndTime: txTreatmentEndTime,
                 revision: appt.revision,
                 scheduleRevision: newScheduleRevision,
               } as Prisma.InputJsonValue,

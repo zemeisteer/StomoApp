@@ -247,7 +247,7 @@ export const api = {
 
   // Reviews
   getPublicReviews: (page = 1, limit = 20) =>
-    fetcher<any>(`/api/reviews?page=${page}&limit=${limit}`),
+    fetcher<{ items: any[]; total: number; page: number; limit: number }>(`/api/reviews?page=${page}&limit=${limit}`),
   submitReview: (payload: {
     authorName: string;
     rating: number;
@@ -413,12 +413,18 @@ export const api = {
   getAdminReviews: (status?: string, page = 1, limit = 50) => {
     const q = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) q.set('status', status);
-    return fetcher<any>(`/api/admin/reviews?${q.toString()}`);
+    return fetcher<{ items: any[]; total: number; page: number; limit: number }>(
+      `/api/admin/reviews?${q.toString()}`,
+    );
   },
-  updateReviewStatus: (id: string, status: string) =>
+  updateReviewStatus: (id: string, status: string, adminNote?: string) =>
     fetcher<any>(`/api/admin/reviews/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, adminNote }),
+    }),
+  deleteReview: (id: string) =>
+    fetcher<any>(`/api/admin/reviews/${id}`, {
+      method: 'DELETE',
     }),
 
   // Scheduling & Exceptions
@@ -652,4 +658,18 @@ export const api = {
   },
   getAuditLogs: (page = 1, limit = 50) =>
     fetcher<any>(`/api/admin/audit-logs?page=${page}&limit=${limit}`),
+
+  // Admin Notifications API
+  getAdminNotifications: (channel?: string, status?: string, page = 1, limit = 50) => {
+    const q = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (channel) q.set('channel', channel);
+    if (status) q.set('status', status);
+    return fetcher<{ items: any[]; total: number; page: number; limit: number }>(
+      `/api/admin/notifications?${q.toString()}`,
+    );
+  },
+  retryAdminNotification: (id: string) =>
+    fetcher<any>(`/api/admin/notifications/${id}/retry`, {
+      method: 'POST',
+    }),
 };

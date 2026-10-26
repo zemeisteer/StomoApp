@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { PrismaModule } from '../src/prisma/prisma.module';
+import { AuditModule } from '../src/audit/audit.module';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -17,6 +18,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
       envFilePath: ['.env', '../.env'],
     }),
     PrismaModule,
+    AuditModule,
   ],
   providers: [NotificationsService],
 })

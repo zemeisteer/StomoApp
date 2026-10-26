@@ -53,6 +53,36 @@ function mergeIntervals(intervals: TimeInterval[]): TimeInterval[] {
   return merged;
 }
 
+export function allocateIntegerAmounts(totalAmount: number, weights: number[]): number[] {
+  if (totalAmount === 0 || weights.length === 0) {
+    return weights.map(() => 0);
+  }
+  const sign = totalAmount < 0 ? -1 : 1;
+  const absTotal = Math.abs(totalAmount);
+  const totalWeight = weights.reduce((acc, w) => acc + Math.max(0, w), 0);
+  if (totalWeight === 0) {
+    const base = Math.floor(absTotal / weights.length);
+    const rem = absTotal - base * weights.length;
+    return weights.map((_, i) => sign * (base + (i < rem ? 1 : 0)));
+  }
+
+  const unrounded = weights.map((w) => (Math.max(0, w) / totalWeight) * absTotal);
+  const floors = unrounded.map((u) => Math.floor(u));
+  const remainder = absTotal - floors.reduce((acc, f) => acc + f, 0);
+
+  const fractionalParts = unrounded.map((u, i) => ({
+    fraction: u - floors[i],
+    index: i,
+  }));
+  fractionalParts.sort((a, b) => b.fraction - a.fraction);
+
+  const result = [...floors];
+  for (let i = 0; i < remainder; i++) {
+    result[fractionalParts[i].index] += 1;
+  }
+  return result.map((r) => r * sign);
+}
+
 const DOW_ENUM_MAP: Record<number, DayOfWeek> = {
   0: DayOfWeek.SUNDAY,
   1: DayOfWeek.MONDAY,
@@ -275,27 +305,37 @@ export class AnalyticsService {
         nameRu?: string | null;
         usageCount: number;
         distinctAppointmentIds: Set<string>;
+        quotedValueMinor: number;
+        grossPaymentsMinor: number;
+        refundsMinor: number;
+        netRevenueMinor: number;
         revenueMinor: number;
       }
     >();
 
     let totalServiceUsage = 0;
     let legacyBundlesCount = 0;
+    let totalQuotedMinor = 0;
 
     for (const appt of serviceAppointments) {
-      const netPayment = appt.payments.reduce(
-        (acc, p) => (p.isRefund ? acc - p.amount : acc + p.amount),
-        0,
-      );
+      const grossPayment = appt.payments
+        .filter((p) => !p.isRefund)
+        .reduce((acc, p) => acc + p.amount, 0);
+      const refundPayment = appt.payments
+        .filter((p) => p.isRefund)
+        .reduce((acc, p) => acc + p.amount, 0);
 
       if (appt.serviceItems && appt.serviceItems.length > 0) {
         const validItems = appt.serviceItems.filter((i) => !i.isLegacyBundle);
         const legacyItems = appt.serviceItems.filter((i) => i.isLegacyBundle);
         legacyBundlesCount += legacyItems.length;
 
-        const totalItemsPrice = validItems.reduce((acc, i) => acc + (i.priceFrom || 0), 0);
+        const weights = validItems.map((i) => Math.max(0, i.priceFrom || 0));
+        const allocatedGross = allocateIntegerAmounts(grossPayment, weights);
+        const allocatedRefunds = allocateIntegerAmounts(refundPayment, weights);
 
-        for (const item of validItems) {
+        for (let idx = 0; idx < validItems.length; idx++) {
+          const item = validItems[idx];
           const key = item.serviceId || item.serviceNameUz;
           const current = serviceStatsMap.get(key) || {
             serviceId: item.serviceId || undefined,
@@ -303,18 +343,28 @@ export class AnalyticsService {
             nameRu: item.serviceNameRu,
             usageCount: 0,
             distinctAppointmentIds: new Set<string>(),
+            quotedValueMinor: 0,
+            grossPaymentsMinor: 0,
+            refundsMinor: 0,
+            netRevenueMinor: 0,
             revenueMinor: 0,
           };
+
+          const itemQuoted = item.priceFrom || 0;
+          const itemGross = allocatedGross[idx] || 0;
+          const itemRefund = allocatedRefunds[idx] || 0;
+          const itemNet = itemGross - itemRefund;
 
           current.usageCount += 1;
           current.distinctAppointmentIds.add(appt.id);
           totalServiceUsage += 1;
 
-          if (netPayment > 0 && totalItemsPrice > 0) {
-            current.revenueMinor += Math.round(((item.priceFrom || 0) / totalItemsPrice) * netPayment);
-          } else {
-            current.revenueMinor += item.priceFrom || 0;
-          }
+          current.quotedValueMinor += itemQuoted;
+          current.grossPaymentsMinor += itemGross;
+          current.refundsMinor += itemRefund;
+          current.netRevenueMinor += itemNet;
+          current.revenueMinor = current.netRevenueMinor;
+          totalQuotedMinor += itemQuoted;
 
           serviceStatsMap.set(key, current);
         }
@@ -326,18 +376,26 @@ export class AnalyticsService {
           nameUz: appt.serviceName,
           usageCount: 0,
           distinctAppointmentIds: new Set<string>(),
+          quotedValueMinor: 0,
+          grossPaymentsMinor: 0,
+          refundsMinor: 0,
+          netRevenueMinor: 0,
           revenueMinor: 0,
         };
+
+        const quoted = appt.servicePriceFrom || 0;
+        const net = grossPayment - refundPayment;
 
         current.usageCount += 1;
         current.distinctAppointmentIds.add(appt.id);
         totalServiceUsage += 1;
 
-        if (netPayment > 0) {
-          current.revenueMinor += netPayment;
-        } else {
-          current.revenueMinor += appt.servicePriceFrom || 0;
-        }
+        current.quotedValueMinor += quoted;
+        current.grossPaymentsMinor += grossPayment;
+        current.refundsMinor += refundPayment;
+        current.netRevenueMinor += net;
+        current.revenueMinor = current.netRevenueMinor;
+        totalQuotedMinor += quoted;
 
         serviceStatsMap.set(key, current);
       }
@@ -354,6 +412,10 @@ export class AnalyticsService {
         count: s.usageCount,
         usageCount: s.usageCount,
         appointmentsCount: s.distinctAppointmentIds.size,
+        quotedValueMinor: s.quotedValueMinor,
+        grossPaymentsMinor: s.grossPaymentsMinor,
+        refundsMinor: s.refundsMinor,
+        netRevenueMinor: s.netRevenueMinor,
         revenueMinor: s.revenueMinor,
         percentage: totalServiceUsage > 0 ? Math.round((s.usageCount / totalServiceUsage) * 100) : 0,
       }));
@@ -683,17 +745,17 @@ export class AnalyticsService {
     for (const p of payments) {
       let effectiveAmount = p.amount;
 
-      // When serviceId filter is active, apportion payment proportionately to this service
+      // When serviceId filter is active, apportion payment proportionately to this service using exact integer allocation
       if (serviceId && p.appointment) {
         const appt = p.appointment;
         if (appt.serviceItems && appt.serviceItems.length > 0) {
           const validItems = appt.serviceItems.filter((i) => !i.isLegacyBundle);
-          const totalItemsPrice = validItems.reduce((acc, i) => acc + (i.priceFrom || 0), 0);
-          const matchingItems = validItems.filter((i) => i.serviceId === serviceId);
-          const matchingPrice = matchingItems.reduce((acc, i) => acc + (i.priceFrom || 0), 0);
-          if (totalItemsPrice > 0) {
-            effectiveAmount = Math.round(p.amount * (matchingPrice / totalItemsPrice));
-          }
+          const weights = validItems.map((i) => Math.max(0, i.priceFrom || 0));
+          const allocated = allocateIntegerAmounts(p.amount, weights);
+          const matchingIndices = validItems
+            .map((item, idx) => (item.serviceId === serviceId ? idx : -1))
+            .filter((idx) => idx !== -1);
+          effectiveAmount = matchingIndices.reduce((sum, idx) => sum + (allocated[idx] || 0), 0);
         }
       }
 
@@ -745,6 +807,7 @@ export class AnalyticsService {
         filtersNote: 'Lidlar klinikaga kelib tushgan umumiy qayta aloqa murojaatlarini ifodalaydi',
       },
       revenue: {
+        totalQuotedMinor,
         totalIncomeMinor: totalIncome,
         totalRefundsMinor: totalRefunds,
         netRevenueMinor: netRevenue,

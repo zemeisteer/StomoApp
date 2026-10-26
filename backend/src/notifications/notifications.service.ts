@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import {
   AppointmentStatus,
   NotificationChannel,
@@ -91,11 +92,49 @@ export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private mailTransporter: nodemailer.Transporter | null = null;
 
+  private clinicSettingsCache: {
+    nameUz: string;
+    nameRu: string;
+    timezone: string;
+    phone: string;
+    email: string;
+    cachedAt: number;
+  } | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly auditService: AuditService,
   ) {
     this.initMailTransporter();
+  }
+
+  async getClinicSettings() {
+    const now = Date.now();
+    if (this.clinicSettingsCache && now - this.clinicSettingsCache.cachedAt < 10000) {
+      return this.clinicSettingsCache;
+    }
+    try {
+      const settings = await this.prisma.clinicSettings.findFirst();
+      this.clinicSettingsCache = {
+        nameUz: settings?.name || 'DentaCare',
+        nameRu: settings?.nameRu || settings?.name || 'DentaCare',
+        timezone: settings?.timezone || 'Asia/Tashkent',
+        phone: settings?.phone || '+998 71 123 45 67',
+        email: settings?.email || 'info@dentacare.uz',
+        cachedAt: now,
+      };
+    } catch {
+      this.clinicSettingsCache = {
+        nameUz: 'DentaCare',
+        nameRu: 'DentaCare',
+        timezone: 'Asia/Tashkent',
+        phone: '+998 71 123 45 67',
+        email: 'info@dentacare.uz',
+        cachedAt: now,
+      };
+    }
+    return this.clinicSettingsCache;
   }
 
   private initMailTransporter() {
@@ -118,27 +157,58 @@ export class NotificationsService {
     }
   }
 
-  private redactRecipient(recipient: string): string {
+  maskRecipient(recipient: string): string {
     if (!recipient) return '***';
     if (recipient.includes('@')) {
       const [local, domain] = recipient.split('@');
-      return `${local.charAt(0)}***@${domain}`;
+      const maskedLocal = local.length > 2 ? `${local.slice(0, 2)}***` : `${local.charAt(0)}***`;
+      return `${maskedLocal}@${domain}`;
     }
-    if (recipient.length > 5) {
-      return `${recipient.slice(0, 5)}***${recipient.slice(-2)}`;
+    const cleaned = recipient.replace(/\D/g, '');
+    if (cleaned.length >= 9) {
+      return `+${cleaned.slice(0, 3)} ${cleaned.slice(3, 5)} *** ** ${cleaned.slice(-2)}`;
     }
-    return '***';
+    return recipient.slice(0, 3) + '***' + recipient.slice(-2);
   }
 
-  formatTashkentTime(dateOrIso: string | Date, tz = 'Asia/Tashkent'): string {
+  sanitizeError(err: string | null | undefined): string | null {
+    if (!err) return null;
+    return err
+      .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
+      .replace(/password=[^&\s]+/gi, 'password=[REDACTED]')
+      .replace(/bot\d+:[A-Za-z0-9_-]+/gi, 'bot[REDACTED_TOKEN]')
+      .replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
+  }
+
+  escapeTelegramMarkdown(str: string): string {
+    if (!str) return '';
+    return String(str).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+  }
+
+  private redactRecipient(recipient: string): string {
+    return this.maskRecipient(recipient);
+  }
+
+  formatAppointmentDateTime(
+    dateOrIso: string | Date,
+    tz = 'Asia/Tashkent',
+    lang: 'uz' | 'ru' = 'uz',
+  ): string {
     try {
       const d = typeof dateOrIso === 'string' ? new Date(dateOrIso) : dateOrIso;
       const day = formatInTimeZone(d, tz, 'dd.MM.yyyy');
       const time = formatInTimeZone(d, tz, 'HH:mm');
-      return `${day} soat ${time} (Toshkent vaqti)`;
+      if (lang === 'ru') {
+        return `${day} в ${time}`;
+      }
+      return `${day} soat ${time}`;
     } catch {
       return String(dateOrIso);
     }
+  }
+
+  formatTashkentTime(dateOrIso: string | Date, tz = 'Asia/Tashkent'): string {
+    return this.formatAppointmentDateTime(dateOrIso, tz, 'uz');
   }
 
   /**
@@ -1668,15 +1738,24 @@ export class NotificationsService {
     }
   }
 
-  private async deliverJob(job: any, workerLeaseToken: string) {
+  async deliverJob(job: any, workerLeaseToken: string) {
     // 1. Pre-flight check: ONLY apply status suppression to reminders!
     if (job.appointmentId && job.templateKey === 'appointment_reminder') {
+      const nowUtc = new Date();
       const appt = await this.prisma.appointment.findUnique({
         where: { id: job.appointmentId },
-        select: { status: true, startTime: true, revision: true, scheduleRevision: true },
+        select: {
+          id: true,
+          status: true,
+          startTime: true,
+          expiresAt: true,
+          revision: true,
+          scheduleRevision: true,
+          serviceName: true,
+        },
       });
 
-      // Cancel reminder if appointment is cancelled, completed, or no-show
+      // Cancel reminder if appointment is deleted or in terminal status
       if (
         !appt ||
         ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(
@@ -1687,6 +1766,34 @@ export class NotificationsService {
           UPDATE "notification_jobs"
           SET status = 'CANCELLED'::"notification_status",
               "last_error" = 'Qabul bekor qilingan yoki yakunlanganligi sababli eslatma bekor qilindi',
+              "lease_token" = NULL
+          WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+        `;
+        return;
+      }
+
+      // Suppress reminder if appointment start time is already in the past (worker backlog or delayed execution)
+      if (appt.startTime.getTime() <= nowUtc.getTime()) {
+        await this.prisma.$executeRaw`
+          UPDATE "notification_jobs"
+          SET status = 'CANCELLED'::"notification_status",
+              "last_error" = 'Qabul boshlanish vaqti o‘tib ketganligi sababli eslatma bekor qilindi',
+              "lease_token" = NULL
+          WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
+        `;
+        return;
+      }
+
+      // Suppress reminder for unconfirmed or expired PENDING requests
+      if (appt.status === AppointmentStatus.PENDING) {
+        const isExpired = appt.expiresAt && appt.expiresAt.getTime() <= nowUtc.getTime();
+        const reason = isExpired
+          ? 'Muddati o‘tgan tasdiqlanmagan buyurtma uchun eslatma yuborilmaydi'
+          : 'Tasdiqlanmagan (kutilayotgan) buyurtma uchun eslatma yuborilmaydi';
+        await this.prisma.$executeRaw`
+          UPDATE "notification_jobs"
+          SET status = 'CANCELLED'::"notification_status",
+              "last_error" = ${reason},
               "lease_token" = NULL
           WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
         `;
@@ -1742,7 +1849,6 @@ export class NotificationsService {
       }
 
       // Check if a reminder for THIS SPECIFIC SCHEDULE has already been delivered
-      // (A delivered reminder for schedule A must NOT suppress reminder for rescheduled schedule B!)
       const targetScheduleRevision = job.scheduleRevision ?? currentScheduleRev;
 
       // 1. Check explicit schedule revision match
@@ -1757,7 +1863,6 @@ export class NotificationsService {
       });
 
       // 2. If not found by explicit revision, check legacy records (scheduleRevision IS NULL)
-      // BUT ONLY if evidence-based classification proves they belong to the CURRENT generation!
       if (!alreadyDeliveredForSchedule) {
         const potentialLegacyDelivered = await this.prisma.notificationJob.findFirst({
           where: {
@@ -1775,7 +1880,7 @@ export class NotificationsService {
             potentialLegacyDelivered as any,
             appt as any,
             evidence,
-            new Date(),
+            nowUtc,
           );
 
           if (classification.classification === 'CURRENT_GENERATION_MATCH') {
@@ -1794,9 +1899,6 @@ export class NotificationsService {
         `;
         return;
       }
-
-      // If duration changed without rescheduling start time, the appointment revision incremented
-      // but scheduleRevision and start time are preserved! Worker proceeds with delivery without cancelling.
     }
 
     // 2. Verify worker STILL holds the lease before initiating delivery!
@@ -1825,7 +1927,7 @@ export class NotificationsService {
         SET status = ${isRealDelivery ? 'SENT' : 'SIMULATED'}::"notification_status",
             "sent_at" = NOW(),
             "attempts" = ${job.attempts + 1},
-            "last_error" = ${isRealDelivery ? null : 'Development sink (simulated delivery)'},
+            "last_error" = ${isRealDelivery ? null : 'Simulated delivery (development sink)'},
             "lease_token" = NULL
         WHERE id = ${job.id} AND "lease_token" = ${workerLeaseToken};
       `;
@@ -1838,7 +1940,7 @@ export class NotificationsService {
         UPDATE "notification_jobs"
         SET attempts = ${nextAttempts},
             status = ${willFail ? 'FAILED' : 'PENDING'}::"notification_status",
-            "last_error" = ${err?.message || String(err)},
+            "last_error" = ${this.sanitizeError(err?.message || String(err))},
             "locked_at" = NULL,
             "lease_token" = NULL,
             "scheduled_for" = NOW() + INTERVAL '2 minutes'
@@ -1848,25 +1950,54 @@ export class NotificationsService {
   }
 
   private async deliverEmail(job: any): Promise<boolean> {
-    const smtpFrom = this.configService.get<string>('SMTP_FROM', 'DentaCare <info@dentacare.uz>');
+    const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
-    const formattedTime = payload.formattedTime || this.formatTashkentTime(payload.startTime || new Date());
+    const lang = payload.lang === 'ru' ? 'ru' : 'uz';
+    const clinicName = lang === 'ru' ? clinic.nameRu : clinic.nameUz;
+    const formattedTime = payload.formattedTime || this.formatAppointmentDateTime(payload.startTime || new Date(), clinic.timezone, lang);
+    const serviceName = payload.serviceName || '';
+    const smtpFrom = this.configService.get<string>('SMTP_FROM', `${clinicName} <${clinic.email}>`);
 
-    let subject = `DentaCare: Qabul bildirishnomasi`;
-    let text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz qayd etildi. Vaqti: ${formattedTime}.`;
+    let subject = `${clinicName}: Qabul bildirishnomasi`;
+    let text = `Hurmatli bemor! Sizning ${serviceName} bo'yicha qabul so'rovingiz qabul qilindi va tasdiqlash kutilmoqda. Qabul vaqti: ${formattedTime}.`;
+
+    if (lang === 'ru') {
+      subject = `${clinicName}: Уведомление о приеме`;
+      text = `Уважаемый пациент! Ваша заявка на прием по услуге "${serviceName}" принята и ожидает подтверждения. Время приема: ${formattedTime}.`;
+    }
 
     if (job.templateKey === 'patient_booking_confirmed') {
-      subject = `DentaCare: Qabulingiz tasdiqlandi!`;
-      text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz tasdiqlandi. Qabul vaqti: ${formattedTime}. Sizni kutamiz!`;
+      if (lang === 'ru') {
+        subject = `${clinicName}: Ваш прием подтвержден!`;
+        text = `Уважаемый пациент! Ваш прием по услуге "${serviceName}" успешно подтвержден. Время приема: ${formattedTime}. Ждем вас в клинике!`;
+      } else {
+        subject = `${clinicName}: Qabulingiz tasdiqlandi!`;
+        text = `Hurmatli bemor! Sizning "${serviceName}" bo'yicha qabulingiz tasdiqlandi. Qabul vaqti: ${formattedTime}. Sizni kutamiz!`;
+      }
     } else if (job.templateKey === 'appointment_cancellation') {
-      subject = `DentaCare: Qabul bekor qilindi`;
-      text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz (${formattedTime}) bekor qilindi.`;
+      if (lang === 'ru') {
+        subject = `${clinicName}: Прием отменен`;
+        text = `Уважаемый пациент! Ваш прием по услуге "${serviceName}" на ${formattedTime} был отменен.`;
+      } else {
+        subject = `${clinicName}: Qabul bekor qilindi`;
+        text = `Hurmatli bemor! Sizning "${serviceName}" bo'yicha ${formattedTime} dagi qabulingiz bekor qilindi.`;
+      }
     } else if (job.templateKey === 'appointment_rescheduled') {
-      subject = `DentaCare: Qabul yangi vaqtga ko'chirildi`;
-      text = `Hurmatli bemor! Sizning ${payload.serviceName || ''} bo'yicha qabulingiz yangi vaqtga rejalashtirildi: ${formattedTime}.`;
+      if (lang === 'ru') {
+        subject = `${clinicName}: Прием перенесен на новое время`;
+        text = `Уважаемый пациент! Ваш прием по услуге "${serviceName}" перенесен на новое время: ${formattedTime}.`;
+      } else {
+        subject = `${clinicName}: Qabul yangi vaqtga ko'chirildi`;
+        text = `Hurmatli bemor! Sizning "${serviceName}" bo'yicha qabulingiz yangi vaqtga rejalashtirildi: ${formattedTime}.`;
+      }
     } else if (job.templateKey === 'appointment_reminder') {
-      subject = `DentaCare: Qabul eslatmasi`;
-      text = `Hurmatli bemor! Eslatib o'tamiz, bugun ${formattedTime} da ${payload.serviceName || ''} qabuliga yozilgansiz.`;
+      if (lang === 'ru') {
+        subject = `${clinicName}: Напоминание о приеме`;
+        text = `Уважаемый пациент! Напоминаем, что ваш прием по услуге "${serviceName}" запланирован на ${formattedTime}. Ждем вас в клинике!`;
+      } else {
+        subject = `${clinicName}: Qabul eslatmasi`;
+        text = `Hurmatli bemor! Eslatib o'tamiz, sizning "${serviceName}" bo'yicha qabulingiz ${formattedTime} da rejalashtirilgan. Sizni kutamiz!`;
+      }
     }
 
     if (this.mailTransporter) {
@@ -1876,14 +2007,14 @@ export class NotificationsService {
         subject,
         text,
         headers: {
-          'X-DentaCare-Job-ID': job.id,
-          'X-DentaCare-Deduplication': job.deduplicationKey || job.id,
+          'X-Clinic-Job-ID': job.id,
+          'X-Clinic-Deduplication': job.deduplicationKey || job.id,
         },
       });
       return true;
     } else {
       this.logger.log(
-        `[DEV SINK: EMAIL] To: ${this.redactRecipient(job.recipient)} | Subject: ${subject}`,
+        `[DEV SINK: EMAIL] To: ${this.maskRecipient(job.recipient)} | Subject: ${subject}`,
       );
       return false;
     }
@@ -1892,18 +2023,33 @@ export class NotificationsService {
   private async deliverSms(job: any): Promise<boolean> {
     const smsApiKey = this.configService.get<string>('SMS_API_KEY');
     const smsApiUrl = this.configService.get<string>('SMS_API_URL');
+    const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
-    const formattedTime = payload.formattedTime || this.formatTashkentTime(payload.startTime || new Date());
+    const lang = payload.lang === 'ru' ? 'ru' : 'uz';
+    const clinicName = lang === 'ru' ? clinic.nameRu : clinic.nameUz;
+    const formattedTime = payload.formattedTime || this.formatAppointmentDateTime(payload.startTime || new Date(), clinic.timezone, lang);
+    const serviceName = payload.serviceName || '';
 
-    let message = `DentaCare: ${payload.serviceName || ''} - ${formattedTime}`;
+    let message = lang === 'ru'
+      ? `${clinicName}: Заявка принята. ${serviceName} - ${formattedTime}. Ожидает подтверждения.`
+      : `${clinicName}: Qabul so'rovi qabul qilindi. ${serviceName} - ${formattedTime}. Tasdiqlash kutilmoqda.`;
+
     if (job.templateKey === 'patient_booking_confirmed') {
-      message = `DentaCare: Qabulingiz tasdiqlandi. ${payload.serviceName || ''} - ${formattedTime}`;
+      message = lang === 'ru'
+        ? `${clinicName}: Прием подтвержден! ${serviceName} - ${formattedTime}.`
+        : `${clinicName}: Qabulingiz tasdiqlandi! ${serviceName} - ${formattedTime}.`;
     } else if (job.templateKey === 'appointment_cancellation') {
-      message = `DentaCare: Qabulingiz bekor qilindi. ${payload.serviceName || ''}`;
+      message = lang === 'ru'
+        ? `${clinicName}: Прием отменен. ${serviceName} (${formattedTime}).`
+        : `${clinicName}: Qabulingiz bekor qilindi. ${serviceName} (${formattedTime}).`;
     } else if (job.templateKey === 'appointment_rescheduled') {
-      message = `DentaCare: Qabul yangi vaqtga ko'chirildi: ${formattedTime}`;
+      message = lang === 'ru'
+        ? `${clinicName}: Прием перенесен: ${formattedTime}.`
+        : `${clinicName}: Qabul yangi vaqtga ko'chirildi: ${formattedTime}.`;
     } else if (job.templateKey === 'appointment_reminder') {
-      message = `DentaCare Eslatma: Bugun ${formattedTime} da qabuldasiz.`;
+      message = lang === 'ru'
+        ? `${clinicName} Напоминание: прием ${formattedTime} (${serviceName}).`
+        : `${clinicName} Eslatma: ${formattedTime} da qabuldasiz (${serviceName}).`;
     }
 
     if (smsApiKey && smsApiUrl) {
@@ -1927,12 +2073,12 @@ export class NotificationsService {
         }
         return true;
       } catch (e: any) {
-        this.logger.warn(`SMS dispatch failed: ${e?.message}`);
+        this.logger.warn(`SMS dispatch failed: ${this.sanitizeError(e?.message)}`);
         throw e;
       }
     } else {
       this.logger.log(
-        `[DEV SINK: SMS] To: ${this.redactRecipient(job.recipient)} | Message: ${message}`,
+        `[DEV SINK: SMS] To: ${this.maskRecipient(job.recipient)} | Message: ${message}`,
       );
       return false;
     }
@@ -1940,10 +2086,16 @@ export class NotificationsService {
 
   private async deliverTelegram(job: any): Promise<boolean> {
     const botToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
-    const formattedTime = payload.formattedTime || this.formatTashkentTime(payload.startTime || new Date());
+    const formattedTime = payload.formattedTime || this.formatAppointmentDateTime(payload.startTime || new Date(), clinic.timezone, 'uz');
 
-    const text = `🔔 *Yangi qabul so'rovi!*\n\nXizmat: ${payload.serviceName}\nVaqti: ${formattedTime}\n\n👉 Boshqaruv paneli: ${payload.adminUrl}`;
+    const tgHeader = this.escapeTelegramMarkdown(`🔔 ${clinic.nameUz}: Yangi qabul so'rovi!`);
+    const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
+    const tgTime = this.escapeTelegramMarkdown(formattedTime);
+    const tgUrl = payload.adminUrl ? String(payload.adminUrl) : '';
+
+    const text = `${tgHeader}\n\nXizmat: ${tgService}\nVaqti: ${tgTime}\n\n👉 Boshqaruv paneli: ${tgUrl}`;
 
     if (botToken) {
       try {
@@ -1963,25 +2115,48 @@ export class NotificationsService {
         }
         return true;
       } catch (e: any) {
-        this.logger.warn(`Telegram API call failed: ${e?.message}`);
+        this.logger.warn(`Telegram API call failed: ${this.sanitizeError(e?.message)}`);
         throw e;
       }
     } else {
       this.logger.log(
-        `[DEV SINK: TELEGRAM] Chat: ${this.redactRecipient(job.recipient)} | Message: ${text.replace(/\n/g, ' ')}`,
+        `[DEV SINK: TELEGRAM] Chat: ${this.maskRecipient(job.recipient)} | Message: ${text.replace(/\n/g, ' ')}`,
       );
       return false;
     }
   }
 
-  async findAll(params: { status?: NotificationStatus; page?: number; limit?: number }) {
-    const { status, page = 1, limit = 50 } = params;
+  /**
+   * Admin view: Query notification jobs with filtering, pagination bounds, masked recipient,
+   * sanitized error messages, and appointment references.
+   */
+  async findAll(params: {
+    channel?: NotificationChannel;
+    status?: NotificationStatus;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, Math.floor(Number(params.page) || 1));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(params.limit) || 50)));
+
     const where: Prisma.NotificationJobWhereInput = {};
-    if (status) where.status = status;
+    if (params.channel) where.channel = params.channel;
+    if (params.status) where.status = params.status;
 
     const [items, total] = await Promise.all([
       this.prisma.notificationJob.findMany({
         where,
+        include: {
+          appointment: {
+            select: {
+              id: true,
+              startTime: true,
+              serviceName: true,
+              status: true,
+              patient: { select: { fullName: true } },
+            },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -1989,6 +2164,128 @@ export class NotificationsService {
       this.prisma.notificationJob.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    const sanitizedItems = items.map((j) => ({
+      id: j.id,
+      channel: j.channel,
+      templateKey: j.templateKey,
+      recipient: this.maskRecipient(j.recipient),
+      appointmentId: j.appointmentId,
+      appointment: j.appointment
+        ? {
+            id: j.appointment.id,
+            startTime: j.appointment.startTime,
+            serviceName: j.appointment.serviceName,
+            status: j.appointment.status,
+            patientName: j.appointment.patient?.fullName || null,
+          }
+        : null,
+      scheduleRevision: j.scheduleRevision,
+      status: j.status,
+      attempts: j.attempts,
+      maxAttempts: j.maxAttempts,
+      scheduledFor: j.scheduledFor,
+      sentAt: j.sentAt,
+      lockedAt: j.lockedAt,
+      lastError: this.sanitizeError(j.lastError),
+      isSimulated: j.status === NotificationStatus.SIMULATED,
+      createdAt: j.createdAt,
+    }));
+
+    return { items: sanitizedItems, total, page, limit };
+  }
+
+  /**
+   * Admin retry: Safely re-queues a failed or pending notification job after verifying
+   * appointment and schedule eligibility. Records staff audit action.
+   */
+  async retryJob(id: string, staffUser?: any) {
+    const job = await this.prisma.notificationJob.findUnique({
+      where: { id },
+      include: { appointment: true },
+    });
+
+    if (!job) {
+      throw new NotFoundException('Xabarnoma topilmadi');
+    }
+
+    if (job.status === NotificationStatus.SENT) {
+      throw new BadRequestException('Ushbu xabarnoma allaqachon muvaffaqiyatli yuborilgan');
+    }
+
+    // Revalidate appointment and schedule eligibility for reminders
+    if (job.templateKey === 'appointment_reminder' && job.appointment) {
+      const now = new Date();
+      if (
+        ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(
+          job.appointment.status,
+        )
+      ) {
+        throw new BadRequestException('Qabul bekor qilingan yoki yakunlangan, eslatmani qayta yuborib bo‘lmaydi');
+      }
+
+      if (job.appointment.startTime.getTime() <= now.getTime()) {
+        throw new BadRequestException('Qabul boshlanish vaqti o‘tib ketgan, eslatmani qayta yuborib bo‘lmaydi');
+      }
+
+      if (job.appointment.status === AppointmentStatus.PENDING) {
+        throw new BadRequestException('Tasdiqlanmagan qabul uchun eslatma yuborib bo‘lmaydi');
+      }
+    }
+
+    const updated = await this.prisma.notificationJob.update({
+      where: { id },
+      data: {
+        status: NotificationStatus.PENDING,
+        attempts: 0,
+        scheduledFor: new Date(),
+        lastError: null,
+        lockedAt: null,
+        leaseToken: null,
+      },
+    });
+
+    await this.auditService.log({
+      userId: staffUser?.id || null,
+      action: 'notification.retried',
+      entity: 'NotificationJob',
+      entityId: id,
+      details: {
+        channel: job.channel,
+        templateKey: job.templateKey,
+        previousStatus: job.status,
+        recipient: this.maskRecipient(job.recipient),
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Admin: Returns current notification provider configuration status
+   */
+  getIntegrationStatus() {
+    const smtpHost = this.configService.get<string>('SMTP_HOST');
+    const smtpUser = this.configService.get<string>('SMTP_USER');
+    const smsApiKey = this.configService.get<string>('SMS_API_KEY');
+    const smsApiUrl = this.configService.get<string>('SMS_API_URL');
+    const tgToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    const tgChatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
+
+    return {
+      email: {
+        configured: Boolean(smtpHost && smtpUser),
+        provider: 'SMTP',
+        host: smtpHost || null,
+      },
+      sms: {
+        configured: Boolean(smsApiKey && smsApiUrl),
+        provider: 'Eskiz / SMS Gateway',
+      },
+      telegram: {
+        configured: Boolean(tgToken && tgChatId),
+        botConfigured: Boolean(tgToken),
+        chatIdConfigured: Boolean(tgChatId),
+      },
+    };
   }
 }
