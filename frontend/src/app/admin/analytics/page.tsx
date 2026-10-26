@@ -681,10 +681,21 @@ export default function AdminAnalyticsPage() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-[11px] text-[#52696e]">
-                            {srv.count} {isUz ? 'ta xizmat' : 'услуг'} ({srv.appointmentsCount || srv.count} {isUz ? 'qabul' : 'приемов'})
+                            {srv.performedCount ?? srv.count} {isUz ? 'bajarilgan' : 'выполнено'}
+                            {srv.bookedCount !== undefined && srv.bookedCount !== (srv.performedCount ?? srv.count) && (
+                              <span className="text-[10px] text-[#718e95] ml-1">
+                                ({srv.bookedCount} {isUz ? 'buyurtma' : 'заказ'})
+                              </span>
+                            )}
                           </span>
-                          {srv.revenueMinor > 0 && (
-                            <span className="font-bold text-xs text-[#167b78] bg-[#e0f2ed] px-2 py-0.5 rounded-md">
+                          {srv.revenueMinor !== undefined && (
+                            <span
+                              className={`font-bold text-xs px-2 py-0.5 rounded-md ${
+                                srv.revenueMinor < 0
+                                  ? 'text-rose-700 bg-rose-50 border border-rose-200'
+                                  : 'text-[#167b78] bg-[#e0f2ed]'
+                              }`}
+                            >
                               {srv.revenueMinor.toLocaleString(isUz ? 'uz-UZ' : 'ru-RU')} {isUz ? "so'm" : "сум"}
                             </span>
                           )}

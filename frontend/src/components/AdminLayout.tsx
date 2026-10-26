@@ -192,6 +192,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       roles: ['OWNER', 'ADMIN'],
     },
     {
+      href: '/admin/notifications',
+      label: language === 'ru' ? 'Уведомления' : 'Xabarnomalar',
+      icon: Bell,
+      roles: ['OWNER', 'ADMIN'],
+    },
+    {
       href: '/admin/staff',
       label: language === 'ru' ? 'Сотрудники' : 'Xodimlar',
       icon: UserCog,

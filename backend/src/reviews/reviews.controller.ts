@@ -13,7 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { ReviewsService } from './reviews.service';
+import { ReviewsService, AuthenticatedStaffUser } from './reviews.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -137,7 +137,7 @@ export class ReviewsController {
   async moderateReview(
     @Param('id') id: string,
     @Body() dto: ModerateReviewDto,
-    @Req() req: any,
+    @Req() req: { user?: AuthenticatedStaffUser },
   ) {
     return this.reviewsService.updateStatus(id, dto.status, dto.adminNote, req?.user);
   }
@@ -145,7 +145,7 @@ export class ReviewsController {
   @Delete('admin/reviews/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  async deleteReview(@Param('id') id: string, @Req() req: any) {
+  async deleteReview(@Param('id') id: string, @Req() req: { user?: AuthenticatedStaffUser }) {
     await this.reviewsService.delete(id, req?.user);
     return { message: 'Fikr o\'chirildi' };
   }

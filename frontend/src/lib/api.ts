@@ -193,6 +193,7 @@ export const api = {
     patientEmail?: string;
     note?: string;
     consentGiven: boolean;
+    lang?: 'uz' | 'ru';
     idempotencyKey?: string;
     expectedQuote?: {
       priceFrom?: number;
@@ -672,4 +673,6 @@ export const api = {
     fetcher<any>(`/api/admin/notifications/${id}/retry`, {
       method: 'POST',
     }),
+  getNotificationIntegrationStatus: () =>
+    fetcher<any>('/api/admin/notifications/integration-status'),
 };

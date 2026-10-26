@@ -912,6 +912,7 @@ function BookingContent() {
         patientEmail: patientEmail.trim() || undefined,
         note: patientNote.trim() || undefined,
         consentGiven,
+        lang: language,
         idempotencyKey: currentKey,
         expectedQuote: boundSelection.serverCalc ? {
           priceFrom: boundSelection.serverCalc.priceFrom,
@@ -1051,6 +1052,7 @@ function BookingContent() {
         patientEmail: patientEmail.trim() || undefined,
         note: patientNote.trim() || undefined,
         consentGiven,
+        lang: language,
         idempotencyKey: newIdempotencyKey,
         expectedQuote: {
           priceFrom: newQuote.priceFrom,

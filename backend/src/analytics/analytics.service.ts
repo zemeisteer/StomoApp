@@ -268,11 +268,12 @@ export class AnalyticsService {
     // a) Distinct appointment counts vs individual service usages
     // b) Service items from multi-service appointments without double-counting appointments
     // c) Single-service legacy appointments lacking appointmentServiceItem rows
-    // d) Service-specific revenue (item price or proportionate share of recorded payments)
+    // d) Service-specific revenue using exact deterministic per-payment integer allocation
     const serviceAppointments = await this.prisma.appointment.findMany({
       where: appointmentWhere,
       select: {
         id: true,
+        status: true,
         serviceId: true,
         serviceName: true,
         servicePriceFrom: true,
@@ -285,16 +286,21 @@ export class AnalyticsService {
             priceFrom: true,
             durationMinutes: true,
             isLegacyBundle: true,
+            sortOrder: true,
           },
-          orderBy: { sortOrder: 'asc' },
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         },
         payments: {
           select: {
+            id: true,
             amount: true,
             isRefund: true,
+            recordedAt: true,
           },
+          orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }],
         },
       },
+      orderBy: [{ startTime: 'asc' }, { id: 'asc' }],
     });
 
     const serviceStatsMap = new Map<
@@ -303,7 +309,8 @@ export class AnalyticsService {
         serviceId?: string;
         nameUz: string;
         nameRu?: string | null;
-        usageCount: number;
+        bookedCount: number;
+        performedCount: number;
         distinctAppointmentIds: Set<string>;
         quotedValueMinor: number;
         grossPaymentsMinor: number;
@@ -313,35 +320,56 @@ export class AnalyticsService {
       }
     >();
 
-    let totalServiceUsage = 0;
+    let totalServiceBooked = 0;
+    let totalServicePerformed = 0;
     let legacyBundlesCount = 0;
+    let legacyGrossMinor = 0;
+    let legacyRefundsMinor = 0;
     let totalQuotedMinor = 0;
 
     for (const appt of serviceAppointments) {
-      const grossPayment = appt.payments
-        .filter((p) => !p.isRefund)
-        .reduce((acc, p) => acc + p.amount, 0);
-      const refundPayment = appt.payments
-        .filter((p) => p.isRefund)
-        .reduce((acc, p) => acc + p.amount, 0);
+      const isPerformed =
+        appt.status === AppointmentStatus.COMPLETED || appt.status === AppointmentStatus.CHECKED_IN;
 
       if (appt.serviceItems && appt.serviceItems.length > 0) {
-        const validItems = appt.serviceItems.filter((i) => !i.isLegacyBundle);
-        const legacyItems = appt.serviceItems.filter((i) => i.isLegacyBundle);
+        const allItems = appt.serviceItems;
+        const legacyItems = allItems.filter((i) => i.isLegacyBundle);
         legacyBundlesCount += legacyItems.length;
 
-        const weights = validItems.map((i) => Math.max(0, i.priceFrom || 0));
-        const allocatedGross = allocateIntegerAmounts(grossPayment, weights);
-        const allocatedRefunds = allocateIntegerAmounts(refundPayment, weights);
+        // Weights include all items (including legacy bundle items) so legacy amounts are not
+        // silently misallocated entirely to catalog services
+        const weights = allItems.map((i) => Math.max(0, i.priceFrom || 0));
 
-        for (let idx = 0; idx < validItems.length; idx++) {
-          const item = validItems[idx];
+        // Deterministic per-payment integer allocation (identical policy as filtered cash totals)
+        const itemGrossAcc = new Array(allItems.length).fill(0);
+        const itemRefundAcc = new Array(allItems.length).fill(0);
+
+        for (const p of appt.payments) {
+          const allocated = allocateIntegerAmounts(p.amount, weights);
+          for (let idx = 0; idx < allItems.length; idx++) {
+            if (p.isRefund) {
+              itemRefundAcc[idx] += allocated[idx] || 0;
+            } else {
+              itemGrossAcc[idx] += allocated[idx] || 0;
+            }
+          }
+        }
+
+        for (let idx = 0; idx < allItems.length; idx++) {
+          const item = allItems[idx];
+          if (item.isLegacyBundle) {
+            legacyGrossMinor += itemGrossAcc[idx];
+            legacyRefundsMinor += itemRefundAcc[idx];
+            continue;
+          }
+
           const key = item.serviceId || item.serviceNameUz;
           const current = serviceStatsMap.get(key) || {
             serviceId: item.serviceId || undefined,
             nameUz: item.serviceNameUz,
             nameRu: item.serviceNameRu,
-            usageCount: 0,
+            bookedCount: 0,
+            performedCount: 0,
             distinctAppointmentIds: new Set<string>(),
             quotedValueMinor: 0,
             grossPaymentsMinor: 0,
@@ -351,13 +379,15 @@ export class AnalyticsService {
           };
 
           const itemQuoted = item.priceFrom || 0;
-          const itemGross = allocatedGross[idx] || 0;
-          const itemRefund = allocatedRefunds[idx] || 0;
+          const itemGross = itemGrossAcc[idx];
+          const itemRefund = itemRefundAcc[idx];
           const itemNet = itemGross - itemRefund;
 
-          current.usageCount += 1;
+          current.bookedCount += 1;
+          if (isPerformed) current.performedCount += 1;
           current.distinctAppointmentIds.add(appt.id);
-          totalServiceUsage += 1;
+          totalServiceBooked += 1;
+          if (isPerformed) totalServicePerformed += 1;
 
           current.quotedValueMinor += itemQuoted;
           current.grossPaymentsMinor += itemGross;
@@ -374,7 +404,8 @@ export class AnalyticsService {
         const current = serviceStatsMap.get(key) || {
           serviceId: appt.serviceId,
           nameUz: appt.serviceName,
-          usageCount: 0,
+          bookedCount: 0,
+          performedCount: 0,
           distinctAppointmentIds: new Set<string>(),
           quotedValueMinor: 0,
           grossPaymentsMinor: 0,
@@ -383,16 +414,25 @@ export class AnalyticsService {
           revenueMinor: 0,
         };
 
-        const quoted = appt.servicePriceFrom || 0;
-        const net = grossPayment - refundPayment;
+        let singleGross = 0;
+        let singleRefund = 0;
+        for (const p of appt.payments) {
+          if (p.isRefund) singleRefund += p.amount;
+          else singleGross += p.amount;
+        }
 
-        current.usageCount += 1;
+        const quoted = appt.servicePriceFrom || 0;
+        const net = singleGross - singleRefund;
+
+        current.bookedCount += 1;
+        if (isPerformed) current.performedCount += 1;
         current.distinctAppointmentIds.add(appt.id);
-        totalServiceUsage += 1;
+        totalServiceBooked += 1;
+        if (isPerformed) totalServicePerformed += 1;
 
         current.quotedValueMinor += quoted;
-        current.grossPaymentsMinor += grossPayment;
-        current.refundsMinor += refundPayment;
+        current.grossPaymentsMinor += singleGross;
+        current.refundsMinor += singleRefund;
         current.netRevenueMinor += net;
         current.revenueMinor = current.netRevenueMinor;
         totalQuotedMinor += quoted;
@@ -402,22 +442,31 @@ export class AnalyticsService {
     }
 
     const popularServices = Array.from(serviceStatsMap.values())
-      .sort((a, b) => b.usageCount - a.usageCount)
+      .sort((a, b) =>
+        b.performedCount !== a.performedCount
+          ? b.performedCount - a.performedCount
+          : b.bookedCount - a.bookedCount,
+      )
       .slice(0, 10)
       .map((s) => ({
         serviceId: s.serviceId,
         name: s.nameUz,
         nameUz: s.nameUz,
         nameRu: s.nameRu,
-        count: s.usageCount,
-        usageCount: s.usageCount,
+        count: s.performedCount,
+        usageCount: s.performedCount,
+        performedCount: s.performedCount,
+        bookedCount: s.bookedCount,
         appointmentsCount: s.distinctAppointmentIds.size,
         quotedValueMinor: s.quotedValueMinor,
         grossPaymentsMinor: s.grossPaymentsMinor,
         refundsMinor: s.refundsMinor,
         netRevenueMinor: s.netRevenueMinor,
-        revenueMinor: s.revenueMinor,
-        percentage: totalServiceUsage > 0 ? Math.round((s.usageCount / totalServiceUsage) * 100) : 0,
+        revenueMinor: s.netRevenueMinor,
+        percentage:
+          totalServicePerformed > 0
+            ? Math.round((s.performedCount / totalServicePerformed) * 100)
+            : 0,
       }));
 
     // 3. Exact Interval-Based Doctor Utilization Calculation
@@ -713,9 +762,11 @@ export class AnalyticsService {
     const payments = await this.prisma.payment.findMany({
       where: paymentWhere,
       select: {
+        id: true,
         amount: true,
         isRefund: true,
         method: true,
+        recordedAt: true,
         appointment: {
           select: {
             id: true,
@@ -723,14 +774,18 @@ export class AnalyticsService {
             servicePriceFrom: true,
             serviceItems: {
               select: {
+                id: true,
                 serviceId: true,
                 priceFrom: true,
                 isLegacyBundle: true,
+                sortOrder: true,
               },
+              orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
             },
           },
         },
       },
+      orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }],
     });
 
     let totalIncome = 0;
@@ -749,10 +804,10 @@ export class AnalyticsService {
       if (serviceId && p.appointment) {
         const appt = p.appointment;
         if (appt.serviceItems && appt.serviceItems.length > 0) {
-          const validItems = appt.serviceItems.filter((i) => !i.isLegacyBundle);
-          const weights = validItems.map((i) => Math.max(0, i.priceFrom || 0));
+          const allItems = appt.serviceItems;
+          const weights = allItems.map((i) => Math.max(0, i.priceFrom || 0));
           const allocated = allocateIntegerAmounts(p.amount, weights);
-          const matchingIndices = validItems
+          const matchingIndices = allItems
             .map((item, idx) => (item.serviceId === serviceId ? idx : -1))
             .filter((idx) => idx !== -1);
           effectiveAmount = matchingIndices.reduce((sum, idx) => sum + (allocated[idx] || 0), 0);
@@ -775,11 +830,26 @@ export class AnalyticsService {
         endDate: end.toISOString(),
         timezone,
       },
+      dateBases: {
+        servicesTable: {
+          field: 'appointment.startTime',
+          labelUz: 'Qabul rejalashtirilgan vaqti (startTime)',
+          labelRu: 'Время приема (startTime)',
+        },
+        cashTotals: {
+          field: 'payment.recordedAt',
+          labelUz: 'Kassa tushumi vaqti (recordedAt)',
+          labelRu: 'Время проводки платежа (recordedAt)',
+        },
+        note: 'Xizmatlar statistikasi qabul vaqtiga (startTime), kassa tushumi esa to\'lov amalga oshirilgan vaqtga (recordedAt) asoslanadi',
+      },
       summary: {
         totalAppointments,
-        totalServiceUsage,
+        totalServiceBooked,
+        totalServicePerformed,
+        totalServiceUsage: totalServicePerformed,
         servicesPerAppointment:
-          totalAppointments > 0 ? Number((totalServiceUsage / totalAppointments).toFixed(2)) : 0,
+          totalAppointments > 0 ? Number((totalServicePerformed / totalAppointments).toFixed(2)) : 0,
         completed,
         cancelled,
         noShow,
@@ -792,11 +862,15 @@ export class AnalyticsService {
       },
       statusBreakdown: statusMap,
       popularServices,
-      totalServiceUsage,
+      totalServiceUsage: totalServicePerformed,
+      totalServiceBooked,
       legacyBundlesCount,
       unresolvedRecords: {
         unresolvedCount: legacyBundlesCount,
-        note: 'Tarixiy ko\'p xizmatli noaniq qabullar katalog xizmatlari statistikasidan chiqarilgan',
+        legacyGrossMinor,
+        legacyRefundsMinor,
+        legacyNetMinor: legacyGrossMinor - legacyRefundsMinor,
+        note: 'Tarixiy ko\'p xizmatli noaniq qabullar katalog xizmatlari statistikasidan chiqarilgan va to\'lovlari ajratilgan',
       },
       doctorUtilization,
       leads: {

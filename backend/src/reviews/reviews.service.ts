@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { ReviewStatus, Prisma } from '@prisma/client';
+import { ReviewStatus, Prisma, StaffRole } from '@prisma/client';
 
 export interface CreateReviewDto {
   authorName: string;
@@ -10,13 +10,12 @@ export interface CreateReviewDto {
   consentDisplayName: boolean;
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+export interface AuthenticatedStaffUser {
+  sub: string;
+  email?: string;
+  role: StaffRole;
+  doctorId?: string | null;
+  id?: string;
 }
 
 @Injectable()
@@ -29,7 +28,8 @@ export class ReviewsService {
   /**
    * Submit public review (always starts as PENDING moderation)
    * Validates non-empty/whitespace input, enforces exact integer rating 1-5,
-   * escapes user HTML, and strips any untrusted patient association.
+   * stores normalized plain text (rendering layer handles escaping safely),
+   * and strips any untrusted patient association.
    */
   async create(data: CreateReviewDto) {
     const trimmedAuthor = (data.authorName || '').trim();
@@ -49,9 +49,9 @@ export class ReviewsService {
 
     return this.prisma.review.create({
       data: {
-        authorName: escapeHtml(trimmedAuthor),
+        authorName: trimmedAuthor,
         rating: data.rating,
-        text: escapeHtml(trimmedText),
+        text: trimmedText,
         consentDisplayName: Boolean(data.consentDisplayName),
         patientId: null, // Untrusted client cannot link review to any patient
         status: ReviewStatus.PENDING,
@@ -130,7 +130,7 @@ export class ReviewsService {
     id: string,
     status: ReviewStatus,
     adminNote?: string,
-    staffUser?: any,
+    staffUser?: AuthenticatedStaffUser,
   ) {
     const review = await this.prisma.review.findUnique({ where: { id } });
     if (!review) throw new NotFoundException('Fikr topilmadi');
@@ -143,8 +143,9 @@ export class ReviewsService {
       },
     });
 
+    const actorId = staffUser?.sub || staffUser?.id || null;
     await this.auditService.log({
-      userId: staffUser?.id || null,
+      userId: actorId,
       action: 'review.moderated',
       entity: 'Review',
       entityId: id,
@@ -162,14 +163,15 @@ export class ReviewsService {
   /**
    * Admin: Permanent delete with audit log
    */
-  async delete(id: string, staffUser?: any) {
+  async delete(id: string, staffUser?: AuthenticatedStaffUser) {
     const review = await this.prisma.review.findUnique({ where: { id } });
     if (!review) throw new NotFoundException('Fikr topilmadi');
 
     await this.prisma.review.delete({ where: { id } });
 
+    const actorId = staffUser?.sub || staffUser?.id || null;
     await this.auditService.log({
-      userId: staffUser?.id || null,
+      userId: actorId,
       action: 'review.deleted',
       entity: 'Review',
       entityId: id,

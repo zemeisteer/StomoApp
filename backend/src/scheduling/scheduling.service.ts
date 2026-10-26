@@ -3,6 +3,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppointmentStatus, DayOfWeek, ExceptionType, Prisma } from '@prisma/client';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { registerDecorator, ValidationOptions, ValidationArguments } from 'class-validator';
+import {
+  isAppointmentOverlapping,
+  buildConflictCandidateWhere,
+  getAppointmentOccupiedEnd,
+} from '../appointments/appointment-time.helper';
 
 export const DAY_MAP: Record<number, DayOfWeek> = {
   0: DayOfWeek.SUNDAY,
@@ -491,22 +496,10 @@ export class SchedulingService {
       return false;
     }
 
-    const whereClause: any = {
-      doctorId,
-      status: { in: TIME_RESERVING_STATUSES },
-      startTime: { lt: new Date(endTimeUtc.getTime() + 24 * 60 * 60000) },
-      OR: [
-        { endTime: { gt: startTimeUtc } },
-        { overrunActive: true },
-      ],
-    };
-
-    if (excludeAppointmentId) {
-      whereClause.id = { not: excludeAppointmentId };
-    }
-
     const candidateAppts = await client.appointment.findMany({
-      where: whereClause,
+      where: buildConflictCandidateWhere(doctorId, startTimeUtc, endTimeUtc, {
+        excludeAppointmentId,
+      }),
     });
 
     const nowUtc = new Date();
@@ -514,11 +507,7 @@ export class SchedulingService {
       if (a.status === AppointmentStatus.PENDING && a.expiresAt && a.expiresAt <= nowUtc) {
         return false;
       }
-      const buffer = a.bufferMinutes ?? 5;
-      const effectiveEnd = (a.overrunActive && a.overrunEstimatedEndTime)
-        ? new Date(new Date(a.overrunEstimatedEndTime).getTime() + buffer * 60000)
-        : new Date(new Date(a.endTime).getTime() + buffer * 60000);
-      return a.startTime < endTimeUtc && effectiveEnd > startTimeUtc;
+      return isAppointmentOverlapping(a, startTimeUtc, endTimeUtc);
     });
 
     return !hasConflict;
@@ -798,6 +787,7 @@ export class SchedulingService {
         id: true,
         startTime: true,
         endTime: true,
+        durationMinutes: true,
         bufferMinutes: true,
         branchId: true,
         branch: { select: { nameUz: true, nameRu: true } },
@@ -821,7 +811,8 @@ export class SchedulingService {
       const apptStartMin = zonedStart.getHours() * 60 + zonedStart.getMinutes();
       const apptEndMin = zonedEnd.getHours() * 60 + zonedEnd.getMinutes();
       const apptBuf = appt.bufferMinutes ?? params.defaultBufferMinutes;
-      const apptEndWithBuf = apptEndMin + apptBuf;
+      const zonedOccupiedEnd = toZonedTime(getAppointmentOccupiedEnd(appt as any), params.timezone);
+      const apptEndWithBuf = zonedOccupiedEnd.getHours() * 60 + zonedOccupiedEnd.getMinutes();
 
       const dateStr = `${zonedStart.getFullYear()}-${pad(zonedStart.getMonth() + 1)}-${pad(zonedStart.getDate())}`;
       const formattedTime = `${dateStr} ${fmt(apptStartMin)} - ${fmt(apptEndMin)}`;

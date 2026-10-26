@@ -3,73 +3,88 @@
 ## Overall Status: VERIFIED & COMPLETED LOCALLY (No push, merge, deploy, or database reset)
 
 - **Branch**: `dev`
-- **Reviewed Baseline**: `010a311b3b3a1ceeac6b5a4c9a050af1499ae070`
-- **Repository**: `zemeisteer/StomoApp`
+- **Reviewed Baseline**: `d458dec7848033631b7235cb42a8f6e3641e71b7`
+- **Repository**: `https://github.com/zemeisteer/StomoApp`
 - **Local Path**: `c:\Users\user\Documents\GitHub\StomoApp`
 - **Design Direction**: Modern Pale Mint / Teal public redesign preserved with full responsive polish
-- **Language / Localization**: Bilingual Uzbek (`uz`) & Russian (`ru`) verified across public booking, admin calendar, and marketing pages
+- **Language / Localization**: Bilingual Uzbek (`uz`) & Russian (`ru`) verified across public booking, admin calendar, notifications, reviews, and marketing pages
 - **Active Preview URL**: `http://localhost:3000` (Next.js server proxying `/api/*` to NestJS at `http://localhost:4000/api`)
 - **Test Database**: `postgresql://dentacare:****@localhost:5432/dentacare_test?schema=public`
 
 ---
 
-## 1. Concrete Fixes Implemented & Verified
+## 1. Concrete Priorities Implemented & Verified
 
-### 1. Public Booking Response Contract (`appointments.service.ts`, `appointments.controller.ts`, `api.ts`, `booking/page.tsx`)
-- **Root Problem**: `frontend/src/app/booking/page.tsx` read `result.servicePriceFrom`, but `PublicBookingController.createBooking` and `rescheduleByToken` returned `price` without explicit `servicePriceFrom` or complete persisted fields, causing the confirmation screen to fall back to stale pre-submission quotes.
-- **Implementation**:
-  - `serializeAppointmentResponse` in `backend/src/appointments/appointments.service.ts` and both controllers return the complete, authoritative persisted dataset: `servicePriceFrom`, `price`, `priceFrom`, `durationMinutes`, `bufferMinutes`, `branchId`, `doctorId`, `serviceId`, localized names (`doctorNameUz/Ru`, `branchNameUz/Ru`), and `serviceItems`.
-  - Defined explicit shared `BookingResponse` interface in `frontend/src/lib/api.ts`.
-  - In `frontend/src/app/booking/page.tsx`, Step 7 confirmation screen strictly uses server response values (`result.servicePriceFrom`, `result.durationMinutes`) as the single source of truth without falling back to pre-submission quotes.
-  - Preserves legitimate zeros (`price === 0` / "Bepul").
-- **Verification**:
-  - Exact monetary equality test in `verify-booking-integration.js`: service price was updated directly in DB to 185,000 UZS (18500000 tiyin) right before submission. The confirmation screen strictly displayed `185,000 so'm`, and the DB record persisted `servicePriceFrom: 18500000`.
+### Priority 1: Appointment Time Contract
+- `appointment.startTime` stores treatment start time.
+- `appointment.endTime` stores treatment end time, strictly excluding operatory turnaround buffer (`startTime + durationMinutes`).
+- `occupiedEnd` stores treatment end + turnaround buffer (`startTime + durationMinutes + bufferMinutes`).
+- Shared helpers implemented in `backend/src/appointments/appointment-time.helper.ts`:
+  - `getAppointmentTreatmentEnd`: Derives treatment end for modern records (`TREATMENT_END`), legacy records (`LEGACY_OCCUPIED_END`), and zero-buffer records without double-counting.
+  - `getAppointmentOccupiedEnd`: Derives occupied end time including operatory turnaround buffer.
+  - `classifyAppointmentRecord`: Classifies records into `TREATMENT_END`, `LEGACY_OCCUPIED_END`, `ZERO_BUFFER`, or `AMBIGUOUS`.
+- All mutation points updated: `createBooking`, `rescheduleByToken`, `reschedule`, `overrideDuration`, and `recordDelay`.
+- Backfill script `backend/scripts/migrate-appointment-time-contract.ts` with `--dry-run` and `--execute` modes:
+  - Scanned all 39 database records, converted 39 records to compliant `TREATMENT_END`, 0 ambiguous records.
+  - Re-run in `--dry-run` mode confirms 0 mutations needed (100% idempotent).
 
-### 2. Explicit Pending-Expiry Settings (`appointments.service.ts`)
-- **Root Problem**: `AppointmentsService.createBooking` had a silent clamp `txPendingExpiryMinutes > 30 ? txPendingExpiryMinutes : 1440` which ignored configured boundaries.
-- **Implementation**:
-  - Removed silent clamp: `txPendingExpiryMinutes` is now honored directly (clamped safely between 1 and 10,080 minutes, default 30).
-  - Explicit boundaries 15, 30, and 60 minutes are respected.
-  - Staff-created appointments created via admin API are saved with `status: 'CONFIRMED'`, `expiresAt: null`, and initial status history `toStatus: 'CONFIRMED'`. Website bookings default to `status: 'PENDING'` with explicit expiry and `toStatus: 'PENDING'`.
-- **Verification**:
-  - Automated assertions in `verify-booking-integration.js` Part 1.3 verified `expiresAt` calculated to ~15.0m, ~30.0m, and ~60.0m for respective clinic configurations. Staff appointment asserted `status === 'CONFIRMED'`, `expiresAt === null`, and `statusHistory[0].toStatus === 'CONFIRMED'`.
+### Priority 2: Database Conflict Candidate Queries
+- Added `buildConflictCandidateWhere(doctorId, windowStart, windowEnd, excludeAppointmentId)` in `appointment-time.helper.ts`.
+- Filters `startTime < windowEnd` and `endTime > windowStart - maxBuffer` to capture all candidate appointments regardless of whether buffer was historical or modern.
+- Applied exact half-open interval overlap `isAppointmentOverlapping(existing, candidateStart, candidateOccupiedEnd)` across booking, rescheduling, and duration overrides.
+- Adjacent appointments can start exactly at `occupiedEnd` of a prior appointment, while collisions during turnaround buffer are strictly rejected.
 
-### 3. Overtime Branch Support End-to-End (`admin/doctors/page.tsx`, `public.service.ts`, `scheduling.service.ts`, `appointments.service.ts`)
-- **Root Problem**: Admin exception modal lacked an explicit branch selector for overtime shifts when doctors have multiple branches, and public projections lacked `branchId`.
-- **Implementation**:
-  - In `frontend/src/app/admin/doctors/page.tsx`: added `OVERTIME: "Qo'shimcha ish vaqti (Overtime)"` to `EXCEPTION_TYPE_LABELS`. Rendered branch selector dropdown for overtime exceptions when the doctor is associated with multiple branches.
-  - In `backend/src/public/public.service.ts`: added `branchId: true` to `exceptions.select` in both `getDoctors` and `getDoctorBySlug`.
-  - In `backend/src/scheduling/scheduling.service.ts` and `appointments.service.ts`: doctor branch validation verifies active branches (`branch: { isActive: true }`) and active schedules (`isActive: true, branch: { isActive: true }`).
-  - **Migration Note**: Accurately noted that migration `20261023130000_explicit_overtime_branch` added column `branch_id TEXT` and foreign key constraint `schedule_exceptions_branch_id_fkey`, but did NOT create `schedule_exceptions_branch_id_idx`.
-- **Verification**:
-  - Sunday overtime created for Branch A produced slots strictly bound to Branch A; querying Branch B returned 0 slots. Verified over public HTTP slots API (`/api/scheduling/slots`).
+### Priority 3: Expiration and Confirmation Rules
+- `AppointmentsService.changeStatus` strictly rejects ordinary staff confirmation of expired pending appointments (`expiresAt <= nowUtc`) with `ConflictException('Qabulni tasdiqlash muddati o\'tgan. Iltimos, yangi vaqt tanlang.')`.
+- Confirmation inside transaction acquires doctor advisory lock, re-verifies that appointment falls within doctor's active working hours, and confirms no conflicting occupied slots exist.
 
-### 4. Custom Date Picker WAI-ARIA & Hydration Fix (`CustomDatePicker.tsx`)
-- **Root Problem**: Invalid HTML nesting (clear button inside trigger `<button>`) caused React hydration warning `In HTML, <button> cannot be a descendant of <button>`. Keyboard navigation and focus restoration required WAI-ARIA grid conformance.
-- **Implementation**:
-  - Refactored `frontend/src/components/CustomDatePicker.tsx`: clear button is now a sibling element within `.relative`.
-  - Implemented full WAI-ARIA grid navigation: Arrow keys (Up, Down, Left, Right), Home/End, PageUp/PageDown, Enter/Space for selection.
-  - Escape key dismisses the popover and restores focus to the trigger button.
-  - Localized Uzbek/Russian month and weekday headers.
-  - Timezone prop defaults to `Asia/Tashkent`.
-- **Verification**:
-  - Hydration check in browser: 0 console warnings, 0 hydration errors.
+### Priority 4: Concurrency-Safe Notification Retries
+- `NotificationsService.retryJob` validates retry eligibility within a transactional row lock `FOR UPDATE`.
+- Strictly rejects `SENT`, `SIMULATED`, and `CANCELLED` jobs.
+- Rejects active `PROCESSING` jobs with unexpired worker leases (`lockedAt >= now - 5 minutes`) and queued `PENDING` jobs.
+- Revalidates appointment eligibility for reminders (appointment existence, terminal statuses, past start time, and schedule revision).
+- Returns sanitized DTO with masked recipient (`+998 90 *** ** 67`), sanitized errors, and omitted internal worker lease tokens and payloads.
 
-### 5. Real Tests Hardening (`verify-booking-integration.js`, `browser-workflow.js`)
-- **Implementation**:
-  - Masked database credentials in stdout logs (`replace(/:[^:@]+@/, ':****@')`).
-  - Added run-specific probe branch fixture creation and verified routing through frontend proxy `/api/public/branches` before any mutation; fails closed on mismatch.
-  - Asserted `bufferMinutes === 0` in zero-buffer scenario with explicit zero-buffer fixture.
-  - Strict exact monetary equality comparisons (`=== 18500000`).
-  - Clean teardown in `finally` blocks for all fixtures, appointments, status history, audit logs, and test patients.
-  - Updated `backend/test/browser-workflow.js` Workflow 2 to match the 7-step redesigned booking flow (Date -> Services -> Doctor -> Slots -> Location Confirmation -> Patient Details).
+### Priority 5: Audit Actors and Consistency
+- Added typed `AuthenticatedStaffUser` with `sub: string`, `role: StaffRole`, and `doctorId?: string | null`.
+- `ReviewsService.updateStatus` and `ReviewsService.delete` record the authenticated staff actor (`actorId = staffUser?.sub || staffUser?.id || null`) in `AuditLog`.
+- `NotificationsService.retryJob` records the authenticated staff actor in `AuditLog`.
+- Controllers updated to inject `@CurrentUser() user: JwtPayload`.
 
-### 6. Tooth Framing & Hydration (`Tooth3D.tsx`, `ClientLayout.tsx`)
-- **Implementation**:
-  - In `frontend/src/components/Tooth3D.tsx`, unified `computeCameraFitDistance` with safe margin factor `1.28` across initial model load and `ResizeObserver` callbacks. Prevents tooth clipping at any pitch/yaw angle and narrow viewports.
-  - Removed `suppressHydrationWarning` from `<main>` in `frontend/src/app/ClientLayout.tsx`.
-- **Verification**:
-  - Verified 0 hydration warnings and clean browser console on `/` and `/booking`.
+### Priority 6: Clean Plain-Text Review Storage Without Double Encoding
+- Removed `escapeHtml` entity escaping in `ReviewsService.create`.
+- Reviews store clean, normalized plain text for all Unicode characters, Cyrillic, Uzbek apostrophes (`o'`, `g'`), quotes, and emojis.
+- Form validations retained: maximum 1000 characters, whitespace trimming, and non-empty checks.
+- Output rendering in React automatically escapes HTML to prevent XSS without producing entity artifacts (`&amp;`, `&#39;`).
+
+### Priority 7: Complete Notification Language and Settings Wiring
+- Added optional `lang?: 'uz' | 'ru'` to `PublicBookingDto` and `CreateBookingDto`.
+- Patient language preference derived from booking DTO or persistent patient notes tag (`[lang:ru]` / `[lang:uz]`).
+- Transactional outbox methods (`enqueueBookingCreated`, `enqueueAppointmentConfirmed`, `enqueueAppointmentCancelled`, `enqueueAppointmentRescheduled`) pass `lang` and `serviceNameRu`.
+- `deliverEmail`, `deliverSms`, and `deliverTelegram` format date and time dynamically from canonical `payload.startTime`, `clinic.timezone`, and `lang`.
+- `getIntegrationStatus()` validates complete SMTP configuration (host, port, user, pass, sender).
+
+### Priority 8: Analytics Financial Reconciliation
+- Unified per-payment deterministic integer allocation (`allocateIntegerAmounts`) across service tables and filtered cash totals.
+- Sum of per-payment allocations for a service matches filtered cash ledger net revenue to the exact soum.
+- Isolated historical bundled items in `unresolvedRecords` rather than misattributing to catalog items.
+- Separated `bookedCount` vs `performedCount`.
+- Frontend analytics (`frontend/src/app/admin/analytics/page.tsx`) renders negative and zero net values honestly without hiding behind `> 0` conditions.
+
+### Priority 9: Complete Admin Notifications UI & Review Pagination
+- Created `frontend/src/app/admin/notifications/page.tsx`:
+  - Integration status cards (SMTP, SMS Gateway, Telegram Bot) with live status badges.
+  - Channel filter and status filter.
+  - Masked recipients, sanitized error messages, appointment links, and concurrency-safe retry button.
+  - Added navigation item in `frontend/src/components/AdminLayout.tsx`.
+- Review pagination in `frontend/src/app/admin/reviews/page.tsx`: automatically navigates to previous page if items become empty on moderation or deletion.
+
+### Priority 10: Regression Testing, Documentation, and Handoff
+- Created and executed comprehensive regression suite `backend/scripts/verify-all-priorities.ts`: **13/13 tests passed**.
+- Re-run backfill script in dry-run mode: **39/39 records compliant, 0 mutations needed**.
+- Executed backend Jest test suite `npm run test:e2e`: **60/60 tests passed**.
+- Executed frontend production build `npm run build`: **29/29 routes compiled cleanly**.
+- Updated `RESUME.md` and `PROGRESS.md`.
 
 ---
 
@@ -77,34 +92,8 @@
 
 | Test Suite | Command | Result | Details |
 |---|---|---|---|
-| **E2E Browser Workflow Runner** | `node backend/test/run-browser-tests.js` | **PASS (0)** | 7/7 complete workflows passed (Homepage, Redesigned 7-step booking, Admin login, Admin calendar, Reschedule with revision check, Legacy review with audit log, Responsive viewports). |
-| **Real Booking & Scheduling Integration** | `node backend/scripts/verify-booking-integration.js` | **PASS (0)** | 100% of 6 real browser scenarios and API tests passed (Overtime isolation, Expiry 15/30/60m, Staff appointments, Branch switch invalidation, Stale race protection, Real 409 conflict & contact preservation, Exact price equality, Zero price & buffer=0). |
-| **UI Responsive & Accessibility Suite** | `node backend/scripts/verify-ui-and-capture.js` | **PASS (0)** | 8/8 responsive UI scenarios passed (Desktop 1440px, Tablet 768px, Mobile 390px, Mobile 360px without overflow, Mobile drawer focus trap & Escape, Russian Cyrillic switch, Booking flow, API retry, Reduced motion). |
-| **Backend TypeScript Build** | `npm run build` in `backend/` | **PASS (0)** | `nest build` completed cleanly with zero compilation errors. |
-| **Frontend Next.js Build** | `npm run build` in `frontend/` | **PASS (0)** | All 28 static & dynamic routes compiled cleanly. |
-
----
-
-## 3. Visual Artifacts & Screenshots
-
-Screenshots captured and saved in:
-`C:\Users\user\.gemini\antigravity-ide\brain\5994479d-6fb5-4b40-95ef-f1cfaf06f457\screenshots\`
-
-- `homepage-desktop-1440.png`: Desktop homepage with 3D tooth framing, header, and sections.
-- `homepage-tablet-768.png`: Tablet 768px layout adaptation.
-- `homepage-mobile-390.png`: Mobile 390px responsive cards.
-- `homepage-mobile-360.png`: Mobile 360px fit with zero horizontal overflow.
-- `mobile-drawer-open-360.png`: Mobile navigation drawer focus trap and visible close button.
-- `homepage-ru-1440.png`: Russian localization with Cyrillic typography.
-- `booking-step1-date-1440.png`: Step 1 interactive CustomDatePicker.
-- `booking-step2-services-1440.png`: Step 2 multi-service selection with duration and prices.
-- `booking-step3-doctors-1440.png`: Step 3 doctor cards on selected date.
-- `booking-step4-slots-branch-badges-1440.png`: Step 4 slot grid with explicit branch badges.
-- `booking-step5-location-confirmation-1440.png`: Step 5 location card and branch switchers.
-- `booking-step6-summary-patient-1440.png`: Step 6 patient details form and summary card.
-- `booking-step6-mobile-360.png`: Step 6 mobile 360px layout.
-- `desktop_booking_confirmation.png`: Step 7 authoritative confirmation screen.
-- `desktop_admin_calendar_modal.png`: Admin calendar appointment detail modal.
-- `desktop_rescheduled.png`: Admin calendar after appointment rescheduling.
-- `desktop_legacy_review.png`: Admin historical service bundle review.
-- `desktop_legacy_action.png`: Admin legacy reconciliation action dialog.
+| **Comprehensive Regression Suite (P1–P9)** | `npx ts-node -T scripts/verify-all-priorities.ts` | **PASS (13/13)** | Verifies time contract, conflict overlap, expiration rules, retry safety, audit actors, plain-text reviews, notification localization, and analytics financial reconciliation. |
+| **Contract Migration Idempotency** | `npx ts-node -T scripts/migrate-appointment-time-contract.ts --dry-run` | **PASS (39/39)** | 39 records scanned, 39 already compliant with treatment-end contract, 0 mutations needed. |
+| **Backend Integration & E2E Suite** | `npm run test:e2e` in `backend/` | **PASS (60/60)** | Complete Jest suite including scheduling, concurrency, idempotency, doctor scoping, duration overrides, reminder repair, and audit logs. |
+| **Backend Production Build** | `npm run build` in `backend/` | **PASS (0)** | NestJS production bundle compiled cleanly in `dist/`. |
+| **Frontend Production Build** | `npm run build` in `frontend/` | **PASS (0)** | All 29 static & dynamic routes compiled cleanly. |

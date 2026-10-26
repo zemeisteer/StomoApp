@@ -15,6 +15,14 @@ import { AppointmentStatus, ExceptionType, NotificationChannel, NotificationStat
 import { nanoid } from 'nanoid';
 import * as crypto from 'crypto';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
+import {
+  getAppointmentTreatmentEnd,
+  getAppointmentOccupiedEnd,
+  getAppointmentEffectiveTreatmentEnd,
+  getAppointmentEffectiveOccupiedEnd,
+  isAppointmentOverlapping,
+  buildConflictCandidateWhere,
+} from './appointment-time.helper';
 
 // Allowed status transitions
 const ALLOWED_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
@@ -51,6 +59,7 @@ export interface CreateBookingDto {
   patientEmail?: string;
   note?: string;
   consentGiven: boolean;
+  lang?: 'uz' | 'ru';
   idempotencyKey?: string;
   source?: string;
   expectedQuote?: ExpectedQuote;
@@ -105,26 +114,16 @@ export function verifyFingerprintMatch(
   return existingFingerprint === reqFingerprint;
 }
 
-export function isAppointmentOverlapping(
-  appt: {
-    startTime: Date | string;
-    endTime: Date | string;
-    bufferMinutes?: number | null;
-    overrunActive?: boolean;
-    overrunEstimatedEndTime?: Date | string | null;
-  },
-  slotStart: Date,
-  slotEnd: Date,
-): boolean {
-  const apptStart = new Date(appt.startTime);
-  const apptEnd = new Date(appt.endTime);
-  const buffer = appt.bufferMinutes ?? 5;
-  const effectiveEnd = (appt.overrunActive && appt.overrunEstimatedEndTime)
-    ? new Date(new Date(appt.overrunEstimatedEndTime).getTime() + buffer * 60000)
-    : new Date(apptEnd.getTime() + buffer * 60000);
-
-  return apptStart < slotEnd && effectiveEnd > slotStart;
-}
+export {
+  AppointmentTimeLike,
+  isAppointmentOverlapping,
+  getAppointmentTreatmentEnd,
+  getAppointmentOccupiedEnd,
+  getAppointmentEffectiveTreatmentEnd,
+  getAppointmentEffectiveOccupiedEnd,
+  buildConflictCandidateWhere,
+  classifyAppointmentRecord,
+} from './appointment-time.helper';
 
 export function serializeAppointmentResponse(appointment: any) {
   const doc = appointment.doctor;
@@ -345,13 +344,15 @@ export class AppointmentsService {
       throw new BadRequestException('Tanlangan vaqt shifokor ish grafigidan tashqarida');
     }
 
-    const conflictingBeforeLock = await this.prisma.appointment.findFirst({
-      where: {
-        doctorId: dto.doctorId,
-        status: { in: TIME_RESERVING_STATUSES },
-        startTime: { lt: endTimeUtc },
-        endTime: { gt: startTimeUtc },
-      },
+    const candidateBeforeLock = await this.prisma.appointment.findMany({
+      where: buildConflictCandidateWhere(dto.doctorId, startTimeUtc, endTimeUtc),
+    });
+    const nowUtcPreLock = new Date();
+    const conflictingBeforeLock = candidateBeforeLock.find((a) => {
+      if (a.status === AppointmentStatus.PENDING && a.expiresAt && a.expiresAt <= nowUtcPreLock) {
+        return false;
+      }
+      return isAppointmentOverlapping(a, startTimeUtc, endTimeUtc);
     });
     if (conflictingBeforeLock) {
       throw new ConflictException('Bu vaqt allaqachon band qilindi. Iltimos boshqa vaqtni tanlang.');
@@ -549,15 +550,7 @@ export class AppointmentsService {
 
           // Double check overlap within lock using the occupied interval and active overruns
           const candidateAppts = await tx.appointment.findMany({
-            where: {
-              doctorId: dto.doctorId,
-              status: { in: TIME_RESERVING_STATUSES },
-              startTime: { lt: new Date(txOccupiedEndUtc.getTime() + 24 * 60 * 60000) },
-              OR: [
-                { endTime: { gt: startTimeUtc } },
-                { overrunActive: true },
-              ],
-            },
+            where: buildConflictCandidateWhere(dto.doctorId, startTimeUtc, txOccupiedEndUtc),
           });
 
           const conflicting = candidateAppts.find((a) => {
@@ -585,12 +578,30 @@ export class AppointmentsService {
             },
           });
 
+          // Documented communication language policy:
+          // 1. Explicitly requested in booking DTO ('uz' | 'ru')
+          // 2. Otherwise detect if booking note or patient notes contain Cyrillic or '[lang:ru]' tag
+          // 3. Default to clinic primary language 'uz'
+          const isRussian = dto.lang === 'ru' ||
+            (dto.note && /[а-яА-ЯёЁ]/.test(dto.note)) ||
+            (patient?.notes && patient.notes.includes('[lang:ru]'));
+          const communicationLang: 'uz' | 'ru' = isRussian ? 'ru' : 'uz';
+          const langTag = communicationLang === 'ru' ? '[lang:ru]' : '[lang:uz]';
+
           if (!patient) {
             patient = await tx.patient.create({
               data: {
                 fullName: cleanName,
                 phone: normalizedPhone,
                 email: dto.patientEmail?.trim() || null,
+                notes: langTag,
+              },
+            });
+          } else if (!patient.notes || (!patient.notes.includes('[lang:ru]') && !patient.notes.includes('[lang:uz]'))) {
+            patient = await tx.patient.update({
+              where: { id: patient.id },
+              data: {
+                notes: patient.notes ? `${patient.notes} ${langTag}` : langTag,
               },
             });
           }
@@ -676,15 +687,22 @@ export class AppointmentsService {
             },
           });
 
+          const txCombinedNameRu = txAuthoritative.serviceItems
+            ? txAuthoritative.serviceItems.map((i: any) => i.serviceNameRu || i.serviceNameUz).join(' + ')
+            : undefined;
+
           // Transactional Outbox: persist notification intent inside the same transaction
           await this.notificationsService.enqueueBookingCreated(
             {
               id: appointment.id,
               startTime: appointment.startTime,
               serviceName: appointment.serviceName,
+              serviceNameRu: txCombinedNameRu,
               patientEmail: patient.email || undefined,
               patientPhone: patient.phone,
               revision: appointment.revision,
+              scheduleRevision: appointment.scheduleRevision,
+              lang: communicationLang,
             },
             tx,
           );
@@ -792,29 +810,44 @@ export class AppointmentsService {
       }
 
       // When confirming an appointment from PENDING:
-      // Verify that this slot has not expired and been booked by another patient in the meantime!
+      // Ordinary confirmation cannot resurrect an expired public reservation.
+      // Validates expiration, doctor working hours, and authoritative slot conflicts.
       if (currentStatus === AppointmentStatus.PENDING && newStatus === AppointmentStatus.CONFIRMED) {
+        const nowUtc = new Date();
+        if (locked.expiresAt && new Date(locked.expiresAt) <= nowUtc) {
+          throw new ConflictException(
+            'Ushbu arizaning tasdiqlash muddati tugagan. Muddati o‘tgan arizani to‘g‘ridan-to‘g‘ri tasdiqlab bo‘lmaydi. Qayta yangi qabul sifatida rasmiylashtiring.',
+          );
+        }
+
         const apptStart = new Date(locked.startTime);
-        const apptEnd = new Date(locked.endTime);
-        const apptBuf = locked.bufferMinutes ?? 5;
-        const apptOccupiedEnd = new Date(apptEnd.getTime() + apptBuf * 60000);
+        const apptOccupiedEnd = getAppointmentOccupiedEnd(locked);
+
+        // Validate doctor working hours in case schedules changed after booking
+        const settings = await tx.clinicSettings.findFirst();
+        const timezone = settings?.timezone || 'Asia/Tashkent';
+        const isWorking = await this.schedulingService.isDoctorWorkingAt(
+          locked.doctorId,
+          apptStart,
+          apptOccupiedEnd,
+          timezone,
+          locked.branchId || undefined,
+          tx,
+        );
+        if (!isWorking) {
+          throw new ConflictException(
+            'Shifokor ish grafigi o‘zgarganligi sababli ushbu vaqtda ishlamaydi. Qabulni tasdiqlab bo‘lmaydi.',
+          );
+        }
 
         const candidateConflicting = await tx.appointment.findMany({
-          where: {
-            doctorId: locked.doctorId,
-            id: { not: appointmentId },
-            status: { in: TIME_RESERVING_STATUSES },
-            startTime: { lt: new Date(apptOccupiedEnd.getTime() + 24 * 60 * 60000) },
-            OR: [
-              { endTime: { gt: apptStart } },
-              { overrunActive: true },
-            ],
-          },
+          where: buildConflictCandidateWhere(locked.doctorId, apptStart, apptOccupiedEnd, {
+            excludeAppointmentId: appointmentId,
+          }),
         });
 
-        const nowUtc = new Date();
         const hasConflict = candidateConflicting.some((other) => {
-          if (other.status === AppointmentStatus.PENDING && other.expiresAt && other.expiresAt <= nowUtc) {
+          if (other.status === AppointmentStatus.PENDING && other.expiresAt && new Date(other.expiresAt) <= nowUtc) {
             return false;
           }
           return isAppointmentOverlapping(other, apptStart, apptOccupiedEnd);
@@ -822,7 +855,7 @@ export class AppointmentsService {
 
         if (hasConflict) {
           throw new ConflictException(
-            'Ushbu vaqt oralig\'i allaqachon boshqa bemor tomonidan band qilingan. Kutilayotgan qabulni tasdiqlab bo\'lmaydi.',
+            'Ushbu vaqt oralig‘i allaqachon boshqa bemor tomonidan band qilingan. Kutilayotgan qabulni tasdiqlab bo‘lmaydi.',
           );
         }
       }
@@ -885,6 +918,20 @@ export class AppointmentsService {
         },
       });
 
+      // Derive communication language:
+      let apptLang: 'uz' | 'ru' = 'uz';
+      if (appt.patient?.notes?.includes('[lang:ru]')) {
+        apptLang = 'ru';
+      } else {
+        const prevJob = await tx.notificationJob.findFirst({
+          where: { appointmentId: appt.id },
+          select: { payload: true },
+        });
+        if ((prevJob?.payload as any)?.lang === 'ru') {
+          apptLang = 'ru';
+        }
+      }
+
       // Transactional Outbox: persist notification intent for status changes
       if (newStatus === AppointmentStatus.CONFIRMED) {
         await this.notificationsService.enqueueAppointmentConfirmed(
@@ -892,9 +939,11 @@ export class AppointmentsService {
             id: appt.id,
             startTime: appt.startTime,
             serviceName: appt.serviceName,
+            serviceNameRu: appt.service?.nameRu || undefined,
             patientEmail: appt.patient?.email || undefined,
             patientPhone: appt.patient?.phone || '',
             revision: appt.revision,
+            lang: apptLang,
           },
           tx,
         );
@@ -904,9 +953,11 @@ export class AppointmentsService {
             id: appt.id,
             startTime: appt.startTime,
             serviceName: appt.serviceName,
+            serviceNameRu: appt.service?.nameRu || undefined,
             patientEmail: appt.patient?.email || undefined,
             patientPhone: appt.patient?.phone || '',
             revision: appt.revision,
+            lang: apptLang,
           },
           tx,
         );
@@ -1165,18 +1216,11 @@ export class AppointmentsService {
             throw new BadRequestException('Yangi tanlangan vaqt shifokor ish grafigidan tashqarida');
           }
 
-          // 11. Double-check conflicting slots (excluding current appointment) using txOccupiedEndTime and active overruns
+          // 11. Double-check conflicting slots (excluding current appointment) using authoritative candidate query
           const candidateConflicting = await tx.appointment.findMany({
-            where: {
-              doctorId: currentAppt.doctorId,
-              status: { in: TIME_RESERVING_STATUSES },
-              id: { not: appointmentId },
-              startTime: { lt: new Date(txOccupiedEndTime.getTime() + 24 * 60 * 60000) },
-              OR: [
-                { endTime: { gt: newStartTime } },
-                { overrunActive: true },
-              ],
-            },
+            where: buildConflictCandidateWhere(currentAppt.doctorId, newStartTime, txOccupiedEndTime, {
+              excludeAppointmentId: appointmentId,
+            }),
           });
 
           const conflicting = candidateConflicting.find((a) =>
@@ -1240,16 +1284,31 @@ export class AppointmentsService {
             },
           });
 
+          let apptLang: 'uz' | 'ru' = 'uz';
+          if (appt.patient?.notes?.includes('[lang:ru]')) {
+            apptLang = 'ru';
+          } else {
+            const prevJob = await tx.notificationJob.findFirst({
+              where: { appointmentId: appt.id },
+              select: { payload: true },
+            });
+            if ((prevJob?.payload as any)?.lang === 'ru') {
+              apptLang = 'ru';
+            }
+          }
+
           // 14. Transactionally durable notification intent for rescheduling
           await this.notificationsService.enqueueAppointmentRescheduled(
             {
               id: appt.id,
               startTime: appt.startTime,
               serviceName: appt.serviceName,
+              serviceNameRu: appt.service?.nameRu || undefined,
               patientEmail: appt.patient?.email || undefined,
               patientPhone: appt.patient?.phone || '',
               revision: appt.revision,
               scheduleRevision: appt.scheduleRevision,
+              lang: apptLang,
             },
             tx,
           );
@@ -1352,14 +1411,14 @@ export class AppointmentsService {
             const settings = await tx.clinicSettings.findFirst();
             const timezone = settings?.timezone || 'Asia/Tashkent';
             const bufferMinutes = currentAppt.bufferMinutes ?? settings?.bufferMinutes ?? 5;
-            const totalMinutes = durationMinutes + bufferMinutes;
-            const newEndTime = new Date(currentAppt.startTime.getTime() + totalMinutes * 60 * 1000);
+            const newTreatmentEndTime = new Date(currentAppt.startTime.getTime() + durationMinutes * 60 * 1000);
+            const newOccupiedEndTime = new Date(currentAppt.startTime.getTime() + (durationMinutes + bufferMinutes) * 60 * 1000);
 
-            // 6. Validate working hours through transaction client tx
+            // 6. Validate working hours through transaction client tx using full occupied interval
             const isWorking = await this.schedulingService.isDoctorWorkingAt(
               currentAppt.doctorId,
               currentAppt.startTime,
-              newEndTime,
+              newOccupiedEndTime,
               timezone,
               currentAppt.branchId || undefined,
               tx,
@@ -1368,16 +1427,15 @@ export class AppointmentsService {
               throw new BadRequestException('Yangi davomiylik shifokor ish grafigidan tashqariga chiqadi');
             }
 
-            // 7. Validate overlap through transaction client tx
-            const conflicting = await tx.appointment.findFirst({
-              where: {
-                doctorId: currentAppt.doctorId,
-                status: { in: TIME_RESERVING_STATUSES },
-                id: { not: appointmentId },
-                startTime: { lt: newEndTime },
-                endTime: { gt: currentAppt.startTime },
-              },
+            // 7. Validate overlap through transaction client tx using authoritative candidate query
+            const candidateConflicting = await tx.appointment.findMany({
+              where: buildConflictCandidateWhere(currentAppt.doctorId, currentAppt.startTime, newOccupiedEndTime, {
+                excludeAppointmentId: appointmentId,
+              }),
             });
+            const conflicting = candidateConflicting.find((other) =>
+              isAppointmentOverlapping(other, currentAppt.startTime, newOccupiedEndTime),
+            );
             if (conflicting) {
               throw new ConflictException('Davomiylikni uzaytirish boshqa qabul bilan to\'qnashuv keltiradi');
             }
@@ -1387,7 +1445,8 @@ export class AppointmentsService {
               where: { id: appointmentId },
               data: {
                 durationMinutes,
-                endTime: newEndTime,
+                endTime: newTreatmentEndTime,
+                bufferMinutes,
                 revision: newRevision,
               },
               include: {
@@ -1441,7 +1500,7 @@ export class AppointmentsService {
                   previousDurationMinutes: currentAppt.durationMinutes,
                   newDurationMinutes: durationMinutes,
                   previousEndTime: currentAppt.endTime.toISOString(),
-                  newEndTime: newEndTime.toISOString(),
+                  newEndTime: newTreatmentEndTime.toISOString(),
                   serviceItemsTotalDuration: serviceItemsTotal,
                   adjustmentMinutes: durationMinutes - serviceItemsTotal,
                   reason: reason || 'Admin duration override',
@@ -2007,12 +2066,13 @@ export class AppointmentsService {
         status: AppointmentStatus;
         startTime: Date;
         endTime: Date;
+        durationMinutes: number;
         bufferMinutes: number | null;
         overrunMinutes: number | null;
         overrunActive: boolean;
       }>>`
         SELECT id, "doctor_id" as "doctorId", status, "start_time" as "startTime",
-               "end_time" as "endTime", "buffer_minutes" as "bufferMinutes",
+               "end_time" as "endTime", "duration_minutes" as "durationMinutes", "buffer_minutes" as "bufferMinutes",
                "overrun_minutes" as "overrunMinutes", "overrun_active" as "overrunActive"
         FROM "appointments"
         WHERE id = ${id}
@@ -2046,8 +2106,7 @@ export class AppointmentsService {
       }
 
       const buffer = locked.bufferMinutes ?? 5;
-      const scheduledEndTime = new Date(locked.endTime);
-      const scheduledTreatmentEnd = new Date(scheduledEndTime.getTime() - buffer * 60000);
+      const scheduledTreatmentEnd = getAppointmentTreatmentEnd(locked);
       const estimatedEndTime = new Date(scheduledTreatmentEnd.getTime() + effectiveDelay * 60000);
       const estimatedFreeTime = new Date(estimatedEndTime.getTime() + buffer * 60000);
 

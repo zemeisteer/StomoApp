@@ -46,13 +46,24 @@ export default function AdminReviewsPage() {
 
   const canDelete = user?.role === 'OWNER' || user?.role === 'ADMIN';
 
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+
   const loadReviews = useCallback(async () => {
     try {
       setIsLoading(true);
       setErrorMessage(null);
       const res = await api.getAdminReviews(statusFilter || undefined, page, limit);
-      setReviews(res.items || []);
-      setTotal(res.total || 0);
+      const items = res.items || [];
+      const totalCount = res.total || 0;
+
+      // If current page is out of bounds (e.g. after deleting or moderating all items on page), navigate back
+      if (items.length === 0 && totalCount > 0 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+        return;
+      }
+
+      setReviews(items);
+      setTotal(totalCount);
     } catch (e: any) {
       console.error('Failed to load reviews', e);
       setErrorMessage(e?.message || (isUz ? "Sharhlarni yuklashda xatolik yuz berdi" : "Ошибка загрузки отзывов"));
@@ -78,10 +89,18 @@ export default function AdminReviewsPage() {
       setUpdatingId(activeReview.id);
       setErrorMessage(null);
       await api.updateReviewStatus(activeReview.id, pendingTargetStatus, adminNote.trim() || undefined);
+      setFeedbackMessage(
+        isUz ? "Sharh holati muvaffaqiyatli o'zgartirildi" : "Статус отзыва успешно обновлен",
+      );
+      setTimeout(() => setFeedbackMessage(null), 4000);
       setNoteModalOpen(false);
       setActiveReview(null);
       setPendingTargetStatus(null);
-      await loadReviews();
+      if (statusFilter && reviews.length === 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        await loadReviews();
+      }
     } catch (err: any) {
       setErrorMessage(err?.message || (isUz ? "Holatni saqlashda xatolik" : "Ошибка обновления статуса"));
     } finally {
@@ -94,7 +113,15 @@ export default function AdminReviewsPage() {
       setUpdatingId(id);
       setErrorMessage(null);
       await api.updateReviewStatus(id, newStatus);
-      await loadReviews();
+      setFeedbackMessage(
+        isUz ? "Sharh holati muvaffaqiyatli o'zgartirildi" : "Статус отзыва успешно обновлен",
+      );
+      setTimeout(() => setFeedbackMessage(null), 4000);
+      if (statusFilter && reviews.length === 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        await loadReviews();
+      }
     } catch (err: any) {
       setErrorMessage(err?.message || (isUz ? "Holatni saqlashda xatolik" : "Ошибка обновления статуса"));
     } finally {
@@ -108,10 +135,14 @@ export default function AdminReviewsPage() {
       setIsDeleting(true);
       setErrorMessage(null);
       await api.deleteReview(deleteConfirmReview.id);
+      setFeedbackMessage(
+        isUz ? "Sharh muvaffaqiyatli o'chirildi" : "Отзыв успешно удален",
+      );
+      setTimeout(() => setFeedbackMessage(null), 4000);
       setDeleteConfirmReview(null);
       // Adjust page if this was the last item on current page
       if (reviews.length === 1 && page > 1) {
-        setPage(page - 1);
+        setPage((p) => Math.max(1, p - 1));
       } else {
         await loadReviews();
       }
@@ -188,6 +219,22 @@ export default function AdminReviewsPage() {
             <button
               onClick={() => setErrorMessage(null)}
               className="text-rose-500 hover:text-rose-700 font-bold ml-4"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Feedback Alert */}
+        {feedbackMessage && (
+          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs text-emerald-800">
+            <span className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600" />
+              {feedbackMessage}
+            </span>
+            <button
+              onClick={() => setFeedbackMessage(null)}
+              className="text-emerald-500 hover:text-emerald-700 font-bold ml-4"
             >
               ✕
             </button>

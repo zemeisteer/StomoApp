@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
@@ -96,8 +96,8 @@ export class NotificationsService {
     nameUz: string;
     nameRu: string;
     timezone: string;
-    phone: string;
-    email: string;
+    phone: string | null;
+    email: string | null;
     cachedAt: number;
   } | null = null;
 
@@ -109,7 +109,14 @@ export class NotificationsService {
     this.initMailTransporter();
   }
 
-  async getClinicSettings() {
+  async getClinicSettings(): Promise<{
+    nameUz: string;
+    nameRu: string;
+    timezone: string;
+    phone: string | null;
+    email: string | null;
+    cachedAt: number;
+  }> {
     const now = Date.now();
     if (this.clinicSettingsCache && now - this.clinicSettingsCache.cachedAt < 10000) {
       return this.clinicSettingsCache;
@@ -120,8 +127,8 @@ export class NotificationsService {
         nameUz: settings?.name || 'DentaCare',
         nameRu: settings?.nameRu || settings?.name || 'DentaCare',
         timezone: settings?.timezone || 'Asia/Tashkent',
-        phone: settings?.phone || '+998 71 123 45 67',
-        email: settings?.email || 'info@dentacare.uz',
+        phone: settings?.phone || null,
+        email: settings?.email || null,
         cachedAt: now,
       };
     } catch {
@@ -129,8 +136,8 @@ export class NotificationsService {
         nameUz: 'DentaCare',
         nameRu: 'DentaCare',
         timezone: 'Asia/Tashkent',
-        phone: '+998 71 123 45 67',
-        email: 'info@dentacare.uz',
+        phone: null,
+        email: null,
         cachedAt: now,
       };
     }
@@ -683,7 +690,18 @@ export class NotificationsService {
     // Schedule reminder time
     const reminderTime = new Date(lockedAppt.start_time.getTime() - 2 * 60 * 60 * 1000);
     const scheduledFor = reminderTime > nowUtc ? reminderTime : nowUtc;
-    const formattedTime = this.formatTashkentTime(lockedAppt.start_time);
+
+    // Derive language and serviceNameRu from prior jobs
+    let reminderLang: 'uz' | 'ru' = 'uz';
+    let serviceNameRu: string | undefined = undefined;
+    const priorJob = await tx.notificationJob.findFirst({
+      where: { appointmentId: appointment.id, templateKey: { not: 'appointment_reminder' } },
+      select: { payload: true },
+    });
+    if (priorJob && typeof priorJob.payload === 'object' && priorJob.payload !== null) {
+      if ((priorJob.payload as any).lang === 'ru') reminderLang = 'ru';
+      if ((priorJob.payload as any).serviceNameRu) serviceNameRu = (priorJob.payload as any).serviceNameRu;
+    }
 
     // Atomically create replacement job
     const created = await tx.notificationJob.create({
@@ -700,9 +718,10 @@ export class NotificationsService {
         payload: {
           appointmentId: appointment.id,
           serviceName: lockedAppt.service_name || appointment.serviceName,
+          serviceNameRu,
           startTime: lockedAppt.start_time.toISOString(),
           scheduleRevision: currentScheduleRev,
-          formattedTime,
+          lang: reminderLang,
         },
       },
     });
@@ -1424,16 +1443,18 @@ export class NotificationsService {
       id: string;
       startTime: Date;
       serviceName: string;
+      serviceNameRu?: string;
       patientEmail?: string | null;
       patientPhone: string;
       revision?: number;
       scheduleRevision?: number;
+      lang?: 'uz' | 'ru';
     },
     tx?: Prisma.TransactionClient | PrismaService,
   ) {
-    const formattedTime = this.formatTashkentTime(appointment.startTime);
     const revision = appointment.revision ?? 1;
     const scheduleRevision = appointment.scheduleRevision ?? 1;
+    const lang = appointment.lang || 'uz';
 
     // 1. Patient Confirmation / Received (Email or SMS)
     if (appointment.patientEmail) {
@@ -1449,9 +1470,10 @@ export class NotificationsService {
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
+            serviceNameRu: appointment.serviceNameRu,
             startTime: appointment.startTime.toISOString(),
             scheduleRevision,
-            formattedTime,
+            lang,
           },
         },
         tx,
@@ -1469,9 +1491,10 @@ export class NotificationsService {
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
+            serviceNameRu: appointment.serviceNameRu,
             startTime: appointment.startTime.toISOString(),
             scheduleRevision,
-            formattedTime,
+            lang,
           },
         },
         tx,
@@ -1492,8 +1515,8 @@ export class NotificationsService {
           payload: {
             serviceName: appointment.serviceName,
             startTime: appointment.startTime.toISOString(),
-            formattedTime,
             adminUrl: `${frontendUrl}/admin/calendar?appointmentId=${appointment.id}`,
+            lang: 'uz',
           },
         },
         tx,
@@ -1516,9 +1539,10 @@ export class NotificationsService {
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
+            serviceNameRu: appointment.serviceNameRu,
             startTime: appointment.startTime.toISOString(),
             scheduleRevision,
-            formattedTime,
+            lang,
           },
         },
         tx,
@@ -1534,14 +1558,16 @@ export class NotificationsService {
       id: string;
       startTime: Date;
       serviceName: string;
+      serviceNameRu?: string;
       patientEmail?: string | null;
       patientPhone: string;
       revision?: number;
+      lang?: 'uz' | 'ru';
     },
     tx?: Prisma.TransactionClient | PrismaService,
   ) {
-    const formattedTime = this.formatTashkentTime(appointment.startTime);
     const revision = appointment.revision ?? 1;
+    const lang = appointment.lang || 'uz';
 
     await this.enqueue(
       {
@@ -1554,8 +1580,9 @@ export class NotificationsService {
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
+          serviceNameRu: appointment.serviceNameRu,
           startTime: appointment.startTime.toISOString(),
-          formattedTime,
+          lang,
         },
       },
       tx,
@@ -1570,17 +1597,19 @@ export class NotificationsService {
       id: string;
       startTime: Date;
       serviceName: string;
+      serviceNameRu?: string;
       patientEmail?: string | null;
       patientPhone: string;
       revision?: number;
+      lang?: 'uz' | 'ru';
     },
     tx?: Prisma.TransactionClient | PrismaService,
   ) {
     // 1. Cancel pending reminders immediately inside tx
     await this.cancelAppointmentReminders(appointment.id, tx);
 
-    const formattedTime = this.formatTashkentTime(appointment.startTime);
     const revision = appointment.revision ?? 1;
+    const lang = appointment.lang || 'uz';
 
     // 2. Queue cancellation notice
     await this.enqueue(
@@ -1594,8 +1623,9 @@ export class NotificationsService {
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
+          serviceNameRu: appointment.serviceNameRu,
           startTime: appointment.startTime.toISOString(),
-          formattedTime,
+          lang,
         },
       },
       tx,
@@ -1611,18 +1641,20 @@ export class NotificationsService {
       id: string;
       startTime: Date;
       serviceName: string;
+      serviceNameRu?: string;
       patientEmail?: string | null;
       patientPhone: string;
       revision: number;
       scheduleRevision?: number;
+      lang?: 'uz' | 'ru';
     },
     tx?: Prisma.TransactionClient | PrismaService,
   ) {
     // 1. Cancel previous pending reminders inside tx
     await this.cancelAppointmentReminders(appointment.id, tx);
 
-    const formattedTime = this.formatTashkentTime(appointment.startTime);
     const scheduleRevision = appointment.scheduleRevision ?? appointment.revision;
+    const lang = appointment.lang || 'uz';
 
     // 2. Queue reschedule notification
     await this.enqueue(
@@ -1637,9 +1669,10 @@ export class NotificationsService {
         payload: {
           appointmentId: appointment.id,
           serviceName: appointment.serviceName,
+          serviceNameRu: appointment.serviceNameRu,
           startTime: appointment.startTime.toISOString(),
           scheduleRevision,
-          formattedTime,
+          lang,
         },
       },
       tx,
@@ -1661,9 +1694,10 @@ export class NotificationsService {
           payload: {
             appointmentId: appointment.id,
             serviceName: appointment.serviceName,
+            serviceNameRu: appointment.serviceNameRu,
             startTime: appointment.startTime.toISOString(),
             scheduleRevision,
-            formattedTime,
+            lang,
           },
         },
         tx,
@@ -1952,11 +1986,23 @@ export class NotificationsService {
   private async deliverEmail(job: any): Promise<boolean> {
     const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
-    const lang = payload.lang === 'ru' ? 'ru' : 'uz';
+    const lang: 'uz' | 'ru' = payload.lang === 'ru' ? 'ru' : 'uz';
     const clinicName = lang === 'ru' ? clinic.nameRu : clinic.nameUz;
-    const formattedTime = payload.formattedTime || this.formatAppointmentDateTime(payload.startTime || new Date(), clinic.timezone, lang);
-    const serviceName = payload.serviceName || '';
-    const smtpFrom = this.configService.get<string>('SMTP_FROM', `${clinicName} <${clinic.email}>`);
+    // Canonical timestamp and intended timezone take precedence
+    const formattedTime = payload.startTime
+      ? this.formatAppointmentDateTime(payload.startTime, clinic.timezone, lang)
+      : (payload.formattedTime || this.formatAppointmentDateTime(new Date(), clinic.timezone, lang));
+    const serviceName = (lang === 'ru' && payload.serviceNameRu) ? payload.serviceNameRu : (payload.serviceName || '');
+
+    const configuredFrom = this.configService.get<string>('SMTP_FROM');
+    let smtpFrom = configuredFrom;
+    if (!smtpFrom && clinic.email) {
+      smtpFrom = `${clinicName} <${clinic.email}>`;
+    }
+    if (!smtpFrom && this.mailTransporter) {
+      this.logger.warn(`Email delivery skipped: neither SMTP_FROM nor clinic.email is configured.`);
+      return false;
+    }
 
     let subject = `${clinicName}: Qabul bildirishnomasi`;
     let text = `Hurmatli bemor! Sizning ${serviceName} bo'yicha qabul so'rovingiz qabul qilindi va tasdiqlash kutilmoqda. Qabul vaqti: ${formattedTime}.`;
@@ -2000,7 +2046,7 @@ export class NotificationsService {
       }
     }
 
-    if (this.mailTransporter) {
+    if (this.mailTransporter && smtpFrom) {
       await this.mailTransporter.sendMail({
         from: smtpFrom,
         to: job.recipient,
@@ -2025,10 +2071,12 @@ export class NotificationsService {
     const smsApiUrl = this.configService.get<string>('SMS_API_URL');
     const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
-    const lang = payload.lang === 'ru' ? 'ru' : 'uz';
+    const lang: 'uz' | 'ru' = payload.lang === 'ru' ? 'ru' : 'uz';
     const clinicName = lang === 'ru' ? clinic.nameRu : clinic.nameUz;
-    const formattedTime = payload.formattedTime || this.formatAppointmentDateTime(payload.startTime || new Date(), clinic.timezone, lang);
-    const serviceName = payload.serviceName || '';
+    const formattedTime = payload.startTime
+      ? this.formatAppointmentDateTime(payload.startTime, clinic.timezone, lang)
+      : (payload.formattedTime || this.formatAppointmentDateTime(new Date(), clinic.timezone, lang));
+    const serviceName = (lang === 'ru' && payload.serviceNameRu) ? payload.serviceNameRu : (payload.serviceName || '');
 
     let message = lang === 'ru'
       ? `${clinicName}: Заявка принята. ${serviceName} - ${formattedTime}. Ожидает подтверждения.`
@@ -2088,7 +2136,9 @@ export class NotificationsService {
     const botToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
-    const formattedTime = payload.formattedTime || this.formatAppointmentDateTime(payload.startTime || new Date(), clinic.timezone, 'uz');
+    const formattedTime = payload.startTime
+      ? this.formatAppointmentDateTime(payload.startTime, clinic.timezone, 'uz')
+      : (payload.formattedTime || this.formatAppointmentDateTime(new Date(), clinic.timezone, 'uz'));
 
     const tgHeader = this.escapeTelegramMarkdown(`🔔 ${clinic.nameUz}: Yangi qabul so'rovi!`);
     const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
@@ -2199,92 +2249,212 @@ export class NotificationsService {
    * appointment and schedule eligibility. Records staff audit action.
    */
   async retryJob(id: string, staffUser?: any) {
-    const job = await this.prisma.notificationJob.findUnique({
-      where: { id },
-      include: { appointment: true },
-    });
+    const actorId = staffUser?.sub || staffUser?.id || null;
+    const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
-    if (!job) {
-      throw new NotFoundException('Xabarnoma topilmadi');
-    }
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Row lock FOR UPDATE on NotificationJob to serialize concurrent retries & worker claims
+      const jobRows = await tx.$queryRaw<any[]>`
+        SELECT id, channel, "template_key" as "templateKey", recipient,
+               status, attempts, "max_attempts" as "maxAttempts",
+               "scheduled_for" as "scheduledFor", "sent_at" as "sentAt",
+               "locked_at" as "lockedAt", "lease_token" as "leaseToken",
+               "last_error" as "lastError", payload, "created_at" as "createdAt",
+               "appointment_id" as "appointmentId", "schedule_revision" as "scheduleRevision"
+        FROM "notification_jobs"
+        WHERE id = ${id}
+        FOR UPDATE;
+      `;
+      const job = jobRows[0];
+      if (!job) {
+        throw new NotFoundException('Xabarnoma topilmadi');
+      }
 
-    if (job.status === NotificationStatus.SENT) {
-      throw new BadRequestException('Ushbu xabarnoma allaqachon muvaffaqiyatli yuborilgan');
-    }
+      // Explicit status validations
+      if (job.status === NotificationStatus.SENT) {
+        throw new BadRequestException('Ushbu xabarnoma allaqachon muvaffaqiyatli yuborilgan');
+      }
 
-    // Revalidate appointment and schedule eligibility for reminders
-    if (job.templateKey === 'appointment_reminder' && job.appointment) {
+      if (job.status === NotificationStatus.SIMULATED) {
+        throw new BadRequestException('Simulyatsiya qilingan xabarnoma muvaffaqiyatli bajarilgan deb hisoblanadi');
+      }
+
+      if (job.status === NotificationStatus.CANCELLED) {
+        throw new BadRequestException('Bekor qilingan xabarnomani qayta yuborib bo‘lmaydi');
+      }
+
       const now = new Date();
+      // Check active worker lease
+      if (job.status === NotificationStatus.PROCESSING) {
+        const lockedAtMs = job.lockedAt ? new Date(job.lockedAt).getTime() : 0;
+        if (now.getTime() - lockedAtMs < LEASE_DURATION_MS) {
+          throw new ConflictException(
+            'Xabarnoma ayni paytda fon xizmati (worker) tomonidan yuborilmoqda. Qayta urinib bo‘lmaydi.',
+          );
+        }
+      }
+
+      // Check if already queued pending without errors
       if (
-        ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(
-          job.appointment.status,
-        )
+        job.status === NotificationStatus.PENDING &&
+        job.attempts < job.maxAttempts &&
+        (!job.lockedAt || now.getTime() - new Date(job.lockedAt).getTime() >= LEASE_DURATION_MS)
       ) {
-        throw new BadRequestException('Qabul bekor qilingan yoki yakunlangan, eslatmani qayta yuborib bo‘lmaydi');
+        throw new BadRequestException('Xabarnoma allaqachon navbatda turibdi');
       }
 
-      if (job.appointment.startTime.getTime() <= now.getTime()) {
-        throw new BadRequestException('Qabul boshlanish vaqti o‘tib ketgan, eslatmani qayta yuborib bo‘lmaydi');
+      // Revalidate reminder eligibility
+      let appointmentSnapshot: any = null;
+      if (job.templateKey === 'appointment_reminder') {
+        if (!job.appointmentId) {
+          throw new BadRequestException('Eslatma biriktirilgan qabul topilmadi');
+        }
+
+        const apptRows = await tx.$queryRaw<any[]>`
+          SELECT id, status, "start_time" as "startTime", "schedule_revision" as "scheduleRevision", "expires_at" as "expiresAt"
+          FROM "appointments"
+          WHERE id = ${job.appointmentId}
+          FOR UPDATE;
+        `;
+        const appt = apptRows[0];
+        if (!appt) {
+          throw new BadRequestException('Eslatma biriktirilgan qabul mavjud emas');
+        }
+
+        if (
+          ([AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW] as string[]).includes(
+            appt.status,
+          )
+        ) {
+          throw new BadRequestException('Qabul bekor qilingan yoki yakunlangan, eslatmani qayta yuborib bo‘lmaydi');
+        }
+
+        if (new Date(appt.startTime).getTime() <= now.getTime()) {
+          throw new BadRequestException('Qabul boshlanish vaqti o‘tib ketgan, eslatmani qayta yuborib bo‘lmaydi');
+        }
+
+        if (appt.status === AppointmentStatus.PENDING) {
+          throw new BadRequestException('Tasdiqlanmagan qabul uchun eslatma yuborib bo‘lmaydi');
+        }
+
+        if (
+          appt.scheduleRevision !== null &&
+          job.scheduleRevision !== null &&
+          appt.scheduleRevision !== job.scheduleRevision
+        ) {
+          throw new BadRequestException(
+            'Qabul vaqti o‘zgargan (eskirgan eslatma avlodi). Yangi jadval uchun yangi eslatma mavjud.',
+          );
+        }
+
+        appointmentSnapshot = {
+          id: appt.id,
+          status: appt.status,
+          startTime: appt.startTime,
+        };
       }
 
-      if (job.appointment.status === AppointmentStatus.PENDING) {
-        throw new BadRequestException('Tasdiqlanmagan qabul uchun eslatma yuborib bo‘lmaydi');
-      }
-    }
+      // Preserve attempt history in audit and update job
+      const previousAttempts = job.attempts;
+      const updated = await tx.notificationJob.update({
+        where: { id },
+        data: {
+          status: NotificationStatus.PENDING,
+          attempts: 0,
+          scheduledFor: now,
+          lastError: null,
+          lockedAt: null,
+          leaseToken: null,
+        },
+      });
 
-    const updated = await this.prisma.notificationJob.update({
-      where: { id },
-      data: {
-        status: NotificationStatus.PENDING,
-        attempts: 0,
-        scheduledFor: new Date(),
-        lastError: null,
-        lockedAt: null,
-        leaseToken: null,
-      },
+      // Audit log inside transaction with verified actor ID
+      await this.auditService.log({
+        userId: actorId,
+        action: 'notification.retried',
+        entity: 'NotificationJob',
+        entityId: id,
+        details: {
+          channel: job.channel,
+          templateKey: job.templateKey,
+          previousStatus: job.status,
+          previousAttempts,
+          recipient: this.maskRecipient(job.recipient),
+        },
+      });
+
+      return {
+        job: updated,
+        appointment: appointmentSnapshot,
+      };
     });
 
-    await this.auditService.log({
-      userId: staffUser?.id || null,
-      action: 'notification.retried',
-      entity: 'NotificationJob',
-      entityId: id,
-      details: {
-        channel: job.channel,
-        templateKey: job.templateKey,
-        previousStatus: job.status,
-        recipient: this.maskRecipient(job.recipient),
-      },
-    });
-
-    return updated;
+    // Return sanitized notification DTO matching list endpoint
+    const j = result.job;
+    return {
+      id: j.id,
+      channel: j.channel,
+      templateKey: j.templateKey,
+      recipient: this.maskRecipient(j.recipient),
+      appointmentId: j.appointmentId,
+      appointment: result.appointment,
+      scheduleRevision: j.scheduleRevision,
+      status: j.status,
+      attempts: j.attempts,
+      maxAttempts: j.maxAttempts,
+      scheduledFor: j.scheduledFor,
+      sentAt: j.sentAt,
+      lockedAt: j.lockedAt,
+      lastError: null,
+      isSimulated: false,
+      createdAt: j.createdAt,
+    };
   }
 
   /**
-   * Admin: Returns current notification provider configuration status
+   * Admin: Returns current notification provider configuration status with strict verification
    */
-  getIntegrationStatus() {
+  async getIntegrationStatus() {
+    const clinic = await this.getClinicSettings();
     const smtpHost = this.configService.get<string>('SMTP_HOST');
+    const smtpPort = this.configService.get<number>('SMTP_PORT');
     const smtpUser = this.configService.get<string>('SMTP_USER');
+    const smtpPass = this.configService.get<string>('SMTP_PASS');
+    const smtpFrom = this.configService.get<string>('SMTP_FROM') || (clinic.email ? `${clinic.nameUz} <${clinic.email}>` : null);
+    const emailConfigured = Boolean(smtpHost && smtpPort && smtpUser && smtpPass && smtpFrom);
+
     const smsApiKey = this.configService.get<string>('SMS_API_KEY');
     const smsApiUrl = this.configService.get<string>('SMS_API_URL');
+    const smsConfigured = Boolean(smsApiKey && smsApiUrl);
+
     const tgToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     const tgChatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
+    const tgConfigured = Boolean(tgToken && tgChatId);
 
     return {
       email: {
-        configured: Boolean(smtpHost && smtpUser),
+        configured: emailConfigured,
         provider: 'SMTP',
         host: smtpHost || null,
+        port: smtpPort || null,
+        hasSender: Boolean(smtpFrom),
+        status: emailConfigured
+          ? (this.mailTransporter ? 'configured' : 'usable')
+          : 'missing_configuration',
+        mode: emailConfigured ? 'real' : 'simulated',
       },
       sms: {
-        configured: Boolean(smsApiKey && smsApiUrl),
+        configured: smsConfigured,
         provider: 'Eskiz / SMS Gateway',
+        status: smsConfigured ? 'configured' : 'missing_configuration',
+        mode: smsConfigured ? 'real' : 'simulated',
       },
       telegram: {
-        configured: Boolean(tgToken && tgChatId),
+        configured: tgConfigured,
         botConfigured: Boolean(tgToken),
         chatIdConfigured: Boolean(tgChatId),
+        status: tgConfigured ? 'configured' : 'missing_configuration',
+        mode: tgConfigured ? 'real' : 'simulated',
       },
     };
   }

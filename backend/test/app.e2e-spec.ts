@@ -166,7 +166,11 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     // 2. Create Doctor B Staff User if not exists
     await prisma.staffUser.upsert({
       where: { email: 'dr.karimova@dentacare.local' },
-      update: { doctorId: testDoctorBId },
+      update: {
+        doctorId: testDoctorBId,
+        isActive: true,
+        passwordHash: await bcrypt.hash('Doctor2026!', 12),
+      },
       create: {
         email: 'dr.karimova@dentacare.local',
         passwordHash: await bcrypt.hash('Doctor2026!', 12),
@@ -410,8 +414,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   it('Regression 7: Shared family phone does not silently merge different patients', async () => {
     const familyPhone = `${testPhonePrefix}05`;
 
-    const slot1 = getNextWorkingSlot(6, 12, 0);
-    const slot2 = getNextWorkingSlot(6, 14, 0);
+    const slot1 = getNextWorkingSlot(8, 12, 0);
+    const slot2 = getNextWorkingSlot(8, 14, 0);
 
     await request(app.getHttpServer())
       .post('/api/booking')
@@ -1204,7 +1208,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       const diffMin = Math.round(
         (new Date(resAppt.endTime).getTime() - new Date(resAppt.startTime).getTime()) / 60000,
       );
-      expect(diffMin).toBe(durationMinutes + originalBuffer); // Exactly 50 minutes total duration
+      expect(diffMin).toBe(durationMinutes); // Exactly 40 minutes treatment duration (treatment-end contract)
     } finally {
       // Cleanup
       await prisma.clinicSettings.updateMany({
@@ -2202,9 +2206,9 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(appt!.durationMinutes).toBe(75);
     expect(appt!.bufferMinutes).toBe(5);
 
-    // Assert: endTime - startTime = durationMinutes + bufferMinutes
+    // Assert: endTime - startTime = durationMinutes (treatment-end contract)
     const actualIntervalMs = new Date(appt!.endTime).getTime() - new Date(appt!.startTime).getTime();
-    const expectedIntervalMs = (appt!.durationMinutes + (appt!.bufferMinutes ?? 5)) * 60 * 1000;
+    const expectedIntervalMs = appt!.durationMinutes * 60 * 1000;
     expect(actualIntervalMs).toBe(expectedIntervalMs);
 
     // Assert: service-item totals match defined appointment duration policy
@@ -2661,8 +2665,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(finalApptA).toBeDefined();
     expect(finalApptA!.durationMinutes).toBe(60);
     const intervalA = (finalApptA!.endTime.getTime() - finalApptA!.startTime.getTime()) / (60 * 1000);
-    expect(intervalA).toBe(finalApptA!.durationMinutes + finalApptA!.bufferMinutes);
-    expect(intervalA).toBe(65);
+    expect(intervalA).toBe(finalApptA!.durationMinutes);
+    expect(intervalA).toBe(60);
 
     const overlapSlotA = new Date(finalApptA!.startTime.getTime() + 15 * 60 * 1000);
     const conflictResA = await request(app.getHttpServer())
@@ -2729,8 +2733,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(finalApptB).toBeDefined();
     expect(finalApptB!.durationMinutes).toBe(45);
     const intervalB = (finalApptB!.endTime.getTime() - finalApptB!.startTime.getTime()) / (60 * 1000);
-    expect(intervalB).toBe(finalApptB!.durationMinutes + finalApptB!.bufferMinutes);
-    expect(intervalB).toBe(50);
+    expect(intervalB).toBe(finalApptB!.durationMinutes);
+    expect(intervalB).toBe(45);
 
     const overlapSlotB = new Date(finalApptB!.startTime.getTime() + 10 * 60 * 1000);
     const conflictResB = await request(app.getHttpServer())
@@ -3492,6 +3496,12 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     const apptAfterBook = await prisma.appointment.findUnique({ where: { id: apptId } });
     expect(apptAfterBook!.scheduleRevision).toBe(1);
 
+    // Confirm appointment so it is eligible for reminder delivery
+    await prisma.appointment.update({
+      where: { id: apptId },
+      data: { status: AppointmentStatus.CONFIRMED },
+    });
+
     // 2. Deliver reminder for Slot A
     const jobA = await prisma.notificationJob.findFirst({
       where: { appointmentId: apptId, scheduleRevision: 1, templateKey: 'appointment_reminder' },
@@ -3514,6 +3524,12 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       .post(`/api/booking/reschedule/${publicToken}`)
       .send({ startTime: slotB.toISOString() })
       .expect(200);
+
+    // Re-confirm rescheduled appointment for reminder eligibility
+    await prisma.appointment.update({
+      where: { id: apptId },
+      data: { status: AppointmentStatus.CONFIRMED },
+    });
 
     const apptAfterReschedB = await prisma.appointment.findUnique({ where: { id: apptId } });
     expect(apptAfterReschedB!.scheduleRevision).toBe(2);
@@ -3540,6 +3556,12 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       .post(`/api/booking/reschedule/${publicToken}`)
       .send({ startTime: slotA.toISOString() })
       .expect(200);
+
+    // Re-confirm rescheduled appointment for reminder eligibility
+    await prisma.appointment.update({
+      where: { id: apptId },
+      data: { status: AppointmentStatus.CONFIRMED },
+    });
 
     const apptAfterReschedA = await prisma.appointment.findUnique({ where: { id: apptId } });
     expect(apptAfterReschedA!.scheduleRevision).toBe(3);

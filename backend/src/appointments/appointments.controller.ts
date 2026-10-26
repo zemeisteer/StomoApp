@@ -14,7 +14,7 @@ import { JwtPayload } from '../auth/auth.service';
 import { AppointmentStatus, StaffRole } from '@prisma/client';
 import {
   IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min, Max, IsArray, Matches, IsEmail, ValidateIf,
-  IsNotEmpty, ValidateNested,
+  IsNotEmpty, ValidateNested, IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -76,6 +76,10 @@ export class PublicBookingDto {
 
   @IsBoolean()
   consentGiven!: boolean;
+
+  @IsOptional()
+  @IsIn(['uz', 'ru'], { message: 'Til faqat uz yoki ru bo\'lishi mumkin' })
+  lang?: 'uz' | 'ru';
 
   @IsOptional()
   @IsString()
