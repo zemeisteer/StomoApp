@@ -10,6 +10,8 @@ export interface MigrationOptions {
   batchSize: number;
   limit: number;
   cursor?: string;
+  provenanceCutoff?: Date;
+  approvedManifestIds?: string[];
 }
 
 export function parseArgs(argv: string[]): MigrationOptions {
@@ -17,6 +19,8 @@ export function parseArgs(argv: string[]): MigrationOptions {
   let batchSize = 100;
   let limit = 10000;
   let cursor: string | undefined = undefined;
+  let provenanceCutoff: Date | undefined = undefined;
+  let approvedManifestIds: string[] | undefined = undefined;
 
   for (const arg of argv) {
     if (arg === '--execute' || arg === '-e') {
@@ -32,10 +36,21 @@ export function parseArgs(argv: string[]): MigrationOptions {
     } else if (arg.startsWith('--cursor=')) {
       const val = arg.split('=')[1]?.trim();
       if (val) cursor = val;
+    } else if (arg.startsWith('--provenance-cutoff=')) {
+      const val = arg.split('=')[1]?.trim();
+      if (val) {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) provenanceCutoff = d;
+      }
+    } else if (arg.startsWith('--manifest=')) {
+      const val = arg.split('=')[1]?.trim();
+      if (val) {
+        approvedManifestIds = val.split(',').map((id) => id.trim()).filter(Boolean);
+      }
     }
   }
 
-  return { dryRun, batchSize, limit, cursor };
+  return { dryRun, batchSize, limit, cursor, provenanceCutoff, approvedManifestIds };
 }
 
 export interface AmbiguousRecordReport {
@@ -49,7 +64,41 @@ export interface AmbiguousRecordReport {
   reason: string;
 }
 
-export async function runTimeContractMigration(options: MigrationOptions, prismaClient?: PrismaClient) {
+export interface ArithmeticCandidateReviewReport {
+  id: string;
+  doctorId: string;
+  createdAt: string;
+  startTime: string;
+  endTime: string;
+  diffMinutes: number;
+  durationMinutes: number;
+  bufferMinutes: number;
+  reason: string;
+}
+
+export interface TimeContractMigrationResult {
+  scanned: number;
+  compliant: number;
+  zeroBuffer: number;
+  provenLegacyEligible: number;
+  arithmeticCandidatesReviewCount: number;
+  arithmeticCandidatesReview: ArithmeticCandidateReviewReport[];
+  legacyEligible: number; // backward compatibility for existing callers
+  migrated: number;
+  skippedModified: number;
+  skippedRecordIds: string[];
+  ambiguousCount: number;
+  ambiguous: AmbiguousRecordReport[];
+  isDryRun: boolean;
+  nextCursor: string | null;
+  remainingWork: number;
+  hasMore: boolean;
+}
+
+export async function runTimeContractMigration(
+  options: MigrationOptions,
+  prismaClient?: PrismaClient,
+): Promise<TimeContractMigrationResult> {
   const prisma = prismaClient || new PrismaClient();
   const startTime = Date.now();
 
@@ -61,6 +110,12 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
   console.log(`Scan Limit     : ${options.limit}`);
   if (options.cursor) {
     console.log(`Start Cursor   : ${options.cursor}`);
+  }
+  if (options.provenanceCutoff) {
+    console.log(`Provenance Cutoff : ${options.provenanceCutoff.toISOString()}`);
+  }
+  if (options.approvedManifestIds && options.approvedManifestIds.length > 0) {
+    console.log(`Approved Manifest : ${options.approvedManifestIds.length} explicit record ID(s)`);
   }
 
   const totalAppointments = await prisma.appointment.count();
@@ -78,6 +133,7 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
     orderBy: { id: 'asc' },
     select: {
       id: true,
+      createdAt: true,
       startTime: true,
       endTime: true,
       durationMinutes: true,
@@ -94,7 +150,7 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
 
   const compliantRecords: string[] = [];
   const zeroBufferRecords: string[] = [];
-  const legacyToMigrate: Array<{
+  const provenLegacyToMigrate: Array<{
     id: string;
     startTime: Date;
     currentEndTime: Date;
@@ -102,7 +158,11 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
     durationMinutes: number;
     bufferMinutes: number;
   }> = [];
+  const arithmeticCandidatesReview: ArithmeticCandidateReviewReport[] = [];
   const ambiguousRecords: AmbiguousRecordReport[] = [];
+  const skippedRecordIds: string[] = [];
+
+  const manifestSet = options.approvedManifestIds ? new Set(options.approvedManifestIds) : null;
 
   for (const appt of appointments) {
     const timeLike: AppointmentTimeLike = {
@@ -127,15 +187,41 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
         zeroBufferRecords.push(appt.id);
         break;
       case 'LEGACY_OCCUPIED_END': {
-        const proposedEnd = getAppointmentTreatmentEnd(timeLike);
-        legacyToMigrate.push({
-          id: appt.id,
-          startTime: appt.startTime,
-          currentEndTime: appt.endTime,
-          proposedEndTime: proposedEnd,
-          durationMinutes: result.durationMinutes ?? appt.durationMinutes,
-          bufferMinutes: result.bufferMinutes,
-        });
+        // Enforce Provenance:
+        // A timestamp difference equal to duration + buffer does not prove that a record
+        // came from the old writer. It can also result from a manual adjustment.
+        // Therefore, require available provenance (e.g. createdAt <= cutoff) or deliberate manifest approval.
+        const hasManifestApproval = manifestSet ? manifestSet.has(appt.id) : false;
+        const hasProvenanceCutoff = options.provenanceCutoff
+          ? new Date(appt.createdAt) <= options.provenanceCutoff
+          : false;
+
+        if (hasManifestApproval || hasProvenanceCutoff) {
+          // Proven eligible legacy record
+          const proposedEnd = getAppointmentTreatmentEnd(timeLike);
+          provenLegacyToMigrate.push({
+            id: appt.id,
+            startTime: appt.startTime,
+            currentEndTime: appt.endTime,
+            proposedEndTime: proposedEnd,
+            durationMinutes: result.durationMinutes ?? appt.durationMinutes,
+            bufferMinutes: result.bufferMinutes,
+          });
+        } else {
+          // Arithmetic candidate requiring manual review before modification
+          arithmeticCandidatesReview.push({
+            id: appt.id,
+            doctorId: appt.doctorId,
+            createdAt: appt.createdAt.toISOString(),
+            startTime: appt.startTime.toISOString(),
+            endTime: appt.endTime.toISOString(),
+            diffMinutes: result.diffMinutes,
+            durationMinutes: result.durationMinutes ?? appt.durationMinutes,
+            bufferMinutes: result.bufferMinutes,
+            reason: 'Vaqt farqi davomiylik+buferga teng, biroq eski writer provanansi yoki tasdiqlangan manifest mavjud emas',
+          });
+          skippedRecordIds.push(appt.id);
+        }
         break;
       }
       case 'AMBIGUOUS': {
@@ -149,21 +235,30 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
           bufferMinutes: result.bufferMinutes,
           reason: result.reason || 'Noaniq vaqt formati',
         });
+        skippedRecordIds.push(appt.id);
         break;
       }
     }
   }
 
   console.log('\n--- SCAN FINDINGS ---');
-  console.log(`Scanned in this Run               : ${appointments.length}`);
-  console.log(`Already Compliant (Treatment-End) : ${compliantRecords.length}`);
-  console.log(`Zero-Buffer Appointments          : ${zeroBufferRecords.length}`);
-  console.log(`Legacy Occupied-End to Backfill   : ${legacyToMigrate.length}`);
-  console.log(`Ambiguous Records (Preserved)     : ${ambiguousRecords.length}`);
+  console.log(`Scanned in this Run                 : ${appointments.length}`);
+  console.log(`Already Compliant (Treatment-End)   : ${compliantRecords.length}`);
+  console.log(`Zero-Buffer Appointments            : ${zeroBufferRecords.length}`);
+  console.log(`Proven Legacy (Eligible to Migrate) : ${provenLegacyToMigrate.length}`);
+  console.log(`Arithmetic Candidates (Review)      : ${arithmeticCandidatesReview.length}`);
+  console.log(`Ambiguous Records (Preserved)       : ${ambiguousRecords.length}`);
+
+  if (arithmeticCandidatesReview.length > 0) {
+    console.log('\n[NOTICE] Arithmetic candidates detected lacking provenance. These require deliberate staff review:');
+    console.table(arithmeticCandidatesReview.slice(0, 10));
+    if (arithmeticCandidatesReview.length > 10) {
+      console.log(`... and ${arithmeticCandidatesReview.length - 10} more review candidates.`);
+    }
+  }
 
   if (ambiguousRecords.length > 0) {
     console.log('\n[NOTICE] Ambiguous records detected. These are NOT modified and preserved for deliberate staff review:');
-    // Display report without patient PII
     console.table(ambiguousRecords.slice(0, 10));
     if (ambiguousRecords.length > 10) {
       console.log(`... and ${ambiguousRecords.length - 10} more ambiguous records.`);
@@ -173,11 +268,11 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
   let migratedCount = 0;
   let skippedModifiedCount = 0;
 
-  if (!options.dryRun && legacyToMigrate.length > 0) {
-    console.log(`\nExecuting backfill in batches of ${options.batchSize}...`);
+  if (!options.dryRun && provenLegacyToMigrate.length > 0) {
+    console.log(`\nExecuting backfill on proven legacy records in batches of ${options.batchSize}...`);
 
-    for (let i = 0; i < legacyToMigrate.length; i += options.batchSize) {
-      const batch = legacyToMigrate.slice(i, i + options.batchSize);
+    for (let i = 0; i < provenLegacyToMigrate.length; i += options.batchSize) {
+      const batch = provenLegacyToMigrate.slice(i, i + options.batchSize);
       let batchSuccessCount = 0;
       let batchSkippedCount = 0;
 
@@ -200,6 +295,7 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
 
           if (!current) {
             batchSkippedCount++;
+            skippedRecordIds.push(item.id);
             continue;
           }
 
@@ -212,6 +308,7 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
           if (isModified) {
             console.log(`[RACE GUARD] Appointment ${item.id} was concurrently modified since initial inspection. Skipping.`);
             batchSkippedCount++;
+            skippedRecordIds.push(item.id);
             continue;
           }
 
@@ -227,6 +324,7 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
           if (recheck.classification !== 'LEGACY_OCCUPIED_END') {
             console.log(`[RACE GUARD] Appointment ${item.id} is no longer in LEGACY_OCCUPIED_END state (${recheck.classification}). Skipping.`);
             batchSkippedCount++;
+            skippedRecordIds.push(item.id);
             continue;
           }
 
@@ -259,17 +357,17 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
       migratedCount += batchSuccessCount;
       skippedModifiedCount += batchSkippedCount;
 
-      console.log(`Migrated ${migratedCount} records (Skipped modified: ${skippedModifiedCount})...`);
+      console.log(`Migrated ${migratedCount} proven records (Skipped modified: ${skippedModifiedCount})...`);
     }
 
     console.log(`\n[SUCCESS] Backfill completed. Successfully updated ${migratedCount} records.`);
     if (skippedModifiedCount > 0) {
       console.log(`[NOTICE] Skipped ${skippedModifiedCount} records modified concurrently.`);
     }
-  } else if (options.dryRun && legacyToMigrate.length > 0) {
-    console.log(`\n[DRY-RUN] ${legacyToMigrate.length} legacy records identified for migration. Re-run with --execute to apply.`);
+  } else if (options.dryRun && provenLegacyToMigrate.length > 0) {
+    console.log(`\n[DRY-RUN] ${provenLegacyToMigrate.length} proven legacy records identified for migration. Re-run with --execute to apply.`);
   } else {
-    console.log('\n[INFO] All scanned records are already compliant or zero-buffer. Zero mutations needed.');
+    console.log('\n[INFO] Zero proven legacy records requiring migration.');
   }
 
   // Continuation checkpoint calculation
@@ -295,9 +393,13 @@ export async function runTimeContractMigration(options: MigrationOptions, prisma
     scanned: appointments.length,
     compliant: compliantRecords.length,
     zeroBuffer: zeroBufferRecords.length,
-    legacyEligible: legacyToMigrate.length,
+    provenLegacyEligible: provenLegacyToMigrate.length,
+    arithmeticCandidatesReviewCount: arithmeticCandidatesReview.length,
+    arithmeticCandidatesReview,
+    legacyEligible: provenLegacyToMigrate.length,
     migrated: migratedCount,
     skippedModified: skippedModifiedCount,
+    skippedRecordIds: Array.from(new Set(skippedRecordIds)),
     ambiguousCount: ambiguousRecords.length,
     ambiguous: ambiguousRecords,
     isDryRun: options.dryRun,

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -236,5 +236,42 @@ export class ClinicService {
   async updateBranch(id: string, data: any) {
     this.validateBranchData(data);
     return this.prisma.branch.update({ where: { id }, data });
+  }
+
+  async deleteBranch(id: string) {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id },
+      include: {
+        appointments: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!branch) throw new NotFoundException('Filial topilmadi');
+
+    // If branch has appointments, deactivate it to preserve clinical histories
+    if (branch.appointments.length > 0) {
+      await this.prisma.branch.update({
+        where: { id },
+        data: { isActive: false },
+      });
+      return {
+        success: true,
+        deactivated: true,
+        message: 'Filialda tarixiy qabullar mavjud bo‘lgani sababli u nofaol holatga o‘tkazildi',
+      };
+    }
+
+    // If no appointments, clean relations and delete safely
+    await this.prisma.$transaction(async (tx) => {
+      await tx.doctorBranch.deleteMany({ where: { branchId: id } });
+      await tx.doctorSchedule.deleteMany({ where: { branchId: id } });
+      await tx.scheduleException.deleteMany({ where: { branchId: id } });
+      await tx.branch.delete({ where: { id } });
+    });
+
+    return {
+      success: true,
+      deactivated: false,
+      message: 'Filial muvaffaqiyatli o‘chirildi',
+    };
   }
 }

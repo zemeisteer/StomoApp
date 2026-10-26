@@ -542,6 +542,22 @@ export default function AdminDoctorsManagePage() {
     }
   };
 
+  const handleDeleteDoctor = async (doc: any) => {
+    if (!doc) return;
+    const confirmed = confirm(
+      `Haqiqatan ham "Dr. ${doc.firstNameUz} ${doc.lastNameUz}" shifokorini o'chirmoqchimisiz?\n\nAgar shifokorga tegishli qabullar mavjud bo'lsa, u arxivlanadi va nofaol qilinadi (tarixiy yozuvlar saqlanadi). Agar qabullar bo'lmasa, u butunlay o'chiriladi.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await api.deleteDoctorAdmin(doc.id);
+      alert(res?.message || 'Shifokor muvaffaqiyatli o‘chirildi');
+      await loadDoctorsAndBranches();
+    } catch (err: any) {
+      alert(err?.message || 'Shifokorni o‘chirishda xatolik yuz berdi');
+    }
+  };
+
   const filteredDoctors = doctors.filter((doc) => {
     if (!doctorSearch.trim()) return true;
     const q = doctorSearch.toLowerCase().trim();
@@ -679,13 +695,25 @@ export default function AdminDoctorsManagePage() {
                 </div>
               </div>
 
-              <button
-                onClick={() => openEditDoctor(selectedDoctorObj)}
-                className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shrink-0"
-              >
-                <Edit2 className="w-3.5 h-3.5 text-teal-700" />
-                <span>Profil va xizmatlarni tahrirlash</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openEditDoctor(selectedDoctorObj)}
+                  className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                >
+                  <Edit2 className="w-3.5 h-3.5 text-teal-700" />
+                  <span>Profil va xizmatlarni tahrirlash</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteDoctor(selectedDoctorObj)}
+                  className="px-3.5 py-2 border border-rose-200 text-rose-700 hover:bg-rose-50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                  title="Shifokorni o'chirish"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span>O&apos;chirish</span>
+                </button>
+              </div>
             </div>
           );
         })()}
@@ -1150,21 +1178,37 @@ export default function AdminDoctorsManagePage() {
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsDoctorModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
-                >
-                  Bekor qilish
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingDoctor}
-                  className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
-                >
-                  {isSavingDoctor ? 'Saqlanmoqda...' : 'Saqlash'}
-                </button>
+              <div className="pt-2 flex justify-between items-center border-t border-slate-100">
+                {editingDoctor ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDoctorModalOpen(false);
+                      handleDeleteDoctor(editingDoctor);
+                    }}
+                    className="px-3.5 py-2 text-rose-600 hover:bg-rose-50 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4 text-rose-600" />
+                    <span>Shifokorni o&apos;chirish</span>
+                  </button>
+                ) : <div />}
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsDoctorModalOpen(false)}
+                    className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                  >
+                    Bekor qilish
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingDoctor}
+                    className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
+                  >
+                    {isSavingDoctor ? 'Saqlanmoqda...' : 'Saqlash'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

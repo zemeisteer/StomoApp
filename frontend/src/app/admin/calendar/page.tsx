@@ -126,6 +126,14 @@ export default function AdminCalendarPage() {
   const [mutatingStatus, setMutatingStatus] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Banner for recently confirmed appointment so the receptionist can immediately locate it on the calendar
+  const [confirmedToast, setConfirmedToast] = useState<{
+    id: string;
+    patientName: string;
+    startTime: string;
+    doctorName?: string;
+  } | null>(null);
+
   // Search by patient name or phone
   const [search, setSearch] = useState<string>('');
 
@@ -593,6 +601,21 @@ export default function AdminCalendarPage() {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('pendingCountChanged'));
       }
+
+      if (newStatus === 'CONFIRMED') {
+        const docName =
+          selectedAppt.doctor?.user?.fullName ||
+          (selectedAppt.doctor
+            ? `${selectedAppt.doctor.firstNameUz || ''} ${selectedAppt.doctor.lastNameUz || ''}`.trim()
+            : undefined);
+        setConfirmedToast({
+          id: selectedAppt.id,
+          patientName: selectedAppt.patientName,
+          startTime: selectedAppt.startTime,
+          doctorName: docName,
+        });
+      }
+
       closeAppointment();
       if (appointments.length === 1 && currentPage > 1) {
         setCurrentPage((prev) => Math.max(1, prev - 1));
@@ -852,15 +875,61 @@ export default function AdminCalendarPage() {
           </div>
         </div>
 
+        {/* Confirmed Appointment Notification Banner */}
+        {confirmedToast && (
+          <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 flex-shrink-0">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-emerald-900">
+                  {isRu ? 'Заявка успешно подтверждена!' : 'Ariza muvaffaqiyatli tasdiqlandi!'}
+                </p>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  {confirmedToast.patientName} &bull; {formatClinicDate(confirmedToast.startTime)} {formatClinicTime(confirmedToast.startTime)} {confirmedToast.doctorName ? `(${confirmedToast.doctorName})` : ''}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsInboxMode(false);
+                  setSelectedStatus('');
+                  const targetDate = new Date(confirmedToast.startTime);
+                  setCurrentDate(targetDate);
+                  setViewMode('day');
+                  openAppointment({ id: confirmedToast.id, startTime: confirmedToast.startTime });
+                  setConfirmedToast(null);
+                }}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <CalendarIcon className="w-4 h-4" />
+                <span>{isRu ? 'Показать в календаре' : "Taqvimda ko'rish"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmedToast(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-emerald-100/50 cursor-pointer"
+                title={isRu ? 'Закрыть' : 'Yopish'}
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Mode Selector: Pending Applications vs Working Calendar */}
         <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-fit">
           <button
             type="button"
             onClick={() => {
               setIsInboxMode(false);
+              setSelectedStatus('');
               setCurrentPage(1);
             }}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
               !isInboxMode
                 ? 'bg-white text-teal-800 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'

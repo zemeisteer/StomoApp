@@ -163,6 +163,55 @@ export class DoctorsService {
     });
   }
 
+  async delete(id: string) {
+    const doctor = await this.prisma.doctor.findUnique({
+      where: { id },
+      include: {
+        appointments: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!doctor) throw new NotFoundException('Shifokor topilmadi');
+
+    // If doctor has appointments, preserve historical clinical records by archiving and deactivating
+    if (doctor.appointments.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.doctor.update({
+          where: { id },
+          data: { isArchived: true, isActive: false },
+        });
+        await tx.doctorSchedule.updateMany({
+          where: { doctorId: id },
+          data: { isActive: false },
+        });
+      });
+      return {
+        success: true,
+        archived: true,
+        message: 'Shifokorda tarixiy qabullar mavjudligi sababli u arxivlandi va nofaol holatga o‘tkazildi',
+      };
+    }
+
+    // If doctor has NO appointments, delete relations and remove doctor record cleanly
+    await this.prisma.$transaction(async (tx) => {
+      await tx.doctorSpecialty.deleteMany({ where: { doctorId: id } });
+      await tx.doctorBranch.deleteMany({ where: { doctorId: id } });
+      await tx.doctorService.deleteMany({ where: { doctorId: id } });
+      await tx.doctorSchedule.deleteMany({ where: { doctorId: id } });
+      await tx.scheduleException.deleteMany({ where: { doctorId: id } });
+      await tx.staffUser.updateMany({
+        where: { doctorId: id },
+        data: { doctorId: null },
+      });
+      await tx.doctor.delete({ where: { id } });
+    });
+
+    return {
+      success: true,
+      archived: false,
+      message: 'Shifokor muvaffaqiyatli o‘chirildi',
+    };
+  }
+
   async getSpecialties() {
     return this.prisma.specialty.findMany({
       where: { isActive: true },

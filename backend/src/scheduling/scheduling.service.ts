@@ -7,6 +7,8 @@ import {
   isAppointmentOverlapping,
   buildConflictCandidateWhere,
   getAppointmentOccupiedEnd,
+  getAppointmentEffectiveOccupiedEnd,
+  MAX_SUPPORTED_DURATION_MINUTES,
 } from '../appointments/appointment-time.helper';
 
 export const DAY_MAP: Record<number, DayOfWeek> = {
@@ -590,6 +592,12 @@ export class SchedulingService {
       totalPriceFrom += (s.priceFrom || 0);
     });
 
+    if (totalDurationMinutes > MAX_SUPPORTED_DURATION_MINUTES) {
+      throw new BadRequestException(
+        `Xizmatlarning umumiy davomiyligi ruxsat etilgan maksimal vaqtdan (${MAX_SUPPORTED_DURATION_MINUTES} daqiqa) oshmasligi kerak`,
+      );
+    }
+
     const combinedNameUz = items.map((i) => i.serviceNameUz).join(', ');
 
     return {
@@ -785,10 +793,14 @@ export class SchedulingService {
       },
       select: {
         id: true,
+        status: true,
+        expiresAt: true,
         startTime: true,
         endTime: true,
         durationMinutes: true,
         bufferMinutes: true,
+        overrunActive: true,
+        overrunEstimatedEndTime: true,
         branchId: true,
         branch: { select: { nameUz: true, nameRu: true } },
         patient: { select: { fullName: true, phone: true } },
@@ -796,10 +808,23 @@ export class SchedulingService {
       orderBy: { startTime: 'asc' },
     });
 
+    // Query date-specific overtime exceptions so approved overtime does not false-conflict with regular schedule
+    const overtimeExceptions = await params.tx.scheduleException.findMany({
+      where: {
+        doctorId: params.doctorId,
+        type: ExceptionType.OVERTIME,
+      },
+    });
+
     const pad = (n: number) => String(n).padStart(2, '0');
     const fmt = (min: number) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
 
     for (const appt of upcomingAppts) {
+      // 1. Expired pending appointments do not block schedule changes
+      if (appt.status === AppointmentStatus.PENDING && appt.expiresAt && new Date(appt.expiresAt) <= now) {
+        continue;
+      }
+
       const zonedStart = toZonedTime(new Date(appt.startTime), params.timezone);
       const zonedEnd = toZonedTime(new Date(appt.endTime), params.timezone);
       const apptDayOfWeek = DAY_MAP[zonedStart.getDay()];
@@ -808,14 +833,37 @@ export class SchedulingService {
         continue;
       }
 
-      const apptStartMin = zonedStart.getHours() * 60 + zonedStart.getMinutes();
-      const apptEndMin = zonedEnd.getHours() * 60 + zonedEnd.getMinutes();
+      // 2. Active treatment overruns remain protected using effective occupied end
+      const effectiveOccupiedEnd = getAppointmentEffectiveOccupiedEnd(appt as any);
+      const zonedOccupiedEnd = toZonedTime(effectiveOccupiedEnd, params.timezone);
+
+      // 3. Cross-midnight occupied intervals retain their date information:
+      // Calculate minutes relative to start day's midnight so 00:10 tomorrow is 1450m (not 10m < 23:50).
+      const startDayMidnight = new Date(zonedStart.getFullYear(), zonedStart.getMonth(), zonedStart.getDate(), 0, 0, 0, 0);
+      const apptStartMin = Math.round((zonedStart.getTime() - startDayMidnight.getTime()) / 60000);
+      const apptEndMin = Math.round((zonedEnd.getTime() - startDayMidnight.getTime()) / 60000);
+      const apptEndWithBuf = Math.round((zonedOccupiedEnd.getTime() - startDayMidnight.getTime()) / 60000);
       const apptBuf = appt.bufferMinutes ?? params.defaultBufferMinutes;
-      const zonedOccupiedEnd = toZonedTime(getAppointmentOccupiedEnd(appt as any), params.timezone);
-      const apptEndWithBuf = zonedOccupiedEnd.getHours() * 60 + zonedOccupiedEnd.getMinutes();
 
       const dateStr = `${zonedStart.getFullYear()}-${pad(zonedStart.getMonth() + 1)}-${pad(zonedStart.getDate())}`;
       const formattedTime = `${dateStr} ${fmt(apptStartMin)} - ${fmt(apptEndMin)}`;
+
+      // 4. Respect date-specific overtime exceptions
+      const matchingOvertime = overtimeExceptions.find((ex: any) => {
+        const exZoned = toZonedTime(new Date(ex.date), params.timezone);
+        const exDateStr = `${exZoned.getFullYear()}-${pad(exZoned.getMonth() + 1)}-${pad(exZoned.getDate())}`;
+        if (exDateStr !== dateStr) return false;
+        if (ex.branchId && ex.branchId !== params.branchId) return false;
+        if (!ex.startTime || !ex.endTime) return false;
+        const otStart = this.parseTime(ex.startTime);
+        const otEnd = this.parseTime(ex.endTime);
+        return apptStartMin >= otStart && apptEndWithBuf <= otEnd;
+      });
+
+      if (matchingOvertime) {
+        // Fully covered by approved overtime on this specific date
+        continue;
+      }
 
       let conflictReason: string | null = null;
 

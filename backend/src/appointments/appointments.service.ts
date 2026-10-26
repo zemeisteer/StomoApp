@@ -22,7 +22,21 @@ import {
   getAppointmentEffectiveOccupiedEnd,
   isAppointmentOverlapping,
   buildConflictCandidateWhere,
+  MAX_SUPPORTED_DURATION_MINUTES,
 } from './appointment-time.helper';
+
+/**
+ * Patient-facing notification templates used to derive communication language.
+ * Staff-facing notification templates (such as staff_new_booking) are explicitly excluded.
+ */
+export const PATIENT_COMMUNICATION_TEMPLATES = [
+  'patient_booking_received',
+  'patient_booking_received_sms',
+  'patient_booking_confirmed',
+  'appointment_rescheduled',
+  'appointment_reminder',
+  'appointment_cancellation',
+] as const;
 
 // Allowed status transitions
 const ALLOWED_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
@@ -513,6 +527,11 @@ export class AppointmentsService {
 
           // Calculate consistent duration, buffer, treatment end, and occupied end
           const txDurationMinutes = txAuthoritative.totalDurationMinutes;
+          if (txDurationMinutes > MAX_SUPPORTED_DURATION_MINUTES) {
+            throw new BadRequestException(
+              `Xizmatlarning umumiy davomiyligi ruxsat etilgan maksimal vaqtdan (${MAX_SUPPORTED_DURATION_MINUTES} daqiqa) oshmasligi kerak`,
+            );
+          }
           const txPriceFrom = txAuthoritative.totalPriceFrom;
           const txTreatmentEndTimeUtc = new Date(startTimeUtc.getTime() + txDurationMinutes * 60 * 1000);
           const txOccupiedEndUtc = new Date(startTimeUtc.getTime() + (txDurationMinutes + txBufferMinutes) * 60 * 1000);
@@ -957,13 +976,20 @@ export class AppointmentsService {
       });
 
       // Derive communication language with strict precedence:
-      // 1. Appointment's own prior notification intent snapshot
+      // 1. Appointment's own prior patient-facing notification intent snapshot
       // 2. Persisted patient notes tag ([lang:ru] / [lang:uz])
-      // 3. Documented clinic default ('uz')
+      // 3. Documented clinic primary default ('uz')
+      // Note: Never derive patient language from staff alerts (e.g. staff_new_booking).
       let apptLang: 'uz' | 'ru' = 'uz';
       const prevJob = await tx.notificationJob.findFirst({
-        where: { appointmentId: appt.id },
-        orderBy: { createdAt: 'desc' },
+        where: {
+          appointmentId: appt.id,
+          templateKey: { in: [...PATIENT_COMMUNICATION_TEMPLATES] },
+        },
+        orderBy: [
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ],
         select: { payload: true },
       });
       const snapshotLang = (prevJob?.payload as any)?.lang;
@@ -1333,13 +1359,20 @@ export class AppointmentsService {
           });
 
           // Derive communication language with strict precedence:
-          // 1. Appointment's own prior notification intent snapshot
+          // 1. Appointment's own prior patient-facing notification intent snapshot
           // 2. Persisted patient notes tag ([lang:ru] / [lang:uz])
-          // 3. Documented clinic default ('uz')
+          // 3. Documented clinic primary default ('uz')
+          // Note: Never derive patient language from staff alerts (e.g. staff_new_booking).
           let apptLang: 'uz' | 'ru' = 'uz';
           const prevJob = await tx.notificationJob.findFirst({
-            where: { appointmentId: appt.id },
-            orderBy: { createdAt: 'desc' },
+            where: {
+              appointmentId: appt.id,
+              templateKey: { in: [...PATIENT_COMMUNICATION_TEMPLATES] },
+            },
+            orderBy: [
+              { createdAt: 'desc' },
+              { id: 'desc' },
+            ],
             select: { payload: true },
           });
           const snapshotLang = (prevJob?.payload as any)?.lang;

@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { PartialType } from '@nestjs/swagger';
 import { ClinicService } from './clinic.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -218,5 +218,12 @@ export class ClinicController {
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
   async updateBranch(@Param('id') id: string, @Body() data: UpdateBranchDto) {
     return this.clinicService.updateBranch(id, data);
+  }
+
+  @Delete('branches/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  async deleteBranch(@Param('id') id: string) {
+    return this.clinicService.deleteBranch(id);
   }
 }

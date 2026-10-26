@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { PartialType } from '@nestjs/swagger';
 import { DoctorsService } from './doctors.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -176,6 +176,13 @@ export class DoctorsController {
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
   archive(@Param('id') id: string) {
     return this.doctorsService.archive(id);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  delete(@Param('id') id: string) {
+    return this.doctorsService.delete(id);
   }
 
   @Post('admin/specialties')

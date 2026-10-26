@@ -166,95 +166,183 @@ export function classifyAppointmentRecord(appt: AppointmentTimeLike): {
   };
 }
 
+export class InvalidAppointmentTimeError extends Error {
+  constructor(message: string, public readonly details?: Record<string, any>) {
+    super(message);
+    this.name = 'InvalidAppointmentTimeError';
+  }
+}
+
 /**
- * Returns the exact scheduled treatment end time (excluding buffer).
+ * Validates the time and duration fields of an appointment record.
+ * Returns a typed validation result, or throws InvalidAppointmentTimeError if options.throwOnInvalid is true.
  */
-export function getAppointmentTreatmentEnd(appt: AppointmentTimeLike): Date {
+export function validateAppointmentTime(
+  appt: AppointmentTimeLike,
+  options?: { throwOnInvalid?: boolean },
+): {
+  isValid: boolean;
+  startMs: number;
+  endMs: number;
+  durationMinutes: number | null;
+  bufferMinutes: number;
+  error?: string;
+} {
+  const fail = (error: string, start = NaN, end = NaN, dur: number | null = null, buf = 0) => {
+    if (options?.throwOnInvalid) {
+      throw new InvalidAppointmentTimeError(error, { id: appt.id });
+    }
+    return {
+      isValid: false,
+      startMs: start,
+      endMs: end,
+      durationMinutes: dur,
+      bufferMinutes: buf,
+      error,
+    };
+  };
+
   const startMs = new Date(appt.startTime).getTime();
   const endMs = new Date(appt.endTime).getTime();
 
-  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) {
-    return new Date(endMs || startMs || Date.now());
+  if (isNaN(startMs) || isNaN(endMs)) {
+    return fail('Boshlanish yoki tugash vaqti noto‘g‘ri sana (NaN)', startMs, endMs);
   }
 
-  if (!appt.durationMinutes || isNaN(appt.durationMinutes) || appt.durationMinutes <= 0) {
-    // Conservative policy: if durationMinutes is missing, treat stored endTime as treatment end
-    return new Date(endMs);
+  if (endMs <= startMs) {
+    return fail('Tugash vaqti boshlanish vaqtidan keyin bo‘lishi shart (end <= start)', startMs, endMs);
   }
 
-  const durationMinutes = appt.durationMinutes;
-  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 0);
-  const diffExactMs = endMs - startMs;
+  const dur = appt.durationMinutes;
+  if (dur !== undefined && dur !== null) {
+    if (!Number.isFinite(dur) || isNaN(dur) || dur <= 0 || !Number.isInteger(dur)) {
+      return fail('Muolaja davomiyligi (durationMinutes) musbat butun son bo‘lishi shart', startMs, endMs);
+    }
+  }
+
+  const buf = appt.bufferMinutes;
+  if (buf !== undefined && buf !== null) {
+    if (!Number.isFinite(buf) || isNaN(buf) || buf < 0 || !Number.isInteger(buf)) {
+      return fail('Bufer (bufferMinutes) noldan kichik bo‘lmagan butun son bo‘lishi shart', startMs, endMs, dur ?? null);
+    }
+  }
+
+  if (appt.overrunActive) {
+    if (!appt.overrunEstimatedEndTime) {
+      return fail('Faol overrun uchun overrunEstimatedEndTime ko‘rsatilishi shart', startMs, endMs, dur ?? null, buf ?? 0);
+    }
+    const overrunMs = new Date(appt.overrunEstimatedEndTime).getTime();
+    if (isNaN(overrunMs) || !Number.isFinite(overrunMs) || overrunMs <= startMs) {
+      return fail('overrunEstimatedEndTime noto‘g‘ri yoki boshlanish vaqtidan oldin', startMs, endMs, dur ?? null, buf ?? 0);
+    }
+  }
+
+  return {
+    isValid: true,
+    startMs,
+    endMs,
+    durationMinutes: dur ?? null,
+    bufferMinutes: Math.max(0, buf ?? 0),
+  };
+}
+
+/**
+ * Asserts that an appointment record has valid timestamps and duration.
+ * Throws InvalidAppointmentTimeError on any validation violation.
+ */
+export function assertAppointmentTimeValid(appt: AppointmentTimeLike): void {
+  validateAppointmentTime(appt, { throwOnInvalid: true });
+}
+
+/**
+ * Returns the exact scheduled treatment end time (excluding buffer).
+ * Throws InvalidAppointmentTimeError if record has invalid timestamps or missing duration.
+ */
+export function getAppointmentTreatmentEnd(appt: AppointmentTimeLike): Date {
+  const validation = validateAppointmentTime(appt);
+  if (!validation.isValid) {
+    throw new InvalidAppointmentTimeError(validation.error || 'Noto‘g‘ri qabul vaqti', { id: appt.id });
+  }
+
+  if (validation.durationMinutes === null) {
+    throw new InvalidAppointmentTimeError('Qabul davomiyligi (durationMinutes) ko‘rsatilmagan yoki noto‘g‘ri', { id: appt.id });
+  }
+
+  const durationMinutes = validation.durationMinutes;
+  const bufferMinutes = validation.bufferMinutes;
+  const diffExactMs = validation.endMs - validation.startMs;
   const expectedTreatmentMs = durationMinutes * 60000;
   const expectedOccupiedMs = (durationMinutes + bufferMinutes) * 60000;
 
   if (bufferMinutes === 0) {
-    return new Date(endMs);
+    return new Date(validation.endMs);
   }
 
   if (Math.abs(diffExactMs - expectedTreatmentMs) <= SUB_MINUTE_TOLERANCE_MS) {
     // Current contract: endTime is treatment end
-    return new Date(endMs);
+    return new Date(validation.endMs);
   }
 
   if (Math.abs(diffExactMs - expectedOccupiedMs) <= SUB_MINUTE_TOLERANCE_MS) {
     // Legacy record: endTime had buffer added; treatment ended at start + duration
-    return new Date(startMs + durationMinutes * 60000);
+    return new Date(validation.startMs + durationMinutes * 60000);
   }
 
   // Ambiguous record: treatment end is defined by canonical durationMinutes
-  return new Date(startMs + durationMinutes * 60000);
+  return new Date(validation.startMs + durationMinutes * 60000);
 }
 
 /**
  * Returns the exact scheduled occupied end time (including buffer).
+ * Throws InvalidAppointmentTimeError if record has invalid timestamps or missing duration.
  */
 export function getAppointmentOccupiedEnd(appt: AppointmentTimeLike): Date {
-  const startMs = new Date(appt.startTime).getTime();
-  const endMs = new Date(appt.endTime).getTime();
-
-  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) {
-    return new Date(endMs || startMs || Date.now());
+  const validation = validateAppointmentTime(appt);
+  if (!validation.isValid) {
+    throw new InvalidAppointmentTimeError(validation.error || 'Noto‘g‘ri qabul vaqti', { id: appt.id });
   }
 
-  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 0);
-
-  if (!appt.durationMinutes || isNaN(appt.durationMinutes) || appt.durationMinutes <= 0) {
-    // Conservative policy for missing duration:
-    // Occupied end extends through stored endTime plus buffer to fail safe against double booking
-    return new Date(endMs + bufferMinutes * 60000);
+  if (validation.durationMinutes === null) {
+    throw new InvalidAppointmentTimeError('Qabul davomiyligi (durationMinutes) ko‘rsatilmagan yoki noto‘g‘ri', { id: appt.id });
   }
 
-  const durationMinutes = appt.durationMinutes;
-  const diffExactMs = endMs - startMs;
+  const durationMinutes = validation.durationMinutes;
+  const bufferMinutes = validation.bufferMinutes;
+  const diffExactMs = validation.endMs - validation.startMs;
   const expectedTreatmentMs = durationMinutes * 60000;
   const expectedOccupiedMs = (durationMinutes + bufferMinutes) * 60000;
 
   if (bufferMinutes === 0) {
-    // If stored diff is less than canonical duration, protect slot with canonical duration
-    return new Date(Math.max(endMs, startMs + durationMinutes * 60000));
+    return new Date(Math.max(validation.endMs, validation.startMs + durationMinutes * 60000));
   }
 
   if (Math.abs(diffExactMs - expectedTreatmentMs) <= SUB_MINUTE_TOLERANCE_MS) {
     // Current contract: occupied end is treatment end + buffer
-    return new Date(endMs + bufferMinutes * 60000);
+    return new Date(validation.endMs + bufferMinutes * 60000);
   }
 
   if (Math.abs(diffExactMs - expectedOccupiedMs) <= SUB_MINUTE_TOLERANCE_MS) {
     // Legacy record: endTime is ALREADY occupied end (start + duration + buffer)
-    return new Date(endMs);
+    return new Date(validation.endMs);
   }
 
-  // Ambiguous record: protect slot with whichever is later (stored endTime + buffer vs canonical duration + buffer)
-  return new Date(Math.max(endMs + bufferMinutes * 60000, startMs + (durationMinutes + bufferMinutes) * 60000));
+  // Ambiguous record: protect slot with whichever is later
+  return new Date(Math.max(validation.endMs + bufferMinutes * 60000, validation.startMs + (durationMinutes + bufferMinutes) * 60000));
 }
 
 /**
  * Returns effective clinical treatment end time taking active overrun into account.
  */
 export function getAppointmentEffectiveTreatmentEnd(appt: AppointmentTimeLike): Date {
-  if (appt.overrunActive && appt.overrunEstimatedEndTime) {
-    return new Date(appt.overrunEstimatedEndTime);
+  if (appt.overrunActive) {
+    if (!appt.overrunEstimatedEndTime) {
+      throw new InvalidAppointmentTimeError('Faol overrun uchun overrunEstimatedEndTime ko‘rsatilishi shart', { id: appt.id });
+    }
+    const overrunMs = new Date(appt.overrunEstimatedEndTime).getTime();
+    if (isNaN(overrunMs) || !Number.isFinite(overrunMs)) {
+      throw new InvalidAppointmentTimeError('overrunEstimatedEndTime noto‘g‘ri formatda', { id: appt.id });
+    }
+    return new Date(overrunMs);
   }
   return getAppointmentTreatmentEnd(appt);
 }
@@ -264,8 +352,15 @@ export function getAppointmentEffectiveTreatmentEnd(appt: AppointmentTimeLike): 
  */
 export function getAppointmentEffectiveOccupiedEnd(appt: AppointmentTimeLike): Date {
   const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 5);
-  if (appt.overrunActive && appt.overrunEstimatedEndTime) {
-    return new Date(new Date(appt.overrunEstimatedEndTime).getTime() + bufferMinutes * 60000);
+  if (appt.overrunActive) {
+    if (!appt.overrunEstimatedEndTime) {
+      throw new InvalidAppointmentTimeError('Faol overrun uchun overrunEstimatedEndTime ko‘rsatilishi shart', { id: appt.id });
+    }
+    const overrunMs = new Date(appt.overrunEstimatedEndTime).getTime();
+    if (isNaN(overrunMs) || !Number.isFinite(overrunMs)) {
+      throw new InvalidAppointmentTimeError('overrunEstimatedEndTime noto‘g‘ri formatda', { id: appt.id });
+    }
+    return new Date(overrunMs + bufferMinutes * 60000);
   }
   return getAppointmentOccupiedEnd(appt);
 }
@@ -274,15 +369,14 @@ export function getAppointmentEffectiveOccupiedEnd(appt: AppointmentTimeLike): D
  * Authoritative half-open interval overlap check between an appointment and a candidate slot.
  * Returns true if [appt.startTime, appt.effectiveOccupiedEnd) overlaps with [slotStart, slotEnd).
  * 
- * Half-open behavior:
- * - Appt [10:00, 10:35), Candidate [10:32, 11:07) -> OVERLAPS (10:00 < 11:07 && 10:35 > 10:32) => TRUE
- * - Appt [10:00, 10:35), Candidate [10:35, 11:10) -> NO OVERLAP (10:35 is NOT > 10:35) => FALSE
+ * Invariant: If a candidate appointment has invalid timestamps or malformed overrun, it FAILS CLOSED
+ * (returns true) so the slot cannot be booked or advertised over corrupted/blocking appointment data.
  */
 export function isAppointmentOverlapping(
   appt: AppointmentTimeLike,
   slotStart: Date | string,
   slotEnd: Date | string,
-  options?: { nowUtc?: Date; includeExpiredPending?: boolean },
+  options?: { nowUtc?: Date; includeExpiredPending?: boolean; throwOnInvalid?: boolean },
 ): boolean {
   const now = options?.nowUtc || new Date();
 
@@ -293,36 +387,52 @@ export function isAppointmentOverlapping(
     }
   }
 
-  const startA = new Date(appt.startTime).getTime();
-  const endA = getAppointmentEffectiveOccupiedEnd(appt).getTime();
   const startB = new Date(slotStart).getTime();
   const endB = new Date(slotEnd).getTime();
+  if (isNaN(startB) || isNaN(endB) || endB <= startB) {
+    throw new InvalidAppointmentTimeError('Tekshirilayotgan slot vaqti noto‘g‘ri');
+  }
+
+  let startA: number;
+  let endA: number;
+  try {
+    startA = new Date(appt.startTime).getTime();
+    endA = getAppointmentEffectiveOccupiedEnd(appt).getTime();
+    if (isNaN(startA) || isNaN(endA) || endA <= startA) {
+      throw new InvalidAppointmentTimeError('Qabul vaqti noto‘g‘ri');
+    }
+  } catch (err) {
+    if (options?.throwOnInvalid) {
+      throw err;
+    }
+    // Fail-closed: invalid appointment blocks availability so corrupted records do not disappear
+    return true;
+  }
 
   return startA < endB && endA > startB;
 }
 
 /**
- * Enforced domain limit for buffer duration (2 hours = 120 minutes).
- * Used to safely construct indexed database candidate queries.
+ * Enforced domain limits for scheduling bounds.
  */
-export const ENFORCED_MAX_BUFFER_MINUTES = 120;
+export const ENFORCED_MAX_BUFFER_MINUTES = 120; // 2 hours maximum buffer
 export const ENFORCED_MAX_BUFFER_MS = ENFORCED_MAX_BUFFER_MINUTES * 60 * 1000;
 
-/**
- * Maximum supported span for a single appointment's canonical duration + buffer (12 hours).
- * Used in candidate queries so ambiguous records with short/truncated stored endTime cannot escape candidate query.
- */
-export const MAX_CANONICAL_APPOINTMENT_SPAN_MINUTES = 720;
-export const MAX_CANONICAL_APPOINTMENT_SPAN_MS = MAX_CANONICAL_APPOINTMENT_SPAN_MINUTES * 60 * 1000;
+export const MAX_SUPPORTED_DURATION_MINUTES = 480; // 8 hours maximum clinical duration
+export const MAX_CANONICAL_LOOKBACK_MINUTES = MAX_SUPPORTED_DURATION_MINUTES + ENFORCED_MAX_BUFFER_MINUTES; // 600 minutes
+export const MAX_CANONICAL_LOOKBACK_MS = MAX_CANONICAL_LOOKBACK_MINUTES * 60 * 1000;
 
 /**
  * Generates the Prisma where-clause conditions to reliably query ALL candidate appointments
  * whose effective occupied interval could overlap with [requestedStartUtc, requestedOccupiedEndUtc).
  * 
- * Guarantee:
- * Every appointment whose effective occupied interval overlaps [requestedStartUtc, requestedOccupiedEndUtc)
- * is guaranteed to be returned by this query. Zero false negatives across all supported record classes
- * (TREATMENT_END, LEGACY_OCCUPIED_END, ZERO_BUFFER, and AMBIGUOUS).
+ * Mathematically proven complete:
+ * 1. Compliant / legacy records: endTime > requestedStart - 120m
+ * 2. Ambiguous records within standard span: startTime > requestedStart - 600m
+ * 3. Out-of-range historical/imported active records: durationMinutes > 480 (matches regardless of lookback)
+ * 4. Active overruns: overrunActive = true
+ * 
+ * Result: Zero false negatives across modern, legacy, zero-buffer, ambiguous, out-of-range, and overrun records.
  */
 export function buildConflictCandidateWhere(
   doctorId: string,
@@ -340,12 +450,10 @@ export function buildConflictCandidateWhere(
     // Upper bound: appointment must start before requested slot ends
     startTime: { lt: requestedOccupiedEndUtc },
     // Lower bound:
-    // 1. Stored endTime > (requestedStart - max possible buffer) (covers normal and legacy records)
-    // 2. OR startTime > (requestedStart - MAX_CANONICAL_APPOINTMENT_SPAN_MS) (covers ambiguous records with truncated endTime)
-    // 3. OR active overrun
     OR: [
       { endTime: { gt: new Date(requestedStartUtc.getTime() - ENFORCED_MAX_BUFFER_MS) } },
-      { startTime: { gt: new Date(requestedStartUtc.getTime() - MAX_CANONICAL_APPOINTMENT_SPAN_MS) } },
+      { startTime: { gt: new Date(requestedStartUtc.getTime() - MAX_CANONICAL_LOOKBACK_MS) } },
+      { durationMinutes: { gt: MAX_SUPPORTED_DURATION_MINUTES } },
       { overrunActive: true },
     ],
   };

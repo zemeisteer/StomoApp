@@ -118,8 +118,18 @@ export default function AdminOverviewPage() {
         setServices(srvs);
 
         if (brs.length > 0 && !regBranchId) setRegBranchId(brs[0].id);
-        if (docs.length > 0 && !regDoctorId) setRegDoctorId(docs[0].id);
-        if (srvs.length > 0 && !regServiceId) setRegServiceId(srvs[0].id);
+        if (docs.length > 0 && !regDoctorId) {
+          const firstDoc = docs[0];
+          setRegDoctorId(firstDoc.id);
+          if (firstDoc.branches && firstDoc.branches.length > 0) {
+            setRegBranchId(firstDoc.branches[0].branchId || firstDoc.branches[0].id);
+          }
+          if (firstDoc.services && firstDoc.services.length > 0) {
+            setRegServiceId(firstDoc.services[0].serviceId || firstDoc.services[0].id);
+          } else if (srvs.length > 0) {
+            setRegServiceId(srvs[0].id);
+          }
+        }
       } catch (err) {
         console.error('Failed to load fixtures', err);
       }
@@ -334,6 +344,31 @@ export default function AdminOverviewPage() {
     }
   };
 
+  // Doctor selection handler that syncs valid doctor services and branch
+  const handleDoctorSelect = (docId: string) => {
+    setRegDoctorId(docId);
+    setRegErrorMsg(null);
+    const doc = doctors.find((d) => d.id === docId);
+    if (doc) {
+      if (doc.branches && doc.branches.length > 0) {
+        setRegBranchId(doc.branches[0].branchId || doc.branches[0].id);
+      }
+      if (doc.services && doc.services.length > 0) {
+        setRegServiceId(doc.services[0].serviceId || doc.services[0].id);
+      }
+    }
+  };
+
+  // Compute available services supported by currently selected doctor
+  const availableServicesForReg = useMemo(() => {
+    if (!regDoctorId) return services;
+    const doc = doctors.find((d) => d.id === regDoctorId);
+    if (!doc || !doc.services || doc.services.length === 0) return services;
+    const docSrvIds = doc.services.map((ds: any) => ds.serviceId || ds.id);
+    const filtered = services.filter((s) => docSrvIds.includes(s.id));
+    return filtered.length > 0 ? filtered : services;
+  }, [doctors, regDoctorId, services]);
+
   // Quick Patient Registration Submission
   const handleQuickRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -354,6 +389,16 @@ export default function AdminOverviewPage() {
       return;
     }
 
+    // Ensure selected service is actually provided by this doctor
+    const doc = doctors.find((d) => d.id === regDoctorId);
+    let effectiveServiceId = regServiceId;
+    if (doc && doc.services && doc.services.length > 0) {
+      const docSrvIds = doc.services.map((ds: any) => ds.serviceId || ds.id);
+      if (!effectiveServiceId || !docSrvIds.includes(effectiveServiceId)) {
+        effectiveServiceId = docSrvIds[0];
+      }
+    }
+
     try {
       setIsSubmittingReg(true);
       // Create appointment today at current hour + 5 min
@@ -364,7 +409,7 @@ export default function AdminOverviewPage() {
         patientName: regName.trim(),
         patientPhone: cleanPhone,
         doctorId: regDoctorId,
-        serviceId: regServiceId || undefined,
+        serviceId: effectiveServiceId || undefined,
         branchId: regBranchId || undefined,
         startTime: startTimeIso,
         consentGiven: true,
@@ -1386,7 +1431,7 @@ export default function AdminOverviewPage() {
                     <CustomSelect
                       id="admin-quickreg-doctor-select"
                       value={regDoctorId}
-                      onChange={(val) => setRegDoctorId(val)}
+                      onChange={(val) => handleDoctorSelect(val)}
                       placeholder={isUz ? 'Shifokorni tanlang' : 'Выберите врача'}
                       options={doctors.map((d) => ({
                         value: d.id,
@@ -1395,6 +1440,42 @@ export default function AdminOverviewPage() {
                       locale={isUz ? 'uz' : 'ru'}
                     />
                   </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                      {isUz ? 'Xizmat' : 'Услуга'}
+                    </label>
+                    <CustomSelect
+                      id="admin-quickreg-service-select"
+                      value={regServiceId}
+                      onChange={(val) => setRegServiceId(val)}
+                      placeholder={isUz ? 'Xizmatni tanlang' : 'Выберите услугу'}
+                      options={availableServicesForReg.map((s) => ({
+                        value: s.id,
+                        label: isUz ? s.nameUz : (s.nameRu || s.nameUz),
+                      }))}
+                      locale={isUz ? 'uz' : 'ru'}
+                    />
+                  </div>
+
+                  {branches.length > 1 && (
+                    <div>
+                      <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                        {isUz ? 'Filial' : 'Филиал'}
+                      </label>
+                      <CustomSelect
+                        id="admin-quickreg-branch-select"
+                        value={regBranchId}
+                        onChange={(val) => setRegBranchId(val)}
+                        placeholder={isUz ? 'Filialni tanlang' : 'Выберите филиал'}
+                        options={branches.map((b) => ({
+                          value: b.id,
+                          label: isUz ? b.nameUz : (b.nameRu || b.nameUz),
+                        }))}
+                        locale={isUz ? 'uz' : 'ru'}
+                      />
+                    </div>
+                  )}
 
                   <button
                     type="submit"

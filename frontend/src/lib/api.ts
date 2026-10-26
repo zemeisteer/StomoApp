@@ -508,6 +508,8 @@ export const api = {
     }),
   archiveDoctorAdmin: (id: string) =>
     fetcher<any>(`/api/doctors/admin/${id}/archive`, { method: 'PUT' }),
+  deleteDoctorAdmin: (id: string) =>
+    fetcher<any>(`/api/doctors/admin/${id}`, { method: 'DELETE' }),
 
   getAllServicesAdmin: () => fetcher<any[]>('/api/services/admin/all'),
   createServiceAdmin: (payload: any) =>
@@ -614,6 +616,10 @@ export const api = {
     fetcher<any>(`/api/clinic/branches/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    }),
+  deleteBranchAdmin: (id: string) =>
+    fetcher<any>(`/api/clinic/branches/${id}`, {
+      method: 'DELETE',
     }),
 
   // Media Management
