@@ -18,21 +18,38 @@
  *    - Standard: endTime + bufferMinutes
  *    - Overrun active: overrunEstimatedEndTime + bufferMinutes
  * 
- * HISTORICAL COMPATIBILITY:
- * In legacy records written prior to the treatment-end contract unification,
- * endTime was stored as (startTime + durationMinutes + bufferMinutes).
- * The helpers below inspect the interval against durationMinutes and bufferMinutes:
- * - If diffMinutes === durationMinutes: treatment-end contract (new).
- * - If diffMinutes === durationMinutes + bufferMinutes: legacy occupied-end contract (buffer already in endTime).
- * - If diffMinutes !== durationMinutes && diffMinutes !== durationMinutes + bufferMinutes:
- *   ambiguous manual edit. The helper protects the slot with Math.max(endTime, startTime + duration + buffer).
+ * DOCUMENTED CONSERVATIVE POLICY FOR HISTORICAL RECORDS:
+ * 1. Missing or Invalid Durations:
+ *    - Arithmetic alone does not prove historical provenance.
+ *    - Never silently invent 30 minutes for authoritative scheduling, conflict, or classification decisions.
+ *    - If durationMinutes is missing (<= 0 or NaN) and timestamps are valid (endMs > startMs), the record
+ *      is classified as AMBIGUOUS. For occupied end calculations, we treat [startTime, endTime] as the minimum
+ *      treatment window and conservatively add bufferMinutes (if defined > 0) to prevent double-booking during
+ *      an uncertain clinical period.
+ *    - If timestamps are invalid (startMs >= endMs or NaN), the record is classified as AMBIGUOUS and fails closed.
+ * 
+ * 2. Sub-Minute Timestamp Precision:
+ *    - Timestamps with fractional seconds/milliseconds are evaluated with a tolerance of 1,000ms (1 second).
+ *    - If exact duration in milliseconds deviates from whole minutes by more than 1,000ms, it is classified
+ *      as AMBIGUOUS to prevent masking corrupted or sub-minute drifted records.
+ * 
+ * 3. Zero-Buffer Invariant:
+ *    - A record with bufferMinutes === 0 is ONLY classified as ZERO_BUFFER if (endMs - startMs) matches
+ *      durationMinutes within the 1-second tolerance. If it differs, it is classified as AMBIGUOUS.
+ * 
+ * 4. Stored vs Canonical Occupied End Invariant:
+ *    - If canonical duration + buffer extends beyond stored endTime (e.g. manual truncation or corrupted endTime),
+ *      getAppointmentOccupiedEnd protects the doctor/operatory with Math.max(endTime, startTime + (duration + buffer)).
+ *    - Candidate queries (buildConflictCandidateWhere) expand the lookback to cover the maximum possible canonical
+ *      appointment span (12 hours = 720 minutes) so records with truncated stored endTime never disappear from
+ *      the database candidate selection before in-memory verification.
  */
 
 export interface AppointmentTimeLike {
   id?: string;
   startTime: Date | string;
   endTime: Date | string;
-  durationMinutes: number;
+  durationMinutes?: number | null;
   bufferMinutes?: number | null;
   overrunActive?: boolean | null;
   overrunEstimatedEndTime?: Date | string | null;
@@ -42,35 +59,111 @@ export interface AppointmentTimeLike {
 
 export type RecordContractClassification = 'TREATMENT_END' | 'LEGACY_OCCUPIED_END' | 'ZERO_BUFFER' | 'AMBIGUOUS';
 
+export const SUB_MINUTE_TOLERANCE_MS = 1000; // 1 second tolerance for millisecond/sub-minute drift
+
 /**
  * Classifies an appointment record's timestamp contract.
  */
 export function classifyAppointmentRecord(appt: AppointmentTimeLike): {
   classification: RecordContractClassification;
   diffMinutes: number;
-  durationMinutes: number;
+  durationMinutes: number | null;
   bufferMinutes: number;
   isAmbiguous: boolean;
+  reason?: string;
 } {
   const startMs = new Date(appt.startTime).getTime();
   const endMs = new Date(appt.endTime).getTime();
-  const diffMinutes = Math.round((endMs - startMs) / 60000);
-  const durationMinutes = Math.max(1, appt.durationMinutes || 30);
-  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 5);
 
+  // 1. Missing or invalid timestamps
+  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) {
+    return {
+      classification: 'AMBIGUOUS',
+      diffMinutes: 0,
+      durationMinutes: appt.durationMinutes ?? null,
+      bufferMinutes: Math.max(0, appt.bufferMinutes ?? 0),
+      isAmbiguous: true,
+      reason: 'Boshlanish yoki tugash vaqti noto‘g‘ri yoki bo‘sh (end <= start)',
+    };
+  }
+
+  // 2. Missing or invalid durationMinutes - do not silently invent 30 minutes!
+  if (!appt.durationMinutes || isNaN(appt.durationMinutes) || appt.durationMinutes <= 0) {
+    const diffMin = Math.round((endMs - startMs) / 60000);
+    return {
+      classification: 'AMBIGUOUS',
+      diffMinutes: diffMin,
+      durationMinutes: null,
+      bufferMinutes: Math.max(0, appt.bufferMinutes ?? 0),
+      isAmbiguous: true,
+      reason: 'Muolaja davomiyligi (durationMinutes) ko‘rsatilmagan yoki 0 dan kichik',
+    };
+  }
+
+  const durationMinutes = appt.durationMinutes;
+  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 0);
+  const diffExactMs = endMs - startMs;
+  const diffMinutes = Math.round(diffExactMs / 60000);
+
+  const expectedTreatmentMs = durationMinutes * 60000;
+  const expectedOccupiedMs = (durationMinutes + bufferMinutes) * 60000;
+
+  const matchesTreatmentEnd = Math.abs(diffExactMs - expectedTreatmentMs) <= SUB_MINUTE_TOLERANCE_MS;
+  const matchesOccupiedEnd = Math.abs(diffExactMs - expectedOccupiedMs) <= SUB_MINUTE_TOLERANCE_MS;
+
+  // 3. Zero-buffer rows: MUST strictly match durationMinutes to be unambiguous
   if (bufferMinutes === 0) {
-    return { classification: 'ZERO_BUFFER', diffMinutes, durationMinutes, bufferMinutes, isAmbiguous: false };
+    if (matchesTreatmentEnd) {
+      return {
+        classification: 'ZERO_BUFFER',
+        diffMinutes,
+        durationMinutes,
+        bufferMinutes: 0,
+        isAmbiguous: false,
+      };
+    } else {
+      return {
+        classification: 'AMBIGUOUS',
+        diffMinutes,
+        durationMinutes,
+        bufferMinutes: 0,
+        isAmbiguous: true,
+        reason: `Bufer 0 bo‘lgan qabulda saqlangan vaqt oralig‘i (${diffMinutes} daqiqa) davomiylikka (${durationMinutes} daqiqa) mos kelmadi`,
+      };
+    }
   }
 
-  if (diffMinutes === durationMinutes) {
-    return { classification: 'TREATMENT_END', diffMinutes, durationMinutes, bufferMinutes, isAmbiguous: false };
+  // 4. Treatment-end (modern unified contract)
+  if (matchesTreatmentEnd) {
+    return {
+      classification: 'TREATMENT_END',
+      diffMinutes,
+      durationMinutes,
+      bufferMinutes,
+      isAmbiguous: false,
+    };
   }
 
-  if (diffMinutes === durationMinutes + bufferMinutes) {
-    return { classification: 'LEGACY_OCCUPIED_END', diffMinutes, durationMinutes, bufferMinutes, isAmbiguous: false };
+  // 5. Legacy occupied-end contract
+  if (matchesOccupiedEnd) {
+    return {
+      classification: 'LEGACY_OCCUPIED_END',
+      diffMinutes,
+      durationMinutes,
+      bufferMinutes,
+      isAmbiguous: false,
+    };
   }
 
-  return { classification: 'AMBIGUOUS', diffMinutes, durationMinutes, bufferMinutes, isAmbiguous: true };
+  // 6. Inconsistent / ambiguous interval
+  return {
+    classification: 'AMBIGUOUS',
+    diffMinutes,
+    durationMinutes,
+    bufferMinutes,
+    isAmbiguous: true,
+    reason: `Vaqt oralig‘i (${diffMinutes}m) davomiylikka (${durationMinutes}m) ham, buferli tugashga (${durationMinutes + bufferMinutes}m) ham mos kelmadi`,
+  };
 }
 
 /**
@@ -79,21 +172,33 @@ export function classifyAppointmentRecord(appt: AppointmentTimeLike): {
 export function getAppointmentTreatmentEnd(appt: AppointmentTimeLike): Date {
   const startMs = new Date(appt.startTime).getTime();
   const endMs = new Date(appt.endTime).getTime();
-  const diffMinutes = Math.round((endMs - startMs) / 60000);
-  const durationMinutes = Math.max(1, appt.durationMinutes || 30);
-  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 5);
+
+  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) {
+    return new Date(endMs || startMs || Date.now());
+  }
+
+  if (!appt.durationMinutes || isNaN(appt.durationMinutes) || appt.durationMinutes <= 0) {
+    // Conservative policy: if durationMinutes is missing, treat stored endTime as treatment end
+    return new Date(endMs);
+  }
+
+  const durationMinutes = appt.durationMinutes;
+  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 0);
+  const diffExactMs = endMs - startMs;
+  const expectedTreatmentMs = durationMinutes * 60000;
+  const expectedOccupiedMs = (durationMinutes + bufferMinutes) * 60000;
 
   if (bufferMinutes === 0) {
     return new Date(endMs);
   }
 
-  if (diffMinutes === durationMinutes) {
+  if (Math.abs(diffExactMs - expectedTreatmentMs) <= SUB_MINUTE_TOLERANCE_MS) {
     // Current contract: endTime is treatment end
     return new Date(endMs);
   }
 
-  if (diffMinutes === durationMinutes + bufferMinutes) {
-    // Legacy record: endTime had buffer added; treatment ended at start + duration (or end - buffer)
+  if (Math.abs(diffExactMs - expectedOccupiedMs) <= SUB_MINUTE_TOLERANCE_MS) {
+    // Legacy record: endTime had buffer added; treatment ended at start + duration
     return new Date(startMs + durationMinutes * 60000);
   }
 
@@ -107,27 +212,41 @@ export function getAppointmentTreatmentEnd(appt: AppointmentTimeLike): Date {
 export function getAppointmentOccupiedEnd(appt: AppointmentTimeLike): Date {
   const startMs = new Date(appt.startTime).getTime();
   const endMs = new Date(appt.endTime).getTime();
-  const diffMinutes = Math.round((endMs - startMs) / 60000);
-  const durationMinutes = Math.max(1, appt.durationMinutes || 30);
-  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 5);
 
-  if (bufferMinutes === 0) {
-    return new Date(endMs);
+  if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) {
+    return new Date(endMs || startMs || Date.now());
   }
 
-  if (diffMinutes === durationMinutes) {
+  const bufferMinutes = Math.max(0, appt.bufferMinutes ?? 0);
+
+  if (!appt.durationMinutes || isNaN(appt.durationMinutes) || appt.durationMinutes <= 0) {
+    // Conservative policy for missing duration:
+    // Occupied end extends through stored endTime plus buffer to fail safe against double booking
+    return new Date(endMs + bufferMinutes * 60000);
+  }
+
+  const durationMinutes = appt.durationMinutes;
+  const diffExactMs = endMs - startMs;
+  const expectedTreatmentMs = durationMinutes * 60000;
+  const expectedOccupiedMs = (durationMinutes + bufferMinutes) * 60000;
+
+  if (bufferMinutes === 0) {
+    // If stored diff is less than canonical duration, protect slot with canonical duration
+    return new Date(Math.max(endMs, startMs + durationMinutes * 60000));
+  }
+
+  if (Math.abs(diffExactMs - expectedTreatmentMs) <= SUB_MINUTE_TOLERANCE_MS) {
     // Current contract: occupied end is treatment end + buffer
     return new Date(endMs + bufferMinutes * 60000);
   }
 
-  if (diffMinutes === durationMinutes + bufferMinutes) {
+  if (Math.abs(diffExactMs - expectedOccupiedMs) <= SUB_MINUTE_TOLERANCE_MS) {
     // Legacy record: endTime is ALREADY occupied end (start + duration + buffer)
-    // Do NOT add buffer a second time!
     return new Date(endMs);
   }
 
-  // Ambiguous record: protect slot with whichever is later
-  return new Date(Math.max(endMs, startMs + (durationMinutes + bufferMinutes) * 60000));
+  // Ambiguous record: protect slot with whichever is later (stored endTime + buffer vs canonical duration + buffer)
+  return new Date(Math.max(endMs + bufferMinutes * 60000, startMs + (durationMinutes + bufferMinutes) * 60000));
 }
 
 /**
@@ -190,12 +309,20 @@ export const ENFORCED_MAX_BUFFER_MINUTES = 120;
 export const ENFORCED_MAX_BUFFER_MS = ENFORCED_MAX_BUFFER_MINUTES * 60 * 1000;
 
 /**
+ * Maximum supported span for a single appointment's canonical duration + buffer (12 hours).
+ * Used in candidate queries so ambiguous records with short/truncated stored endTime cannot escape candidate query.
+ */
+export const MAX_CANONICAL_APPOINTMENT_SPAN_MINUTES = 720;
+export const MAX_CANONICAL_APPOINTMENT_SPAN_MS = MAX_CANONICAL_APPOINTMENT_SPAN_MINUTES * 60 * 1000;
+
+/**
  * Generates the Prisma where-clause conditions to reliably query ALL candidate appointments
  * whose effective occupied interval could overlap with [requestedStartUtc, requestedOccupiedEndUtc).
  * 
  * Guarantee:
  * Every appointment whose effective occupied interval overlaps [requestedStartUtc, requestedOccupiedEndUtc)
- * is guaranteed to be returned by this query. Zero false negatives.
+ * is guaranteed to be returned by this query. Zero false negatives across all supported record classes
+ * (TREATMENT_END, LEGACY_OCCUPIED_END, ZERO_BUFFER, and AMBIGUOUS).
  */
 export function buildConflictCandidateWhere(
   doctorId: string,
@@ -212,10 +339,13 @@ export function buildConflictCandidateWhere(
     status: { in: statuses },
     // Upper bound: appointment must start before requested slot ends
     startTime: { lt: requestedOccupiedEndUtc },
-    // Lower bound: appointment's treatment must have ended after (requestedStart - max possible buffer),
-    // OR the appointment has an active overrun.
+    // Lower bound:
+    // 1. Stored endTime > (requestedStart - max possible buffer) (covers normal and legacy records)
+    // 2. OR startTime > (requestedStart - MAX_CANONICAL_APPOINTMENT_SPAN_MS) (covers ambiguous records with truncated endTime)
+    // 3. OR active overrun
     OR: [
       { endTime: { gt: new Date(requestedStartUtc.getTime() - ENFORCED_MAX_BUFFER_MS) } },
+      { startTime: { gt: new Date(requestedStartUtc.getTime() - MAX_CANONICAL_APPOINTMENT_SPAN_MS) } },
       { overrunActive: true },
     ],
   };

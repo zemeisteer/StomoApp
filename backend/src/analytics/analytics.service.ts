@@ -274,6 +274,9 @@ export class AnalyticsService {
       select: {
         id: true,
         status: true,
+        arrivedAt: true,
+        actualStartTime: true,
+        actualEndTime: true,
         serviceId: true,
         serviceName: true,
         servicePriceFrom: true,
@@ -326,10 +329,21 @@ export class AnalyticsService {
     let legacyGrossMinor = 0;
     let legacyRefundsMinor = 0;
     let totalQuotedMinor = 0;
+    let arrivedAppointmentsCount = 0;
+    let inTreatmentAppointmentsCount = 0;
 
     for (const appt of serviceAppointments) {
-      const isPerformed =
-        appt.status === AppointmentStatus.COMPLETED || appt.status === AppointmentStatus.CHECKED_IN;
+      if (appt.status === AppointmentStatus.CHECKED_IN) {
+        arrivedAppointmentsCount++;
+        if (appt.actualStartTime && !appt.actualEndTime) {
+          inTreatmentAppointmentsCount++;
+        }
+      } else if (appt.arrivedAt) {
+        arrivedAppointmentsCount++;
+      }
+
+      // Treatment performed is strictly counted upon completion, arrival alone does not equal treatment performed
+      const isPerformed = appt.status === AppointmentStatus.COMPLETED;
 
       if (appt.serviceItems && appt.serviceItems.length > 0) {
         const allItems = appt.serviceItems;
@@ -849,7 +863,15 @@ export class AnalyticsService {
         totalServicePerformed,
         totalServiceUsage: totalServicePerformed,
         servicesPerAppointment:
-          totalAppointments > 0 ? Number((totalServicePerformed / totalAppointments).toFixed(2)) : 0,
+          totalAppointments > 0 ? Number((totalServiceBooked / totalAppointments).toFixed(2)) : 0,
+        servicesPerCompletedAppointment:
+          completed > 0 ? Number((totalServicePerformed / completed).toFixed(2)) : 0,
+        denominators: {
+          servicesPerAppointment: 'totalServiceBooked / totalAppointments (barcha buyurtmalar bo‘yicha o‘rtacha xizmatlar)',
+          servicesPerCompletedAppointment: 'totalServicePerformed / completed (yakunlangan qabullar bo‘yicha o‘rtacha bajarilgan xizmatlar)',
+        },
+        arrived: arrivedAppointmentsCount,
+        inTreatment: inTreatmentAppointmentsCount,
         completed,
         cancelled,
         noShow,

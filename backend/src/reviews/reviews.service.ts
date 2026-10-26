@@ -124,7 +124,7 @@ export class ReviewsService {
   }
 
   /**
-   * Admin: Moderate review (Approve / Reject) with audit log
+   * Admin: Moderate review (Approve / Reject) with atomic transactional audit log
    */
   async updateStatus(
     id: string,
@@ -132,55 +132,86 @@ export class ReviewsService {
     adminNote?: string,
     staffUser?: AuthenticatedStaffUser,
   ) {
-    const review = await this.prisma.review.findUnique({ where: { id } });
-    if (!review) throw new NotFoundException('Fikr topilmadi');
-
-    const updated = await this.prisma.review.update({
-      where: { id },
-      data: {
-        status,
-        adminNote: adminNote !== undefined ? adminNote.trim() : review.adminNote,
-      },
-    });
-
     const actorId = staffUser?.sub || staffUser?.id || null;
-    await this.auditService.log({
-      userId: actorId,
-      action: 'review.moderated',
-      entity: 'Review',
-      entityId: id,
-      details: {
-        previousStatus: review.status,
-        newStatus: status,
-        authorName: review.authorName,
-        adminNote: adminNote !== undefined ? adminNote.trim() : review.adminNote,
-      },
-    });
 
-    return updated;
+    return await this.prisma.$transaction(async (tx) => {
+      const [review] = await tx.$queryRaw<Array<{
+        id: string;
+        status: ReviewStatus;
+        adminNote: string | null;
+        authorName: string;
+      }>>`
+        SELECT id, status, "admin_note" as "adminNote", "author_name" as "authorName"
+        FROM "reviews"
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+
+      if (!review) throw new NotFoundException('Fikr topilmadi');
+
+      const updated = await tx.review.update({
+        where: { id },
+        data: {
+          status,
+          adminNote: adminNote !== undefined ? adminNote.trim() : (review.adminNote || undefined),
+        },
+      });
+
+      // Atomic audit logging: write failure rolls back the entire business operation
+      await this.auditService.logTransactional({
+        tx,
+        userId: actorId,
+        action: 'review.moderated',
+        entity: 'Review',
+        entityId: id,
+        details: {
+          previousStatus: review.status,
+          newStatus: status,
+          authorName: review.authorName,
+          adminNote: adminNote !== undefined ? adminNote.trim() : review.adminNote,
+        },
+      });
+
+      return updated;
+    });
   }
 
   /**
-   * Admin: Permanent delete with audit log
+   * Admin: Permanent delete with atomic transactional audit log
    */
   async delete(id: string, staffUser?: AuthenticatedStaffUser) {
-    const review = await this.prisma.review.findUnique({ where: { id } });
-    if (!review) throw new NotFoundException('Fikr topilmadi');
-
-    await this.prisma.review.delete({ where: { id } });
-
     const actorId = staffUser?.sub || staffUser?.id || null;
-    await this.auditService.log({
-      userId: actorId,
-      action: 'review.deleted',
-      entity: 'Review',
-      entityId: id,
-      details: {
-        authorName: review.authorName,
-        status: review.status,
-      },
-    });
 
-    return { success: true };
+    return await this.prisma.$transaction(async (tx) => {
+      const [review] = await tx.$queryRaw<Array<{
+        id: string;
+        status: ReviewStatus;
+        authorName: string;
+      }>>`
+        SELECT id, status, "author_name" as "authorName"
+        FROM "reviews"
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+
+      if (!review) throw new NotFoundException('Fikr topilmadi');
+
+      await tx.review.delete({ where: { id } });
+
+      // Atomic audit logging: write failure rolls back the entire business operation
+      await this.auditService.logTransactional({
+        tx,
+        userId: actorId,
+        action: 'review.deleted',
+        entity: 'Review',
+        entityId: id,
+        details: {
+          authorName: review.authorName,
+          status: review.status,
+        },
+      });
+
+      return { success: true };
+    });
   }
 }

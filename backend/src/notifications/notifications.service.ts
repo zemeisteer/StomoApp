@@ -2252,8 +2252,31 @@ export class NotificationsService {
     const actorId = staffUser?.sub || staffUser?.id || null;
     const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
+    // 1. Initial non-locking lookup to determine appointment association
+    const preJob = await this.prisma.notificationJob.findUnique({
+      where: { id },
+      select: { id: true, appointmentId: true, templateKey: true, status: true },
+    });
+    if (!preJob) {
+      throw new NotFoundException('Xabarnoma topilmadi');
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Row lock FOR UPDATE on NotificationJob to serialize concurrent retries & worker claims
+      // 2. Consistent lock hierarchy: Appointment FOR UPDATE FIRST (matching AppointmentsService)
+      let appointmentSnapshot: any = null;
+      let appt: any = null;
+
+      if (preJob.appointmentId) {
+        const apptRows = await tx.$queryRaw<any[]>`
+          SELECT id, status, "start_time" as "startTime", "schedule_revision" as "scheduleRevision", "expires_at" as "expiresAt"
+          FROM "appointments"
+          WHERE id = ${preJob.appointmentId}
+          FOR UPDATE;
+        `;
+        appt = apptRows[0];
+      }
+
+      // 3. Row lock FOR UPDATE on NotificationJob SECOND
       const jobRows = await tx.$queryRaw<any[]>`
         SELECT id, channel, "template_key" as "templateKey", recipient,
                status, attempts, "max_attempts" as "maxAttempts",
@@ -2268,6 +2291,17 @@ export class NotificationsService {
       const job = jobRows[0];
       if (!job) {
         throw new NotFoundException('Xabarnoma topilmadi');
+      }
+
+      // Re-check appointment if job had a different appointmentId than pre-lookup
+      if (job.appointmentId && job.appointmentId !== preJob.appointmentId) {
+        const apptRows = await tx.$queryRaw<any[]>`
+          SELECT id, status, "start_time" as "startTime", "schedule_revision" as "scheduleRevision", "expires_at" as "expiresAt"
+          FROM "appointments"
+          WHERE id = ${job.appointmentId}
+          FOR UPDATE;
+        `;
+        appt = apptRows[0];
       }
 
       // Explicit status validations
@@ -2304,21 +2338,9 @@ export class NotificationsService {
       }
 
       // Revalidate reminder eligibility
-      let appointmentSnapshot: any = null;
       if (job.templateKey === 'appointment_reminder') {
-        if (!job.appointmentId) {
+        if (!job.appointmentId || !appt) {
           throw new BadRequestException('Eslatma biriktirilgan qabul topilmadi');
-        }
-
-        const apptRows = await tx.$queryRaw<any[]>`
-          SELECT id, status, "start_time" as "startTime", "schedule_revision" as "scheduleRevision", "expires_at" as "expiresAt"
-          FROM "appointments"
-          WHERE id = ${job.appointmentId}
-          FOR UPDATE;
-        `;
-        const appt = apptRows[0];
-        if (!appt) {
-          throw new BadRequestException('Eslatma biriktirilgan qabul mavjud emas');
         }
 
         if (
@@ -2368,8 +2390,9 @@ export class NotificationsService {
         },
       });
 
-      // Audit log inside transaction with verified actor ID
-      await this.auditService.log({
+      // Atomic audit log inside transaction with verified actor ID
+      await this.auditService.logTransactional({
+        tx,
         userId: actorId,
         action: 'notification.retried',
         entity: 'NotificationJob',

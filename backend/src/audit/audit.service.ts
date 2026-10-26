@@ -11,9 +11,31 @@ export interface CreateAuditLogParams {
   ipAddress?: string;
 }
 
+export interface CreateTransactionalAuditLogParams extends CreateAuditLogParams {
+  tx: Prisma.TransactionClient;
+}
+
 @Injectable()
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Enlists audit log creation directly into the caller's transaction client.
+   * Throws on failure to ensure atomic rollback of business mutations.
+   */
+  async logTransactional(params: CreateTransactionalAuditLogParams) {
+    const sanitizedDetails = this.sanitizeDetails(params.details);
+    return await params.tx.auditLog.create({
+      data: {
+        userId: params.userId || null,
+        action: params.action,
+        entity: params.entity || null,
+        entityId: params.entityId || null,
+        details: sanitizedDetails as Prisma.InputJsonValue,
+        ipAddress: params.ipAddress || null,
+      },
+    });
+  }
 
   async log(params: CreateAuditLogParams) {
     try {

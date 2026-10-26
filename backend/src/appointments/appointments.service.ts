@@ -40,6 +40,25 @@ const TIME_RESERVING_STATUSES: AppointmentStatus[] = [
   AppointmentStatus.CONFIRMED,
   AppointmentStatus.CHECKED_IN,
 ];
+export interface LockedAppointmentForStatusChange {
+  id: string;
+  status: AppointmentStatus;
+  doctorId: string;
+  serviceId: string | null;
+  serviceName: string;
+  startTime: Date;
+  endTime: Date;
+  durationMinutes: number;
+  bufferMinutes: number;
+  expiresAt: Date | null;
+  branchId: string | null;
+  arrivedAt: Date | null;
+  actualStartTime: Date | null;
+  actualEndTime: Date | null;
+  overrunActive: boolean;
+  overrunEstimatedEndTime: Date | null;
+}
+
 export interface ExpectedQuote {
   priceFrom?: number;
   price?: number;
@@ -579,13 +598,18 @@ export class AppointmentsService {
           });
 
           // Documented communication language policy:
-          // 1. Explicitly requested in booking DTO ('uz' | 'ru')
-          // 2. Otherwise detect if booking note or patient notes contain Cyrillic or '[lang:ru]' tag
-          // 3. Default to clinic primary language 'uz'
-          const isRussian = dto.lang === 'ru' ||
-            (dto.note && /[а-яА-ЯёЁ]/.test(dto.note)) ||
-            (patient?.notes && patient.notes.includes('[lang:ru]'));
-          const communicationLang: 'uz' | 'ru' = isRussian ? 'ru' : 'uz';
+          // 1. Explicit valid choice in booking DTO ('uz' | 'ru')
+          // 2. Persisted patient preference tag in patient.notes ([lang:ru] / [lang:uz])
+          // 3. Documented clinic primary default ('uz')
+          // Note: Do NOT infer preferred language from clinical notes or Cyrillic characters (Uzbek can be written in Cyrillic).
+          let communicationLang: 'uz' | 'ru' = 'uz';
+          if (dto.lang === 'ru' || dto.lang === 'uz') {
+            communicationLang = dto.lang;
+          } else if (patient?.notes?.includes('[lang:ru]')) {
+            communicationLang = 'ru';
+          } else if (patient?.notes?.includes('[lang:uz]')) {
+            communicationLang = 'uz';
+          }
           const langTag = communicationLang === 'ru' ? '[lang:ru]' : '[lang:uz]';
 
           if (!patient) {
@@ -597,13 +621,20 @@ export class AppointmentsService {
                 notes: langTag,
               },
             });
-          } else if (!patient.notes || (!patient.notes.includes('[lang:ru]') && !patient.notes.includes('[lang:uz]'))) {
-            patient = await tx.patient.update({
-              where: { id: patient.id },
-              data: {
-                notes: patient.notes ? `${patient.notes} ${langTag}` : langTag,
-              },
-            });
+          } else {
+            // Preserve all clinical notes while updating or setting the language tag
+            let updatedNotes = patient.notes || '';
+            if (updatedNotes.includes('[lang:ru]') || updatedNotes.includes('[lang:uz]')) {
+              updatedNotes = updatedNotes.replace(/\[lang:(ru|uz)\]/g, langTag).trim();
+            } else {
+              updatedNotes = updatedNotes ? `${updatedNotes} ${langTag}` : langTag;
+            }
+            if (updatedNotes !== (patient.notes || '')) {
+              patient = await tx.patient.update({
+                where: { id: patient.id },
+                data: { notes: updatedNotes },
+              });
+            }
           }
 
           const publicToken = nanoid(32);
@@ -780,12 +811,14 @@ export class AppointmentsService {
       // 1. Consistent doctor advisory lock first
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-      // 2. Row lock on appointment FOR UPDATE second
-      const [locked] = await tx.$queryRaw<any[]>`
+      // 2. Row lock on appointment FOR UPDATE second with concrete projection
+      const [locked] = await tx.$queryRaw<LockedAppointmentForStatusChange[]>`
         SELECT id, status, "doctor_id" as "doctorId", "service_id" as "serviceId", "service_name" as "serviceName",
-               "start_time" as "startTime", "end_time" as "endTime", "buffer_minutes" as "bufferMinutes",
+               "start_time" as "startTime", "end_time" as "endTime",
+               "duration_minutes" as "durationMinutes", "buffer_minutes" as "bufferMinutes",
                "expires_at" as "expiresAt", "branch_id" as "branchId",
-               "arrived_at" as "arrivedAt", "actual_start_time" as "actualStartTime"
+               "arrived_at" as "arrivedAt", "actual_start_time" as "actualStartTime", "actual_end_time" as "actualEndTime",
+               "overrun_active" as "overrunActive", "overrun_estimated_end_time" as "overrunEstimatedEndTime"
         FROM "appointments"
         WHERE id = ${appointmentId}
         FOR UPDATE
@@ -818,6 +851,11 @@ export class AppointmentsService {
           throw new ConflictException(
             'Ushbu arizaning tasdiqlash muddati tugagan. Muddati o‘tgan arizani to‘g‘ridan-to‘g‘ri tasdiqlab bo‘lmaydi. Qayta yangi qabul sifatida rasmiylashtiring.',
           );
+        }
+
+        // Authoritative validation: do not silently invent duration for confirmation
+        if (!locked.durationMinutes || locked.durationMinutes <= 0 || isNaN(new Date(locked.startTime).getTime()) || isNaN(new Date(locked.endTime).getTime())) {
+          throw new BadRequestException('Qabul vaqti yoki davomiyligi noto‘g‘ri ko‘rsatilgan');
         }
 
         const apptStart = new Date(locked.startTime);
@@ -918,19 +956,29 @@ export class AppointmentsService {
         },
       });
 
-      // Derive communication language:
+      // Derive communication language with strict precedence:
+      // 1. Appointment's own prior notification intent snapshot
+      // 2. Persisted patient notes tag ([lang:ru] / [lang:uz])
+      // 3. Documented clinic default ('uz')
       let apptLang: 'uz' | 'ru' = 'uz';
-      if (appt.patient?.notes?.includes('[lang:ru]')) {
+      const prevJob = await tx.notificationJob.findFirst({
+        where: { appointmentId: appt.id },
+        orderBy: { createdAt: 'desc' },
+        select: { payload: true },
+      });
+      const snapshotLang = (prevJob?.payload as any)?.lang;
+      if (snapshotLang === 'ru' || snapshotLang === 'uz') {
+        apptLang = snapshotLang;
+      } else if (appt.patient?.notes?.includes('[lang:ru]')) {
         apptLang = 'ru';
-      } else {
-        const prevJob = await tx.notificationJob.findFirst({
-          where: { appointmentId: appt.id },
-          select: { payload: true },
-        });
-        if ((prevJob?.payload as any)?.lang === 'ru') {
-          apptLang = 'ru';
-        }
+      } else if (appt.patient?.notes?.includes('[lang:uz]')) {
+        apptLang = 'uz';
       }
+
+      // Multi-service appointments: build Russian name from all saved service items
+      const serviceNameRu = appt.serviceItems && appt.serviceItems.length > 0
+        ? appt.serviceItems.map((i: any) => i.serviceNameRu || i.serviceNameUz).join(' + ')
+        : (appt.service?.nameRu || undefined);
 
       // Transactional Outbox: persist notification intent for status changes
       if (newStatus === AppointmentStatus.CONFIRMED) {
@@ -939,7 +987,7 @@ export class AppointmentsService {
             id: appt.id,
             startTime: appt.startTime,
             serviceName: appt.serviceName,
-            serviceNameRu: appt.service?.nameRu || undefined,
+            serviceNameRu,
             patientEmail: appt.patient?.email || undefined,
             patientPhone: appt.patient?.phone || '',
             revision: appt.revision,
@@ -953,7 +1001,7 @@ export class AppointmentsService {
             id: appt.id,
             startTime: appt.startTime,
             serviceName: appt.serviceName,
-            serviceNameRu: appt.service?.nameRu || undefined,
+            serviceNameRu,
             patientEmail: appt.patient?.email || undefined,
             patientPhone: appt.patient?.phone || '',
             revision: appt.revision,
@@ -1284,18 +1332,29 @@ export class AppointmentsService {
             },
           });
 
+          // Derive communication language with strict precedence:
+          // 1. Appointment's own prior notification intent snapshot
+          // 2. Persisted patient notes tag ([lang:ru] / [lang:uz])
+          // 3. Documented clinic default ('uz')
           let apptLang: 'uz' | 'ru' = 'uz';
-          if (appt.patient?.notes?.includes('[lang:ru]')) {
+          const prevJob = await tx.notificationJob.findFirst({
+            where: { appointmentId: appt.id },
+            orderBy: { createdAt: 'desc' },
+            select: { payload: true },
+          });
+          const snapshotLang = (prevJob?.payload as any)?.lang;
+          if (snapshotLang === 'ru' || snapshotLang === 'uz') {
+            apptLang = snapshotLang;
+          } else if (appt.patient?.notes?.includes('[lang:ru]')) {
             apptLang = 'ru';
-          } else {
-            const prevJob = await tx.notificationJob.findFirst({
-              where: { appointmentId: appt.id },
-              select: { payload: true },
-            });
-            if ((prevJob?.payload as any)?.lang === 'ru') {
-              apptLang = 'ru';
-            }
+          } else if (appt.patient?.notes?.includes('[lang:uz]')) {
+            apptLang = 'uz';
           }
+
+          // Multi-service appointments: build Russian name from all saved service items
+          const serviceNameRu = appt.serviceItems && appt.serviceItems.length > 0
+            ? appt.serviceItems.map((i: any) => i.serviceNameRu || i.serviceNameUz).join(' + ')
+            : (appt.service?.nameRu || undefined);
 
           // 14. Transactionally durable notification intent for rescheduling
           await this.notificationsService.enqueueAppointmentRescheduled(
@@ -1303,7 +1362,7 @@ export class AppointmentsService {
               id: appt.id,
               startTime: appt.startTime,
               serviceName: appt.serviceName,
-              serviceNameRu: appt.service?.nameRu || undefined,
+              serviceNameRu,
               patientEmail: appt.patient?.email || undefined,
               patientPhone: appt.patient?.phone || '',
               revision: appt.revision,

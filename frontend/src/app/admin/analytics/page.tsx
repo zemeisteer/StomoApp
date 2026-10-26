@@ -657,8 +657,8 @@ export default function AdminAnalyticsPage() {
                   </h2>
                   <span className="text-[11px] text-[#52696e]">
                     {isUz
-                      ? `Jami ${data?.totalServiceUsage || summary.totalAppointments} ta xizmat ko‘rsatildi (${summary.servicesPerAppointment || 1} xizmat/qabul)`
-                      : `Всего оказано ${data?.totalServiceUsage || summary.totalAppointments} услуг (${summary.servicesPerAppointment || 1} услуг/прием)`}
+                      ? `Jami ${data?.totalServiceUsage ?? 0} ta muolaja bajarildi (${summary.servicesPerCompletedAppointment ?? summary.servicesPerAppointment ?? 0} xizmat/qabul)`
+                      : `Всего выполнено ${data?.totalServiceUsage ?? 0} процедур (${summary.servicesPerCompletedAppointment ?? summary.servicesPerAppointment ?? 0} услуг/прием)`}
                   </span>
                 </div>
                 <Layers className="w-4 h-4 text-[#167b78]" />

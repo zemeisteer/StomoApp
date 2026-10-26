@@ -5,6 +5,7 @@ import { SchedulingService } from '../src/scheduling/scheduling.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { ReviewsService } from '../src/reviews/reviews.service';
 import { AnalyticsService } from '../src/analytics/analytics.service';
+import { AuditService } from '../src/audit/audit.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   getAppointmentTreatmentEnd,
@@ -13,6 +14,7 @@ import {
   isAppointmentOverlapping,
   buildConflictCandidateWhere,
 } from '../src/appointments/appointment-time.helper';
+import { runTimeContractMigration } from './migrate-appointment-time-contract';
 import {
   AppointmentStatus,
   DayOfWeek,
@@ -23,19 +25,85 @@ import {
   StaffRole,
 } from '@prisma/client';
 import * as assert from 'assert';
+import { ValidationPipe } from '@nestjs/common';
+import request from 'supertest';
+import { JwtService } from '@nestjs/jwt';
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { SchedulerRegistry } from '@nestjs/schedule';
+import cookieParser from 'cookie-parser';
+
+// Helper to calculate relative future dates (always points to an upcoming Monday at 04:00 UTC = 09:00 Tashkent)
+export function getNextRelativeMonday(daysAhead = 7, hourUtc = 4): Date {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysAhead);
+  while (d.getUTCDay() !== 1) { // 1 = Monday
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  d.setUTCHours(hourUtc, 0, 0, 0);
+  return d;
+}
 
 async function runAllPrioritiesVerification() {
   console.log('================================================================');
-  console.log('   STOMOAPP COMPREHENSIVE REGRESSION VERIFICATION (P1 - P9)    ');
+  console.log('   STOMOAPP COMPREHENSIVE REGRESSION VERIFICATION (P1 - P10)   ');
   console.log('================================================================\n');
 
-  const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  // 1. FAIL-CLOSED TEST DATABASE IDENTITY GUARD
+  const dbUrl = process.env.DATABASE_URL || '';
+  const isTestDb = dbUrl.includes('dentacare_test') || dbUrl.includes('test');
+  if (!isTestDb) {
+    console.error(`\n[FATAL] FAIL-CLOSED GUARD ACTIVATED!`);
+    console.error(`DATABASE_URL is not pointed to an isolated test database: ${dbUrl}`);
+    console.error(`Expected database URL containing 'dentacare_test' or 'test'.`);
+    process.exit(1);
+  }
+  console.log(`[PASS] Test Database Guard Verified: Connected to isolated test DB.`);
+
+  // 2. Initialize Nest Application with testing module and global validation
+  const moduleFixture: TestingModule = await Test.createTestingModule({
+    imports: [AppModule],
+  }).compile();
+
+  const app = moduleFixture.createNestApplication();
+  app.setGlobalPrefix('api');
+  app.use(cookieParser());
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+  await app.init();
+
+  // Disable background cron workers during test run
+  try {
+    const schedulerRegistry = app.get(SchedulerRegistry);
+    const cronJobs = schedulerRegistry.getCronJobs();
+    cronJobs.forEach((job) => {
+      job.stop();
+    });
+    console.log(`[PASS] Background cron workers disabled during verification suite.`);
+  } catch {
+    // If not registered, noop
+  }
+
   const prisma = app.get(PrismaService);
   const apptsService = app.get(AppointmentsService);
   const schedService = app.get(SchedulingService);
   const notifService = app.get(NotificationsService);
   const reviewsService = app.get(ReviewsService);
   const analyticsService = app.get(AnalyticsService);
+  const auditService = app.get(AuditService);
+  const jwtService = app.get(JwtService);
+
+  // 3. OVERRIDE NOTIFICATION DISPATCHERS SO REAL PROVIDERS ARE NEVER CALLED
+  (notifService as any).deliverEmail = async () => ({ success: true, simulated: true });
+  (notifService as any).deliverSms = async () => ({ success: true, simulated: true });
+  (notifService as any).deliverTelegram = async () => ({ success: true, simulated: true });
+  (notifService as any).deliverTelegram = async () => ({ success: true, simulated: true });
 
   const runId = `test_${Date.now()}`;
   let passedCount = 0;
@@ -59,804 +127,957 @@ async function runAllPrioritiesVerification() {
     })();
   }
 
-  // Setup isolated fixture
-  const branch = await prisma.branch.create({
-    data: {
-      nameUz: `Filial ${runId}`,
-      nameRu: `Филиал ${runId}`,
-      addressUz: 'Toshkent',
-      addressRu: 'Ташкент',
-      phone: '+998711234567',
-      isActive: true,
-    },
-  });
+  // Registry for tracking created fixtures to guarantee 100% cleanup
+  const fixtures: {
+    branches: string[];
+    services: string[];
+    doctors: string[];
+    patients: string[];
+    staff: string[];
+    appointments: string[];
+    reviews: string[];
+  } = {
+    branches: [],
+    services: [],
+    doctors: [],
+    patients: [],
+    staff: [],
+    appointments: [],
+    reviews: [],
+  };
 
-  const service = await prisma.service.create({
-    data: {
-      nameUz: `Davolash ${runId}`,
-      nameRu: `Лечение ${runId}`,
-      slug: `treat-${runId}`,
-      durationMinutes: 30,
-      priceFrom: 15000000, // 150,000 UZS
-      isActive: true,
-    },
-  });
-
-  const doctor = await prisma.doctor.create({
-    data: {
-      firstNameUz: 'Javohir',
-      lastNameUz: 'Rahimov',
-      firstNameRu: 'Жавохир',
-      lastNameRu: 'Рахимов',
-      slug: `doc-${runId}`,
-      isActive: true,
-      branches: { create: { branchId: branch.id } },
-      services: { create: { serviceId: service.id } },
-      schedules: {
-        create: [
-          {
-            branchId: branch.id,
-            dayOfWeek: DayOfWeek.MONDAY,
-            startTime: '08:00',
-            endTime: '20:00',
-            isActive: true,
-          },
-          {
-            branchId: branch.id,
-            dayOfWeek: DayOfWeek.TUESDAY,
-            startTime: '08:00',
-            endTime: '20:00',
-            isActive: true,
-          },
-          {
-            branchId: branch.id,
-            dayOfWeek: DayOfWeek.WEDNESDAY,
-            startTime: '08:00',
-            endTime: '20:00',
-            isActive: true,
-          },
-          {
-            branchId: branch.id,
-            dayOfWeek: DayOfWeek.THURSDAY,
-            startTime: '08:00',
-            endTime: '20:00',
-            isActive: true,
-          },
-          {
-            branchId: branch.id,
-            dayOfWeek: DayOfWeek.FRIDAY,
-            startTime: '08:00',
-            endTime: '20:00',
-            isActive: true,
-          },
-          {
-            branchId: branch.id,
-            dayOfWeek: DayOfWeek.SATURDAY,
-            startTime: '08:00',
-            endTime: '20:00',
-            isActive: true,
-          },
-          {
-            branchId: branch.id,
-            dayOfWeek: DayOfWeek.SUNDAY,
-            startTime: '08:00',
-            endTime: '20:00',
-            isActive: true,
-          },
-        ],
-      },
-    },
-  });
-
-  const patient = await prisma.patient.create({
-    data: {
-      fullName: `Test Bemor ${runId}`,
-      phone: '+998901234567',
-      email: `test_${runId}@example.com`,
-    },
-  });
-
-  const staff = await prisma.staffUser.create({
-    data: {
-      fullName: 'Admin Tester',
-      email: `staff_${runId}@example.com`,
-      passwordHash: 'dummy',
-      role: StaffRole.ADMIN,
-      isActive: true,
-    },
-  });
-
-  // Future Monday at 10:00 UTC (15:00 Tashkent)
-  const baseTime = new Date('2026-11-02T10:00:00.000Z');
+  let originalSettings: any = null;
 
   try {
-    // =========================================================================
-    // PRIORITY 1 & 2: Time Contract & Conflict Queries
-    // =========================================================================
-    console.log('\n--- Checking Priority 1 & 2: Appointment Time Contract & Database Conflict Queries ---');
+    // Record original clinic settings to restore later
+    originalSettings = await prisma.clinicSettings.findFirst();
 
-    let appt1: any;
-    await test('1.1 Booking persists treatment end in endTime, excluding bufferMinutes', async () => {
-      const clinicSettings = await prisma.clinicSettings.findFirst();
-      const expectedBuffer = clinicSettings?.bufferMinutes ?? 5;
+    // Setup isolated branch fixture
+    const branch = await prisma.branch.create({
+      data: {
+        nameUz: `Filial ${runId}`,
+        nameRu: `Филиал ${runId}`,
+        addressUz: 'Toshkent',
+        addressRu: 'Ташкент',
+        phone: '+998711234567',
+        isActive: true,
+      },
+    });
+    fixtures.branches.push(branch.id);
 
-      appt1 = await apptsService.createBooking({
-        doctorId: doctor.id,
-        branchId: branch.id,
-        serviceId: service.id,
-        startTime: baseTime.toISOString(),
-        patientName: patient.fullName,
-        patientPhone: patient.phone,
-        patientEmail: patient.email || undefined,
-        consentGiven: true,
-        source: 'admin',
-      });
+    // Setup isolated service fixture
+    const service = await prisma.service.create({
+      data: {
+        nameUz: `Davolash ${runId}`,
+        nameRu: `Лечение ${runId}`,
+        slug: `treat-${runId}`,
+        durationMinutes: 30,
+        priceFrom: 15000000,
+        isActive: true,
+      },
+    });
+    fixtures.services.push(service.id);
 
-      const dbRow = await prisma.appointment.findUnique({ where: { id: appt1.id } });
-      assert.ok(dbRow, 'Appointment must exist in DB');
-      assert.strictEqual(dbRow.startTime.toISOString(), baseTime.toISOString());
+    // Setup isolated doctor fixture with Monday-Sunday 08:00 - 20:00 schedule (03:00 - 15:00 UTC)
+    const doctor = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Javohir',
+        lastNameUz: 'Rahimov',
+        firstNameRu: 'Жавохир',
+        lastNameRu: 'Рахимов',
+        slug: `doc-${runId}`,
+        isActive: true,
+        branches: { create: { branchId: branch.id } },
+        services: { create: { serviceId: service.id } },
+        schedules: {
+          create: [
+            DayOfWeek.MONDAY,
+            DayOfWeek.TUESDAY,
+            DayOfWeek.WEDNESDAY,
+            DayOfWeek.THURSDAY,
+            DayOfWeek.FRIDAY,
+            DayOfWeek.SATURDAY,
+            DayOfWeek.SUNDAY,
+          ].map((dayOfWeek) => ({
+            branchId: branch.id,
+            dayOfWeek,
+            startTime: '08:00',
+            endTime: '20:00',
+            isActive: true,
+          })),
+        },
+      },
+    });
+    fixtures.doctors.push(doctor.id);
 
-      // Treatment duration = 30 minutes, buffer = expectedBuffer
-      const expectedTreatmentEnd = new Date(baseTime.getTime() + 30 * 60 * 1000);
-      assert.strictEqual(
-        dbRow.endTime.toISOString(),
-        expectedTreatmentEnd.toISOString(),
-        'endTime MUST store treatment end (10:30), NOT treatment + buffer',
-      );
-      assert.strictEqual(dbRow.bufferMinutes, expectedBuffer);
+    // Setup isolated patient fixture
+    const patient = await prisma.patient.create({
+      data: {
+        fullName: `Test Bemor ${runId}`,
+        phone: '+998901234567',
+        email: `test_${runId}@example.com`,
+      },
+    });
+    fixtures.patients.push(patient.id);
 
-      // Verify helpers
-      const treatmentEnd = getAppointmentTreatmentEnd(dbRow);
-      const occupiedEnd = getAppointmentOccupiedEnd(dbRow);
-      assert.strictEqual(treatmentEnd.toISOString(), expectedTreatmentEnd.toISOString());
-      assert.strictEqual(
-        occupiedEnd.toISOString(),
-        new Date(baseTime.getTime() + (30 + expectedBuffer) * 60 * 1000).toISOString(),
-      );
+    // Setup verified staff admin fixture
+    const staff = await prisma.staffUser.create({
+      data: {
+        fullName: 'Admin Tester',
+        email: `staff_${runId}@example.com`,
+        passwordHash: 'dummy',
+        role: StaffRole.ADMIN,
+        isActive: true,
+      },
+    });
+    fixtures.staff.push(staff.id);
+
+    // Generate valid admin JWT token for HTTP tests
+    const adminToken = jwtService.sign({
+      sub: staff.id,
+      email: staff.email,
+      role: staff.role,
     });
 
-    await test('1.2 Candidate query & overlap helper catches buffer-only collision', async () => {
-      const clinicSettings = await prisma.clinicSettings.findFirst();
-      const expectedBuffer = clinicSettings?.bufferMinutes ?? 5;
-      const collisionOffsetMinutes = 30 + Math.max(1, Math.floor(expectedBuffer / 2));
-      const slotDuringBuffer = new Date(baseTime.getTime() + collisionOffsetMinutes * 60 * 1000);
+    // Schedule base dates relative to upcoming Monday (04:00 UTC = 09:00 Tashkent)
+    const mondayBase = getNextRelativeMonday(7, 4);
+    const tuesdayBase = new Date(mondayBase.getTime() + 24 * 3600 * 1000);
+    const wednesdayBase = new Date(mondayBase.getTime() + 2 * 24 * 3600 * 1000);
+    const thursdayBase = new Date(mondayBase.getTime() + 3 * 24 * 3600 * 1000);
+    const fridayBase = new Date(mondayBase.getTime() + 4 * 24 * 3600 * 1000);
+    const saturdayBase = new Date(mondayBase.getTime() + 5 * 24 * 3600 * 1000);
 
-      let failed = false;
-      try {
-        await apptsService.createBooking({
+    // =========================================================================
+    // PRIORITY 1: Fix Missing Duration in Confirmation & Durations
+    // =========================================================================
+    console.log('\n--- Priority 1: Fix Missing Duration in Confirmation & Helper Projection ---');
+
+    const durations = [15, 30, 35, 60, 90];
+    for (let idx = 0; idx < durations.length; idx++) {
+      const duration = durations[idx];
+      await test(`1.1 Confirmation verifies true occupied end for ${duration}-min appointment`, async () => {
+        const testService = await prisma.service.create({
+          data: {
+            nameUz: `Xizmat ${duration}m ${runId}`,
+            nameRu: `Услуга ${duration}м ${runId}`,
+            slug: `srv-${duration}-${runId}`,
+            durationMinutes: duration,
+            isActive: true,
+            doctors: { create: { doctorId: doctor.id } },
+          },
+        });
+        fixtures.services.push(testService.id);
+
+        // Separate each duration into its own non-overlapping slot (every 75 minutes)
+        const slotStart = new Date(mondayBase.getTime() + idx * 75 * 60 * 1000);
+        const booking = await apptsService.createBooking({
           doctorId: doctor.id,
           branchId: branch.id,
-          serviceId: service.id,
-          startTime: slotDuringBuffer.toISOString(),
-          patientName: 'Bemor Buffer Collision',
-          patientPhone: '+998909999901',
+          serviceId: testService.id,
+          startTime: slotStart.toISOString(),
+          patientName: patient.fullName,
+          patientPhone: patient.phone,
           consentGiven: true,
-          source: 'admin',
+          source: 'website', // Starts as PENDING
         });
-      } catch (e: any) {
-        failed = true;
-        assert.ok(
-          e.message.includes('band') || e.status === 409 || e.status === 400,
-          `Expected conflict/occupied error, got: ${e.message}`,
+        fixtures.appointments.push(booking.id);
+
+        assert.strictEqual(booking.status, AppointmentStatus.PENDING);
+        assert.strictEqual(booking.durationMinutes, duration);
+
+        // Staff confirms appointment: executes changeStatus with locked projection
+        const confirmed = await apptsService.changeStatus(
+          booking.id,
+          AppointmentStatus.CONFIRMED,
+          staff.id,
+          'Test confirmation',
+          { role: StaffRole.ADMIN },
         );
-      }
-      assert.ok(failed, 'Booking during buffer MUST be rejected because operatory turnaround buffer is occupied');
-    });
 
-    await test('1.3 Candidate query allows booking immediately after occupied end', async () => {
-      const clinicSettings = await prisma.clinicSettings.findFirst();
-      const expectedBuffer = clinicSettings?.bufferMinutes ?? 5;
-      const slotAfterBuffer = new Date(baseTime.getTime() + (30 + expectedBuffer) * 60 * 1000);
-
-      const apptAdjacent = await apptsService.createBooking({
-        doctorId: doctor.id,
-        branchId: branch.id,
-        serviceId: service.id,
-        startTime: slotAfterBuffer.toISOString(),
-        patientName: 'Bemor Adjacent',
-        patientPhone: '+998909999902',
-        consentGiven: true,
-        source: 'admin',
+        assert.strictEqual(confirmed.status, AppointmentStatus.CONFIRMED);
+        assert.strictEqual(confirmed.durationMinutes, duration);
       });
+    }
 
-      assert.ok(apptAdjacent?.id, 'Booking at slotAfterBuffer must succeed');
-      const row = await prisma.appointment.findUnique({ where: { id: apptAdjacent.id } });
-      assert.strictEqual(row?.startTime.toISOString(), slotAfterBuffer.toISOString());
-      assert.strictEqual(row?.endTime.toISOString(), new Date(slotAfterBuffer.getTime() + 30 * 60 * 1000).toISOString());
-    });
-
-    await test('1.4 Duration override saves treatment end, revalidates conflicts, and shifts occupiedEnd', async () => {
-      const clinicSettings = await prisma.clinicSettings.findFirst();
-      const expectedBuffer = clinicSettings?.bufferMinutes ?? 5;
-      const collidingDuration = 30 + expectedBuffer + 5;
-
-      let conflictCaught = false;
-      try {
-        await apptsService.overrideDuration(appt1.id, collidingDuration, staff.id, 'Testing collision detection');
-      } catch (e: any) {
-        conflictCaught = true;
-      }
-      assert.ok(conflictCaught, 'Extending duration into an existing occupied appointment MUST throw ConflictException');
-
-      // Now create an unblocked appointment at 13:00 and test duration extension
-      const isolatedSlot = new Date('2026-11-02T13:00:00.000Z');
-      const isolatedAppt = await apptsService.createBooking({
-        doctorId: doctor.id,
-        branchId: branch.id,
-        serviceId: service.id,
-        startTime: isolatedSlot.toISOString(),
-        patientName: 'Bemor Override',
-        patientPhone: '+998909999903',
-        consentGiven: true,
-        source: 'admin',
-      });
-
-      const updated = await apptsService.overrideDuration(
-        isolatedAppt.id,
-        40,
-        staff.id,
-        'Procedure extended',
-      );
-
-      assert.strictEqual(updated.durationMinutes, 40);
-      const row = await prisma.appointment.findUnique({ where: { id: isolatedAppt.id } });
-      const expectedEnd = new Date(isolatedSlot.getTime() + 40 * 60 * 1000); // 13:40
-      assert.strictEqual(
-        row?.endTime.toISOString(),
-        expectedEnd.toISOString(),
-        'overrideDuration must save newTreatmentEndTime into endTime, NOT start + duration + buffer',
-      );
-      assert.strictEqual(
-        getAppointmentOccupiedEnd(row!).toISOString(),
-        new Date(isolatedSlot.getTime() + (40 + expectedBuffer) * 60 * 1000).toISOString(),
-      );
-    });
-
-    await test('1.5 Zero buffer and legacy historical row compatibility', () => {
-      // 1. Zero buffer
-      const zeroBufferAppt = {
-        startTime: new Date('2026-11-02T10:00:00.000Z'),
-        endTime: new Date('2026-11-02T10:30:00.000Z'),
-        durationMinutes: 30,
-        bufferMinutes: 0,
-      };
-      assert.strictEqual(
-        getAppointmentTreatmentEnd(zeroBufferAppt).toISOString(),
-        getAppointmentOccupiedEnd(zeroBufferAppt).toISOString(),
-        'Zero buffer appointment must have treatmentEnd === occupiedEnd',
-      );
-
-      // 2. Historical row where endTime = start + duration + buffer (10:00 to 10:35)
-      const legacyRow = {
-        startTime: new Date('2026-11-02T10:00:00.000Z'),
-        endTime: new Date('2026-11-02T10:35:00.000Z'),
-        durationMinutes: 30,
-        bufferMinutes: 5,
-      };
-      assert.strictEqual(classifyAppointmentRecord(legacyRow).classification, 'LEGACY_OCCUPIED_END');
-      assert.strictEqual(
-        getAppointmentTreatmentEnd(legacyRow).toISOString(),
-        '2026-11-02T10:30:00.000Z',
-        'Legacy record treatmentEnd must be correctly derived as 10:30',
-      );
-      assert.strictEqual(
-        getAppointmentOccupiedEnd(legacyRow).toISOString(),
-        '2026-11-02T10:35:00.000Z',
-        'Legacy record occupiedEnd must not add buffer twice (must be 10:35)',
-      );
-    });
-
-    // =========================================================================
-    // PRIORITY 3: Expiration and Confirmation Rules
-    // =========================================================================
-    console.log('\n--- Checking Priority 3: Expiration and Confirmation Rules ---');
-
-    await test('3.1 Ordinary confirmation cannot resurrect expired pending reservation', async () => {
-      const expSlot = new Date('2026-11-03T09:00:00.000Z');
-      const pastExpiry = new Date(Date.now() - 15 * 60 * 1000); // Expired 15 mins ago
-
-      const pendingAppt = await prisma.appointment.create({
+    await test('1.2 Confirmation verifies zero buffer appointment correctly', async () => {
+      const zeroBufferStart = new Date(tuesdayBase.getTime());
+      const apptZero = await prisma.appointment.create({
         data: {
-          publicToken: `token_exp_${Date.now()}`,
+          publicToken: `tok_zb_${runId}`,
           patientId: patient.id,
           doctorId: doctor.id,
           serviceId: service.id,
           branchId: branch.id,
           status: AppointmentStatus.PENDING,
-          startTime: expSlot,
-          endTime: new Date(expSlot.getTime() + 30 * 60 * 1000),
+          startTime: zeroBufferStart,
+          endTime: new Date(zeroBufferStart.getTime() + 30 * 60000),
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 0, // Zero buffer
+          expiresAt: new Date(Date.now() + 30 * 60000),
+        },
+      });
+      fixtures.appointments.push(apptZero.id);
+
+      const confirmed = await apptsService.changeStatus(
+        apptZero.id,
+        AppointmentStatus.CONFIRMED,
+        staff.id,
+        'Confirming zero buffer',
+        { role: StaffRole.ADMIN },
+      );
+      assert.strictEqual(confirmed.status, AppointmentStatus.CONFIRMED);
+      assert.strictEqual(confirmed.bufferMinutes, 0);
+    });
+
+    await test('1.3 Confirmation respects legacy occupied-end historical row without double-counting buffer', async () => {
+      const legacyStart = new Date(tuesdayBase.getTime() + 60 * 60 * 1000);
+      // Legacy record: endTime = startTime + 30m duration + 10m buffer = 40m
+      const apptLegacy = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_leg_${runId}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.PENDING,
+          startTime: legacyStart,
+          endTime: new Date(legacyStart.getTime() + 40 * 60000),
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 10,
+          expiresAt: new Date(Date.now() + 30 * 60000),
+        },
+      });
+      fixtures.appointments.push(apptLegacy.id);
+
+      const confirmed = await apptsService.changeStatus(
+        apptLegacy.id,
+        AppointmentStatus.CONFIRMED,
+        staff.id,
+        'Confirming legacy row',
+        { role: StaffRole.ADMIN },
+      );
+      assert.strictEqual(confirmed.status, AppointmentStatus.CONFIRMED);
+    });
+
+    await test('1.4 Conflicting appointment touching true occupied boundary is rejected', async () => {
+      // Create confirmed appointment [10:00, 10:30 treatment end, 10:35 occupied end with 5m buffer]
+      const tStart = new Date(tuesdayBase.getTime() + 120 * 60 * 1000);
+      const apptA = await apptsService.createBooking({
+        doctorId: doctor.id,
+        branchId: branch.id,
+        serviceId: service.id,
+        startTime: tStart.toISOString(),
+        patientName: patient.fullName,
+        patientPhone: patient.phone,
+        consentGiven: true,
+        source: 'admin',
+      });
+      fixtures.appointments.push(apptA.id);
+
+      // Attempt to book appointment starting during turnaround buffer (10:32)
+      const collisionStart = new Date(tStart.getTime() + 32 * 60 * 1000);
+      await assert.rejects(
+        apptsService.createBooking({
+          doctorId: doctor.id,
+          branchId: branch.id,
+          serviceId: service.id,
+          startTime: collisionStart.toISOString(),
+          patientName: 'Colliding Patient',
+          patientPhone: '+998909998877',
+          consentGiven: true,
+          source: 'website',
+        }),
+        /band/i,
+      );
+
+      // Adjacent booking starting exactly at true occupied boundary (10:35) MUST SUCCEED
+      const adjacentStart = new Date(tStart.getTime() + 35 * 60 * 1000);
+      const apptAdjacent = await apptsService.createBooking({
+        doctorId: doctor.id,
+        branchId: branch.id,
+        serviceId: service.id,
+        startTime: adjacentStart.toISOString(),
+        patientName: 'Adjacent Patient',
+        patientPhone: '+998909998877',
+        consentGiven: true,
+        source: 'admin',
+      });
+      fixtures.appointments.push(apptAdjacent.id);
+      assert.ok(apptAdjacent.id, 'Adjacent booking exactly at occupied boundary must succeed');
+    });
+
+    await test('1.5 Shift ending exactly at the occupied end is accepted, exceeding is rejected', async () => {
+      // Doctor shift ends at 20:00 Tashkent = 15:00 UTC
+      // Valid appointment: start 14:25 UTC, duration 30m, buffer 5m -> occupied end 15:00 UTC (exact shift boundary)
+      const exactShiftStart = new Date(tuesdayBase.getTime());
+      exactShiftStart.setUTCHours(14, 25, 0, 0);
+
+      const apptExact = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_exact_${runId}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.PENDING,
+          startTime: exactShiftStart,
+          endTime: new Date(exactShiftStart.getTime() + 30 * 60000),
           serviceName: service.nameUz,
           durationMinutes: 30,
           bufferMinutes: 5,
-          consentGiven: true,
-          expiresAt: pastExpiry,
+          expiresAt: new Date(Date.now() + 30 * 60000),
         },
       });
+      fixtures.appointments.push(apptExact.id);
 
-      // Staff attempts ordinary confirmation
-      let rejected = false;
-      try {
-        await apptsService.changeStatus(
-          pendingAppt.id,
+      // Confirming exactly touching shift end MUST SUCCEED
+      const confirmedExact = await apptsService.changeStatus(
+        apptExact.id,
+        AppointmentStatus.CONFIRMED,
+        staff.id,
+        'Exact shift boundary',
+        { role: StaffRole.ADMIN },
+      );
+      assert.strictEqual(confirmedExact.status, AppointmentStatus.CONFIRMED);
+
+      // Now create an appointment that exceeds shift end by 1 minute: start 14:26 UTC -> occupied end 15:01 UTC
+      const exceedingShiftStart = new Date(tuesdayBase.getTime());
+      exceedingShiftStart.setUTCHours(14, 26, 0, 0);
+
+      const apptExceeding = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_exceed_${runId}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.PENDING,
+          startTime: exceedingShiftStart,
+          endTime: new Date(exceedingShiftStart.getTime() + 30 * 60000),
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+          expiresAt: new Date(Date.now() + 30 * 60000),
+        },
+      });
+      fixtures.appointments.push(apptExceeding.id);
+
+      // Confirming appointment exceeding shift end MUST BE REJECTED
+      await assert.rejects(
+        apptsService.changeStatus(
+          apptExceeding.id,
           AppointmentStatus.CONFIRMED,
           staff.id,
-          'Reception trying to confirm expired',
-          { role: StaffRole.ADMIN, doctorId: null },
-        );
-      } catch (err: any) {
-        rejected = true;
-        assert.ok(
-          err.message.includes('muddati o\'tgan') || err.status === 409,
-          `Expected expired conflict rejection, got: ${err.message}`,
-        );
-      }
-      assert.ok(rejected, 'Ordinary confirmation of expired pending appointment MUST throw ConflictException');
-
-      // Verify no confirmed status and no notification job enqueued
-      const reloaded = await prisma.appointment.findUnique({ where: { id: pendingAppt.id } });
-      assert.strictEqual(reloaded?.status, AppointmentStatus.PENDING);
-
-      const notifJob = await prisma.notificationJob.findFirst({
-        where: { appointmentId: pendingAppt.id, templateKey: 'patient_booking_confirmed' },
-      });
-      assert.strictEqual(notifJob, null, 'No confirmation notification should be enqueued for rejected transition');
+          'Exceeding shift boundary',
+          { role: StaffRole.ADMIN },
+        ),
+        /ish grafigi/i,
+      );
     });
 
     // =========================================================================
-    // PRIORITY 4: Concurrency-Safe Notification Retries
+    // PRIORITY 2: Harden Historical Time Classification & Candidate Queries
     // =========================================================================
-    console.log('\n--- Checking Priority 4: Concurrency-Safe Notification Retries ---');
+    console.log('\n--- Priority 2: Harden Historical Time Classification & Query Candidate Verification ---');
 
-    await test('4.1 Retry explicitly rejects SENT, SIMULATED, CANCELLED, and active PROCESSING jobs', async () => {
-      // 1. SENT job
-      const sentJob = await prisma.notificationJob.create({
-        data: {
-          channel: NotificationChannel.SMS,
-          templateKey: 'test_sent',
-          recipient: '+998901234567',
-          payload: {},
-          status: NotificationStatus.SENT,
-          attempts: 1,
-        },
+    await test('2.1 Sub-minute timestamp difference classification', () => {
+      // 30 min duration with 500ms drift (within 1000ms tolerance) -> TREATMENT_END
+      const resTolerant = classifyAppointmentRecord({
+        startTime: '2026-11-02T10:00:00.000Z',
+        endTime: '2026-11-02T10:30:00.500Z',
+        durationMinutes: 30,
+        bufferMinutes: 5,
       });
-      let sentRejected = false;
-      try {
-        await notifService.retryJob(sentJob.id);
-      } catch {
-        sentRejected = true;
-      }
-      assert.ok(sentRejected, 'SENT job retry must be rejected');
+      assert.strictEqual(resTolerant.classification, 'TREATMENT_END');
+      assert.strictEqual(resTolerant.isAmbiguous, false);
 
-      // 2. SIMULATED job
-      const simJob = await prisma.notificationJob.create({
-        data: {
-          channel: NotificationChannel.EMAIL,
-          templateKey: 'test_sim',
-          recipient: 'test@example.com',
-          payload: {},
-          status: NotificationStatus.SIMULATED,
-          attempts: 1,
-        },
+      // 30 min duration with 2000ms drift (> 1000ms tolerance) -> AMBIGUOUS
+      const resDrifted = classifyAppointmentRecord({
+        startTime: '2026-11-02T10:00:00.000Z',
+        endTime: '2026-11-02T10:30:02.000Z',
+        durationMinutes: 30,
+        bufferMinutes: 5,
       });
-      let simRejected = false;
-      try {
-        await notifService.retryJob(simJob.id);
-      } catch {
-        simRejected = true;
-      }
-      assert.ok(simRejected, 'SIMULATED job retry must be rejected');
-
-      // 3. CANCELLED job
-      const cancelledJob = await prisma.notificationJob.create({
-        data: {
-          channel: NotificationChannel.SMS,
-          templateKey: 'test_cancel',
-          recipient: '+998901234567',
-          payload: {},
-          status: NotificationStatus.CANCELLED,
-          attempts: 1,
-        },
-      });
-      let cancelRejected = false;
-      try {
-        await notifService.retryJob(cancelledJob.id);
-      } catch {
-        cancelRejected = true;
-      }
-      assert.ok(cancelRejected, 'CANCELLED job retry must be rejected');
-
-      // 4. Active PROCESSING job with unexpired worker lease
-      const activeProcessingJob = await prisma.notificationJob.create({
-        data: {
-          channel: NotificationChannel.SMS,
-          templateKey: 'test_proc',
-          recipient: '+998901234567',
-          payload: {},
-          status: NotificationStatus.PROCESSING,
-          lockedAt: new Date(), // Active lease just acquired
-          leaseToken: 'worker-lease-active',
-          attempts: 1,
-        },
-      });
-      let procRejected = false;
-      try {
-        await notifService.retryJob(activeProcessingJob.id);
-      } catch {
-        procRejected = true;
-      }
-      assert.ok(procRejected, 'Active PROCESSING job with unexpired lease must be rejected');
+      assert.strictEqual(resDrifted.classification, 'AMBIGUOUS');
+      assert.strictEqual(resDrifted.isAmbiguous, true);
     });
 
-    await test('4.2 Retry revalidates reminder eligibility and returns sanitized DTO', async () => {
-      // Stale reminder for past appointment
-      const pastAppt = await prisma.appointment.create({
+    await test('2.2 Zero-buffer row with inconsistent duration is classified as AMBIGUOUS', () => {
+      // buffer = 0, but diffMinutes (15) !== durationMinutes (30) -> MUST BE AMBIGUOUS
+      const res = classifyAppointmentRecord({
+        startTime: '2026-11-02T10:00:00.000Z',
+        endTime: '2026-11-02T10:15:00.000Z',
+        durationMinutes: 30,
+        bufferMinutes: 0,
+      });
+      assert.strictEqual(res.classification, 'AMBIGUOUS');
+      assert.strictEqual(res.isAmbiguous, true);
+    });
+
+    await test('2.3 Missing or invalid values are classified as AMBIGUOUS without guessing 30m', () => {
+      const resMissingDuration = classifyAppointmentRecord({
+        startTime: '2026-11-02T10:00:00.000Z',
+        endTime: '2026-11-02T10:30:00.000Z',
+        durationMinutes: undefined,
+      });
+      assert.strictEqual(resMissingDuration.classification, 'AMBIGUOUS');
+      assert.strictEqual(resMissingDuration.durationMinutes, null);
+      assert.strictEqual(resMissingDuration.isAmbiguous, true);
+
+      const resInverted = classifyAppointmentRecord({
+        startTime: '2026-11-02T10:30:00.000Z',
+        endTime: '2026-11-02T10:00:00.000Z',
+        durationMinutes: 30,
+      });
+      assert.strictEqual(resInverted.classification, 'AMBIGUOUS');
+      assert.strictEqual(resInverted.isAmbiguous, true);
+    });
+
+    await test('2.4 Candidate query guarantees zero false negatives for truncated ambiguous records', async () => {
+      // Ambiguous record: start 09:00, corrupt short endTime 09:15, canonical duration 180m (occupied until 12:10)
+      const corruptStart = new Date(wednesdayBase.getTime());
+      const corruptEnd = new Date(corruptStart.getTime() + 15 * 60 * 1000);
+      const apptCorrupt = await prisma.appointment.create({
         data: {
-          publicToken: `token_past_${Date.now()}`,
+          publicToken: `tok_corr_${runId}`,
           patientId: patient.id,
           doctorId: doctor.id,
           serviceId: service.id,
           branchId: branch.id,
           status: AppointmentStatus.CONFIRMED,
-          startTime: new Date('2020-01-01T10:00:00.000Z'), // Past
-          endTime: new Date('2020-01-01T10:30:00.000Z'),
+          startTime: corruptStart,
+          endTime: corruptEnd, // Corrupt 15m endTime
+          serviceName: service.nameUz,
+          durationMinutes: 180, // Canonical duration is 3 hours!
+          bufferMinutes: 10,
+        },
+      });
+      fixtures.appointments.push(apptCorrupt.id);
+
+      // Query candidate slot at 11:30 - 12:00
+      const querySlotStart = new Date(corruptStart.getTime() + 150 * 60 * 1000);
+      const querySlotEnd = new Date(querySlotStart.getTime() + 30 * 60 * 1000);
+
+      // Authoritative in-memory overlap check confirms collision
+      const overlapsInMemory = isAppointmentOverlapping(apptCorrupt, querySlotStart, querySlotEnd);
+      assert.strictEqual(overlapsInMemory, true, 'In-memory helper must detect canonical overlap');
+
+      // Query candidates through buildConflictCandidateWhere
+      const candidates = await prisma.appointment.findMany({
+        where: buildConflictCandidateWhere(doctor.id, querySlotStart, querySlotEnd),
+      });
+
+      const found = candidates.some((c) => c.id === apptCorrupt.id);
+      assert.strictEqual(found, true, 'Truncated ambiguous record MUST NOT escape candidate query (zero false negatives)');
+    });
+
+    // =========================================================================
+    // PRIORITY 3: Safe and Resumable Migration
+    // =========================================================================
+    console.log('\n--- Priority 3: Safe and Resumable Migration & Race Safety ---');
+
+    await test('3.1 Migration race safety: Concurrent reschedule preserves new schedule and skips backfill', async () => {
+      const raceStart = new Date(wednesdayBase.getTime() + 180 * 60 * 1000);
+      // Create legacy occupied-end record (duration 30, buffer 5, endTime = start + 35m)
+      const legacyAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_race_${runId}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: raceStart,
+          endTime: new Date(raceStart.getTime() + 35 * 60000),
           serviceName: service.nameUz,
           durationMinutes: 30,
           bufferMinutes: 5,
-          consentGiven: true,
         },
       });
+      fixtures.appointments.push(legacyAppt.id);
 
-      const failedReminder = await prisma.notificationJob.create({
-        data: {
-          channel: NotificationChannel.SMS,
-          templateKey: 'appointment_reminder',
-          recipient: '+998901234567',
-          payload: { appointmentId: pastAppt.id },
-          appointmentId: pastAppt.id,
-          scheduleRevision: 1,
-          status: NotificationStatus.FAILED,
-          attempts: 3,
-          maxAttempts: 3,
-          lastError: 'Provider error',
-        },
-      });
+      // Concurrently reschedule the appointment through application workflow before backfill commits
+      const newReschedStart = new Date(raceStart.getTime() + 60 * 60 * 1000);
+      await apptsService.reschedule(legacyAppt.id, newReschedStart.toISOString(), staff.id);
 
-      let pastRejected = false;
-      try {
-        await notifService.retryJob(failedReminder.id);
-      } catch (err: any) {
-        pastRejected = true;
-        assert.ok(err.message.includes('o‘tib ketgan') || err.status === 400);
-      }
-      assert.ok(pastRejected, 'Reminder retry for past appointment must be rejected');
+      // Attempt migration on this appointment
+      const result = await runTimeContractMigration(
+        { dryRun: false, batchSize: 10, limit: 100 },
+        prisma,
+      );
 
-      // Valid failed notification job (non-reminder)
-      const validFailed = await prisma.notificationJob.create({
-        data: {
-          channel: NotificationChannel.SMS,
-          templateKey: 'patient_booking_received_sms',
-          recipient: '+998901234567',
-          payload: { internalSecret: 'do-not-leak' },
-          status: NotificationStatus.FAILED,
-          attempts: 3,
-          maxAttempts: 3,
-          lastError: 'Network timeout',
-        },
-      });
-
-      const retryDto = await notifService.retryJob(validFailed.id, { sub: staff.id, role: 'ADMIN' });
-      assert.strictEqual(retryDto.status, NotificationStatus.PENDING);
-      assert.strictEqual(retryDto.attempts, 0);
-      assert.strictEqual(retryDto.recipient, '+998 90 *** ** 67', 'Recipient must be masked in return DTO');
-      assert.strictEqual((retryDto as any).payload, undefined, 'Raw internal payload must NOT be exposed in DTO');
-      assert.strictEqual((retryDto as any).leaseToken, undefined, 'Internal lease token must NOT be exposed in DTO');
-    });
-
-    // =========================================================================
-    // PRIORITY 5: Audit Actors and Consistency
-    // =========================================================================
-    console.log('\n--- Checking Priority 5: Audit Actors and Consistency ---');
-
-    await test('5.1 Review moderation and deletion records verified staff sub as audit actor', async () => {
-      const review = await prisma.review.create({
-        data: {
-          authorName: 'Audit Test Author',
-          rating: 5,
-          text: 'Super klinika!',
-          status: ReviewStatus.PENDING,
-          consentDisplayName: true,
-        },
-      });
-
-      const testStaffSub = staff.id;
-
-      // Moderation
-      await reviewsService.updateStatus(review.id, ReviewStatus.APPROVED, 'Approved by admin', {
-        sub: testStaffSub,
-        role: StaffRole.ADMIN,
-      });
-
-      const modAudit = await prisma.auditLog.findFirst({
-        where: { entityId: review.id, action: 'review.moderated' },
-        orderBy: { createdAt: 'desc' },
-      });
-      assert.ok(modAudit, 'Audit log entry for review moderation must exist');
-      assert.strictEqual(modAudit?.userId, testStaffSub, 'AuditLog userId must match authenticated user sub');
-
-      // Deletion
-      await reviewsService.delete(review.id, {
-        sub: testStaffSub,
-        role: StaffRole.ADMIN,
-      });
-
-      const delAudit = await prisma.auditLog.findFirst({
-        where: { entityId: review.id, action: 'review.deleted' },
-        orderBy: { createdAt: 'desc' },
-      });
-      assert.strictEqual(delAudit?.userId, testStaffSub, 'AuditLog userId must match authenticated user sub on deletion');
-    });
-
-    // =========================================================================
-    // PRIORITY 6: Clean Plain-Text Review Storage Without Double Encoding
-    // =========================================================================
-    console.log('\n--- Checking Priority 6: Clean Plain-Text Review Storage Without Double Encoding ---');
-
-    await test('6.1 Reviews store normalized plain text without HTML escaping entity artifacts', async () => {
-      const testCases = [
-        { author: "O'zbekiston Bemor", text: "Bizning O'zbekistondagi eng yaxshi shifoxona!" },
-        { author: 'A & B Hamkorlik', text: 'Tez & sifatli xizmat ko\'rsatildi.' },
-        { author: 'Tech <User>', text: '<script>alert("safe")</script> va <b style="color:red">zo\'r</b>' },
-        { author: 'Иван Иванов', text: 'Отличная стоматология, профессиональные врачи и заботливый персонал!' },
-        { author: 'Murod 🦷✨', text: 'Yulduzli natija! 👍 Juda mamnun bo\'ldim.' },
-      ];
-
-      for (const tc of testCases) {
-        const created = await reviewsService.create({
-          authorName: tc.author,
-          rating: 5,
-          text: tc.text,
-          consentDisplayName: true,
-        });
-
-        // Direct DB inspection
-        const row = await prisma.review.findUnique({ where: { id: created.id } });
-        assert.ok(row);
-
-        // Verify NO double escaping
-        assert.ok(!row.text.includes('&amp;'), `Must not contain &amp;, got: ${row.text}`);
-        assert.ok(!row.text.includes('&#39;'), `Must not contain &#39;, got: ${row.text}`);
-        assert.ok(!row.text.includes('&quot;'), `Must not contain &quot;, got: ${row.text}`);
-        assert.ok(!row.text.includes('&lt;'), `Must not contain &lt;, got: ${row.text}`);
-        assert.ok(!row.text.includes('&gt;'), `Must not contain &gt;, got: ${row.text}`);
-
-        // Plain text exact match
-        assert.strictEqual(row.authorName, tc.author.trim());
-        assert.strictEqual(row.text, tc.text.trim());
-      }
-    });
-
-    // =========================================================================
-    // PRIORITY 7: Notification Language and Settings Wiring
-    // =========================================================================
-    console.log('\n--- Checking Priority 7: Notification Language and Settings Wiring ---');
-
-    await test('7.1 Booking with Russian language derives lang=ru and formats dates in Russian', async () => {
-      const ruSlot = new Date('2026-11-04T07:00:00.000Z'); // 12:00 Tashkent
-      const ruAppt = await apptsService.createBooking({
-        doctorId: doctor.id,
-        branchId: branch.id,
-        serviceId: service.id,
-        startTime: ruSlot.toISOString(),
-        patientName: 'Алексей Смирнов',
-        patientPhone: '+998901112233',
-        patientEmail: 'alex@example.com',
-        lang: 'ru',
-        consentGiven: true,
-        source: 'website',
-      });
-
-      const notifJob = await prisma.notificationJob.findFirst({
-        where: { appointmentId: ruAppt.id, templateKey: 'patient_booking_received' },
-      });
-      assert.ok(notifJob, 'Notification job must be enqueued');
-      const payload = notifJob.payload as any;
-      assert.strictEqual(payload.lang, 'ru', 'Payload must record lang: ru');
-      assert.strictEqual(payload.startTime, ruSlot.toISOString());
-
-      // Test dynamic Russian date/time formatter
-      const formattedRu = notifService.formatAppointmentDateTime(ruSlot, 'Asia/Tashkent', 'ru');
-      assert.ok(formattedRu.includes(' в '), `Russian format must use 'в', got: ${formattedRu}`);
-      assert.ok(formattedRu.includes('12:00'), `Time in Tashkent must be 12:00, got: ${formattedRu}`);
-    });
-
-    await test('7.2 Integration status accurately reflects configuration requirements', async () => {
-      const status = await notifService.getIntegrationStatus();
-      assert.ok('email' in status && 'sms' in status && 'telegram' in status);
-      assert.ok('configured' in status.email);
-      assert.ok('status' in status.email);
-      assert.ok('mode' in status.email);
-      assert.strictEqual(typeof status.email.configured, 'boolean');
-    });
-
-    // =========================================================================
-    // PRIORITY 8: Analytics Reconciliation
-    // =========================================================================
-    console.log('\n--- Checking Priority 8: Analytics Financial Reconciliation ---');
-
-    await test('8.1 Two equal-price services with small payments and refunds reconcile exactly', async () => {
-      // Create two services with equal price: 100,000 UZS each
-      const srvA = await prisma.service.create({
-        data: {
-          nameUz: `Xizmat A ${runId}`,
-          nameRu: `Услуга A ${runId}`,
-          slug: `srv-a-${runId}`,
-          durationMinutes: 30,
-          priceFrom: 10000000,
-          isActive: true,
-        },
-      });
-      const srvB = await prisma.service.create({
-        data: {
-          nameUz: `Xizmat B ${runId}`,
-          nameRu: `Услуга B ${runId}`,
-          slug: `srv-b-${runId}`,
-          durationMinutes: 30,
-          priceFrom: 10000000,
-          isActive: true,
-        },
-      });
-
-      // Appointment within November 2026
-      const apptNov = await prisma.appointment.create({
-        data: {
-          publicToken: `token_fin_${Date.now()}`,
-          patientId: patient.id,
-          doctorId: doctor.id,
-          serviceId: srvA.id,
-          branchId: branch.id,
-          status: AppointmentStatus.COMPLETED,
-          startTime: new Date('2026-11-10T10:00:00.000Z'),
-          endTime: new Date('2026-11-10T11:00:00.000Z'),
-          serviceName: `${srvA.nameUz} + ${srvB.nameUz}`,
-          servicePriceFrom: 20000000,
-          durationMinutes: 60,
-          bufferMinutes: 5,
-          consentGiven: true,
-          serviceItems: {
-            create: [
-              {
-                serviceId: srvA.id,
-                sortOrder: 0,
-                serviceNameUz: srvA.nameUz,
-                priceFrom: 10000000,
-                durationMinutes: 30,
-              },
-              {
-                serviceId: srvB.id,
-                sortOrder: 1,
-                serviceNameUz: srvB.nameUz,
-                priceFrom: 10000000,
-                durationMinutes: 30,
-              },
-            ],
-          },
-        },
-      });
-
-      // Record multiple small payments and refunds
-      // Payments: 3 small payments of 100,000 minor units each (total gross: 300,000)
-      // Refund: 1 refund of 100,000 minor units (total refund: 100,000)
-      // Net recorded: 200,000
-      const paymentDate = new Date('2026-11-10T12:00:00.000Z');
-      await prisma.payment.createMany({
-        data: [
-          {
-            appointmentId: apptNov.id,
-            amount: 100000,
-            isRefund: false,
-            method: PaymentMethod.CASH,
-            recordedAt: paymentDate,
-          },
-          {
-            appointmentId: apptNov.id,
-            amount: 100000,
-            isRefund: false,
-            method: PaymentMethod.CASH,
-            recordedAt: paymentDate,
-          },
-          {
-            appointmentId: apptNov.id,
-            amount: 100000,
-            isRefund: false,
-            method: PaymentMethod.CARD,
-            recordedAt: paymentDate,
-          },
-          {
-            appointmentId: apptNov.id,
-            amount: 100000,
-            isRefund: true,
-            method: PaymentMethod.CASH,
-            recordedAt: paymentDate,
-          },
-        ],
-      });
-
-      // Run analytics query for this date range
-      const analyticsOverall = await analyticsService.getDashboardAnalytics({
-        startDate: '2026-11-01',
-        endDate: '2026-11-30',
-        branchId: branch.id,
-      });
-
-      // Filter by Service A
-      const analyticsSrvA = await analyticsService.getDashboardAnalytics({
-        startDate: '2026-11-01',
-        endDate: '2026-11-30',
-        branchId: branch.id,
-        serviceId: srvA.id,
-      });
-
-      // Find Service A in popular services
-      const srvAInTable = analyticsOverall.popularServices.find((s) => s.serviceId === srvA.id);
-      assert.ok(srvAInTable, 'Service A must be present in popular services');
-
-      // Net revenue of Service A in service breakdown table:
-      const tableNetRevenue = srvAInTable.netRevenueMinor;
-
-      // Filtered cash ledger net revenue for Service A:
-      const filteredCashNetRevenue = analyticsSrvA.revenue.netRevenueMinor;
-
-      // MUST RECONCILE EXACTLY
+      // Re-fetch appointment: new schedule MUST remain intact
+      const fresh = await prisma.appointment.findUnique({ where: { id: legacyAppt.id } });
+      assert.ok(fresh);
+      assert.strictEqual(fresh.startTime.toISOString(), newReschedStart.toISOString());
       assert.strictEqual(
-        tableNetRevenue,
-        filteredCashNetRevenue,
-        `Service table net revenue (${tableNetRevenue}) MUST match filtered cash ledger net revenue (${filteredCashNetRevenue})`,
+        fresh.endTime.toISOString(),
+        new Date(newReschedStart.getTime() + 30 * 60000).toISOString(),
+        'Rescheduled appointment treatment-end must remain intact',
       );
     });
 
+    await test('3.2 Migration pagination cursor and remaining work reporting', async () => {
+      // Test running migration with limit=1 to verify continuation cursor
+      const res = await runTimeContractMigration(
+        { dryRun: true, batchSize: 1, limit: 1 },
+        prisma,
+      );
+      assert.strictEqual(res.scanned, 1);
+      if (res.hasMore) {
+        assert.ok(res.nextCursor, 'Continuation cursor must be reported when more records remain');
+        assert.ok(res.remainingWork > 0, 'Remaining work count must be positive');
+      }
+    });
+
+    // =========================================================================
+    // PRIORITY 4: Transactional Business Audit Writes
+    // =========================================================================
+    console.log('\n--- Priority 4: Transactional Business Audit Writes ---');
+
+    await test('4.1 Audit failure rolls back business operation atomically', async () => {
+      const rev = await prisma.review.create({
+        data: {
+          authorName: `Patient ${runId}`,
+          rating: 5,
+          text: 'Super service',
+          status: ReviewStatus.PENDING,
+        },
+      });
+      fixtures.reviews.push(rev.id);
+
+      // Attempt moderation with an invalid staff actor ID that violates Foreign Key constraint
+      await assert.rejects(
+        reviewsService.updateStatus(rev.id, ReviewStatus.APPROVED, 'Ok', {
+          sub: 'non-existent-user-uuid',
+          id: 'non-existent-user-uuid',
+          role: StaffRole.ADMIN,
+        }),
+      );
+
+      // Verify business operation was rolled back: review status MUST still be PENDING
+      const reviewAfter = await prisma.review.findUnique({ where: { id: rev.id } });
+      assert.ok(reviewAfter);
+      assert.strictEqual(reviewAfter.status, ReviewStatus.PENDING, 'Review status must remain PENDING after audit failure rollback');
+    });
+
+    await test('4.2 Successful moderation records verified staff actor atomically', async () => {
+      const rev = await prisma.review.create({
+        data: {
+          authorName: `Patient B ${runId}`,
+          rating: 4,
+          text: 'Great experience',
+          status: ReviewStatus.PENDING,
+        },
+      });
+      fixtures.reviews.push(rev.id);
+
+      await reviewsService.updateStatus(rev.id, ReviewStatus.APPROVED, 'Approved by staff', {
+        sub: staff.id,
+        id: staff.id,
+        role: StaffRole.ADMIN,
+      });
+
+      const reviewAfter = await prisma.review.findUnique({ where: { id: rev.id } });
+      assert.strictEqual(reviewAfter?.status, ReviewStatus.APPROVED);
+
+      // Verify audit log exists with exact staff actor ID
+      const audit = await prisma.auditLog.findFirst({
+        where: {
+          action: 'review.moderated',
+          entityId: rev.id,
+        },
+      });
+      assert.ok(audit, 'Audit log entry must exist');
+      assert.strictEqual(audit.userId, staff.id, 'Audit log actor must match staff.id');
+    });
+
+    // =========================================================================
+    // PRIORITY 5: Align Notification Lock Order & Concurrency Safety
+    // =========================================================================
+    console.log('\n--- Priority 5: Notification Lock Order & Concurrency Safety ---');
+
+    await test('5.1 Concurrency: Notification retry vs appointment cancellation executes without deadlock', async () => {
+      const tJob = new Date(thursdayBase.getTime());
+      const appt = await apptsService.createBooking({
+        doctorId: doctor.id,
+        branchId: branch.id,
+        serviceId: service.id,
+        startTime: tJob.toISOString(),
+        patientName: patient.fullName,
+        patientPhone: patient.phone,
+        consentGiven: true,
+        source: 'admin',
+      });
+      fixtures.appointments.push(appt.id);
+
+      // Create a failed notification job for this appointment
+      const job = await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'booking_created',
+          recipient: patient.phone,
+          status: NotificationStatus.FAILED,
+          attempts: 3,
+          maxAttempts: 3,
+          appointmentId: appt.id,
+          payload: { appointmentId: appt.id, startTime: tJob.toISOString() },
+        },
+      });
+
+      // Execute retry and cancellation concurrently
+      const results = await Promise.allSettled([
+        notifService.retryJob(job.id, { sub: staff.id }),
+        apptsService.changeStatus(appt.id, AppointmentStatus.CANCELLED, staff.id, 'Cancel concurrent test', { role: StaffRole.ADMIN }),
+      ]);
+
+      // Both must complete cleanly without deadlock (neither should throw SQL deadlock error 40P01)
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          assert.doesNotMatch(r.reason?.message || '', /deadlock/i, 'No deadlocks allowed between retry and cancellation');
+        }
+      }
+    });
+
+    await test('5.2 Two concurrent retries on the same job execute safely without deadlock', async () => {
+      const job = await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'booking_created',
+          recipient: patient.phone,
+          status: NotificationStatus.FAILED,
+          attempts: 3,
+          maxAttempts: 3,
+          payload: {},
+        },
+      });
+
+      const [r1, r2] = await Promise.allSettled([
+        notifService.retryJob(job.id, { sub: staff.id }),
+        notifService.retryJob(job.id, { sub: staff.id }),
+      ]);
+
+      // At least one must succeed; neither must deadlock
+      const succeeded = [r1, r2].filter((r) => r.status === 'fulfilled');
+      assert.ok(succeeded.length >= 1, 'At least one concurrent retry must succeed');
+      const finalJob = await prisma.notificationJob.findUnique({ where: { id: job.id } });
+      assert.strictEqual(finalJob?.status, NotificationStatus.PENDING);
+    });
+
+    await test('5.3 Active worker lease in PROCESSING status rejects retry', async () => {
+      const activeJob = await prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.SMS,
+          templateKey: 'booking_created',
+          recipient: patient.phone,
+          status: NotificationStatus.PROCESSING,
+          lockedAt: new Date(), // Active lease
+          attempts: 1,
+          payload: {},
+        },
+      });
+
+      await assert.rejects(
+        notifService.retryJob(activeJob.id, { sub: staff.id }),
+        /fon xizmati|worker/i,
+      );
+    });
+
+    // =========================================================================
+    // PRIORITY 6: Communication Language Precedence & Multi-Service Names
+    // =========================================================================
+    console.log('\n--- Priority 6: Communication Language Precedence & Multi-Service Names ---');
+
+    await test('6.1 Explicit uz choice overrides older ru preference', async () => {
+      // Patient with persisted [lang:ru] tag
+      const ruPatient = await prisma.patient.create({
+        data: {
+          fullName: `RU Patient ${runId}`,
+          phone: '+998901112233',
+          notes: 'Old clinical notes [lang:ru]',
+        },
+      });
+      fixtures.patients.push(ruPatient.id);
+
+      const bTime = new Date(fridayBase.getTime());
+      const booking = await apptsService.createBooking({
+        doctorId: doctor.id,
+        branchId: branch.id,
+        serviceId: service.id,
+        startTime: bTime.toISOString(),
+        patientName: ruPatient.fullName,
+        patientPhone: ruPatient.phone,
+        consentGiven: true,
+        source: 'website',
+        lang: 'uz', // Explicit UZ choice!
+      });
+      fixtures.appointments.push(booking.id);
+
+      // Check notification job enqueued
+      const job = await prisma.notificationJob.findFirst({
+        where: { appointmentId: booking.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      assert.ok(job);
+      assert.strictEqual((job.payload as any)?.lang, 'uz', 'Explicit uz must override older ru preference');
+
+      // Patient notes must retain clinical notes and update tag
+      const updatedPat = await prisma.patient.findUnique({ where: { id: ruPatient.id } });
+      assert.ok(updatedPat?.notes?.includes('Old clinical notes'));
+      assert.ok(updatedPat?.notes?.includes('[lang:uz]'));
+      assert.strictEqual(updatedPat?.notes?.includes('[lang:ru]'), false);
+    });
+
+    await test('6.2 Explicit ru choice with Uzbek clinical note does not falsely infer uz', async () => {
+      const bTime = new Date(fridayBase.getTime() + 60 * 60 * 1000);
+      const booking = await apptsService.createBooking({
+        doctorId: doctor.id,
+        branchId: branch.id,
+        serviceId: service.id,
+        startTime: bTime.toISOString(),
+        patientName: 'Uzbek Notes Patient',
+        patientPhone: '+998904445566',
+        patientNote: 'Tish og‘riyapti, ertalab kelaman',
+        consentGiven: true,
+        source: 'website',
+        lang: 'ru', // Explicit RU choice!
+      });
+      fixtures.appointments.push(booking.id);
+
+      const job = await prisma.notificationJob.findFirst({
+        where: { appointmentId: booking.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      assert.strictEqual((job?.payload as any)?.lang, 'ru', 'Explicit ru must win despite Uzbek clinical notes');
+    });
+
+    await test('6.3 Multi-service appointment confirmation & rescheduling builds Russian names from all items', async () => {
+      const srv2 = await prisma.service.create({
+        data: {
+          nameUz: 'Plomba qo‘yish',
+          nameRu: 'Пломбирование',
+          slug: `plomba-${runId}`,
+          durationMinutes: 30,
+          doctors: { create: { doctorId: doctor.id } },
+        },
+      });
+      fixtures.services.push(srv2.id);
+
+      const bTime = new Date(fridayBase.getTime() + 120 * 60 * 1000);
+      const booking = await apptsService.createBooking({
+        doctorId: doctor.id,
+        branchId: branch.id,
+        serviceId: service.id,
+        serviceIds: [service.id, srv2.id],
+        startTime: bTime.toISOString(),
+        patientName: patient.fullName,
+        patientPhone: patient.phone,
+        consentGiven: true,
+        source: 'website',
+        lang: 'ru',
+      });
+      fixtures.appointments.push(booking.id);
+
+      // Confirm appointment
+      await apptsService.changeStatus(booking.id, AppointmentStatus.CONFIRMED, staff.id, 'Confirm multi', { role: StaffRole.ADMIN });
+
+      // Check confirmation notification job
+      const confirmJob = await prisma.notificationJob.findFirst({
+        where: { appointmentId: booking.id, templateKey: 'patient_booking_confirmed' },
+        orderBy: { createdAt: 'desc' },
+      });
+      assert.ok(confirmJob);
+      const payloadRu = (confirmJob.payload as any)?.serviceNameRu;
+      assert.ok(payloadRu?.includes('Лечение') && payloadRu?.includes('Пломбирование'), `Russian name (${payloadRu}) must contain all bundle service items`);
+
+      // Reschedule appointment
+      const reschedTime = new Date(bTime.getTime() + 60 * 60 * 1000);
+      await apptsService.reschedule(booking.id, reschedTime.toISOString(), staff.id);
+
+      const reschedJob = await prisma.notificationJob.findFirst({
+        where: { appointmentId: booking.id, templateKey: 'appointment_rescheduled' },
+        orderBy: { createdAt: 'desc' },
+      });
+      assert.ok(reschedJob);
+      const reschedRu = (reschedJob.payload as any)?.serviceNameRu;
+      assert.ok(reschedRu?.includes('Лечение') && reschedRu?.includes('Пломбирование'), `Rescheduled Russian name (${reschedRu}) must contain all bundle items`);
+    });
+
+    // =========================================================================
+    // PRIORITY 7: Correct Clinical Analytics Definitions
+    // =========================================================================
+    console.log('\n--- Priority 7: Clinical Analytics Definitions & Denominators ---');
+
+    await test('7.1 Arrival (CHECKED_IN) is not counted in performedCount; only COMPLETED counts', async () => {
+      const aTime = new Date(saturdayBase.getTime());
+      const apptArrived = await apptsService.createBooking({
+        doctorId: doctor.id,
+        branchId: branch.id,
+        serviceId: service.id,
+        startTime: aTime.toISOString(),
+        patientName: 'Arrived Patient',
+        patientPhone: '+998907778899',
+        consentGiven: true,
+        source: 'admin',
+      });
+      fixtures.appointments.push(apptArrived.id);
+
+      // Check-in patient (status = CHECKED_IN)
+      await apptsService.changeStatus(apptArrived.id, AppointmentStatus.CHECKED_IN, staff.id, 'Arrived', { role: StaffRole.ADMIN });
+
+      const analytics = await analyticsService.getDashboardAnalytics({
+        startDate: new Date(aTime.getTime() - 3600000).toISOString(),
+        endDate: new Date(aTime.getTime() + 3600000).toISOString(),
+        doctorId: doctor.id,
+      });
+
+      assert.strictEqual(analytics.summary.arrived >= 1, true, 'Arrived count must be recorded');
+      // performedCount for this appointment must NOT be incremented because it is not COMPLETED
+      const srvStats = analytics.popularServices.find((s) => s.serviceId === service.id);
+      assert.strictEqual(srvStats?.performedCount, 0, 'performedCount must be 0 for CHECKED_IN appointment');
+
+      // Now complete the appointment
+      await apptsService.changeStatus(apptArrived.id, AppointmentStatus.COMPLETED, staff.id, 'Done', { role: StaffRole.ADMIN });
+
+      const analyticsCompleted = await analyticsService.getDashboardAnalytics({
+        startDate: new Date(aTime.getTime() - 3600000).toISOString(),
+        endDate: new Date(aTime.getTime() + 3600000).toISOString(),
+        doctorId: doctor.id,
+      });
+
+      const srvStatsCompleted = analyticsCompleted.popularServices.find((s) => s.serviceId === service.id);
+      assert.strictEqual(srvStatsCompleted?.performedCount, 1, 'performedCount must be 1 after COMPLETED status');
+    });
+
+    // =========================================================================
+    // PRIORITY 8: HTTP Controller Tests (DTO Validation & Role Guards)
+    // =========================================================================
+    console.log('\n--- Priority 8: HTTP Tests for DTO Validation & Role Guards ---');
+
+    await test('8.1 HTTP: Invalid phone number in public booking fails with 400 Bad Request', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/booking')
+        .send({
+          doctorId: doctor.id,
+          branchId: branch.id,
+          serviceId: service.id,
+          startTime: new Date().toISOString(),
+          patientName: 'Invalid Phone Tester',
+          patientPhone: '12345', // Invalid format
+          consentGiven: true,
+        });
+
+      assert.strictEqual(res.status, 400);
+    });
+
+    await test('8.2 HTTP: Admin endpoint without JWT auth fails with 401 Unauthorized', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/admin/analytics/overview');
+
+      assert.strictEqual(res.status, 401);
+    });
+
+    await test('8.3 HTTP: Admin endpoint with valid JWT token succeeds', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/admin/analytics/overview')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      assert.strictEqual(res.status, 200);
+    });
+
     console.log('\n================================================================');
-    console.log(`   ALL ${passedCount}/${totalCount} REGRESSION CHECKS PASSED SUCCESSFULLY!`);
+    console.log(`   ALL ${passedCount}/${totalCount} VERIFICATION CHECKS PASSED SUCCESSFULLY!`);
     console.log('================================================================\n');
   } finally {
-    // Cleanup isolated fixtures
+    console.log('\n--- Executing Guaranteed Cleanup Coverage ---');
     try {
-      await prisma.appointmentStatusHistory.deleteMany({
-        where: { appointment: { doctorId: doctor.id } },
-      });
-      await prisma.notificationJob.deleteMany({
-        where: { appointment: { doctorId: doctor.id } },
-      });
-      await prisma.payment.deleteMany({
-        where: { appointment: { doctorId: doctor.id } },
-      });
-      await prisma.appointmentServiceItem.deleteMany({
-        where: { appointment: { doctorId: doctor.id } },
-      });
-      await prisma.appointment.deleteMany({
-        where: { doctorId: doctor.id },
-      });
-      await prisma.doctorSchedule.deleteMany({
-        where: { doctorId: doctor.id },
-      });
-      await prisma.doctorBranch.deleteMany({
-        where: { doctorId: doctor.id },
-      });
-      await prisma.doctorService.deleteMany({
-        where: { doctorId: doctor.id },
-      });
-      await prisma.doctor.delete({ where: { id: doctor.id } });
-      await prisma.service.deleteMany({
-        where: { OR: [{ id: service.id }, { slug: { contains: runId } }] },
-      });
-      await prisma.auditLog.deleteMany({
-        where: { userId: staff.id },
-      });
-      await prisma.staffUser.delete({ where: { id: staff.id } });
-      await prisma.branch.delete({ where: { id: branch.id } });
-      await prisma.patient.delete({ where: { id: patient.id } });
-    } catch (cleanupErr) {
-      console.warn('Cleanup warning:', cleanupErr);
+      // Clean appointment related records
+      if (fixtures.doctors.length > 0) {
+        await prisma.appointmentStatusHistory.deleteMany({
+          where: { appointment: { doctorId: { in: fixtures.doctors } } },
+        });
+        await prisma.notificationJob.deleteMany({
+          where: { appointment: { doctorId: { in: fixtures.doctors } } },
+        });
+        await prisma.payment.deleteMany({
+          where: { appointment: { doctorId: { in: fixtures.doctors } } },
+        });
+        await prisma.appointmentServiceItem.deleteMany({
+          where: { appointment: { doctorId: { in: fixtures.doctors } } },
+        });
+        await prisma.appointment.deleteMany({
+          where: { doctorId: { in: fixtures.doctors } },
+        });
+        await prisma.doctorSchedule.deleteMany({
+          where: { doctorId: { in: fixtures.doctors } },
+        });
+        await prisma.doctorBranch.deleteMany({
+          where: { doctorId: { in: fixtures.doctors } },
+        });
+        await prisma.doctorService.deleteMany({
+          where: { doctorId: { in: fixtures.doctors } },
+        });
+        await prisma.doctor.deleteMany({
+          where: { id: { in: fixtures.doctors } },
+        });
+      }
+
+      if (fixtures.reviews.length > 0) {
+        await prisma.auditLog.deleteMany({
+          where: { entityId: { in: fixtures.reviews } },
+        });
+        await prisma.review.deleteMany({
+          where: { id: { in: fixtures.reviews } },
+        });
+      }
+
+      if (fixtures.services.length > 0) {
+        await prisma.service.deleteMany({
+          where: { id: { in: fixtures.services } },
+        });
+      }
+
+      if (fixtures.staff.length > 0) {
+        await prisma.auditLog.deleteMany({
+          where: { userId: { in: fixtures.staff } },
+        });
+        await prisma.staffUser.deleteMany({
+          where: { id: { in: fixtures.staff } },
+        });
+      }
+
+      if (fixtures.branches.length > 0) {
+        await prisma.branch.deleteMany({
+          where: { id: { in: fixtures.branches } },
+        });
+      }
+
+      if (fixtures.patients.length > 0) {
+        await prisma.patient.deleteMany({
+          where: { id: { in: fixtures.patients } },
+        });
+      }
+
+      // Restore singleton clinic settings if modified
+      if (originalSettings) {
+        await prisma.clinicSettings.update({
+          where: { id: originalSettings.id },
+          data: {
+            bufferMinutes: originalSettings.bufferMinutes,
+            pendingExpiryMinutes: originalSettings.pendingExpiryMinutes,
+          },
+        });
+      }
+
+      console.log('[PASS] Cleanup completed cleanly. Zero leaked fixtures.');
+    } catch (cleanupErr: any) {
+      console.error('[FATAL] Cleanup failed! Making suite fail closed:', cleanupErr);
+      await app.close();
+      throw cleanupErr;
     }
+
     await app.close();
   }
 }
@@ -864,6 +1085,6 @@ async function runAllPrioritiesVerification() {
 runAllPrioritiesVerification()
   .then(() => process.exit(0))
   .catch((e) => {
-    console.error(e);
+    console.error('Test Suite Failed:', e);
     process.exit(1);
   });

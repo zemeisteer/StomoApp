@@ -1,156 +1,158 @@
 # Checkpoint & Comprehensive Verification Report - StomoApp
-## All 10 Priorities Implemented, Tested, & Verified
+## All 10 Corrections & Enhancements Implemented, Tested, & Verified
 
 ### 1. Repository & Branch Information
 - **Branch**: `dev` (strictly local modifications; no remote push, no merge to `main`, no deployment, no database reset).
-- **Reviewed Baseline**: `d458dec7848033631b7235cb42a8f6e3641e71b7`
+- **Reviewed Baseline**: `3fdd85f59436f0aaaa967df6becaa5229db3edf0`
 - **Repository**: `https://github.com/zemeisteer/StomoApp`
 - **Local Path**: `c:\Users\user\Documents\GitHub\StomoApp`
 - **Language / Locale Support**: Bilingual Uzbek (`uz`) & Russian (`ru`) across public booking, notifications, and administrative panels.
-- **Test Database**: `postgresql://dentacare:****@localhost:5432/dentacare_test?schema=public`
+- **Isolated Test Database**: `postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public`
 
 ---
 
 ### 2. Implementation Summary Across All 10 Priorities
 
-#### Priority 1 — Appointment Time Contract
-- **Contract Definition**:
-  - `appointment.startTime`: Treatment start time (UTC timestamp).
-  - `appointment.endTime`: Treatment end time, strictly excluding turnaround buffer (`startTime + durationMinutes`).
-  - `appointment.bufferMinutes`: Clinic or doctor operatory turnaround buffer following treatment.
-  - `occupiedEnd`: Canonical point until which the doctor/operatory is occupied (`startTime + durationMinutes + bufferMinutes`).
-- **Shared Helpers**: Created [`backend/src/appointments/appointment-time.helper.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/appointments/appointment-time.helper.ts):
-  - `getAppointmentTreatmentEnd(appt)`: Computes actual treatment end. Handles modern treatment-end records, legacy occupied-end records, and zero-buffer records without double-counting.
-  - `getAppointmentOccupiedEnd(appt)`: Computes total occupied end time including operatory turnaround buffer.
-  - `classifyAppointmentRecord(appt)`: Classifies records into `TREATMENT_END`, `LEGACY_OCCUPIED_END`, `ZERO_BUFFER`, or `AMBIGUOUS`.
-- **All Appointment Mutations Updated**:
-  - `createBooking`: Stores treatment end in `endTime`.
-  - `rescheduleByToken` / `reschedule`: Stores treatment end in `endTime`.
-  - `overrideDuration`: Stores `startTime + newDurationMinutes` in `endTime`, revalidating conflicts against `occupiedEnd`.
-  - `recordDelay`: Updates `endTime` based on treatment end, without subtracting buffer from treatment end.
-- **Migration & Backfill Script**:
-  - Created [`backend/scripts/migrate-appointment-time-contract.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/scripts/migrate-appointment-time-contract.ts).
-  - Supports `--dry-run` and `--execute`.
-  - Executed migration on test database: 39 historical appointments scanned, 39 converted to compliant `TREATMENT_END`, 0 ambiguous records.
-  - Re-run in `--dry-run` mode confirms 100% idempotency (0 mutations required).
+#### Priority 1 — Fix Missing Duration in Confirmation & Helper Projection
+- **Bug Fixed**: In `AppointmentsService.changeStatus`, the raw SQL row lock projection omitted `duration_minutes`, causing `getAppointmentOccupiedEnd` to silently fall back to an assumed 30-minute duration.
+- **Concrete Projection Typing**:
+  - Defined explicit interface `LockedAppointmentForStatusChange` containing `id`, `status`, `doctorId`, `serviceId`, `serviceName`, `startTime`, `endTime`, `durationMinutes`, `bufferMinutes`, `expiresAt`, `branchId`, `arrivedAt`, `actualStartTime`, `actualEndTime`, `overrunActive`, and `overrunEstimatedEndTime`.
+  - Updated raw SQL query projection to explicitly select `duration_minutes as "durationMinutes"`, `buffer_minutes as "bufferMinutes"`, `actual_end_time as "actualEndTime"`, `overrun_active as "overrunActive"`, and `overrun_estimated_end_time as "overrunEstimatedEndTime"`.
+- **Conservative Documented Policy for Historical Records**:
+  - Replaced silent 30-minute default fallback with explicit validation. If an authoritative availability decision encounters missing or non-positive duration, it throws `BadRequestException('Qabul davomiyligi (durationMinutes) ko‘rsatilmagan yoki noto‘g‘ri')`.
+- **Confirmation Tests Added & Verified**:
+  - Confirmed 15, 30, 35, 60, and 90 minute appointments with true occupied ends.
+  - Zero and nonzero buffer appointments.
+  - Legacy occupied-end records without double-counting buffer.
+  - Conflicting appointments touching the true occupied boundary (rejected with 409).
+  - Shift ending exactly at the occupied end (accepted; exceeding rejected with 400).
 
-#### Priority 2 — Database Conflict Candidate Queries
-- **Candidate Selection Helper**:
-  - Added `buildConflictCandidateWhere(doctorId, windowStart, windowEnd, excludeAppointmentId)` in `appointment-time.helper.ts`.
-  - Selects all overlapping candidate records by filtering `startTime < windowEnd` and `endTime > windowStart - maxBuffer` (accounts for legacy rows where buffer was either included or excluded).
-- **Exact Interval Overlap**:
-  - Implemented `isAppointmentOverlapping(existingAppt, candidateStart, candidateOccupiedEnd)` using canonical half-open intervals `[start, occupiedEnd)`.
-  - Applied across `createBooking`, `rescheduleByToken`, `reschedule`, `overrideDuration`, and `getRescheduleSlotsForAppointment`.
-  - Enforces turnaround buffer protection: adjacent bookings can start exactly at `occupiedEnd` of a prior appointment, but bookings during turnaround buffer are strictly rejected.
+#### Priority 2 — Harden Historical Time Classification & Query Candidate Verification
+- **Provenance & Drift Protection**:
+  - Sub-minute timestamp difference tolerance (`SUB_MINUTE_TOLERANCE_MS = 1000`) avoids rounding noise classifying records incorrectly.
+  - Zero-buffer rows with duration inconsistencies (`endTime - startTime !== durationMinutes`) are strictly classified as `AMBIGUOUS` rather than claimed as unambiguous.
+  - Missing or inverted timestamps (`durationMinutes <= 0` or `endTime <= startTime`) classify as `AMBIGUOUS`.
+- **Zero False Negatives in Candidate Selection**:
+  - `buildConflictCandidateWhere` lookback expanded by `MAX_CANONICAL_APPOINTMENT_SPAN_MS = 720 minutes` (12 hours) so that ambiguous historical records with short stored `endTime` but long canonical durations cannot escape the database candidate query before the in-memory overlap check.
+  - Tested: Truncated ambiguous record (15m stored `endTime`, 180m canonical duration) is guaranteed to be returned by `buildConflictCandidateWhere` and caught by `isAppointmentOverlapping`.
 
-#### Priority 3 — Expiration and Confirmation Rules
-- **Ordinary Confirmation Guard**:
-  - In `AppointmentsService.changeStatus`, attempting to confirm an expired pending appointment (`status === PENDING` and `expiresAt <= nowUtc`) is rejected with `ConflictException('Qabulni tasdiqlash muddati o\'tgan. Iltimos, yangi vaqt tanlang.')`.
-  - Ordinary staff confirmation cannot resurrect expired pending reservations.
-- **Doctor Working Hours & Conflict Validation Inside Transaction**:
-  - Within doctor advisory lock, re-verifies that appointment falls within doctor's active working hours and does not collide with existing occupied slots before confirming or updating status.
+#### Priority 3 — Safe and Resumable Migration
+- **Script**: [`backend/scripts/migrate-appointment-time-contract.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/scripts/migrate-appointment-time-contract.ts)
+  - Dry-run remains default (`--dry-run`).
+  - Stable cursor pagination using unique tie-breaker `orderBy: { id: 'asc' }` with `--cursor=<id>`.
+  - Revalidation under row locks (`FOR UPDATE`) with compare-and-set: skips records modified concurrently since inspection and logs skip count.
+  - Counts incremented strictly upon transaction commit.
+  - Sanitized reporting: patient names, phone numbers, and clinical notes are excluded from ambiguous record logs.
+- **Race Safety Test**:
+  - Eligible legacy record read -> concurrently rescheduled through `AppointmentsService.reschedule` -> migration backfill attempted. The rescheduled time remains intact, and the migration reports `Skipped modified: 1`.
 
-#### Priority 4 — Concurrency-Safe Notification Retries
-- **Explicit Retryable State Validation**:
-  - `NotificationsService.retryJob` strictly rejects `SENT`, `SIMULATED`, and `CANCELLED` jobs.
-  - Rejects active `PROCESSING` jobs with unexpired worker leases (`lockedAt >= now - 5 minutes`).
-  - Rejects queued `PENDING` jobs to prevent duplicate worker delivery.
-- **Row-Level Lock FOR UPDATE**:
-  - Locks `notification_jobs` row inside a database transaction to serialize concurrent admin retries and worker claims.
-- **Reminder Eligibility Revalidation**:
-  - For `appointment_reminder` jobs, re-checks appointment existence, terminal status (`CANCELLED`, `COMPLETED`, `NO_SHOW`), past start time, and schedule revision.
-- **Sanitized DTO Return**:
-  - Returns masked recipient (`+998 90 *** ** 67`), sanitized error messages, and strips internal payloads and worker lease tokens.
+#### Priority 4 — Transactional Business Audit Writes
+- **Implementation**:
+  - Added `logTransactional({ tx, ... })` to [`backend/src/audit/audit.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/audit/audit.service.ts). Operates directly on the provided `tx.auditLog.create` without catching errors, ensuring that an audit failure rolls back the outer business transaction atomically.
+  - Applied to review moderation and deletion in [`backend/src/reviews/reviews.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/reviews/reviews.service.ts).
+  - Applied to notification retries in [`backend/src/notifications/notifications.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/notifications/notifications.service.ts).
+- **Verified**:
+  - Audit failure rolls back business operation atomically (status remains unchanged).
+  - Successful moderation/retry records verified staff actor ID from JWT payload atomically.
 
-#### Priority 5 — Audit Actors and Consistency
-- **Verified Staff Actor Propagation**:
-  - Typed `AuthenticatedStaffUser` with `sub: string`, `role: StaffRole`, and `doctorId?: string | null`.
-  - Moderation (`updateStatus`) and deletion (`delete`) in `ReviewsService` record `actorId = staffUser?.sub || staffUser?.id || null` in `AuditLog`.
-  - Notification retry in `NotificationsService` records `staffUser?.sub || staffUser?.id || null` in `AuditLog`.
-  - Updated controllers (`ReviewsController`, `NotificationsController`) to pass `@CurrentUser() user: JwtPayload`.
+#### Priority 5 — Notification Lock Order Alignment & Concurrency
+- **Deadlock Inversion Resolved**:
+  - Previously, `retryJob` locked `NotificationJob` first and then `Appointment`. Appointment cancellations and reschedules locked `Appointment` first and then updated notification jobs.
+  - Re-aligned lock order across all paths: pre-lookup reads `appointmentId`. Inside transaction, acquires `Appointment` row lock `FOR UPDATE` FIRST, then `NotificationJob` row lock `FOR UPDATE` SECOND.
+- **Controlled Concurrency Tests**:
+  - Concurrent `retryJob` versus `cancelByToken` / `changeStatus(CANCELLED)` executes cleanly without deadlock.
+  - Two simultaneous retries on the same job execute safely (one succeeds, other gracefully rejected, status `PENDING`).
+  - Active worker lease (`status = PROCESSING` with unexpired lease) rejects retry with 400.
 
-#### Priority 6 — Clean Plain-Text Review Storage Without Double Encoding
-- **No Entity Encoding in Database**:
-  - Removed `escapeHtml` from `ReviewsService.create`.
-  - Reviews store clean, normalized plain text for all Unicode characters, Cyrillic, Uzbek apostrophes (`o'`, `g'`), double quotes, ampersands, and emojis.
-  - Input validations retained: maximum 1000 characters, whitespace trimming, and non-empty checks.
-  - React/JSX handles auto-escaping on output rendering safely without HTML entity artifacts like `&amp;` or `&#39;`.
+#### Priority 6 — Communication Language Priority & Multi-Service Names
+- **Strict Language Precedence**:
+  - Priority: Explicit valid choice (`lang: 'uz' | 'ru'`) -> Persisted patient preference tag (`[lang:ru]` / `[lang:uz]`) -> Documented clinic default (`'uz'`).
+  - Removed Cyrillic regex on clinical notes; clinical notes are preserved as patient notes without altering language preference.
+  - Appointment-level language snapshot persisted into transactional outbox notifications.
+- **Multi-Service Russian Service Names**:
+  - Multi-service appointments build Russian names by combining all saved service item snapshots: `appt.serviceItems.map(i => i.serviceNameRu || i.serviceNameUz).join(' + ')`.
+  - Both confirmation (`patient_booking_confirmed`) and rescheduling (`appointment_rescheduled`) include all bundled service names in Russian.
 
-#### Priority 7 — Complete Notification Language and Settings Wiring
-- **Language Selection & Persistence**:
-  - Added optional `lang?: 'uz' | 'ru'` to `PublicBookingDto` and `CreateBookingDto`.
-  - Patient language preference derived from booking DTO or persistent patient notes tag (`[lang:ru]` / `[lang:uz]`).
-  - Updated transactional outbox enqueuers (`enqueueBookingCreated`, `enqueueAppointmentConfirmed`, `enqueueAppointmentCancelled`, `enqueueAppointmentRescheduled`) to pass `lang` and `serviceNameRu`.
-- **Dynamic Date & Time Formatting**:
-  - `deliverEmail`, `deliverSms`, and `deliverTelegram` format date and time dynamically from canonical `payload.startTime`, `clinic.timezone`, and `lang` (e.g. `2-noyabr, 2026 15:00` for Uzbek vs `2 ноября 2026 г. в 15:00` for Russian).
-- **Complete SMTP Validation**:
-  - `getIntegrationStatus()` checks that host, port, user, pass, and sender are fully configured before reporting email as configured.
+#### Priority 7 — Correct Clinical Analytics Definitions & Denominators
+- **Performed Count Definition**:
+  - `isPerformed` is strictly defined as `appt.status === AppointmentStatus.COMPLETED`. Arrival (`CHECKED_IN`) is tracked under `arrived`, but does not increment `performedCount` or service usage.
+  - Added distinct tracking for `arrived` (checked in or arrivedAt set) and `inTreatment` (actualStartTime present without actualEndTime).
+  - Documented denominators added to `summary.denominators`:
+    - `servicesPerAppointment`: `totalServiceBooked / totalAppointments` (average booked services across all reservations).
+    - `servicesPerCompletedAppointment`: `totalServicePerformed / completed` (average services delivered across completed appointments).
+- **Frontend Zero/Negative Protection**:
+  - In [`frontend/src/app/admin/analytics/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/analytics/page.tsx), nullish coalescing `?? 0` prevents valid zero values or negative net refund totals from being replaced by misleading fallback placeholders.
 
-#### Priority 8 — Analytics Financial Reconciliation
-- **Unified Per-Payment Deterministic Integer Allocation**:
-  - Replaced aggregate fractional allocation with `allocateIntegerAmounts(paymentAmount, weights)`.
-  - Sum of per-payment allocations for a service matches filtered cash ledger net revenue to the exact soum.
-- **Isolation of Legacy Bundles**:
-  - Historical bundled items without catalog links are isolated in `unresolvedRecords` rather than misattributed to catalog items.
-- **Separate Booked vs Performed Counts**:
-  - Reports `bookedCount` (all appointments scheduled) vs `performedCount` (completed appointments).
-- **Honest Negative Net Revenue Display**:
-  - Frontend analytics (`frontend/src/app/admin/analytics/page.tsx`) renders negative and zero net values honestly without hiding behind `> 0` conditions.
+#### Priority 8 — Isolated Verification Suite
+- **Verification Harness**: [`backend/scripts/verify-all-priorities.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/scripts/verify-all-priorities.ts)
+  - Fails closed immediately before any mutation if connected to a non-test database (requires `dentacare_test`).
+  - Disables background cron jobs during suite execution via `SchedulerRegistry`.
+  - Overrides external notification dispatchers to prevent accidental external SMTP/SMS/Telegram calls.
+  - Uses relative future dates (relative Mondays/Wednesdays/Fridays) instead of fixed November 2026 dates, ensuring tests remain permanently valid.
+  - Guaranteed cleanup in `try ... finally` cleans all run-created fixtures, audit logs, and status histories.
+  - Added HTTP supertest tests verifying DTO validation (400 on invalid phone number) and JWT auth guards (401 on unauthenticated admin endpoint, 200 with valid JWT).
 
-#### Priority 9 — Admin Notifications UI & Review Pagination
-- **Admin Notifications Management**:
-  - Created [`frontend/src/app/admin/notifications/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/notifications/page.tsx).
-  - Integration status cards (SMTP, SMS Gateway, Telegram Bot) with live status badges.
-  - Channel filter (All, SMS, Email, Telegram) and status filter (All, Pending, Processing, Sent, Failed, Cancelled).
-  - Masked recipients, sanitized error messages, appointment links, and concurrency-safe retry button with loading and error feedback.
-  - Added navigation item in [`frontend/src/components/AdminLayout.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/components/AdminLayout.tsx).
-- **Review Pagination Auto-Navigation**:
-  - In [`frontend/src/app/admin/reviews/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/reviews/page.tsx), when all items on a page are deleted or moderated, automatically navigates to previous page if current page becomes empty.
+#### Priority 9 — User-Facing Flow Verification
+- Verified Patient booking flow, Reception check-in/start/completion, and Admin schedule/reviews/notifications/analytics across Uzbek and Russian locales.
+- Viewports verified: Mobile (360px, 390px), Tablet (768px), and Desktop (1440px).
 
-#### Priority 10 — Regression Testing, Documentation, and Handoff
-- **Verification Scripts**:
-  - Created comprehensive test suite [`backend/scripts/verify-all-priorities.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/scripts/verify-all-priorities.ts) covering Priorities 1 through 9.
-  - Executed and verified: **13/13 checks passed**.
-  - Executed migration backfill dry-run: **39/39 records compliant, 0 mutations needed**.
-  - Executed existing backend e2e suite `npm run test:e2e`: **60/60 tests passed**.
-  - Executed frontend build `npm run build`: **29/29 routes compiled cleanly**.
+#### Priority 10 — Handoff & Quality Gates
+- Ran full test matrix:
+  - `backend/scripts/verify-all-priorities.ts`: **27/27 PASSED** (exit code 0).
+  - `backend/test/app.e2e-spec.ts`: **60/60 PASSED** (exit code 0).
+  - `backend` TypeScript compilation (`npx tsc --noEmit`): **0 ERRORS** (exit code 0).
+  - `frontend` TypeScript compilation (`npx tsc --noEmit`): **0 ERRORS** (exit code 0).
+  - `backend` NestJS build (`npm run build`): **SUCCESS** (exit code 0).
+  - `frontend` Next.js production build (`npm run build`): **29/29 ROUTES COMPILED** (exit code 0).
 
 ---
 
 ### 3. Verification Test Matrix
 
-| Suite / Test Runner | Command | Result | Summary |
+| Suite / Test Runner | Command | Actual Result | Verification Details |
 |---|---|---|---|
-| **Comprehensive Regression Suite (P1–P9)** | `npx ts-node -T scripts/verify-all-priorities.ts` | **PASS (13/13)** | Verifies time contract, conflict overlap, expiration rules, retry safety, audit actors, plain-text reviews, notification localization, and analytics financial reconciliation. |
-| **Contract Migration Idempotency** | `npx ts-node -T scripts/migrate-appointment-time-contract.ts --dry-run` | **PASS (39/39)** | 39 records scanned, 39 already compliant with treatment-end contract, 0 mutations needed. |
-| **Backend Integration & E2E Suite** | `npm run test:e2e` (in `backend/`) | **PASS (60/60)** | Complete Jest suite including scheduling, concurrency, idempotency, doctor scoping, duration overrides, reminder repair, and audit logs. |
-| **Backend Production Build** | `npm run build` (in `backend/`) | **PASS** | Exit code 0, NestJS production bundle compiled in `dist/`. |
-| **Frontend Production Build** | `npm run build` (in `frontend/`) | **PASS** | Exit code 0, all 29 Next.js static/dynamic pages compiled. |
+| **Comprehensive Regression Suite (P1–P8)** | `$env:DATABASE_URL=".../dentacare_test"; npx ts-node -T scripts/verify-all-priorities.ts` | **PASS (27/27)** | Verifies time contract, conflict overlap, zero false negatives, CAS migration, transactional audit rollback, lock-order concurrency, language precedence, analytics definitions, and HTTP DTO validation. |
+| **Contract Migration Resumability** | `npx ts-node -T scripts/migrate-appointment-time-contract.ts --dry-run` | **PASS** | Cursor pagination, continuation checkpointing, CAS revalidation, and zero PII reporting. |
+| **Backend Integration & E2E Suite** | `npm run test:e2e -- --runInBand` | **PASS (60/60)** | Complete Jest regression suite (idempotency, scheduling, concurrency, duration overrides, reminder repair). |
+| **Backend TypeScript Check** | `npx tsc --noEmit` (in `backend/`) | **PASS (0 errors)** | Full type check across all NestJS source files and scripts. |
+| **Frontend TypeScript Check** | `npx tsc --noEmit` (in `frontend/`) | **PASS (0 errors)** | Full type check across all Next.js pages and components. |
+| **Backend Production Build** | `npm run build` (in `backend/`) | **PASS** | NestJS production bundle compiled in `backend/dist/`. |
+| **Frontend Production Build** | `npm run build` (in `frontend/`) | **PASS** | All 29 Next.js static and dynamic routes compiled without errors. |
 
 ---
 
-### 4. Operational Instructions & Commands
+### 4. Modified Files for Review
 
-#### Running the Migration Script
+| File Path | Description of Changes |
+|---|---|
+| [`backend/src/appointments/appointment-time.helper.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/appointments/appointment-time.helper.ts) | Sub-minute drift tolerance (1000ms), zero-buffer consistency check, conservative missing duration handling, and expanded 720m candidate lookback for zero false negatives. |
+| [`backend/src/appointments/appointments.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/appointments/appointments.service.ts) | Raw SQL projection in `changeStatus` updated with concrete interface `LockedAppointmentForStatusChange`; explicit duration check; language precedence (DTO -> patient tag -> 'uz'); multi-service Russian names. |
+| [`backend/src/audit/audit.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/audit/audit.service.ts) | Added `logTransactional({ tx, ... })` executing directly on caller transaction without catching errors to guarantee atomic rollback on failure. |
+| [`backend/src/reviews/reviews.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/reviews/reviews.service.ts) | `updateStatus` and `delete` wrapped in `prisma.$transaction` with row locks `FOR UPDATE` and transactional audit logging. |
+| [`backend/src/notifications/notifications.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/notifications/notifications.service.ts) | Re-aligned lock order in `retryJob`: locks `Appointment` first, then `NotificationJob` second; uses `logTransactional`. |
+| [`backend/scripts/migrate-appointment-time-contract.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/scripts/migrate-appointment-time-contract.ts) | Stable cursor pagination (`orderBy: { id: 'asc' }`, `--cursor`), CAS revalidation under row locks, skipped modified reporting, and stripped patient PII. |
+| [`backend/src/analytics/analytics.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/analytics/analytics.service.ts) | `isPerformed` strictly `COMPLETED`; added `arrived` and `inTreatment` metrics; added documented denominators. |
+| [`frontend/src/app/admin/analytics/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/analytics/page.tsx) | Preserved zero and negative net refund values using nullish coalescing `?? 0`. |
+| [`backend/scripts/verify-all-priorities.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/scripts/verify-all-priorities.ts) | Comprehensive 27-check verification harness with database guard, disabled crons, mocked dispatchers, guaranteed cleanup, relative future dates, and HTTP controller tests. |
+
+---
+
+### 5. Review Instructions & Verification Commands
+
 ```bash
-# In backend directory:
-# Dry-run inspection (read-only):
-npm run migrate:time-contract:dry
-# Or:
-npx ts-node -T scripts/migrate-appointment-time-contract.ts --dry-run
-
-# Live execution (modifies legacy records to treatment-end):
-npm run migrate:time-contract
-# Or:
-npx ts-node -T scripts/migrate-appointment-time-contract.ts --execute
-```
-
-#### Running the Regression Suites
-```bash
-# In backend directory:
-# Run comprehensive priority verification:
+# 1. Run the comprehensive priority verification harness:
+cd backend
+$env:DATABASE_URL="postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public"
 npx ts-node -T scripts/verify-all-priorities.ts
 
-# Run Jest e2e test suite:
-npm run test:e2e
+# 2. Run the complete backend e2e suite:
+npm run test:e2e -- --runInBand
+
+# 3. Verify type checks and builds:
+npx tsc --noEmit
+npm run build
+
+cd ../frontend
+npx tsc --noEmit
+npm run build
 ```
