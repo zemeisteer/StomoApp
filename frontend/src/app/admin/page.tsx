@@ -39,6 +39,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
 import { formatClinicDate, formatClinicTime, getClinicTodayDateString } from '../../lib/dateFormat';
+import { normalizeUzPhone } from '../../lib/phone';
 
 export default function AdminOverviewPage() {
   const { user, isLoading: isAuthLoading } = useAuth();
@@ -74,6 +75,13 @@ export default function AdminOverviewPage() {
   const [regDoctorId, setRegDoctorId] = useState('');
   const [regServiceId, setRegServiceId] = useState('');
   const [regBranchId, setRegBranchId] = useState('');
+  const [regConsentGiven, setRegConsentGiven] = useState(false);
+  const [regSlots, setRegSlots] = useState<Array<{ startTime: string; endTime: string; available: boolean }>>([]);
+  const [regSlotQuote, setRegSlotQuote] = useState<{ durationMinutes: number; bufferMinutes: number; priceFrom: number } | null>(null);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [regSelectedSlot, setRegSelectedSlot] = useState<string>('');
+  const [regIdempotencyKey, setRegIdempotencyKey] = useState<string>(() => `quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+  const [savedAppointmentSummary, setSavedAppointmentSummary] = useState<any | null>(null);
   const [isSubmittingReg, setIsSubmittingReg] = useState(false);
   const [regSuccessMsg, setRegSuccessMsg] = useState<string | null>(null);
   const [regErrorMsg, setRegErrorMsg] = useState<string | null>(null);
@@ -344,30 +352,144 @@ export default function AdminOverviewPage() {
     }
   };
 
-  // Doctor selection handler that syncs valid doctor services and branch
-  const handleDoctorSelect = (docId: string) => {
-    setRegDoctorId(docId);
+  // Branch selection handler with honest cascading
+  const handleBranchSelect = (branchId: string) => {
+    setRegBranchId(branchId);
     setRegErrorMsg(null);
-    const doc = doctors.find((d) => d.id === docId);
-    if (doc) {
-      if (doc.branches && doc.branches.length > 0) {
-        setRegBranchId(doc.branches[0].branchId || doc.branches[0].id);
-      }
-      if (doc.services && doc.services.length > 0) {
-        setRegServiceId(doc.services[0].serviceId || doc.services[0].id);
+    setSavedAppointmentSummary(null);
+    if (regDoctorId) {
+      const doc = doctors.find((d) => d.id === regDoctorId);
+      const docBranchIds = doc?.branches?.map((b: any) => b.branchId || b.id) || [];
+      if (!docBranchIds.includes(branchId)) {
+        setRegDoctorId('');
+        setRegServiceId('');
+        setRegSlots([]);
+        setRegSelectedSlot('');
       }
     }
   };
 
-  // Compute available services supported by currently selected doctor
+  // Doctor selection handler that strictly syncs valid doctor services and branch
+  const handleDoctorSelect = (docId: string) => {
+    setRegDoctorId(docId);
+    setRegErrorMsg(null);
+    setSavedAppointmentSummary(null);
+    setRegSlots([]);
+    setRegSelectedSlot('');
+
+    const doc = doctors.find((d) => d.id === docId);
+    if (doc) {
+      const docBranchIds = doc.branches?.map((b: any) => b.branchId || b.id) || [];
+      if (!regBranchId || !docBranchIds.includes(regBranchId)) {
+        setRegBranchId(docBranchIds[0] || '');
+      }
+      const docSrvIds = doc.services?.map((ds: any) => ds.serviceId || ds.id) || [];
+      if (!docSrvIds.includes(regServiceId)) {
+        setRegServiceId(docSrvIds[0] || '');
+      }
+    } else {
+      setRegServiceId('');
+    }
+  };
+
+  // Service selection handler
+  const handleServiceSelect = (serviceId: string) => {
+    setRegServiceId(serviceId);
+    setRegErrorMsg(null);
+    setSavedAppointmentSummary(null);
+    setRegSlots([]);
+    setRegSelectedSlot('');
+  };
+
+  // Compute available doctors for selected branch
+  const availableDoctorsForReg = useMemo(() => {
+    if (!regBranchId) return doctors;
+    return doctors.filter((doc) => {
+      const docBranchIds = doc.branches?.map((b: any) => b.branchId || b.id) || [];
+      return docBranchIds.includes(regBranchId);
+    });
+  }, [doctors, regBranchId]);
+
+  // Compute available services strictly supported by currently selected doctor (NO silent fallback)
   const availableServicesForReg = useMemo(() => {
-    if (!regDoctorId) return services;
+    if (!regDoctorId) return [];
     const doc = doctors.find((d) => d.id === regDoctorId);
-    if (!doc || !doc.services || doc.services.length === 0) return services;
+    if (!doc || !doc.services || doc.services.length === 0) return [];
     const docSrvIds = doc.services.map((ds: any) => ds.serviceId || ds.id);
-    const filtered = services.filter((s) => docSrvIds.includes(s.id));
-    return filtered.length > 0 ? filtered : services;
+    return services.filter((s) => docSrvIds.includes(s.id));
   }, [doctors, regDoctorId, services]);
+
+  const selectedServiceObj = useMemo(() => {
+    return services.find((s) => s.id === regServiceId);
+  }, [services, regServiceId]);
+
+  const selectedDoctorObjForReg = useMemo(() => {
+    return doctors.find((d) => d.id === regDoctorId);
+  }, [doctors, regDoctorId]);
+
+  const selectedBranchObjForReg = useMemo(() => {
+    return branches.find((b) => b.id === regBranchId);
+  }, [branches, regBranchId]);
+
+  // Server-authoritative available slots fetch for today
+  useEffect(() => {
+    let active = true;
+    if (!regDoctorId || !regServiceId || !regBranchId) {
+      setRegSlots([]);
+      setRegSlotQuote(null);
+      setRegSelectedSlot('');
+      return;
+    }
+
+    const todayDateStr = getClinicTodayDateString();
+
+    async function fetchSlots() {
+      setIsLoadingSlots(true);
+      try {
+        const res = await api.getAvailableSlots(regDoctorId, todayDateStr, regServiceId, regBranchId);
+        if (!active) return;
+        const rawSlots = res?.slots || [];
+        const availableOnly = rawSlots.filter((s: any) => s.available);
+        availableOnly.sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+        setRegSlots(availableOnly);
+        setRegSlotQuote({
+          durationMinutes: res.durationMinutes,
+          bufferMinutes: res.bufferMinutes,
+          priceFrom: res.priceFrom,
+        });
+
+        // Pick nearest slot (>= now, or first available)
+        const nowMs = Date.now();
+        const nearest = availableOnly.find((s: any) => new Date(s.startTime).getTime() >= nowMs) || availableOnly[0] || null;
+        setRegSelectedSlot(nearest ? nearest.startTime : '');
+      } catch (err) {
+        if (!active) return;
+        console.error('Failed to load slots for quick registration', err);
+        setRegSlots([]);
+        setRegSlotQuote(null);
+        setRegSelectedSlot('');
+      } finally {
+        if (active) setIsLoadingSlots(false);
+      }
+    }
+
+    fetchSlots();
+
+    return () => {
+      active = false;
+    };
+  }, [regDoctorId, regServiceId, regBranchId]);
+
+  // Reset quick reg state to register another patient
+  const handleResetQuickReg = () => {
+    setSavedAppointmentSummary(null);
+    setRegSuccessMsg(null);
+    setRegErrorMsg(null);
+    setRegName('');
+    setRegPhone('+998 ');
+    setRegConsentGiven(false);
+    setRegIdempotencyKey(`quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+  };
 
   // Quick Patient Registration Submission
   const handleQuickRegister = async (e: React.FormEvent) => {
@@ -375,52 +497,74 @@ export default function AdminOverviewPage() {
     setRegErrorMsg(null);
     setRegSuccessMsg(null);
 
-    const cleanPhone = regPhone.replace(/[\s()-]/g, '');
-    if (!cleanPhone.startsWith('+998') || cleanPhone.length < 13) {
-      setRegErrorMsg('O\'zbekiston formati (+998XXXXXXXXX) talab etiladi');
-      return;
-    }
-    if (!regName.trim()) {
-      setRegErrorMsg('Bemor ism-familiyasini kiriting');
-      return;
-    }
-    if (!regDoctorId) {
-      setRegErrorMsg('Shifokorni tanlang');
+    const phoneVal = normalizeUzPhone(regPhone, true);
+    if (!phoneVal.isValid) {
+      setRegErrorMsg(
+        isUz
+          ? (phoneVal.errorMessageUz || 'Telefon raqami O\'zbekiston formati (+998XXXXXXXXX)da bo\'lishi shart')
+          : (phoneVal.errorMessageRu || 'Номер телефона должен быть в формате (+998XXXXXXXXX)')
+      );
       return;
     }
 
-    // Ensure selected service is actually provided by this doctor
-    const doc = doctors.find((d) => d.id === regDoctorId);
-    let effectiveServiceId = regServiceId;
-    if (doc && doc.services && doc.services.length > 0) {
-      const docSrvIds = doc.services.map((ds: any) => ds.serviceId || ds.id);
-      if (!effectiveServiceId || !docSrvIds.includes(effectiveServiceId)) {
-        effectiveServiceId = docSrvIds[0];
-      }
+    if (!regName.trim()) {
+      setRegErrorMsg(isUz ? 'Bemor ism-familiyasini kiriting' : 'Введите Ф.И.О. пациента');
+      return;
+    }
+    if (!regBranchId) {
+      setRegErrorMsg(isUz ? 'Filialni tanlang' : 'Выберите филиал');
+      return;
+    }
+    if (!regDoctorId) {
+      setRegErrorMsg(isUz ? 'Shifokorni tanlang' : 'Выберите врача');
+      return;
+    }
+    if (!regServiceId) {
+      setRegErrorMsg(isUz ? 'Xizmatni tanlang' : 'Выберите услугу');
+      return;
+    }
+    if (!regSelectedSlot) {
+      setRegErrorMsg(
+        isUz
+          ? 'Bugungi kunga bo\'sh vaqt mavjud emas yoki tanlanmagan'
+          : 'Свободное время на сегодня отсутствует или не выбрано'
+      );
+      return;
+    }
+    if (!regConsentGiven) {
+      setRegErrorMsg(
+        isUz
+          ? 'Bemorning og\'zaki roziligi olinganini tasdiqlang'
+          : 'Подтвердите получение устного согласия пациента'
+      );
+      return;
     }
 
     try {
       setIsSubmittingReg(true);
-      // Create appointment today at current hour + 5 min
-      const now = new Date();
-      const startTimeIso = new Date(now.getTime() + 5 * 60000).toISOString();
 
-      await api.createAppointmentAdmin({
+      const created = await api.createAppointmentAdmin({
         patientName: regName.trim(),
-        patientPhone: cleanPhone,
+        patientPhone: phoneVal.normalized,
         doctorId: regDoctorId,
-        serviceId: effectiveServiceId || undefined,
-        branchId: regBranchId || undefined,
-        startTime: startTimeIso,
+        serviceId: regServiceId,
+        branchId: regBranchId,
+        startTime: regSelectedSlot,
         consentGiven: true,
+        idempotencyKey: regIdempotencyKey,
       });
 
-      setRegSuccessMsg('Bemor muvaffaqiyatli navbatga qo\'shildi!');
-      setRegName('');
-      setRegPhone('+998 ');
+      setSavedAppointmentSummary(created);
+      setRegSuccessMsg(
+        isUz
+          ? 'Bemor muvaffaqiyatli navbatga qo\'shildi!'
+          : 'Пациент успешно добавлен в очередь!'
+      );
+      setRegIdempotencyKey(`quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
       await loadData();
     } catch (err: any) {
-      setRegErrorMsg(err?.message || 'Bemor qo\'shishda xatolik yuz berdi');
+      // NOTE: retain entered name, phone, doctor, branch, and idempotencyKey on error!
+      setRegErrorMsg(err?.message || (isUz ? 'Bemor qo\'shishda xatolik yuz berdi' : 'Ошибка при регистрации пациента'));
     } finally {
       setIsSubmittingReg(false);
     }
@@ -1378,118 +1522,262 @@ export default function AdminOverviewPage() {
             <div className="lg:col-span-3 space-y-6">
               {/* Card 1: Quick Patient Registration (Image 2) */}
               <div className="ui-card space-y-3.5">
-                <div className="border-b border-[#d8e5e2] pb-2.5">
-                  <h2 className="text-sm font-bold text-[#152f34]">
-                    {isUz ? 'Tezkor bemor ro\'yxatga olish' : 'Быстрая регистрация пациента'}
-                  </h2>
-                  <p className="text-[11px] text-[#52696e]">
-                    {isUz ? 'Bemor kelganda navbatga qo\'shish' : 'Добавить пациента в очередь при визите'}
-                  </p>
+                <div className="border-b border-[#d8e5e2] pb-2.5 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-[#152f34]">
+                      {isUz ? 'Tezkor bemor ro\'yxatga olish' : 'Быстрая регистрация пациента'}
+                    </h2>
+                    <p className="text-[11px] text-[#52696e]">
+                      {isUz ? 'Bemor kelganda navbatga qo\'shish' : 'Добавить пациента в очередь при визите'}
+                    </p>
+                  </div>
+                  {savedAppointmentSummary && (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                      {isUz ? 'Muvaffaqiyatli' : 'Успешно'}
+                    </span>
+                  )}
                 </div>
 
                 {regSuccessMsg && (
-                  <div className="p-2 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold">
-                    {regSuccessMsg}
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{regSuccessMsg}</span>
                   </div>
                 )}
                 {regErrorMsg && (
-                  <div className="p-2 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-semibold">
-                    {regErrorMsg}
+                  <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-semibold flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{regErrorMsg}</span>
                   </div>
                 )}
 
-                <form onSubmit={handleQuickRegister} className="space-y-2.5 text-xs">
-                  <div>
-                    <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                      {isUz ? 'F.I.Sh.' : 'Ф.И.О. пациента'}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={isUz ? "Masalan: Rustam Aliyev" : "Например: Рустам Алиев"}
-                      value={regName}
-                      onChange={(e) => setRegName(e.target.value)}
-                      className="ui-input text-xs"
-                      required
-                    />
-                  </div>
+                {savedAppointmentSummary ? (
+                  /* Saved Appointment Summary Card */
+                  <div className="space-y-3 text-xs">
+                    <div className="p-3 bg-[#e0f2ed]/60 rounded-xl border border-[#167b78]/30 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#152f34]">
+                          {savedAppointmentSummary.patient?.fullName || savedAppointmentSummary.patientName}
+                        </span>
+                        <span className="text-[10px] font-mono text-[#52696e]">
+                          {savedAppointmentSummary.patient?.phone || savedAppointmentSummary.patientPhone}
+                        </span>
+                      </div>
 
-                  <div>
-                    <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                      {isUz ? 'Telefon raqami' : 'Номер телефона'}
-                    </label>
-                    <PhoneInput
-                      value={regPhone}
-                      onChange={(val) => setRegPhone(val)}
-                      className="text-xs"
-                    />
-                  </div>
+                      <div className="text-[11px] text-[#52696e] space-y-1 pt-1 border-t border-black/5">
+                        <p>
+                          <strong className="text-[#152f34]">{isUz ? 'Vaqt:' : 'Время:'}</strong>{' '}
+                          {formatClinicDate(savedAppointmentSummary.startTime, language, { includeWeekday: false })}{' '}
+                          <span className="font-mono font-bold text-[#167b78]">
+                            {formatClinicTime(savedAppointmentSummary.startTime)} — {formatClinicTime(savedAppointmentSummary.endTime)}
+                          </span>
+                        </p>
+                        <p>
+                          <strong className="text-[#152f34]">{isUz ? 'Shifokor:' : 'Врач:'}</strong>{' '}
+                          {savedAppointmentSummary.doctorName ||
+                            (selectedDoctorObjForReg
+                              ? `${isUz ? 'Dr.' : 'Др.'} ${isUz ? `${selectedDoctorObjForReg.firstNameUz} ${selectedDoctorObjForReg.lastNameUz}` : `${selectedDoctorObjForReg.firstNameRu || selectedDoctorObjForReg.firstNameUz} ${selectedDoctorObjForReg.lastNameRu || selectedDoctorObjForReg.lastNameUz}`}`
+                              : '')}
+                        </p>
+                        <p>
+                          <strong className="text-[#152f34]">{isUz ? 'Xizmat:' : 'Услуга:'}</strong>{' '}
+                          {savedAppointmentSummary.serviceName ||
+                            (selectedServiceObj ? (isUz ? selectedServiceObj.nameUz : (selectedServiceObj.nameRu || selectedServiceObj.nameUz)) : '')}
+                        </p>
+                        <p>
+                          <strong className="text-[#152f34]">{isUz ? 'Filial:' : 'Филиал:'}</strong>{' '}
+                          {savedAppointmentSummary.branchName ||
+                            (selectedBranchObjForReg ? (isUz ? selectedBranchObjForReg.nameUz : (selectedBranchObjForReg.nameRu || selectedBranchObjForReg.nameUz)) : '')}
+                        </p>
+                      </div>
+                    </div>
 
-                  <div>
-                    <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                      {isUz ? 'Shifokor' : 'Врач'}
-                    </label>
-                    <CustomSelect
-                      id="admin-quickreg-doctor-select"
-                      value={regDoctorId}
-                      onChange={(val) => handleDoctorSelect(val)}
-                      placeholder={isUz ? 'Shifokorni tanlang' : 'Выберите врача'}
-                      options={doctors.map((d) => ({
-                        value: d.id,
-                        label: `${isUz ? 'Dr.' : 'Др.'} ${isUz ? `${d.firstNameUz} ${d.lastNameUz}` : `${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}`}`,
-                      }))}
-                      locale={isUz ? 'uz' : 'ru'}
-                    />
+                    <div className="flex items-center gap-2 pt-1">
+                      <Link
+                        href={`/admin/calendar?appointmentId=${savedAppointmentSummary.id}`}
+                        className="flex-1 ui-button ui-button--primary text-xs font-bold justify-center"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>{isUz ? 'Taqvimda ko\'rish' : 'Смотреть в календаре'}</span>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={handleResetQuickReg}
+                        className="px-3 py-2 bg-[#f3f8f7] hover:bg-[#eaf5f2] text-[#152f34] border border-[#d8e5e2] rounded-xl text-xs font-bold"
+                      >
+                        {isUz ? 'Yangi bemor' : 'Новый'}
+                      </button>
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                      {isUz ? 'Xizmat' : 'Услуга'}
-                    </label>
-                    <CustomSelect
-                      id="admin-quickreg-service-select"
-                      value={regServiceId}
-                      onChange={(val) => setRegServiceId(val)}
-                      placeholder={isUz ? 'Xizmatni tanlang' : 'Выберите услугу'}
-                      options={availableServicesForReg.map((s) => ({
-                        value: s.id,
-                        label: isUz ? s.nameUz : (s.nameRu || s.nameUz),
-                      }))}
-                      locale={isUz ? 'uz' : 'ru'}
-                    />
-                  </div>
-
-                  {branches.length > 1 && (
+                ) : (
+                  <form onSubmit={handleQuickRegister} className="space-y-2.5 text-xs">
                     <div>
                       <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                        {isUz ? 'Filial' : 'Филиал'}
+                        {isUz ? 'F.I.Sh.' : 'Ф.И.О. пациента'}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder={isUz ? "Masalan: Rustam Aliyev" : "Например: Рустам Алиев"}
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        className="ui-input text-xs"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                        {isUz ? 'Telefon raqami' : 'Номер телефона'}
+                      </label>
+                      <PhoneInput
+                        value={regPhone}
+                        onChange={(val) => setRegPhone(val)}
+                        className="text-xs"
+                        required
+                      />
+                    </div>
+
+                    {branches.length > 1 && (
+                      <div>
+                        <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                          {isUz ? 'Filial' : 'Филиал'}
+                        </label>
+                        <CustomSelect
+                          id="admin-quickreg-branch-select"
+                          value={regBranchId}
+                          onChange={(val) => handleBranchSelect(val)}
+                          placeholder={isUz ? 'Filialni tanlang' : 'Выберите филиал'}
+                          options={branches.map((b) => ({
+                            value: b.id,
+                            label: isUz ? b.nameUz : (b.nameRu || b.nameUz),
+                          }))}
+                          locale={isUz ? 'uz' : 'ru'}
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                        {isUz ? 'Shifokor' : 'Врач'}
                       </label>
                       <CustomSelect
-                        id="admin-quickreg-branch-select"
-                        value={regBranchId}
-                        onChange={(val) => setRegBranchId(val)}
-                        placeholder={isUz ? 'Filialni tanlang' : 'Выберите филиал'}
-                        options={branches.map((b) => ({
-                          value: b.id,
-                          label: isUz ? b.nameUz : (b.nameRu || b.nameUz),
+                        id="admin-quickreg-doctor-select"
+                        value={regDoctorId}
+                        onChange={(val) => handleDoctorSelect(val)}
+                        placeholder={isUz ? 'Shifokorni tanlang' : 'Выберите врача'}
+                        options={availableDoctorsForReg.map((d) => ({
+                          value: d.id,
+                          label: `${isUz ? 'Dr.' : 'Др.'} ${isUz ? `${d.firstNameUz} ${d.lastNameUz}` : `${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}`}`,
                         }))}
                         locale={isUz ? 'uz' : 'ru'}
                       />
                     </div>
-                  )}
 
-                  <button
-                    type="submit"
-                    disabled={isSubmittingReg}
-                    className="w-full ui-button ui-button--primary text-xs font-bold mt-2"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>
-                      {isSubmittingReg
-                        ? (isUz ? 'Qo\'shilmoqda...' : 'Добавление...')
-                        : (isUz ? 'Navbatga qo\'shish' : 'Добавить в очередь')}
-                    </span>
-                  </button>
-                </form>
+                    <div>
+                      <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                        {isUz ? 'Xizmat' : 'Услуга'}
+                      </label>
+                      <CustomSelect
+                        id="admin-quickreg-service-select"
+                        value={regServiceId}
+                        onChange={(val) => handleServiceSelect(val)}
+                        placeholder={isUz ? 'Xizmatni tanlang' : 'Выберите услугу'}
+                        options={availableServicesForReg.map((s) => ({
+                          value: s.id,
+                          label: isUz ? s.nameUz : (s.nameRu || s.nameUz),
+                        }))}
+                        locale={isUz ? 'uz' : 'ru'}
+                      />
+                      {regDoctorId && availableServicesForReg.length === 0 && (
+                        <p className="text-[10px] text-amber-700 mt-1">
+                          {isUz ? 'Tanlangan shifokorga xizmatlar biriktirilmagan' : 'У выбранного врача нет прикрепленных услуг'}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Duration, Buffer & Price Estimate */}
+                    {selectedServiceObj && (
+                      <div className="p-2 bg-[#f8fbfa] border border-[#d8e5e2] rounded-xl text-[11px] text-[#52696e] flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-[#167b78]" />
+                          <span>
+                            ~{regSlotQuote?.durationMinutes ?? selectedServiceObj.durationMinutes} {isUz ? 'daq' : 'мин'}
+                            {' '}(+{regSlotQuote?.bufferMinutes ?? selectedServiceObj.bufferMinutes ?? 5} {isUz ? 'oraliq' : 'буфер'})
+                          </span>
+                        </span>
+                        <span className="font-bold text-[#152f34]">
+                          {((regSlotQuote?.priceFrom ?? selectedServiceObj.priceFrom) || 0).toLocaleString()} {isUz ? 'so\'m' : 'сум'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Server-Authoritative Available Slots Selection */}
+                    {regDoctorId && regServiceId && regBranchId && (
+                      <div>
+                        <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                          {isUz ? 'Bugungi bo\'sh vaqt (Slot)' : 'Свободное время на сегодня'}
+                        </label>
+                        {isLoadingSlots ? (
+                          <div className="p-2.5 bg-[#f3f8f7] rounded-xl text-[11px] text-[#52696e] flex items-center gap-2">
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#167b78]" />
+                            <span>{isUz ? 'Bo\'sh vaqtlar tekshirilmoqda...' : 'Проверка свободных слотов...'}</span>
+                          </div>
+                        ) : regSlots.length === 0 ? (
+                          <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800">
+                            {isUz
+                              ? 'Bugungi kunga bo\'sh vaqt mavjud emas. Boshqa shifokor yoki kunni tanlang.'
+                              : 'На сегодня нет доступных слотов. Выберите другого врача или дату.'}
+                          </div>
+                        ) : (
+                          <CustomSelect
+                            id="admin-quickreg-slot-select"
+                            value={regSelectedSlot}
+                            onChange={(val) => setRegSelectedSlot(val)}
+                            placeholder={isUz ? 'Vaqtni tanlang' : 'Выберите время'}
+                            options={regSlots.map((slot, idx) => {
+                              const tStr = formatClinicTime(slot.startTime);
+                              const isFirst = idx === 0;
+                              return {
+                                value: slot.startTime,
+                                label: `${tStr} ${isFirst ? (isUz ? '(Eng yaqin)' : '(Ближайшее)') : ''}`,
+                              };
+                            })}
+                            locale={isUz ? 'uz' : 'ru'}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    {/* Explicit staff-recorded patient consent */}
+                    <label className="flex items-start gap-2 cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={regConsentGiven}
+                        onChange={(e) => setRegConsentGiven(e.target.checked)}
+                        className="mt-0.5 rounded text-[#167b78] focus:ring-[#167b78]"
+                        required
+                      />
+                      <span className="text-[11px] text-[#52696e] font-medium leading-tight">
+                        {isUz
+                          ? 'Bemor roziligi og\'zaki olindi (xodim tomonidan tasdiqlangan)'
+                          : 'Согласие пациента получено устно (подтверждено сотрудником)'}
+                      </span>
+                    </label>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmittingReg || !regSelectedSlot || !regConsentGiven || regSlots.length === 0}
+                      className="w-full ui-button ui-button--primary text-xs font-bold mt-2 disabled:opacity-50"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>
+                        {isSubmittingReg
+                          ? (isUz ? 'Qo\'shilmoqda...' : 'Добавление...')
+                          : (isUz ? 'Navbatga qo\'shish' : 'Добавить в очередь')}
+                      </span>
+                    </button>
+                  </form>
+                )}
               </div>
 
               {/* Card 2: Billing Status (Image 2) */}

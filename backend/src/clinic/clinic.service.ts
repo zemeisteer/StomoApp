@@ -1,9 +1,15 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { AppointmentStatus } from '@prisma/client';
+import { getBranchLockKey, acquireDeterministicLocks } from '../common/concurrency-lock.helper';
 
 @Injectable()
 export class ClinicService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async getSettings() {
     let settings = await this.prisma.clinicSettings.findFirst();
@@ -238,40 +244,306 @@ export class ClinicService {
     return this.prisma.branch.update({ where: { id }, data });
   }
 
-  async deleteBranch(id: string) {
+  /**
+   * Lifecycle preview for branch: inspects active treatments, future reservations,
+   * historical snapshots and linked staff/schedule consequences before removal.
+   */
+  async getBranchLifecyclePreview(id: string) {
     const branch = await this.prisma.branch.findUnique({
       where: { id },
       include: {
-        appointments: { select: { id: true }, take: 1 },
+        doctors: {
+          include: { doctor: { select: { id: true, firstNameUz: true, lastNameUz: true } } },
+        },
+        schedules: {
+          where: { isActive: true },
+          select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+        },
+        appointments: {
+          select: {
+            id: true,
+            status: true,
+            startTime: true,
+            endTime: true,
+            actualStartTime: true,
+            overrunActive: true,
+            expiresAt: true,
+            patient: { select: { fullName: true, phone: true } },
+            doctor: { select: { firstNameUz: true, lastNameUz: true } },
+          },
+          orderBy: { startTime: 'asc' },
+        },
       },
     });
+
     if (!branch) throw new NotFoundException('Filial topilmadi');
 
-    // If branch has appointments, deactivate it to preserve clinical histories
-    if (branch.appointments.length > 0) {
-      await this.prisma.branch.update({
-        where: { id },
-        data: { isActive: false },
-      });
-      return {
-        success: true,
-        deactivated: true,
-        message: 'Filialda tarixiy qabullar mavjud bo‘lgani sababli u nofaol holatga o‘tkazildi',
-      };
+    const now = new Date();
+    const activeTreatments: any[] = [];
+    const futureAppointments: any[] = [];
+    let historicalCount = 0;
+
+    for (const appt of branch.appointments) {
+      const isExpiredPending =
+        appt.status === AppointmentStatus.PENDING &&
+        appt.expiresAt &&
+        new Date(appt.expiresAt) <= now;
+
+      const isOngoing =
+        appt.status === AppointmentStatus.CHECKED_IN ||
+        (appt.actualStartTime &&
+          appt.status !== AppointmentStatus.COMPLETED &&
+          appt.status !== AppointmentStatus.CANCELLED) ||
+        appt.overrunActive;
+
+      if (isOngoing) {
+        activeTreatments.push({
+          id: appt.id,
+          patientName: appt.patient?.fullName || 'Bemor',
+          patientPhone: appt.patient?.phone || '',
+          doctorName: appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}` : '',
+          startTime: appt.startTime.toISOString(),
+          status: appt.status,
+          actualStartTime: appt.actualStartTime ? appt.actualStartTime.toISOString() : undefined,
+        });
+        continue;
+      }
+
+      const isFutureActive =
+        !isExpiredPending &&
+        new Date(appt.startTime) >= now &&
+        (appt.status === AppointmentStatus.PENDING || appt.status === AppointmentStatus.CONFIRMED);
+
+      if (isFutureActive) {
+        futureAppointments.push({
+          id: appt.id,
+          patientName: appt.patient?.fullName || 'Bemor',
+          patientPhone: appt.patient?.phone || '',
+          doctorName: appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}` : '',
+          startTime: appt.startTime.toISOString(),
+          status: appt.status,
+        });
+      } else {
+        historicalCount++;
+      }
     }
 
-    // If no appointments, clean relations and delete safely
-    await this.prisma.$transaction(async (tx) => {
+    const staffConsequences: string[] = [];
+    if (branch.doctors.length > 0) {
+      staffConsequences.push(
+        `Filialga biriktirilgan ${branch.doctors.length} ta shifokor bog'lanmasi olib tashlanadi.`,
+      );
+    }
+
+    const scheduleConsequences: string[] = [];
+    if (branch.schedules.length > 0) {
+      scheduleConsequences.push(
+        `Filial bo'yicha ${branch.schedules.length} ta shifokor ish grafigi nofaol qilinadi.`,
+      );
+    }
+
+    let canDelete = true;
+    let actionType: 'DELETE' | 'DEACTIVATE' | 'BLOCK' = 'DELETE';
+    let resolutionGuidance = '';
+
+    if (activeTreatments.length > 0) {
+      canDelete = false;
+      actionType = 'BLOCK';
+      resolutionGuidance =
+        `Ushbu filialda ayni paytda muolajada bo'lgan ${activeTreatments.length} ta bemor mavjud. ` +
+        `Filialni o'chirish yoki nofaol qilishdan oldin avval muolajani yakunlang.`;
+    } else if (futureAppointments.length > 0) {
+      canDelete = false;
+      actionType = 'BLOCK';
+      resolutionGuidance =
+        `Filialda kelgusiga rejalashtirilgan ${futureAppointments.length} ta faol qabul mavjud. ` +
+        `Bemorlarni qabulsiz qoldirmaslik uchun avval ushbu qabullarni boshqa filialga ko'chiring yoki bekor qiling.`;
+    } else if (historicalCount > 0) {
+      canDelete = true;
+      actionType = 'DEACTIVATE';
+      resolutionGuidance =
+        `Filialda o'tmishdagi qabullar tarixi (${historicalCount} ta) mavjud. ` +
+        `Tarixiy ma'lumotlar va hisobotlar yaxlitligini saqlash uchun filial nofaol holatga o'tkaziladi.`;
+    } else {
+      canDelete = true;
+      actionType = 'DELETE';
+      resolutionGuidance =
+        `Filialda hech qanday qabullar tarixi yo'q. Filial tizimdan to'liq o'chiriladi.`;
+    }
+
+    return {
+      entityId: branch.id,
+      entityName: branch.nameUz,
+      canDelete,
+      actionType,
+      hasClinicalHistory: historicalCount > 0 || activeTreatments.length > 0 || futureAppointments.length > 0,
+      activeTreatmentCount: activeTreatments.length,
+      activeTreatments,
+      futureAppointmentCount: futureAppointments.length,
+      futureAppointments,
+      historicalAppointmentCount: historicalCount,
+      staffConsequences,
+      scheduleConsequences,
+      resolutionGuidance,
+    };
+  }
+
+  /**
+   * Concurrency-safe branch deletion / deactivation.
+   * Uses PostgreSQL transactional advisory locks shared with booking and scheduling.
+   * Revalidates blocking appointments inside the lock.
+   */
+  async deleteBranch(id: string, actorUser?: any) {
+    const lockKey = getBranchLockKey(id);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Transactional advisory lock shared with booking and scheduling
+      await acquireDeterministicLocks(tx, [lockKey]);
+
+      const branch = await tx.branch.findUnique({
+        where: { id },
+        include: {
+          appointments: {
+            select: {
+              id: true,
+              status: true,
+              startTime: true,
+              actualStartTime: true,
+              overrunActive: true,
+              expiresAt: true,
+              patient: { select: { fullName: true } },
+            },
+          },
+        },
+      });
+
+      if (!branch) throw new NotFoundException('Filial topilmadi');
+
+      const now = new Date();
+      const activeTreatments: any[] = [];
+      const futureAppointments: any[] = [];
+      let historicalCount = 0;
+
+      for (const appt of branch.appointments) {
+        const isExpiredPending =
+          appt.status === AppointmentStatus.PENDING &&
+          appt.expiresAt &&
+          new Date(appt.expiresAt) <= now;
+
+        const isOngoing =
+          appt.status === AppointmentStatus.CHECKED_IN ||
+          (appt.actualStartTime &&
+            appt.status !== AppointmentStatus.COMPLETED &&
+            appt.status !== AppointmentStatus.CANCELLED) ||
+          appt.overrunActive;
+
+        if (isOngoing) {
+          activeTreatments.push({
+            id: appt.id,
+            patientName: appt.patient?.fullName || 'Bemor',
+            status: appt.status,
+          });
+          continue;
+        }
+
+        const isFutureActive =
+          !isExpiredPending &&
+          new Date(appt.startTime) >= now &&
+          (appt.status === AppointmentStatus.PENDING || appt.status === AppointmentStatus.CONFIRMED);
+
+        if (isFutureActive) {
+          futureAppointments.push({
+            id: appt.id,
+            patientName: appt.patient?.fullName || 'Bemor',
+            startTime: appt.startTime.toISOString(),
+            status: appt.status,
+          });
+        } else {
+          historicalCount++;
+        }
+      }
+
+      // Block removal if ongoing treatments exist
+      if (activeTreatments.length > 0) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'ACTIVE_TREATMENT_IN_PROGRESS',
+          message:
+            `Filialni o'chirish/nofaol qilish taqiqlanadi: filialda ayni paytda muolajada bo'lgan ${activeTreatments.length} ta bemor mavjud. ` +
+            `Avval qabulni yakunlang.`,
+          activeTreatments,
+        });
+      }
+
+      // Block removal if future active reservations exist
+      if (futureAppointments.length > 0) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'FUTURE_APPOINTMENTS_EXIST',
+          message:
+            `Filialni o'chirish/nofaol qilish taqiqlanadi: kelgusida ${futureAppointments.length} ta tasdiqlangan yoki kutilayotgan qabul mavjud. ` +
+            `Avval ushbu qabullarni boshqa filialga ko'chiring yoki bekor qiling.`,
+          futureAppointments,
+        });
+      }
+
+      // Safe Deactivation if historical appointments exist
+      if (historicalCount > 0) {
+        await tx.branch.update({
+          where: { id },
+          data: { isActive: false },
+        });
+
+        await tx.doctorSchedule.updateMany({
+          where: { branchId: id },
+          data: { isActive: false },
+        });
+
+        await this.auditService.logTransactional({
+          tx,
+          userId: actorUser?.id,
+          action: 'branch.deactivate',
+          entity: 'branch',
+          entityId: id,
+          details: {
+            branchName: branch.nameUz,
+            historicalAppointments: historicalCount,
+            reason: 'safe_lifecycle_deactivation',
+          },
+        });
+
+        return {
+          success: true,
+          action: 'DEACTIVATE',
+          deactivated: true,
+          message: 'Filialda tarixiy qabullar mavjud bo‘lgani sababli u nofaol holatga o‘tkazildi',
+        };
+      }
+
+      // Clean Hard Deletion if zero history
       await tx.doctorBranch.deleteMany({ where: { branchId: id } });
       await tx.doctorSchedule.deleteMany({ where: { branchId: id } });
       await tx.scheduleException.deleteMany({ where: { branchId: id } });
       await tx.branch.delete({ where: { id } });
-    });
 
-    return {
-      success: true,
-      deactivated: false,
-      message: 'Filial muvaffaqiyatli o‘chirildi',
-    };
+      await this.auditService.logTransactional({
+        tx,
+        userId: actorUser?.id,
+        action: 'branch.delete',
+        entity: 'branch',
+        entityId: id,
+        details: {
+          branchName: branch.nameUz,
+          reason: 'clean_removal_zero_history',
+        },
+      });
+
+      return {
+        success: true,
+        action: 'DELETE',
+        deactivated: false,
+        message: 'Filial tizimdan to‘liq o‘chirildi',
+      };
+    });
   }
 }

@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { StaffRole } from '@prisma/client';
 import {
   IsString,
@@ -220,10 +221,17 @@ export class ClinicController {
     return this.clinicService.updateBranch(id, data);
   }
 
+  @Get('branches/:id/lifecycle-preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER)
+  async getBranchLifecyclePreview(@Param('id') id: string) {
+    return this.clinicService.getBranchLifecyclePreview(id);
+  }
+
   @Delete('branches/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  async deleteBranch(@Param('id') id: string) {
-    return this.clinicService.deleteBranch(id);
+  @Roles(StaffRole.OWNER)
+  async deleteBranch(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.clinicService.deleteBranch(id, user);
   }
 }

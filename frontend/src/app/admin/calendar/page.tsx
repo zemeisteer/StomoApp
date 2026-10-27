@@ -122,6 +122,7 @@ export default function AdminCalendarPage() {
 
   // Selected appointment modal & action states
   const [selectedAppt, setSelectedAppt] = useState<any | null>(null);
+  const [highlightedApptId, setHighlightedApptId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [mutatingStatus, setMutatingStatus] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -193,6 +194,7 @@ export default function AdminCalendarPage() {
   const openAppointment = useCallback(
     (appt: any) => {
       setSelectedAppt(appt);
+      setHighlightedApptId(appt.id);
       setActionError(null);
       setTargetApptError(null);
       setIsRescheduling(false);
@@ -473,7 +475,26 @@ export default function AdminCalendarPage() {
       try {
         const appt = await api.getAppointmentDetail(targetId);
         if (appt) {
+          // Deterministic calendar navigation: clear conflicting filters so appointment is visible
+          if (user?.role !== 'DOCTOR') {
+            setSelectedDoctorId('');
+          }
+          setSelectedBranchId('');
+          setSelectedServiceId('');
+          setSelectedStatus('');
+          setIsInboxMode(false);
+          setSearch('');
+          setCurrentPage(1);
+
+          // Focus clinic date and switch to day view
+          const start = new Date(appt.startTime);
+          if (!isNaN(start.getTime())) {
+            setCurrentDate(start);
+          }
+          setViewMode('day');
+
           setSelectedAppt(appt);
+          setHighlightedApptId(appt.id);
           setActionError(null);
           setTargetApptError(null);
           setIsRescheduling(false);
@@ -492,7 +513,7 @@ export default function AdminCalendarPage() {
       setSelectedAppt(null);
       setTargetApptError(null);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     syncFromUrl();
@@ -1398,7 +1419,11 @@ export default function AdminCalendarPage() {
                                   key={appt.id}
                                   data-testid="appointment-row"
                                   onClick={() => openAppointment(appt)}
-                                  className="p-3 bg-white hover:bg-slate-50 border border-slate-200 hover:border-teal-500 rounded-2xl shadow-sm cursor-pointer transition-all space-y-1.5"
+                                  className={`p-3 bg-white hover:bg-slate-50 border rounded-2xl shadow-sm cursor-pointer transition-all space-y-1.5 ${
+                                    highlightedApptId === appt.id
+                                      ? 'ring-4 ring-[#167b78] border-[#167b78] bg-[#e0f2ed]/40 shadow-md'
+                                      : 'border-slate-200 hover:border-teal-500'
+                                  }`}
                                 >
                                   <div className="flex items-center justify-between gap-2 flex-wrap">
                                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -1461,7 +1486,11 @@ export default function AdminCalendarPage() {
                     key={appt.id}
                     data-testid="appointment-row"
                     onClick={() => openAppointment(appt)}
-                    className="py-4 px-3 hover:bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer transition-colors"
+                    className={`py-4 px-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer transition-colors ${
+                      highlightedApptId === appt.id
+                        ? 'ring-4 ring-[#167b78] border border-[#167b78] bg-[#e0f2ed]/40 shadow-md'
+                        : 'hover:bg-slate-50'
+                    }`}
                   >
                     <div className="flex items-start gap-4">
                       <div className="w-24 text-center shrink-0">

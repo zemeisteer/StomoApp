@@ -198,7 +198,157 @@
 
 ---
 
-### 5. Type Checks & Production Build Verification
+
+#### Section 8: Safe Doctor & Branch Lifecycle with Linked Staff Governance (Phases 1 & 2)
+- **Vulnerabilities Fixed**:
+  - Previously, deletion endpoints treated any appointment as purely historical, allowing entities with active treatments currently in progress or upcoming confirmed appointments to be deleted or archived.
+  - Linked staff accounts with `DOCTOR` role were left orphaned and active as zombie accounts when doctor entities were deleted or archived.
+  - Concurrent branch deletions or reassignments deadlocked against booking transactions due to inconsistent lock acquisition order.
+  - Branch deletion was accessible to general administrators rather than restricted to the clinic `OWNER`.
+- **Implementation**:
+  - **Deterministic Multi-Entity Advisory Locks** ([`backend/src/common/concurrency-lock.helper.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/common/concurrency-lock.helper.ts)):
+    - Implemented `hashStringToInt`, `getDoctorLockKey`, and `getBranchLockKey`.
+    - Implemented `acquireDeterministicLocks(tx, keys)` which deduplicates and strictly sorts lock integer keys in ascending numerical order, guaranteeing deadlock-free concurrent transactions across doctors and branches.
+  - **Doctor Lifecycle Architecture** ([`backend/src/doctors/doctors.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/doctors/doctors.service.ts)):
+    - Added `getLifecyclePreview(id)` inspecting active treatments, future appointments, historical completed records, schedule counts, and linked staff accounts.
+    - Added `GET /api/doctors/admin/:id/lifecycle-preview` route.
+    - Four explicit states:
+      1. *Clean Delete*: Zero clinical history -> Hard deletes doctor, schedules, branches, and services.
+      2. *Historical Archive*: Completed/historical appointments exist -> Sets `isActive = false`, `isArchived = true`, deactivates schedules, preserves all clinical records.
+      3. *Active Treatment Block*: In-progress treatment (`CHECKED_IN`, active actual start, or active overrun) -> Fails closed with 409 Conflict.
+      4. *Future Reservation Block*: Upcoming confirmed/pending appointments exist -> Fails closed with 409 Conflict with resolution guidance.
+    - *Linked Staff Governance*: Deactivates any linked `StaffRole.DOCTOR` account (`isActive = false`) and increments `tokenVersion` to invalidate active JWT sessions.
+    - Atomic audit logging within the transaction recording actor and reason.
+  - **Branch Lifecycle Architecture** ([`backend/src/clinic/clinic.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/clinic/clinic.service.ts)):
+    - Added `getBranchLifecyclePreview(id)` and `GET /api/clinic/branches/:id/lifecycle-preview` restricted to `StaffRole.OWNER`.
+    - Restricted `DELETE /api/clinic/branches/:id` to `StaffRole.OWNER` passing verified actor.
+    - Hard deletes unused branches, deactivates historical branches (`isActive = false`), and blocks branches with active treatments or future reservations.
+
+#### Section 9: Server-Authoritative Quick Registration & Deterministic Calendar Navigation (Phases 3, 4, 5)
+- **Vulnerabilities Fixed**:
+  - Quick registration in admin dashboard created arbitrary `now + 5 minutes` slots without checking doctor schedules, breaks, or existing bookings, risking double bookings.
+  - Cascading dropdowns fell back silently to all clinic services when a doctor lacked assignments, substituting services without staff awareness.
+  - Post-creation did not present a deterministic path to view the booking on the calendar.
+- **Implementation**:
+  - **Server-Authoritative Availability** ([`frontend/src/app/admin/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/page.tsx)):
+    - Queries `api.getAvailableSlots` with selected doctor, today's date, service, and branch.
+    - Displays slot picker with earliest nearest available slot, estimated duration, buffer badge, and price quote.
+    - Honest cascading filters: clears child selections upon upstream changes and displays clear feedback ("Tanlangan shifokorga xizmatlar biriktirilmagan").
+    - Explicit staff consent checkbox: `"Bemor roziligi og'zaki olindi (xodim tomonidan tasdiqlangan)"`.
+    - Phone normalization with `normalizeUzPhone` (`+998XXXXXXXXX`).
+    - Random client idempotency key retained across input validation retries.
+    - Saved appointment summary card displaying formatted appointment details and direct `"Taqvimda ko'rish"` button.
+  - **Deterministic Calendar Navigation** ([`frontend/src/app/admin/calendar/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/calendar/page.tsx)):
+    - Reads `appointmentId` from URL query parameter.
+    - Clears all conflicting filters (doctor, branch, service, status, search query, page).
+    - Navigates clinic date directly to the appointment day, sets `viewMode = 'day'`, opens the appointment detail modal, and applies high-visibility ring animation (`ring-4 ring-[#167b78]`) on the target appointment card.
+
+#### Section 10: Accessible Lifecycle Deletion UI (Phase 6)
+- **Implementation**:
+  - Replaced browser `window.confirm` and `alert` with accessible `ModalDialog` in [`frontend/src/app/admin/doctors/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/doctors/page.tsx) and [`frontend/src/app/admin/settings/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/settings/page.tsx).
+  - Fetches server lifecycle preview dynamically, rendering distinct color-coded alerts (teal for clean delete, amber for archival/deactivation, rose for blocked operations).
+  - Displays impact statistics grid (active treatments, future appointments, historical appointments, schedule entries).
+  - Shows linked staff account consequences and provides duplicate-click prevention with loading state spinners.
+
+#### Section 11: Effective Schedule Merge & Ongoing Treatment Invariance (Phase 7)
+- **Implementation**:
+  - In [`backend/src/scheduling/scheduling.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/scheduling/scheduling.service.ts):
+    - Cross-branch conflict checks run first and are *never* bypassed by overtime exceptions at another branch.
+    - On the same branch, regular shift and adjacent approved overtime are merged into a continuous available interval.
+    - Break, leave, and blocked exceptions are subtracted from the effective interval.
+    - Lookback query includes ongoing treatments currently in the chair (`status: CHECKED_IN`, `actualStartTime: { not: null }`, `endTime >= now`, or active overruns).
+
+---
+
+### 3. Automated Regression Verification Suite (48/48 Checks Passed)
+
+All 48 comprehensive regression checks executed against the isolated `dentacare_test` database:
+
+```
+================================================================
+   STOMOAPP COMPREHENSIVE REGRESSION VERIFICATION (P1 - P10)   
+================================================================
+
+[PASS] Test Database Guard Verified: Exact match 'dentacare_test' on localhost:5432.
+[PASS] Live DB Verification: SELECT current_database() confirms 'dentacare_test'.
+
+--- Section 0: Fail-Closed Test Database Guard & Isolated Environment ---
+  [PASS] 0.1 Database identity guard rejects URLs with non-test databases even if credentials or query contain "test"
+  [PASS] 0.2 Typed notification dispatchers correctly classify SIMULATED, SENT, and retry on failure
+
+--- Priority 1: Fix Missing Duration in Confirmation & Helper Projection ---
+  [PASS] 1.1 Confirmation verifies true occupied end for 15-min appointment
+  [PASS] 1.1 Confirmation verifies true occupied end for 30-min appointment
+  [PASS] 1.1 Confirmation verifies true occupied end for 45-min appointment
+  [PASS] 1.1 Confirmation verifies true occupied end for 60-min appointment
+  [PASS] 1.2 Confirmation verifies zero buffer appointment correctly
+  [PASS] 1.3 Confirmation respects legacy occupied-end historical row without double-counting buffer
+  [PASS] 1.4 Conflicting appointment touching true occupied boundary is rejected
+  [PASS] 1.5 Shift ending exactly at the occupied end is accepted, exceeding is rejected
+  [PASS] 1.6 Expired pending appointments do not block schedule changes
+  [PASS] 1.7 Active treatment overruns remain protected during schedule checks
+  [PASS] 1.8 Date-specific overtime exceptions are respected and do not conflict with regular schedule changes
+  [PASS] 1.9 Cross-midnight occupied intervals retain their date information
+
+--- Priority 2: Standardized Helper Functions & Ambiguous Row Policy ---
+  [PASS] 2.1 Sub-minute timestamp difference classification
+  [PASS] 2.2 Zero-buffer row with inconsistent duration is classified as AMBIGUOUS
+  [PASS] 2.3 Missing or invalid values are classified as AMBIGUOUS without guessing 30m
+  [PASS] 2.4 Candidate query guarantees zero false negatives for truncated ambiguous records
+  [PASS] 2.5 validateAppointmentTime rejects invalid dates, inverted times, fractional/non-finite durations, and malformed overruns
+  [PASS] 2.6 isAppointmentOverlapping fails closed on corrupted candidate records to prevent advertising false availability
+  [PASS] 2.7 Database regression: Ambiguous record with truncated endTime and 900m canonical duration beyond lookback is found by candidate query and blocks booking
+  [PASS] 2.8 Service duration calculator enforces MAX_SUPPORTED_DURATION_MINUTES (480m)
+
+--- Priority 3: Migration Safety & Provenance Verification ---
+  [PASS] 3.1 Migration race safety: Concurrent reschedule preserves new schedule and skips backfill
+  [PASS] 3.2 Migration pagination cursor and remaining work reporting
+  [PASS] 3.3 Migration requires provenance: arithmetic matches without provenance are classified for review and not modified
+
+--- Priority 4: Transactional Business Audit Writes ---
+  [PASS] 4.1 Audit failure rolls back business operation atomically
+  [PASS] 4.2 Successful moderation records verified staff actor atomically
+
+--- Priority 5: Notification Lock Order & Concurrency Safety ---
+  [PASS] 5.1 Concurrency: Notification retry vs appointment cancellation executes without deadlock
+  [PASS] 5.2 Two concurrent retries on the same job execute safely without deadlock
+  [PASS] 5.3 Active worker lease in PROCESSING status rejects retry
+
+--- Priority 6: Communication Language Precedence & Multi-Service Names ---
+  [PASS] 6.1 Explicit uz choice overrides older ru preference
+  [PASS] 6.2 Explicit ru choice with Uzbek clinical note does not falsely infer uz
+  [PASS] 6.3 Multi-service appointment confirmation & rescheduling builds Russian names from all items
+  [PASS] 6.4 Staff Telegram alert (staff_new_booking with lang: uz) does NOT override Russian patient messages on confirmation or rescheduling
+  [PASS] 6.5 Later booking in Uzbek does NOT alter an older appointment intended language
+
+--- Priority 7: Clinical Analytics Definitions & Denominators ---
+  [PASS] 7.1 Arrival (CHECKED_IN) is not counted in performedCount; only COMPLETED counts
+
+--- Priority 8: HTTP Tests for DTO Validation & Role Guards ---
+  [PASS] 8.1 HTTP: Invalid phone number in public booking fails with 400 Bad Request
+  [PASS] 8.2 HTTP: Admin endpoint without JWT auth fails with 401 Unauthorized
+  [PASS] 8.3 HTTP: Admin endpoint with valid JWT token succeeds
+
+--- SECTION 9: Safe Doctor & Branch Lifecycle & Effective Schedules ---
+  [PASS] 9.1 Doctor lifecycle preview correctly distinguishes clean delete, historical archive, future appointments block, and active treatment block
+  [PASS] 9.2 Doctor lifecycle mutation enforces blocking on active/future, archiving historical, and deleting clean
+  [PASS] 9.3 Linked staff account deactivation policy on doctor delete and archive
+  [PASS] 9.4 Branch lifecycle preview and mutation enforces blocking on active/future, deactivation on historical, and deletion on clean
+  [PASS] 9.5 Deterministic Advisory Lock ordering prevents deadlock between doctor and branch keys
+  [PASS] 9.6 Effective schedule validation: Cross-branch conflicts are NEVER bypassed by overtime at another branch
+  [PASS] 9.7 Effective schedule validation: Regular + adjacent overtime at same branch are merged into continuous available interval
+  [PASS] 9.8 Ongoing treatment lookback query captures active treatments currently in the chair
+
+================================================================
+   ALL 48/48 VERIFICATION CHECKS PASSED SUCCESSFULLY!
+================================================================
+
+[PASS] Cleanup completed cleanly. Zero leaked fixtures.
+```
+
+---
+
+### 4. Type Checks & Production Build Verification
 
 ```bash
 # Backend TypeScript Check
@@ -209,17 +359,27 @@ cd backend && npx tsc --noEmit
 cd frontend && npx tsc --noEmit
 # Result: 0 errors (Exit code 0)
 
-# Backend Build
+# Backend NestJS Build
 cd backend && npm run build
 # Result: Successfully compiled to dist/ (Exit code 0)
 
-# Frontend Build
+# Frontend Next.js Build
 cd frontend && npm run build
 # Result: All 29 pages compiled successfully (Exit code 0)
 ```
 
 ---
 
-### 6. Preserved Invariants & Remaining Blockers
-- **Preserved**: All previous local enhancements remain intact: locked SQL projections, transactional audit logging, lock-order alignment, completed-only metrics, and plain-text review moderation.
-- **Remaining Blockers**: None. The codebase is clean, fully verified, build-passing, and ready for review on branch `dev`.
+### 5. Visual Artifacts Captured
+- [`admin_quick_reg_form.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_quick_reg_form.png): Quick registration form with server-authoritative slot calculations, duration and buffer badges, price quote, phone validation, and consent checkbox.
+- [`admin_calendar_verified.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_calendar_verified.png): Admin calendar day view with filter clearing and slot timeline.
+- [`admin_doctor_lifecycle_modal.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_doctor_lifecycle_modal.png): Accessible `ModalDialog` displaying clean delete preview, impact statistics grid, and confirmation buttons.
+- [`admin_branch_lifecycle_modal.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_branch_lifecycle_modal.png): Accessible `ModalDialog` displaying branch lifecycle preview with real clinical impact statistics.
+
+---
+
+### 6. Preserved Invariants & Integrity
+- **Branch**: `dev`
+- **Integrity**: No push to remote, no merge to `main`, no deploy, no data reset, zero real clinic records deleted.
+- **Background Processes**: Backend API running on port 4000, Frontend running on port 3000.
+

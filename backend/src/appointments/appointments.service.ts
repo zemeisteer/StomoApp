@@ -24,6 +24,11 @@ import {
   buildConflictCandidateWhere,
   MAX_SUPPORTED_DURATION_MINUTES,
 } from './appointment-time.helper';
+import {
+  acquireDeterministicLocks,
+  getDoctorLockKey,
+  getBranchLockKey,
+} from '../common/concurrency-lock.helper';
 
 /**
  * Patient-facing notification templates used to derive communication language.
@@ -398,7 +403,10 @@ export class AppointmentsService {
     const cleanName = dto.patientName.trim();
 
     // 5. Atomic Concurrency Lock and DB Transaction with Bounded Retries
-    const lockKey = this.hashStringToInt(`doc_${dto.doctorId}`);
+    const lockKeys = [
+      getDoctorLockKey(dto.doctorId),
+      ...(dto.branchId ? [getBranchLockKey(dto.branchId)] : []),
+    ];
     let createdAppointment: any;
     const maxRetries = 3;
 
@@ -430,8 +438,8 @@ export class AppointmentsService {
         }
 
         createdAppointment = await this.prisma.$transaction(async (tx) => {
-          // Acquire PostgreSQL transactional advisory lock
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+          // Acquire PostgreSQL transactional advisory lock in strictly sorted deterministic order
+          await acquireDeterministicLocks(tx, lockKeys);
 
           // 3rd path: Idempotency Key committed while waiting for advisory lock
           if (dto.idempotencyKey) {
@@ -820,15 +828,18 @@ export class AppointmentsService {
 
     const pre = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      select: { id: true, doctorId: true },
+      select: { id: true, doctorId: true, branchId: true },
     });
     if (!pre) throw new NotFoundException('Qabul topilmadi');
 
-    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+    const statusLockKeys = [
+      getDoctorLockKey(pre.doctorId),
+      ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
+    ];
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      // 1. Consistent doctor advisory lock first
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+      // 1. Consistent doctor and branch advisory locks in sorted order
+      await acquireDeterministicLocks(tx, statusLockKeys);
 
       // 2. Row lock on appointment FOR UPDATE second with concrete projection
       const [locked] = await tx.$queryRaw<LockedAppointmentForStatusChange[]>`
@@ -1052,7 +1063,7 @@ export class AppointmentsService {
   ) {
     const pre = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      select: { id: true, doctorId: true, status: true },
+      select: { id: true, doctorId: true, branchId: true, status: true },
     });
     if (!pre) throw new NotFoundException('Qabul topilmadi');
 
@@ -1062,11 +1073,14 @@ export class AppointmentsService {
       }
     }
 
-    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+    const startLockKeys = [
+      getDoctorLockKey(pre.doctorId),
+      ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
+    ];
 
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Doctor advisory lock
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+      // 1. Doctor and branch advisory locks
+      await acquireDeterministicLocks(tx, startLockKeys);
 
       // 2. Appointment row lock FOR UPDATE
       const [locked] = await tx.$queryRaw<any[]>`
@@ -1146,7 +1160,7 @@ export class AppointmentsService {
   ) {
     const pre = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      select: { id: true, doctorId: true, status: true },
+      select: { id: true, doctorId: true, branchId: true, status: true },
     });
 
     if (!pre) {
@@ -1168,7 +1182,10 @@ export class AppointmentsService {
       throw new BadRequestException('Noto\'g\'ri sana formati');
     }
 
-    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+    const rescheduleLockKeys = [
+      getDoctorLockKey(pre.doctorId),
+      ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
+    ];
 
     const maxRetries = 3;
     let updated: any;
@@ -1176,8 +1193,8 @@ export class AppointmentsService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         updated = await this.prisma.$transaction(async (tx) => {
-          // 1. Acquire doctor advisory lock
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+          // 1. Acquire doctor and branch advisory locks in sorted deterministic order
+          await acquireDeterministicLocks(tx, rescheduleLockKeys);
 
           // 2. Acquire row lock on appointment in consistent order
           const [lockedRow] = await tx.$queryRaw<Array<{ id: string }>>`
@@ -1451,7 +1468,7 @@ export class AppointmentsService {
 
     const pre = await this.prisma.appointment.findUnique({
       where: { id: appointmentId },
-      select: { id: true, doctorId: true, status: true },
+      select: { id: true, doctorId: true, branchId: true, status: true },
     });
     if (!pre) {
       throw new NotFoundException('Qabul topilmadi');
@@ -1460,7 +1477,10 @@ export class AppointmentsService {
       throw new BadRequestException('Tugallangan yoki bekor qilingan qabul davomiyligini o\'zgartirib bo\'lmaydi');
     }
 
-    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+    const durationLockKeys = [
+      getDoctorLockKey(pre.doctorId),
+      ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
+    ];
     const maxRetries = 3;
     let updated: any;
 
@@ -1468,8 +1488,8 @@ export class AppointmentsService {
       try {
         updated = await this.prisma.$transaction(
           async (tx) => {
-            // 1. Acquire shared doctor advisory lock
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+            // 1. Acquire doctor and branch advisory locks in sorted deterministic order
+            await acquireDeterministicLocks(tx, durationLockKeys);
 
             // 2. Acquire row lock on appointment in consistent order
             const [locked] = await tx.$queryRaw<Array<{ id: string; status: string; revision: number }>>`
@@ -2127,10 +2147,10 @@ export class AppointmentsService {
       throw new BadRequestException('Kechikish vaqti 5 dan 240 daqiqagacha bo\'lishi shart');
     }
 
-    // Pre-read to resolve doctorId for consistent lock ordering
+    // Pre-read to resolve doctorId and branchId for consistent lock ordering
     const pre = await this.prisma.appointment.findUnique({
       where: { id },
-      select: { id: true, doctorId: true, status: true },
+      select: { id: true, doctorId: true, branchId: true, status: true },
     });
     if (!pre) {
       throw new NotFoundException('Qabul topilmadi');
@@ -2145,11 +2165,14 @@ export class AppointmentsService {
       }
     }
 
-    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+    const delayLockKeys = [
+      getDoctorLockKey(pre.doctorId),
+      ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
+    ];
 
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Consistent doctor advisory lock first
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+      // 1. Consistent doctor and branch advisory locks in sorted deterministic order
+      await acquireDeterministicLocks(tx, delayLockKeys);
 
       // 2. Row lock on appointment FOR UPDATE inside transaction
       const [locked] = await tx.$queryRaw<Array<{
@@ -2287,7 +2310,7 @@ export class AppointmentsService {
   ) {
     const pre = await this.prisma.appointment.findUnique({
       where: { id },
-      select: { id: true, doctorId: true, status: true },
+      select: { id: true, doctorId: true, branchId: true, status: true },
     });
     if (!pre) throw new NotFoundException('Qabul topilmadi');
 
@@ -2296,11 +2319,14 @@ export class AppointmentsService {
       if (pre.doctorId !== user.doctorId) throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
     }
 
-    const lockKey = this.hashStringToInt(`doc_${pre.doctorId}`);
+    const clearLockKeys = [
+      getDoctorLockKey(pre.doctorId),
+      ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
+    ];
 
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Consistent doctor advisory lock first
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+      // 1. Consistent doctor and branch advisory locks in sorted deterministic order
+      await acquireDeterministicLocks(tx, clearLockKeys);
 
       // 2. Row lock on appointment FOR UPDATE
       const [locked] = await tx.$queryRaw<Array<{ id: string; doctorId: string; status: AppointmentStatus }>>`

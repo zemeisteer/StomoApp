@@ -10,6 +10,11 @@ import {
   getAppointmentEffectiveOccupiedEnd,
   MAX_SUPPORTED_DURATION_MINUTES,
 } from '../appointments/appointment-time.helper';
+import {
+  acquireDeterministicLocks,
+  getDoctorLockKey,
+  getBranchLockKey,
+} from '../common/concurrency-lock.helper';
 
 export const DAY_MAP: Record<number, DayOfWeek> = {
   0: DayOfWeek.SUNDAY,
@@ -789,7 +794,13 @@ export class SchedulingService {
       where: {
         doctorId: params.doctorId,
         status: { in: TIME_RESERVING_STATUSES },
-        startTime: { gte: now },
+        OR: [
+          { startTime: { gte: now } },
+          { status: AppointmentStatus.CHECKED_IN },
+          { actualStartTime: { not: null }, status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] } },
+          { overrunActive: true, overrunEstimatedEndTime: { gte: now } },
+          { endTime: { gte: now } },
+        ],
       },
       select: {
         id: true,
@@ -808,11 +819,10 @@ export class SchedulingService {
       orderBy: { startTime: 'asc' },
     });
 
-    // Query date-specific overtime exceptions so approved overtime does not false-conflict with regular schedule
-    const overtimeExceptions = await params.tx.scheduleException.findMany({
+    // Query date-specific exceptions for this doctor to resolve overtime, blocked time, and leaves accurately
+    const doctorExceptions = await params.tx.scheduleException.findMany({
       where: {
         doctorId: params.doctorId,
-        type: ExceptionType.OVERTIME,
       },
     });
 
@@ -848,43 +858,117 @@ export class SchedulingService {
       const dateStr = `${zonedStart.getFullYear()}-${pad(zonedStart.getMonth() + 1)}-${pad(zonedStart.getDate())}`;
       const formattedTime = `${dateStr} ${fmt(apptStartMin)} - ${fmt(apptEndMin)}`;
 
-      // 4. Respect date-specific overtime exceptions
-      const matchingOvertime = overtimeExceptions.find((ex: any) => {
-        const exZoned = toZonedTime(new Date(ex.date), params.timezone);
-        const exDateStr = `${exZoned.getFullYear()}-${pad(exZoned.getMonth() + 1)}-${pad(exZoned.getDate())}`;
-        if (exDateStr !== dateStr) return false;
-        if (ex.branchId && ex.branchId !== params.branchId) return false;
-        if (!ex.startTime || !ex.endTime) return false;
-        const otStart = this.parseTime(ex.startTime);
-        const otEnd = this.parseTime(ex.endTime);
-        return apptStartMin >= otStart && apptEndWithBuf <= otEnd;
-      });
-
-      if (matchingOvertime) {
-        // Fully covered by approved overtime on this specific date
-        continue;
-      }
-
       let conflictReason: string | null = null;
 
+      // 4. Cross-branch conflict check runs first and must NOT be bypassed by overtime
       if (appt.branchId && appt.branchId !== params.branchId) {
-        // Cross-branch conflict: doctor has an appointment at a different branch during the working hours
         if (apptStartMin < params.schedEnd && apptEndWithBuf > params.schedStart) {
           conflictReason = `Bemorning boshqa filialda (${appt.branch?.nameUz || 'Boshqa filial'}) qabuli mavjud (${fmt(apptStartMin)}-${fmt(apptEndMin)})`;
         }
       } else {
-        // Same branch: check start, end+buffer, and breaks
-        if (apptStartMin < params.schedStart) {
-          conflictReason = `Qabul shifokorning yangi ish vaqtidan (${fmt(params.schedStart)}) oldin boshlanadi (${fmt(apptStartMin)})`;
-        } else if (apptEndWithBuf > params.schedEnd) {
-          conflictReason = `Qabul va uning buferi (${apptBuf} daq) yangi ish vaqtidan (${fmt(params.schedEnd)}) keyin tugaydi (${fmt(apptEndWithBuf)})`;
-        } else if (
-          params.breakStart != null &&
-          params.breakEnd != null &&
-          apptStartMin < params.breakEnd &&
-          apptEndWithBuf > params.breakStart
-        ) {
-          conflictReason = `Qabul yangi tanaffus vaqtiga (${fmt(params.breakStart)}-${fmt(params.breakEnd)}) to'g'ri keladi`;
+        // 5. Same branch: calculate unified effective working intervals on this specific date
+        // Start with the proposed base working interval
+        let dayIntervals: TimeInterval[] = [
+          { start: params.schedStart, end: params.schedEnd, branchId: params.branchId },
+        ];
+
+        // Subtract proposed break
+        if (params.breakStart != null && params.breakEnd != null) {
+          const afterBreak: TimeInterval[] = [];
+          for (const it of dayIntervals) {
+            afterBreak.push(...subtractInterval(it, { start: params.breakStart, end: params.breakEnd }));
+          }
+          dayIntervals = afterBreak;
+        }
+
+        // Find date-specific exceptions on this calendar date
+        const dayExceptions = doctorExceptions.filter((ex: any) => {
+          const exZoned = toZonedTime(new Date(ex.date), params.timezone);
+          const exDateStr = `${exZoned.getFullYear()}-${pad(exZoned.getMonth() + 1)}-${pad(exZoned.getDate())}`;
+          return exDateStr === dateStr;
+        });
+
+        // Add approved OVERTIME on this date matching this branch
+        for (const ex of dayExceptions) {
+          if (ex.type === ExceptionType.OVERTIME && ex.startTime && ex.endTime) {
+            if (!ex.branchId || ex.branchId === params.branchId) {
+              const otStart = this.parseTime(ex.startTime);
+              const otEnd = this.parseTime(ex.endTime);
+              if (otEnd > otStart) {
+                dayIntervals.push({ start: otStart, end: otEnd, branchId: params.branchId });
+              }
+            }
+          }
+        }
+
+        // Merge contiguous / overlapping additions (e.g. regular hours 09-18 + overtime 18-19 => 09-19)
+        dayIntervals = mergeIntervals(dayIntervals);
+
+        // Subtract BLOCKED intervals
+        for (const ex of dayExceptions) {
+          if (ex.type === ExceptionType.BLOCKED && ex.startTime && ex.endTime) {
+            const blStart = this.parseTime(ex.startTime);
+            const blEnd = this.parseTime(ex.endTime);
+            const remaining: TimeInterval[] = [];
+            for (const it of dayIntervals) {
+              remaining.push(...subtractInterval(it, { start: blStart, end: blEnd }));
+            }
+            dayIntervals = remaining;
+          }
+        }
+
+        // Subtract LEAVE intervals
+        for (const ex of dayExceptions) {
+          if (ex.type === ExceptionType.LEAVE) {
+            if (!ex.startTime || !ex.endTime) {
+              dayIntervals = []; // Whole day leave
+              break;
+            }
+            const lvStart = this.parseTime(ex.startTime);
+            const lvEnd = this.parseTime(ex.endTime);
+            const remaining: TimeInterval[] = [];
+            for (const it of dayIntervals) {
+              remaining.push(...subtractInterval(it, { start: lvStart, end: lvEnd }));
+            }
+            dayIntervals = remaining;
+          }
+        }
+
+        // Check if the occupied appointment span is fully covered by any continuous interval
+        const isAccommodated = dayIntervals.some(
+          (it) => apptStartMin >= it.start && apptEndWithBuf <= it.end,
+        );
+
+        if (!isAccommodated) {
+          if (
+            params.breakStart != null &&
+            params.breakEnd != null &&
+            apptStartMin < params.breakEnd &&
+            apptEndWithBuf > params.breakStart
+          ) {
+            conflictReason = `Qabul yangi tanaffus vaqtiga (${fmt(params.breakStart)}-${fmt(params.breakEnd)}) to'g'ri keladi`;
+          } else if (
+            dayExceptions.some(
+              (ex) =>
+                ex.type === ExceptionType.BLOCKED &&
+                ex.startTime &&
+                ex.endTime &&
+                apptStartMin < this.parseTime(ex.endTime) &&
+                apptEndWithBuf > this.parseTime(ex.startTime),
+            )
+          ) {
+            conflictReason = `Qabul shifokorning bloklangan vaqtiga to'g'ri keladi`;
+          } else if (
+            dayExceptions.some((ex) => ex.type === ExceptionType.LEAVE)
+          ) {
+            conflictReason = `Qabul shifokorning ta'til/kasallik vaqtiga to'g'ri keladi`;
+          } else if (apptStartMin < params.schedStart) {
+            conflictReason = `Qabul shifokorning yangi ish vaqtidan (${fmt(params.schedStart)}) oldin boshlanadi (${fmt(apptStartMin)})`;
+          } else if (apptEndWithBuf > params.schedEnd) {
+            conflictReason = `Qabul va uning buferi (${apptBuf} daq) yangi ish vaqtidan (${fmt(params.schedEnd)}) keyin tugaydi (${fmt(apptEndWithBuf)})`;
+          } else {
+            conflictReason = `Qabul yangi ish grafigi va tanaffus chegaralariga to'g'ri kelmaydi`;
+          }
         }
       }
 
@@ -955,10 +1039,13 @@ export class SchedulingService {
       }
     }
 
-    const lockKey = this.getDoctorLockKey(data.doctorId);
+    const lockKeys = [
+      getDoctorLockKey(data.doctorId),
+      ...(branchId ? [getBranchLockKey(branchId)] : []),
+    ];
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+      await acquireDeterministicLocks(tx, lockKeys);
 
       // 1. Verify doctor and branch are active
       const doc = await tx.doctor.findUnique({
@@ -1084,6 +1171,7 @@ export class SchedulingService {
     if (uniqueDoctorIds.length === 0) {
       throw new BadRequestException('Kamida bitta shifokor tanlanishi shart');
     }
+    const sortedDoctorIds = [...uniqueDoctorIds].sort();
 
     // 2. Deduplicate & validate daysOfWeek
     const rawDays = Array.isArray(data.daysOfWeek) ? data.daysOfWeek : [];
@@ -1123,13 +1211,14 @@ export class SchedulingService {
     const cleanBreakEnd = hasBreakEnd ? data.breakEnd!.trim() : null;
 
     // Stable sorted doctor IDs for deadlock-free locking
-    const sortedDoctorIds = [...uniqueDoctorIds].sort();
+    const lockKeys = [
+      ...uniqueDoctorIds.map((id) => getDoctorLockKey(id)),
+      ...(data.branchId ? [getBranchLockKey(data.branchId)] : []),
+    ];
 
     return this.prisma.$transaction(async (tx) => {
       // 5. Acquire PostgreSQL transactional advisory locks in strictly sorted order
-      for (const doctorId of sortedDoctorIds) {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${this.getDoctorLockKey(doctorId)})`;
-      }
+      await acquireDeterministicLocks(tx, lockKeys);
 
       // 6. Validate branch inside transaction
       const branch = await tx.branch.findUnique({
@@ -1669,10 +1758,13 @@ export class SchedulingService {
     reason?: string;
     branchId?: string;
   }) {
-    const lockKey = this.getDoctorLockKey(data.doctorId);
+    const lockKeys = [
+      getDoctorLockKey(data.doctorId),
+      ...(data.branchId ? [getBranchLockKey(data.branchId)] : []),
+    ];
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+      await acquireDeterministicLocks(tx, lockKeys);
 
       // When adding leave, holiday, or blocked period, verify no active appointments are silently stranded
       if (

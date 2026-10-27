@@ -510,6 +510,18 @@ export const api = {
     fetcher<any>(`/api/doctors/admin/${id}/archive`, { method: 'PUT' }),
   deleteDoctorAdmin: (id: string) =>
     fetcher<any>(`/api/doctors/admin/${id}`, { method: 'DELETE' }),
+  getDoctorLifecyclePreview: (id: string) =>
+    fetcher<{
+      canDelete: boolean;
+      action: 'CLEAN_DELETE' | 'ARCHIVE' | 'BLOCKED_ACTIVE_TREATMENT' | 'BLOCKED_FUTURE_APPOINTMENTS';
+      reason: string;
+      activeTreatmentsCount: number;
+      futureAppointmentsCount: number;
+      historicalAppointmentsCount: number;
+      scheduleRecordsCount: number;
+      exceptionsCount: number;
+      linkedStaffAccount?: { id: string; username: string; role: string } | null;
+    }>(`/api/doctors/admin/${id}/lifecycle-preview`),
 
   getAllServicesAdmin: () => fetcher<any[]>('/api/services/admin/all'),
   createServiceAdmin: (payload: any) =>
@@ -621,6 +633,17 @@ export const api = {
     fetcher<any>(`/api/clinic/branches/${id}`, {
       method: 'DELETE',
     }),
+  getBranchLifecyclePreview: (id: string) =>
+    fetcher<{
+      canDelete: boolean;
+      action: 'CLEAN_DELETE' | 'DEACTIVATE' | 'BLOCKED_ACTIVE_TREATMENT' | 'BLOCKED_FUTURE_APPOINTMENTS';
+      reason: string;
+      activeTreatmentsCount: number;
+      futureAppointmentsCount: number;
+      historicalAppointmentsCount: number;
+      assignedDoctorsCount: number;
+      scheduleRecordsCount: number;
+    }>(`/api/clinic/branches/${id}/lifecycle-preview`),
 
   // Media Management
   uploadMedia: (file: File) => {

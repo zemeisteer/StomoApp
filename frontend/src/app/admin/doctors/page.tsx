@@ -22,8 +22,10 @@ import {
 import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect } from '../../../components/CustomSelect';
 import { CustomDatePicker } from '../../../components/CustomDatePicker';
+import { ModalDialog } from '../../../components/ModalDialog';
 import { api } from '../../../lib/api';
 import { formatClinicDate } from '../../../lib/dateFormat';
+import { useI18n } from '../../../lib/i18n';
 
 const DAYS_OF_WEEK = [
   { value: 'MONDAY', label: 'Dushanba' },
@@ -43,6 +45,10 @@ const EXCEPTION_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function AdminDoctorsManagePage() {
+  const { language } = useI18n();
+  const isRu = language === 'ru';
+  const isUz = !isRu;
+
   const [doctors, setDoctors] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
@@ -51,6 +57,18 @@ export default function AdminDoctorsManagePage() {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [exceptions, setExceptions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Doctor Deletion & Lifecycle Modal State
+  const [deletingDoctor, setDeletingDoctor] = useState<any | null>(null);
+  const [doctorPreview, setDoctorPreview] = useState<any | null>(null);
+  const [isLoadingDoctorPreview, setIsLoadingDoctorPreview] = useState(false);
+  const [isDeletingDoctor, setIsDeletingDoctor] = useState(false);
+  const [deleteDoctorError, setDeleteDoctorError] = useState<string | null>(null);
+  const [deleteDoctorSuccess, setDeleteDoctorSuccess] = useState<string | null>(null);
+
+  // Exception Deletion State
+  const [deletingExceptionId, setDeletingExceptionId] = useState<string | null>(null);
+  const [isDeletingException, setIsDeletingException] = useState(false);
 
   // Doctor Create/Edit Modal
   const [isDoctorModalOpen, setIsDoctorModalOpen] = useState(false);
@@ -532,29 +550,58 @@ export default function AdminDoctorsManagePage() {
     }
   };
 
-  const handleDeleteException = async (id: string) => {
-    if (!confirm('Ta\'til yozuvini o\'chirishga ishonchingiz komilmi?')) return;
+  const promptDeleteException = (id: string) => {
+    setDeletingExceptionId(id);
+  };
+
+  const confirmDeleteException = async () => {
+    if (!deletingExceptionId || isDeletingException) return;
     try {
-      await api.deleteDoctorException(id);
+      setIsDeletingException(true);
+      await api.deleteDoctorException(deletingExceptionId);
+      setDeletingExceptionId(null);
       await loadDoctorScheduleData(selectedDoctorId);
     } catch (err: any) {
-      alert(err?.message || 'O\'chirishda xatolik');
+      setExceptionError(err?.message || (isRu ? 'Ошибка при удалении записи' : 'O\'chirishda xatolik'));
+    } finally {
+      setIsDeletingException(false);
     }
   };
 
-  const handleDeleteDoctor = async (doc: any) => {
+  const promptDeleteDoctor = async (doc: any) => {
     if (!doc) return;
-    const confirmed = confirm(
-      `Haqiqatan ham "Dr. ${doc.firstNameUz} ${doc.lastNameUz}" shifokorini o'chirmoqchimisiz?\n\nAgar shifokorga tegishli qabullar mavjud bo'lsa, u arxivlanadi va nofaol qilinadi (tarixiy yozuvlar saqlanadi). Agar qabullar bo'lmasa, u butunlay o'chiriladi.`
-    );
-    if (!confirmed) return;
-
+    setDeletingDoctor(doc);
+    setDoctorPreview(null);
+    setDeleteDoctorError(null);
+    setDeleteDoctorSuccess(null);
+    setIsLoadingDoctorPreview(true);
     try {
-      const res = await api.deleteDoctorAdmin(doc.id);
-      alert(res?.message || 'Shifokor muvaffaqiyatli o‘chirildi');
-      await loadDoctorsAndBranches();
+      const preview = await api.getDoctorLifecyclePreview(doc.id);
+      setDoctorPreview(preview);
     } catch (err: any) {
-      alert(err?.message || 'Shifokorni o‘chirishda xatolik yuz berdi');
+      setDeleteDoctorError(err?.message || (isRu ? 'Ошибка при проверке статуса врача' : 'Shifokor holatini tekshirishda xatolik yuz berdi'));
+    } finally {
+      setIsLoadingDoctorPreview(false);
+    }
+  };
+
+  const confirmDeleteDoctor = async () => {
+    if (!deletingDoctor || isDeletingDoctor) return;
+    try {
+      setIsDeletingDoctor(true);
+      setDeleteDoctorError(null);
+      const res = await api.deleteDoctorAdmin(deletingDoctor.id);
+      setDeleteDoctorSuccess(res?.message || (isRu ? 'Врач успешно удален' : 'Shifokor muvaffaqiyatli o‘chirildi'));
+      await loadDoctorsAndBranches();
+      setTimeout(() => {
+        setDeletingDoctor(null);
+        setDoctorPreview(null);
+        setDeleteDoctorSuccess(null);
+      }, 1200);
+    } catch (err: any) {
+      setDeleteDoctorError(err?.message || (isRu ? 'Ошибка при удалении врача' : 'Shifokorni o‘chirishda xatolik yuz berdi'));
+    } finally {
+      setIsDeletingDoctor(false);
     }
   };
 
@@ -706,7 +753,7 @@ export default function AdminDoctorsManagePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDeleteDoctor(selectedDoctorObj)}
+                  onClick={() => promptDeleteDoctor(selectedDoctorObj)}
                   className="px-3.5 py-2 border border-rose-200 text-rose-700 hover:bg-rose-50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
                   title="Shifokorni o'chirish"
                 >
@@ -859,7 +906,7 @@ export default function AdminDoctorsManagePage() {
 
                     <button
                       type="button"
-                      onClick={() => handleDeleteException(exc.id)}
+                      onClick={() => promptDeleteException(exc.id)}
                       className="text-red-600 hover:underline text-xs font-bold"
                     >
                       O&apos;chirish
@@ -1184,7 +1231,7 @@ export default function AdminDoctorsManagePage() {
                     type="button"
                     onClick={() => {
                       setIsDoctorModalOpen(false);
-                      handleDeleteDoctor(editingDoctor);
+                      promptDeleteDoctor(editingDoctor);
                     }}
                     className="px-3.5 py-2 text-rose-600 hover:bg-rose-50 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
@@ -2062,6 +2109,206 @@ export default function AdminDoctorsManagePage() {
           </div>
         </div>
       )}
+      {/* Accessible Doctor Deletion / Lifecycle Modal */}
+      <ModalDialog
+        isOpen={Boolean(deletingDoctor)}
+        onClose={() => {
+          if (!isDeletingDoctor) {
+            setDeletingDoctor(null);
+            setDoctorPreview(null);
+            setDeleteDoctorError(null);
+            setDeleteDoctorSuccess(null);
+          }
+        }}
+        title={
+          doctorPreview
+            ? (doctorPreview.action === 'BLOCKED_ACTIVE_TREATMENT'
+                ? (isRu ? 'Удаление заблокировано: идет лечение' : 'O\'chirish taqiqlanadi: muolaja jarayonda')
+                : doctorPreview.action === 'BLOCKED_FUTURE_APPOINTMENTS'
+                ? (isRu ? 'Удаление заблокировано: есть будущие приемы' : 'O\'chirish taqiqlanadi: kelgusi qabullar mavjud')
+                : doctorPreview.action === 'ARCHIVE'
+                ? (isRu ? 'Архивация профиля врача' : 'Shifokorni arxivlash va nofaol qilish')
+                : (isRu ? 'Полное удаление профиля врача' : 'Shifokor profilini butunlay o\'chirish'))
+            : (isRu ? 'Удаление врача' : 'Shifokorni o\'chirish')
+        }
+        size="md"
+      >
+        <div className="space-y-4 text-xs">
+          {isLoadingDoctorPreview ? (
+            <div className="p-8 text-center text-slate-500 space-y-2">
+              <RefreshCw className="w-5 h-5 animate-spin mx-auto text-teal-600" />
+              <p>{isRu ? 'Проверка клинической истории и связей...' : 'Klinik tarix va bog\'liqliklar tekshirilmoqda...'}</p>
+            </div>
+          ) : (
+            <>
+              {deleteDoctorSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{deleteDoctorSuccess}</span>
+                </div>
+              )}
+
+              {deleteDoctorError && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{deleteDoctorError}</span>
+                </div>
+              )}
+
+              {deletingDoctor && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <h3 className="font-extrabold text-sm text-slate-900">
+                    Dr. {deletingDoctor.firstNameUz} {deletingDoctor.lastNameUz}
+                  </h3>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    {deletingDoctor.titleUz || deletingDoctor.titleRu || 'Stomatolog'}
+                  </p>
+                </div>
+              )}
+
+              {doctorPreview && (
+                <div className="space-y-3">
+                  {/* Detailed explanation alert */}
+                  <div
+                    className={`p-3.5 rounded-xl border ${
+                      !doctorPreview.canDelete
+                        ? 'bg-rose-50 border-rose-200 text-rose-900'
+                        : doctorPreview.action === 'ARCHIVE'
+                        ? 'bg-amber-50 border-amber-200 text-amber-900'
+                        : 'bg-teal-50 border-teal-200 text-teal-900'
+                    }`}
+                  >
+                    <p className="font-bold mb-1">
+                      {!doctorPreview.canDelete
+                        ? (isRu ? 'Внимание! Операция заблокирована системой:' : 'Diqqat! Ushbu amal tizim tomonidan taqiqlangan:')
+                        : doctorPreview.action === 'ARCHIVE'
+                        ? (isRu ? 'Внимание! Врач будет заархивирован:' : 'Diqqat! Shifokor profili arxivlanadi:')
+                        : (isRu ? 'Врач не имеет клинической истории и будет полностью удален:' : 'Shifokorda hech qanday klinik tarix yo\'q va u butunlay o\'chiriladi:')
+                      }
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      {doctorPreview.reason}
+                    </p>
+                  </div>
+
+                  {/* Impact Statistics Grid */}
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
+                      <strong className={`text-sm ${doctorPreview.activeTreatmentsCount > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+                        {doctorPreview.activeTreatmentsCount} ta
+                      </strong>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
+                      <strong className={`text-sm ${doctorPreview.futureAppointmentsCount > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
+                        {doctorPreview.futureAppointmentsCount} ta
+                      </strong>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
+                      <strong className="text-sm text-slate-800">
+                        {doctorPreview.historicalAppointmentsCount} ta
+                      </strong>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Записи расписания:' : 'Ish jadvallari:'}</span>
+                      <strong className="text-sm text-slate-800">
+                        {doctorPreview.scheduleRecordsCount} ta
+                      </strong>
+                    </div>
+                  </div>
+
+                  {doctorPreview.linkedStaffAccount && (
+                    <div className="p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-950 text-[11px]">
+                      <strong>{isRu ? 'Связанная учетная запись сотрудника:' : 'Biriktirilgan xodim hisobi:'}</strong>{' '}
+                      {doctorPreview.linkedStaffAccount.username} ({doctorPreview.linkedStaffAccount.role}).{' '}
+                      {isRu ? 'Учетная запись будет деактивирована, активные сессии сброшены.' : 'Hisob nofaol qilinadi va sessiyalari bekor qilinadi.'}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      disabled={isDeletingDoctor}
+                      onClick={() => {
+                        setDeletingDoctor(null);
+                        setDoctorPreview(null);
+                      }}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
+                    >
+                      {isRu ? 'Отмена' : 'Bekor qilish'}
+                    </button>
+
+                    {doctorPreview.canDelete ? (
+                      <button
+                        type="button"
+                        disabled={isDeletingDoctor}
+                        onClick={confirmDeleteDoctor}
+                        className={`px-4 py-2 text-white rounded-xl font-bold flex items-center gap-1.5 ${
+                          doctorPreview.action === 'ARCHIVE'
+                            ? 'bg-amber-600 hover:bg-amber-700'
+                            : 'bg-rose-600 hover:bg-rose-700'
+                        }`}
+                      >
+                        {isDeletingDoctor && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                        <span>
+                          {isDeletingDoctor
+                            ? (isRu ? 'Выполняется...' : 'Bajarilmoqda...')
+                            : doctorPreview.action === 'ARCHIVE'
+                            ? (isRu ? 'Архивировать врача' : 'Shifokorni arxivlash')
+                            : (isRu ? 'Удалить навсегда' : 'Butunlay o\'chirish')}
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="text-[11px] font-bold text-rose-700 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200">
+                        {isRu ? 'Действие заблокировано' : 'Amal bloklangan'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </ModalDialog>
+
+      {/* Accessible Exception Deletion Confirmation Modal */}
+      <ModalDialog
+        isOpen={Boolean(deletingExceptionId)}
+        onClose={() => {
+          if (!isDeletingException) setDeletingExceptionId(null);
+        }}
+        title={isRu ? 'Удаление записи исключения' : 'Ta\'til / Istisno yozuvini o\'chirish'}
+        size="sm"
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-600">
+            {isRu
+              ? 'Вы уверены, что хотите удалить эту запись графика/исключения?'
+              : 'Haqiqatan ham ushbu ta\'til/istisno yozuvini o\'chirmoqchimisiz?'}
+          </p>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              disabled={isDeletingException}
+              onClick={() => setDeletingExceptionId(null)}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
+            >
+              {isRu ? 'Отмена' : 'Bekor qilish'}
+            </button>
+            <button
+              type="button"
+              disabled={isDeletingException}
+              onClick={confirmDeleteException}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold flex items-center gap-1.5"
+            >
+              {isDeletingException && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+              <span>{isDeletingException ? (isRu ? 'Удаление...' : 'O\'chirilmoqda...') : (isRu ? 'Удалить' : 'O\'chirish')}</span>
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
     </AdminLayout>
   );
 }

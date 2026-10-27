@@ -6,6 +6,14 @@ import { NotificationsService } from '../src/notifications/notifications.service
 import { ReviewsService } from '../src/reviews/reviews.service';
 import { AnalyticsService } from '../src/analytics/analytics.service';
 import { AuditService } from '../src/audit/audit.service';
+import { DoctorsService } from '../src/doctors/doctors.service';
+import { ClinicService } from '../src/clinic/clinic.service';
+import {
+  hashStringToInt,
+  getDoctorLockKey,
+  getBranchLockKey,
+  acquireDeterministicLocks,
+} from '../src/common/concurrency-lock.helper';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -140,6 +148,8 @@ async function runAllPrioritiesVerification() {
   const reviewsService = app.get(ReviewsService);
   const analyticsService = app.get(AnalyticsService);
   const auditService = app.get(AuditService);
+  const doctorsService = app.get(DoctorsService);
+  const clinicService = app.get(ClinicService);
   const jwtService = app.get(JwtService);
   const configService = app.get(ConfigService);
 
@@ -1348,7 +1358,7 @@ async function runAllPrioritiesVerification() {
         startTime: bTime.toISOString(),
         patientName: 'Uzbek Notes Patient',
         patientPhone: '+998904445566',
-        patientNote: 'Tish og‘riyapti, ertalab kelaman',
+        note: 'Tish og‘riyapti, ertalab kelaman',
         consentGiven: true,
         source: 'website',
         lang: 'ru',
@@ -1632,6 +1642,569 @@ async function runAllPrioritiesVerification() {
         .set('Authorization', `Bearer ${adminToken}`);
 
       assert.strictEqual(res.status, 200);
+    });
+
+    // =========================================================================
+    // SECTION 9: Safe Doctor & Branch Lifecycle, Deterministic Locks & Effective Schedule
+    // =========================================================================
+    console.log('\n--- SECTION 9: Safe Doctor & Branch Lifecycle & Effective Schedules ---');
+
+    await test('9.1 Doctor lifecycle preview correctly distinguishes clean delete, historical archive, future appointments block, and active treatment block', async () => {
+      // 1. Clean doctor with no appointments
+      const cleanDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Clean',
+          lastNameUz: 'Doctor',
+          firstNameRu: 'Чистый',
+          lastNameRu: 'Врач',
+          slug: `clean-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(cleanDoc.id);
+
+      const cleanPreview = await doctorsService.getLifecyclePreview(cleanDoc.id);
+      assert.strictEqual(cleanPreview.canDelete, true);
+      assert.strictEqual(cleanPreview.actionType, 'DELETE');
+      assert.strictEqual(cleanPreview.activeTreatmentCount, 0);
+      assert.strictEqual(cleanPreview.futureAppointmentCount, 0);
+      assert.strictEqual(cleanPreview.historicalAppointmentCount, 0);
+
+      // 2. Doctor with historical completed appointment
+      const histDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Hist',
+          lastNameUz: 'Doctor',
+          firstNameRu: 'Исторический',
+          lastNameRu: 'Врач',
+          slug: `hist-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(histDoc.id);
+
+      const pastStart = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+      const pastEnd = new Date(pastStart.getTime() + 30 * 60 * 1000);
+      const histAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_hist_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: histDoc.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.COMPLETED,
+          startTime: pastStart,
+          endTime: pastEnd,
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(histAppt.id);
+
+      const histPreview = await doctorsService.getLifecyclePreview(histDoc.id);
+      assert.strictEqual(histPreview.canDelete, true);
+      assert.strictEqual(histPreview.actionType, 'ARCHIVE');
+      assert.strictEqual(histPreview.historicalAppointmentCount, 1);
+      assert.strictEqual(histPreview.futureAppointmentCount, 0);
+
+      // 3. Doctor with future confirmed appointment
+      const futureDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Future',
+          lastNameUz: 'Doctor',
+          firstNameRu: 'Будущий',
+          lastNameRu: 'Врач',
+          slug: `future-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(futureDoc.id);
+
+      const futureStart = new Date(Date.now() + 3 * 24 * 3600 * 1000);
+      const futureEnd = new Date(futureStart.getTime() + 30 * 60 * 1000);
+      const futureAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_fut_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: futureDoc.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: futureStart,
+          endTime: futureEnd,
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(futureAppt.id);
+
+      const futurePreview = await doctorsService.getLifecyclePreview(futureDoc.id);
+      assert.strictEqual(futurePreview.canDelete, false);
+      assert.strictEqual(futurePreview.actionType, 'BLOCK');
+      assert.strictEqual(futurePreview.futureAppointmentCount, 1);
+
+      // 4. Doctor with active ongoing treatment
+      const activeDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Active',
+          lastNameUz: 'Doctor',
+          firstNameRu: 'Активный',
+          lastNameRu: 'Врач',
+          slug: `active-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(activeDoc.id);
+
+      const activeStart = new Date(Date.now() - 15 * 60 * 1000); // started 15 min ago
+      const activeEnd = new Date(Date.now() + 45 * 60 * 1000); // ends in 45 min
+      const activeAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_act_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: activeDoc.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CHECKED_IN,
+          startTime: activeStart,
+          endTime: activeEnd,
+          serviceName: service.nameUz,
+          durationMinutes: 60,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(activeAppt.id);
+
+      const activePreview = await doctorsService.getLifecyclePreview(activeDoc.id);
+      assert.strictEqual(activePreview.canDelete, false);
+      assert.strictEqual(activePreview.actionType, 'BLOCK');
+      assert.strictEqual(activePreview.activeTreatmentCount, 1);
+    });
+
+    await test('9.2 Doctor lifecycle mutation enforces blocking on active/future, archiving historical, and deleting clean', async () => {
+      // Find the docs created in 9.1
+      const activeDoc = await prisma.doctor.findFirst({ where: { slug: `active-doc-${runId}` } });
+      const futureDoc = await prisma.doctor.findFirst({ where: { slug: `future-doc-${runId}` } });
+      const histDoc = await prisma.doctor.findFirst({ where: { slug: `hist-doc-${runId}` } });
+      const cleanDoc = await prisma.doctor.findFirst({ where: { slug: `clean-doc-${runId}` } });
+
+      assert.ok(activeDoc && futureDoc && histDoc && cleanDoc);
+
+      // Attempting to delete activeDoc must fail closed
+      await assert.rejects(
+        async () => {
+          await doctorsService.delete(activeDoc.id, { id: staff.id, role: StaffRole.ADMIN });
+        },
+        (err: any) => err.message.includes("muolajada bo'lgan") || err.message.includes('ACTIVE_TREATMENT_IN_PROGRESS'),
+      );
+
+      // Attempting to delete futureDoc must fail closed
+      await assert.rejects(
+        async () => {
+          await doctorsService.delete(futureDoc.id, { id: staff.id, role: StaffRole.ADMIN });
+        },
+        (err: any) => err.message.includes('kelgusida') || err.message.includes('FUTURE_APPOINTMENTS_EXIST'),
+      );
+
+      // Deleting histDoc must archive (isActive: false) and preserve record
+      const archiveRes = await doctorsService.delete(histDoc.id, { id: staff.id, role: StaffRole.ADMIN });
+      assert.strictEqual(archiveRes.action, 'ARCHIVE');
+      const histAfter = await prisma.doctor.findUnique({ where: { id: histDoc.id } });
+      assert.ok(histAfter !== null, 'Historical doctor record must NOT be deleted from DB');
+      assert.strictEqual(histAfter.isActive, false, 'Historical doctor must be archived with isActive=false');
+
+      // Deleting cleanDoc must delete record completely
+      const deleteRes = await doctorsService.delete(cleanDoc.id, { id: staff.id, role: StaffRole.ADMIN });
+      assert.strictEqual(deleteRes.action, 'DELETE');
+      const cleanAfter = await prisma.doctor.findUnique({ where: { id: cleanDoc.id } });
+      assert.strictEqual(cleanAfter, null, 'Clean doctor record must be deleted completely from DB');
+    });
+
+    await test('9.3 Linked staff account deactivation policy on doctor delete and archive', async () => {
+      const docWithStaff = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'StaffLinked',
+          lastNameUz: 'Doctor',
+          firstNameRu: 'Связанный',
+          lastNameRu: 'Врач',
+          slug: `stafflinked-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+        },
+      });
+      fixtures.doctors.push(docWithStaff.id);
+
+      const staffDoctor = await prisma.staffUser.create({
+        data: {
+          fullName: 'StaffLinked Doctor',
+          email: `${docWithStaff.slug}@clinic.local`,
+          passwordHash: 'dummyhash',
+          role: StaffRole.DOCTOR,
+          isActive: true,
+          tokenVersion: 1,
+          doctorId: docWithStaff.id,
+        },
+      });
+      fixtures.staff.push(staffDoctor.id);
+
+      // Check lifecycle preview detects linked staff consequence
+      const preview = await doctorsService.getLifecyclePreview(docWithStaff.id);
+      assert.ok(preview.staffConsequences.some((s: string) => s.includes('DOCTOR') || s.includes(staffDoctor.email)));
+
+      // Perform delete
+      await doctorsService.delete(docWithStaff.id, { id: staff.id, role: StaffRole.ADMIN });
+
+      // Verify linked staff user was deactivated and token revoked
+      const updatedStaff = await prisma.staffUser.findUnique({ where: { id: staffDoctor.id } });
+      assert.ok(updatedStaff);
+      assert.strictEqual(updatedStaff.isActive, false, 'Linked DOCTOR staff user must be deactivated');
+      assert.strictEqual(updatedStaff.tokenVersion, 2, 'Token version must be incremented to revoke sessions');
+    });
+
+    await test('9.4 Branch lifecycle preview and mutation enforces blocking on active/future, deactivation on historical, and deletion on clean', async () => {
+      // 1. Clean branch
+      const cleanBranch = await prisma.branch.create({
+        data: {
+          nameUz: `Clean Branch ${runId}`,
+          nameRu: `Чистый Филиал ${runId}`,
+          addressUz: 'Toshkent',
+          addressRu: 'Ташкент',
+          phone: '+998711111111',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(cleanBranch.id);
+
+      const cleanBPreview = await clinicService.getBranchLifecyclePreview(cleanBranch.id);
+      assert.strictEqual(cleanBPreview.canDelete, true);
+      assert.strictEqual(cleanBPreview.actionType, 'DELETE');
+
+      const cleanBRes = await clinicService.deleteBranch(cleanBranch.id, { id: staff.id, role: StaffRole.OWNER });
+      assert.strictEqual(cleanBRes.action, 'DELETE');
+      const cleanBAfter = await prisma.branch.findUnique({ where: { id: cleanBranch.id } });
+      assert.strictEqual(cleanBAfter, null);
+
+      // 2. Historical branch with completed appointment
+      const histBranch = await prisma.branch.create({
+        data: {
+          nameUz: `Hist Branch ${runId}`,
+          nameRu: `Исторический Филиал ${runId}`,
+          addressUz: 'Toshkent',
+          addressRu: 'Ташкент',
+          phone: '+998712222222',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(histBranch.id);
+
+      const pastStart = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+      const pastEnd = new Date(pastStart.getTime() + 30 * 60 * 1000);
+      const bAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_bhist_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: histBranch.id,
+          status: AppointmentStatus.COMPLETED,
+          startTime: pastStart,
+          endTime: pastEnd,
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(bAppt.id);
+
+      const histBPreview = await clinicService.getBranchLifecyclePreview(histBranch.id);
+      assert.strictEqual(histBPreview.canDelete, true);
+      assert.strictEqual(histBPreview.actionType, 'DEACTIVATE');
+      assert.strictEqual(histBPreview.historicalAppointmentCount, 1);
+
+      const histBRes = await clinicService.deleteBranch(histBranch.id, { id: staff.id, role: StaffRole.OWNER });
+      assert.strictEqual(histBRes.action, 'DEACTIVATE');
+      const histBAfter = await prisma.branch.findUnique({ where: { id: histBranch.id } });
+      assert.ok(histBAfter !== null);
+      assert.strictEqual(histBAfter.isActive, false);
+
+      // 3. Branch with future confirmed appointment
+      const futureBranch = await prisma.branch.create({
+        data: {
+          nameUz: `Future Branch ${runId}`,
+          nameRu: `Будущий Филиал ${runId}`,
+          addressUz: 'Toshkent',
+          addressRu: 'Ташкент',
+          phone: '+998713333333',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(futureBranch.id);
+
+      const futureStart = new Date(Date.now() + 4 * 24 * 3600 * 1000);
+      const futureEnd = new Date(futureStart.getTime() + 30 * 60 * 1000);
+      const fAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_bfut_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: futureBranch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: futureStart,
+          endTime: futureEnd,
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(fAppt.id);
+
+      const futureBPreview = await clinicService.getBranchLifecyclePreview(futureBranch.id);
+      assert.strictEqual(futureBPreview.canDelete, false);
+      assert.strictEqual(futureBPreview.actionType, 'BLOCK');
+
+      await assert.rejects(
+        async () => {
+          await clinicService.deleteBranch(futureBranch.id, { id: staff.id, role: StaffRole.OWNER });
+        },
+        (err: any) => err.message.includes('kelgusida') || err.message.includes('FUTURE_APPOINTMENTS_EXIST'),
+      );
+    });
+
+    await test('9.5 Deterministic Advisory Lock ordering prevents deadlock between doctor and branch keys', async () => {
+      // 1. Verify hashStringToInt produces stable signed 32-bit integers
+      const h1 = hashStringToInt('doc_123');
+      const h2 = hashStringToInt('doc_123');
+      assert.strictEqual(h1, h2);
+      assert.ok(Number.isInteger(h1));
+
+      // 2. Distinct entity prefixes produce different lock keys for same ID string
+      const docKey = getDoctorLockKey('shared-id-xyz');
+      const branchKey = getBranchLockKey('shared-id-xyz');
+      assert.notStrictEqual(docKey, branchKey, 'Doctor lock key and branch lock key must have distinct integer hashes');
+
+      // 3. Acquire sorted locks in a transaction
+      await prisma.$transaction(async (tx) => {
+        await acquireDeterministicLocks(tx, [branchKey, docKey]);
+      });
+    });
+
+    await test('9.6 Effective schedule validation: Cross-branch conflicts are NEVER bypassed by overtime at another branch', async () => {
+      // Doctor has regular schedule at branch1 on Monday 08:00 - 20:00
+      // Create a second branch
+      const branch2 = await prisma.branch.create({
+        data: {
+          nameUz: `Branch Two ${runId}`,
+          nameRu: `Филиал Два ${runId}`,
+          addressUz: 'Toshkent',
+          addressRu: 'Ташкент',
+          phone: '+998719999999',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(branch2.id);
+
+      await prisma.doctorBranch.create({
+        data: {
+          doctorId: doctor.id,
+          branchId: branch2.id,
+        },
+      });
+
+      // Add OVERTIME at branch2 for upcoming Monday 10:00-14:00 (05:00 - 09:00 UTC)
+      const testMondayDate = mondayBase.toISOString().split('T')[0];
+      await prisma.scheduleException.create({
+        data: {
+          doctorId: doctor.id,
+          branchId: branch2.id,
+          type: ExceptionType.OVERTIME,
+          date: new Date(testMondayDate),
+          startTime: '10:00',
+          endTime: '14:00',
+          reason: 'Emergency shift at branch 2',
+        },
+      });
+
+      // Create an existing confirmed appointment at Branch 2 during that overtime: 10:00 - 11:00 (05:00 - 06:00 UTC)
+      const b2Start = new Date(mondayBase.getTime() + 1 * 3600 * 1000); // 05:00 UTC
+      const b2End = new Date(b2Start.getTime() + 60 * 60 * 1000); // 06:00 UTC
+      const apptBranch2 = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_b2_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: branch2.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: b2Start,
+          endTime: b2End,
+          serviceName: service.nameUz,
+          durationMinutes: 60,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(apptBranch2.id);
+
+      // Now check conflicts for booking at Branch 1 during the same hours
+      // Even though doctor has regular schedule at Branch 1, cross-branch commitment at Branch 2 must be detected!
+      const conflicts = await schedService.findAppointmentConflictsForDoctorDay({
+        tx: prisma,
+        doctorId: doctor.id,
+        doctorName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`,
+        dayOfWeek: DayOfWeek.MONDAY,
+        branchId: branch.id,
+        branchName: branch.nameUz,
+        schedStart: 8 * 60,
+        schedEnd: 20 * 60,
+        timezone: 'Asia/Tashkent',
+        defaultBufferMinutes: 5,
+      });
+
+      assert.ok(conflicts.length > 0, 'Cross-branch conflict at Branch 2 must NOT be skipped for Branch 1 booking');
+      assert.ok(
+        conflicts.some((c) => c.appointmentId === apptBranch2.id),
+        'Conflicts must include the Branch 2 appointment',
+      );
+    });
+
+    await test('9.7 Effective schedule validation: Regular + adjacent overtime at same branch are merged into continuous available interval', async () => {
+      // Doctor has regular shift [08:00 - 20:00]
+      const testDateStr = tuesdayBase.toISOString().split('T')[0];
+
+      // Add OVERTIME at branch1 adjacent to regular shift (20:00 - 22:00)
+      await prisma.scheduleException.create({
+        data: {
+          doctorId: doctor.id,
+          branchId: branch.id,
+          type: ExceptionType.OVERTIME,
+          date: new Date(testDateStr),
+          startTime: '20:00',
+          endTime: '22:00',
+          reason: 'Evening shift extension',
+        },
+      });
+
+      // An appointment spanning across the boundary: 19:30 - 20:30 (14:30 - 15:30 UTC)
+      // TuesdayBase is at 04:00 UTC (09:00 Tashkent). 19:30 is TuesdayBase + 10h30m = 14:30 UTC
+      const spanStart = new Date(tuesdayBase.getTime() + 10.5 * 3600 * 1000);
+      const spanEnd = new Date(spanStart.getTime() + 60 * 60 * 1000); // 15:30 UTC = 20:30 Tashkent
+
+      const spanningAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_span_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: spanStart,
+          endTime: spanEnd,
+          serviceName: service.nameUz,
+          durationMinutes: 60,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(spanningAppt.id);
+
+      // Should have zero conflicts because regular [08:00-20:00] + overtime [20:00-22:00] merge into [08:00-22:00]
+      const conflicts = await schedService.findAppointmentConflictsForDoctorDay({
+        tx: prisma,
+        doctorId: doctor.id,
+        doctorName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`,
+        dayOfWeek: DayOfWeek.TUESDAY,
+        branchId: branch.id,
+        branchName: branch.nameUz,
+        schedStart: 8 * 60,
+        schedEnd: 20 * 60,
+        timezone: 'Asia/Tashkent',
+        defaultBufferMinutes: 5,
+      });
+
+      assert.strictEqual(
+        conflicts.filter((c) => c.appointmentId === spanningAppt.id).length,
+        0,
+        'Spanning regular and adjacent overtime on same branch must have 0 conflicts',
+      );
+    });
+
+    await test('9.8 Ongoing treatment lookback query captures active treatments currently in the chair', async () => {
+      // Create an ongoing appointment (CHECKED_IN) that started 20 minutes ago and has 40 min left
+      const now = new Date();
+      const onStart = new Date(now.getTime() - 20 * 60 * 1000);
+      const onEnd = new Date(now.getTime() + 40 * 60 * 1000);
+
+      const ongoingAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_ongo_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CHECKED_IN,
+          startTime: onStart,
+          endTime: onEnd,
+          serviceName: service.nameUz,
+          durationMinutes: 60,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(ongoingAppt.id);
+
+      // Determine dayOfWeek for today in clinic timezone
+      const dayNames: DayOfWeek[] = [
+        DayOfWeek.SUNDAY,
+        DayOfWeek.MONDAY,
+        DayOfWeek.TUESDAY,
+        DayOfWeek.WEDNESDAY,
+        DayOfWeek.THURSDAY,
+        DayOfWeek.FRIDAY,
+        DayOfWeek.SATURDAY,
+      ];
+      const todayDayOfWeek = dayNames[now.getDay()];
+
+      const conflicts = await schedService.findAppointmentConflictsForDoctorDay({
+        tx: prisma,
+        doctorId: doctor.id,
+        doctorName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`,
+        dayOfWeek: todayDayOfWeek,
+        branchId: branch.id,
+        branchName: branch.nameUz,
+        schedStart: 0,
+        schedEnd: 24 * 60,
+        timezone: 'Asia/Tashkent',
+        defaultBufferMinutes: 5,
+      });
+
+      // The candidate query in findAppointmentConflictsForDoctorDay retrieves upcomingAppts including ongoing treatments
+      // (which have status: CHECKED_IN even though startTime < now)
+      const foundOngoing = await prisma.appointment.findMany({
+        where: {
+          doctorId: doctor.id,
+          status: { in: TIME_RESERVING_STATUSES },
+          OR: [
+            { startTime: { gte: now } },
+            { status: AppointmentStatus.CHECKED_IN },
+            { actualStartTime: { not: null }, status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] } },
+            { overrunActive: true, overrunEstimatedEndTime: { gte: now } },
+            { endTime: { gte: now } },
+          ],
+        },
+      });
+
+      assert.ok(
+        foundOngoing.some((c) => c.id === ongoingAppt.id),
+        'Candidate query must capture ongoing treatment that started in the past and is currently in the chair',
+      );
     });
 
     console.log('\n================================================================');

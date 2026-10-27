@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { StaffRole } from '@prisma/client';
 import {
   IsString,
@@ -178,11 +179,18 @@ export class DoctorsController {
     return this.doctorsService.archive(id);
   }
 
+  @Get('admin/:id/lifecycle-preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  lifecyclePreview(@Param('id') id: string) {
+    return this.doctorsService.getLifecyclePreview(id);
+  }
+
   @Delete('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  delete(@Param('id') id: string) {
-    return this.doctorsService.delete(id);
+  delete(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.doctorsService.delete(id, user);
   }
 
   @Post('admin/specialties')

@@ -29,6 +29,7 @@ import { api } from '../../../lib/api';
 import { normalizeUzPhone, formatUzPhoneDisplay } from '../../../lib/phone';
 import { PhoneInput } from '../../../components/PhoneInput';
 import { CustomSelect } from '../../../components/CustomSelect';
+import { ModalDialog } from '../../../components/ModalDialog';
 import { useI18n } from '../../../lib/i18n';
 
 interface ContactPhoneItem {
@@ -88,6 +89,14 @@ export default function AdminSettingsPage() {
   const [branchMapUrl, setBranchMapUrl] = useState('');
   const [branchIsActive, setBranchIsActive] = useState(true);
   const [deletingBranchId, setDeletingBranchId] = useState<string | null>(null);
+
+  // Branch Deletion & Lifecycle Modal State
+  const [branchToDelete, setBranchToDelete] = useState<any | null>(null);
+  const [branchPreview, setBranchPreview] = useState<any | null>(null);
+  const [isLoadingBranchPreview, setIsLoadingBranchPreview] = useState(false);
+  const [isDeletingBranch, setIsDeletingBranch] = useState(false);
+  const [deleteBranchError, setDeleteBranchError] = useState<string | null>(null);
+  const [deleteBranchSuccess, setDeleteBranchSuccess] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
@@ -413,28 +422,45 @@ export default function AdminSettingsPage() {
     }
   };
 
-  // Branch Deletion Handler
-  const handleDeleteBranch = async (b: any) => {
+  // Branch Deletion Lifecycle Handlers
+  const promptDeleteBranch = async (b: any) => {
     if (!b) return;
-    const confirmed = window.confirm(
-      `Haqiqatan ham "${b.nameUz}" filialini o'chirmoqchimisiz?\n\nAgar filialda tarixiy qabullar mavjud bo'lsa, u nofaol holatga o'tkaziladi (tarixiy yozuvlar saqlanadi). Agar qabullar bo'lmasa, butunlay o'chiriladi.`
-    );
-    if (!confirmed) return;
-
+    setBranchToDelete(b);
+    setBranchPreview(null);
+    setDeleteBranchError(null);
+    setDeleteBranchSuccess(null);
+    setIsLoadingBranchPreview(true);
     try {
-      setDeletingBranchId(b.id);
-      setErrorMsg(null);
-      const res = await api.deleteBranchAdmin(b.id);
-      if (editingBranch?.id === b.id) {
+      const preview = await api.getBranchLifecyclePreview(b.id);
+      setBranchPreview(preview);
+    } catch (err: any) {
+      setDeleteBranchError(err?.message || (isRu ? 'Ошибка при проверке статуса филиала' : 'Filial holatini tekshirishda xatolik yuz berdi'));
+    } finally {
+      setIsLoadingBranchPreview(false);
+    }
+  };
+
+  const confirmDeleteBranch = async () => {
+    if (!branchToDelete || isDeletingBranch) return;
+    try {
+      setIsDeletingBranch(true);
+      setDeleteBranchError(null);
+      const res = await api.deleteBranchAdmin(branchToDelete.id);
+      setDeleteBranchSuccess(res?.message || (isRu ? 'Филиал успешно удален' : 'Filial muvaffaqiyatli o\'chirildi'));
+      if (editingBranch?.id === branchToDelete.id) {
         setShowBranchModal(false);
         setEditingBranch(null);
       }
       await loadData();
-      setSuccessMsg(res?.message || 'Filial muvaffaqiyatli o\'chirildi');
+      setTimeout(() => {
+        setBranchToDelete(null);
+        setBranchPreview(null);
+        setDeleteBranchSuccess(null);
+      }, 1200);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Filialni o\'chirishda xatolik yuz berdi');
+      setDeleteBranchError(err?.message || (isRu ? 'Ошибка при удалении филиала' : 'Filialni o\'chirishda xatolik yuz berdi'));
     } finally {
-      setDeletingBranchId(null);
+      setIsDeletingBranch(false);
     }
   };
 
@@ -1075,9 +1101,8 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
                   <button
                     type="button"
-                    disabled={deletingBranchId === b.id}
-                    onClick={() => handleDeleteBranch(b)}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50 cursor-pointer"
+                    onClick={() => promptDeleteBranch(b)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer"
                     title="Filialni o'chirish"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -1232,12 +1257,11 @@ export default function AdminSettingsPage() {
                   {editingBranch ? (
                     <button
                       type="button"
-                      disabled={deletingBranchId === editingBranch.id}
-                      onClick={() => handleDeleteBranch(editingBranch)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl disabled:opacity-50 cursor-pointer"
+                      onClick={() => promptDeleteBranch(editingBranch)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                      <span>{deletingBranchId === editingBranch.id ? 'O\'chirilmoqda...' : 'Filialni o\'chirish'}</span>
+                      <span>Filialni o&apos;chirish</span>
                     </button>
                   ) : (
                     <div />
@@ -1264,6 +1288,159 @@ export default function AdminSettingsPage() {
           </div>
         )}
       </div>
+      {/* Accessible Branch Deletion / Lifecycle Modal */}
+      <ModalDialog
+        isOpen={Boolean(branchToDelete)}
+        onClose={() => {
+          if (!isDeletingBranch) {
+            setBranchToDelete(null);
+            setBranchPreview(null);
+            setDeleteBranchError(null);
+            setDeleteBranchSuccess(null);
+          }
+        }}
+        title={
+          branchPreview
+            ? (branchPreview.action === 'BLOCKED_ACTIVE_TREATMENT'
+                ? (isRu ? 'Удаление филиала заблокировано: идет лечение' : 'Filialni o\'chirish taqiqlanadi: muolaja jarayonda')
+                : branchPreview.action === 'BLOCKED_FUTURE_APPOINTMENTS'
+                ? (isRu ? 'Удаление филиала заблокировано: есть будущие приемы' : 'Filialni o\'chirish taqiqlanadi: kelgusi qabullar mavjud')
+                : branchPreview.action === 'DEACTIVATE'
+                ? (isRu ? 'Деактивация филиала' : 'Filialni nofaol holatga o\'tkazish')
+                : (isRu ? 'Полное удаление филиала' : 'Filialni butunlay o\'chirish'))
+            : (isRu ? 'Удаление филиала' : 'Filialni o\'chirish')
+        }
+        size="md"
+      >
+        <div className="space-y-4 text-xs">
+          {isLoadingBranchPreview ? (
+            <div className="p-8 text-center text-slate-500 space-y-2">
+              <div className="w-5 h-5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p>{isRu ? 'Проверка клинической истории и привязанных врачей...' : 'Klinik tarix va biriktirilgan shifokorlar tekshirilmoqda...'}</p>
+            </div>
+          ) : (
+            <>
+              {deleteBranchSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{deleteBranchSuccess}</span>
+                </div>
+              )}
+
+              {deleteBranchError && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{deleteBranchError}</span>
+                </div>
+              )}
+
+              {branchToDelete && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <h3 className="font-extrabold text-sm text-slate-900">
+                    {branchToDelete.nameUz} {branchToDelete.nameRu ? `(${branchToDelete.nameRu})` : ''}
+                  </h3>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    {branchToDelete.addressUz || branchToDelete.addressRu || 'Manzil ko\'rsatilmagan'}
+                  </p>
+                </div>
+              )}
+
+              {branchPreview && (
+                <div className="space-y-3">
+                  <div
+                    className={`p-3.5 rounded-xl border ${
+                      !branchPreview.canDelete
+                        ? 'bg-rose-50 border-rose-200 text-rose-900'
+                        : branchPreview.action === 'DEACTIVATE'
+                        ? 'bg-amber-50 border-amber-200 text-amber-900'
+                        : 'bg-teal-50 border-teal-200 text-teal-900'
+                    }`}
+                  >
+                    <p className="font-bold mb-1">
+                      {!branchPreview.canDelete
+                        ? (isRu ? 'Внимание! Операция заблокирована системой:' : 'Diqqat! Ushbu amal tizim tomonidan taqiqlangan:')
+                        : branchPreview.action === 'DEACTIVATE'
+                        ? (isRu ? 'Внимание! Филиал будет переведен в неактивное состояние:' : 'Diqqat! Filial nofaol holatga o\'tkaziladi:')
+                        : (isRu ? 'Филиал не имеет клинической истории и будет полностью удален:' : 'Filialda hech qanday klinik tarix yo\'q va u butunlay o\'chiriladi:')
+                      }
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      {branchPreview.reason}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
+                      <strong className={`text-sm ${branchPreview.activeTreatmentsCount > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+                        {branchPreview.activeTreatmentsCount} ta
+                      </strong>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
+                      <strong className={`text-sm ${branchPreview.futureAppointmentsCount > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
+                        {branchPreview.futureAppointmentsCount} ta
+                      </strong>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
+                      <strong className="text-sm text-slate-800">
+                        {branchPreview.historicalAppointmentsCount} ta
+                      </strong>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-slate-500 block">{isRu ? 'Прикрепленные врачи:' : 'Biriktirilgan shifokorlar:'}</span>
+                      <strong className="text-sm text-slate-800">
+                        {branchPreview.assignedDoctorsCount} ta
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      disabled={isDeletingBranch}
+                      onClick={() => {
+                        setBranchToDelete(null);
+                        setBranchPreview(null);
+                      }}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
+                    >
+                      {isRu ? 'Отмена' : 'Bekor qilish'}
+                    </button>
+
+                    {branchPreview.canDelete ? (
+                      <button
+                        type="button"
+                        disabled={isDeletingBranch}
+                        onClick={confirmDeleteBranch}
+                        className={`px-4 py-2 text-white rounded-xl font-bold flex items-center gap-1.5 ${
+                          branchPreview.action === 'DEACTIVATE'
+                            ? 'bg-amber-600 hover:bg-amber-700'
+                            : 'bg-rose-600 hover:bg-rose-700'
+                        }`}
+                      >
+                        {isDeletingBranch && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                        <span>
+                          {isDeletingBranch
+                            ? (isRu ? 'Выполняется...' : 'Bajarilmoqda...')
+                            : branchPreview.action === 'DEACTIVATE'
+                            ? (isRu ? 'Деактивировать филиал' : 'Filialni nofaol qilish')
+                            : (isRu ? 'Удалить навсегда' : 'Butunlay o\'chirish')}
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="text-[11px] font-bold text-rose-700 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200">
+                        {isRu ? 'Действие заблокировано' : 'Amal bloklangan'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </ModalDialog>
     </AdminLayout>
   );
 }
