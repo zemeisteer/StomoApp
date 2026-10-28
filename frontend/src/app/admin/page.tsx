@@ -79,6 +79,14 @@ export default function AdminOverviewPage() {
   const [regSlots, setRegSlots] = useState<Array<{ startTime: string; endTime: string; available: boolean }>>([]);
   const [regSlotQuote, setRegSlotQuote] = useState<{ durationMinutes: number; bufferMinutes: number; priceFrom: number } | null>(null);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [slotFetchError, setSlotFetchError] = useState<string | null>(null);
+  const [slotRefreshSeq, setSlotRefreshSeq] = useState<number>(0);
+  const [loadedSlotContext, setLoadedSlotContext] = useState<{
+    doctorId: string;
+    serviceId: string;
+    branchId: string;
+    date: string;
+  } | null>(null);
   const [regSelectedSlot, setRegSelectedSlot] = useState<string>('');
   const [regIdempotencyKey, setRegIdempotencyKey] = useState<string>(() => `quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
   const [savedAppointmentSummary, setSavedAppointmentSummary] = useState<any | null>(null);
@@ -125,17 +133,24 @@ export default function AdminOverviewPage() {
         setBranches(brs);
         setServices(srvs);
 
-        if (brs.length > 0 && !regBranchId) setRegBranchId(brs[0].id);
+        // Explicit branch selection: Only preselect if there is exactly 1 active branch
+        if (brs.length === 1 && !regBranchId) {
+          setRegBranchId(brs[0].id);
+        }
+
         if (docs.length > 0 && !regDoctorId) {
           const firstDoc = docs[0];
           setRegDoctorId(firstDoc.id);
-          if (firstDoc.branches && firstDoc.branches.length > 0) {
+          if (brs.length === 1) {
+            setRegBranchId(brs[0].id);
+          } else if (firstDoc.branches && firstDoc.branches.length === 1) {
             setRegBranchId(firstDoc.branches[0].branchId || firstDoc.branches[0].id);
           }
+          // Only allow services assigned to the selected doctor. NO fallback to srvs[0]!
           if (firstDoc.services && firstDoc.services.length > 0) {
             setRegServiceId(firstDoc.services[0].serviceId || firstDoc.services[0].id);
-          } else if (srvs.length > 0) {
-            setRegServiceId(srvs[0].id);
+          } else {
+            setRegServiceId('');
           }
         }
       } catch (err) {
@@ -143,7 +158,7 @@ export default function AdminOverviewPage() {
       }
     }
     loadFixtures();
-  }, []);
+  }, [regBranchId, regDoctorId]);
 
   // Main Data Loader
   const loadData = useCallback(async () => {
@@ -302,7 +317,9 @@ export default function AdminOverviewPage() {
       setCancellationTarget((prev: any) => (prev && prev.id === appointmentId ? null : prev));
       await loadData();
     } catch (err: any) {
-      alert(err?.message || 'Holatni yangilashda xatolik yuz berdi');
+      setStatusFeedback(err?.message || (language === 'ru' ? 'Ошибка при обновлении статуса' : 'Holatni yangilashda xatolik yuz berdi'));
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = setTimeout(() => setStatusFeedback(null), 5000);
     } finally {
       setMutatingMap((prev) => {
         const next = { ...prev };
@@ -327,7 +344,9 @@ export default function AdminOverviewPage() {
       feedbackTimerRef.current = setTimeout(() => setStatusFeedback(null), 5000);
       await loadData();
     } catch (err: any) {
-      alert(err?.message || 'Muolajani boshlashda xatolik yuz berdi');
+      setStatusFeedback(err?.message || (language === 'ru' ? 'Ошибка при начале лечения' : 'Muolajani boshlashda xatolik yuz berdi'));
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = setTimeout(() => setStatusFeedback(null), 5000);
     } finally {
       setMutatingMap((prev) => {
         const next = { ...prev };
@@ -337,34 +356,43 @@ export default function AdminOverviewPage() {
     }
   };
 
-  // Record Overrun/Delay (+15 min)
+  // Record Overrun/Delay (+15 min) - plain text feedback without internal jargon
   const handleRecordDelay = async (appointmentId: string) => {
     try {
       await api.recordAppointmentDelay(appointmentId, 15, 'Amaliyot cho\'zildi');
       setStatusFeedback(
         language === 'ru'
-          ? 'Время приема продлено на 15 минут (+overrun)'
-          : 'Qabul vaqti 15 daqiqaga uzaytirildi (+overrun)'
+          ? 'Время приема продлено на 15 минут'
+          : 'Qabul vaqti 15 daqiqaga uzaytirildi'
       );
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = setTimeout(() => setStatusFeedback(null), 5000);
       await loadData();
     } catch (err: any) {
-      alert(err?.message || 'Kechikishni qayd etishda xatolik yuz berdi');
+      setStatusFeedback(err?.message || (language === 'ru' ? 'Ошибка при продлении приема' : 'Kechikishni qayd etishda xatolik yuz berdi'));
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = setTimeout(() => setStatusFeedback(null), 5000);
     }
   };
 
-  // Branch selection handler with honest cascading
+  // Branch selection handler with honest cascading and immediate invalidation
   const handleBranchSelect = (branchId: string) => {
     setRegBranchId(branchId);
     setRegErrorMsg(null);
+    setSlotFetchError(null);
     setSavedAppointmentSummary(null);
+    // Immediately invalidate old slot selections and quote to prevent race conditions
+    setRegSlots([]);
+    setRegSlotQuote(null);
+    setRegSelectedSlot('');
+    setLoadedSlotContext(null);
+
     if (regDoctorId) {
       const doc = doctors.find((d) => d.id === regDoctorId);
       const docBranchIds = doc?.branches?.map((b: any) => b.branchId || b.id) || [];
       if (!docBranchIds.includes(branchId)) {
         setRegDoctorId('');
         setRegServiceId('');
-        setRegSlots([]);
-        setRegSelectedSlot('');
       }
     }
   };
@@ -373,15 +401,23 @@ export default function AdminOverviewPage() {
   const handleDoctorSelect = (docId: string) => {
     setRegDoctorId(docId);
     setRegErrorMsg(null);
+    setSlotFetchError(null);
     setSavedAppointmentSummary(null);
+    // Immediately clear slots, quote, and selection
     setRegSlots([]);
+    setRegSlotQuote(null);
     setRegSelectedSlot('');
+    setLoadedSlotContext(null);
 
     const doc = doctors.find((d) => d.id === docId);
     if (doc) {
       const docBranchIds = doc.branches?.map((b: any) => b.branchId || b.id) || [];
       if (!regBranchId || !docBranchIds.includes(regBranchId)) {
-        setRegBranchId(docBranchIds[0] || '');
+        if (docBranchIds.length === 1) {
+          setRegBranchId(docBranchIds[0]);
+        } else {
+          setRegBranchId('');
+        }
       }
       const docSrvIds = doc.services?.map((ds: any) => ds.serviceId || ds.id) || [];
       if (!docSrvIds.includes(regServiceId)) {
@@ -396,9 +432,12 @@ export default function AdminOverviewPage() {
   const handleServiceSelect = (serviceId: string) => {
     setRegServiceId(serviceId);
     setRegErrorMsg(null);
+    setSlotFetchError(null);
     setSavedAppointmentSummary(null);
     setRegSlots([]);
+    setRegSlotQuote(null);
     setRegSelectedSlot('');
+    setLoadedSlotContext(null);
   };
 
   // Compute available doctors for selected branch
@@ -431,23 +470,43 @@ export default function AdminOverviewPage() {
     return branches.find((b) => b.id === regBranchId);
   }, [branches, regBranchId]);
 
-  // Server-authoritative available slots fetch for today
+  // Server-authoritative available slots fetch for today with strict context binding
   useEffect(() => {
     let active = true;
+    const todayDateStr = getClinicTodayDateString();
+
     if (!regDoctorId || !regServiceId || !regBranchId) {
       setRegSlots([]);
       setRegSlotQuote(null);
       setRegSelectedSlot('');
+      setLoadedSlotContext(null);
+      setSlotFetchError(null);
       return;
     }
 
-    const todayDateStr = getClinicTodayDateString();
+    const currentContext = {
+      doctorId: regDoctorId,
+      serviceId: regServiceId,
+      branchId: regBranchId,
+      date: todayDateStr,
+    };
 
     async function fetchSlots() {
       setIsLoadingSlots(true);
+      setSlotFetchError(null);
       try {
         const res = await api.getAvailableSlots(regDoctorId, todayDateStr, regServiceId, regBranchId);
         if (!active) return;
+
+        // Verify that this response matches the current live selection (ignore race responses)
+        if (
+          currentContext.doctorId !== regDoctorId ||
+          currentContext.serviceId !== regServiceId ||
+          currentContext.branchId !== regBranchId
+        ) {
+          return;
+        }
+
         const rawSlots = res?.slots || [];
         const availableOnly = rawSlots.filter((s: any) => s.available);
         availableOnly.sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
@@ -457,17 +516,22 @@ export default function AdminOverviewPage() {
           bufferMinutes: res.bufferMinutes,
           priceFrom: res.priceFrom,
         });
+        setLoadedSlotContext(currentContext);
 
         // Pick nearest slot (>= now, or first available)
         const nowMs = Date.now();
         const nearest = availableOnly.find((s: any) => new Date(s.startTime).getTime() >= nowMs) || availableOnly[0] || null;
         setRegSelectedSlot(nearest ? nearest.startTime : '');
-      } catch (err) {
+      } catch (err: any) {
         if (!active) return;
         console.error('Failed to load slots for quick registration', err);
         setRegSlots([]);
         setRegSlotQuote(null);
         setRegSelectedSlot('');
+        setLoadedSlotContext(null);
+        setSlotFetchError(
+          err?.message || (isUz ? 'Bo\'sh vaqtlarni yuklab bo\'lmadi' : 'Не удалось загрузить доступные слоты')
+        );
       } finally {
         if (active) setIsLoadingSlots(false);
       }
@@ -478,17 +542,25 @@ export default function AdminOverviewPage() {
     return () => {
       active = false;
     };
-  }, [regDoctorId, regServiceId, regBranchId]);
+  }, [regDoctorId, regServiceId, regBranchId, slotRefreshSeq, isUz]);
 
-  // Reset quick reg state to register another patient
+  // Reset quick reg state to register another patient:
+  // Invalidates availability, clears booked slot, and fetches fresh server slots
   const handleResetQuickReg = () => {
     setSavedAppointmentSummary(null);
     setRegSuccessMsg(null);
     setRegErrorMsg(null);
+    setSlotFetchError(null);
     setRegName('');
     setRegPhone('+998 ');
     setRegConsentGiven(false);
+    setRegSelectedSlot('');
+    setRegSlots([]);
+    setRegSlotQuote(null);
+    setLoadedSlotContext(null);
     setRegIdempotencyKey(`quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    // Trigger fresh availability refetch so the booked slot is gone from the UI
+    setSlotRefreshSeq((s) => s + 1);
   };
 
   // Quick Patient Registration Submission
@@ -523,6 +595,10 @@ export default function AdminOverviewPage() {
       setRegErrorMsg(isUz ? 'Xizmatni tanlang' : 'Выберите услугу');
       return;
     }
+    if (isLoadingSlots) {
+      setRegErrorMsg(isUz ? 'Bo\'sh vaqtlar tekshirilmoqda, kuting' : 'Проверка доступных слотов, подождите');
+      return;
+    }
     if (!regSelectedSlot) {
       setRegErrorMsg(
         isUz
@@ -531,6 +607,29 @@ export default function AdminOverviewPage() {
       );
       return;
     }
+
+    // Context verification: confirm selected slot belongs to the currently loaded context
+    if (
+      !loadedSlotContext ||
+      loadedSlotContext.doctorId !== regDoctorId ||
+      loadedSlotContext.serviceId !== regServiceId ||
+      loadedSlotContext.branchId !== regBranchId
+    ) {
+      setRegErrorMsg(isUz ? 'Bo\'sh vaqtlar yangilanmoqda, kuting' : 'Слоты обновляются, подождите');
+      return;
+    }
+
+    const slotValid = regSlots.some((s) => s.startTime === regSelectedSlot && s.available);
+    if (!slotValid) {
+      setRegErrorMsg(
+        isUz
+          ? 'Tanlangan vaqt band qilingan yoki eskirgan. Yangi vaqt tanlang.'
+          : 'Выбранное время уже занято или устарело. Выберите другое время.'
+      );
+      setSlotRefreshSeq((s) => s + 1);
+      return;
+    }
+
     if (!regConsentGiven) {
       setRegErrorMsg(
         isUz
@@ -561,10 +660,19 @@ export default function AdminOverviewPage() {
           : 'Пациент успешно добавлен в очередь!'
       );
       setRegIdempotencyKey(`quick_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      // Invalidate slots immediately so background slots reflect the booked appointment
+      setSlotRefreshSeq((s) => s + 1);
       await loadData();
     } catch (err: any) {
-      // NOTE: retain entered name, phone, doctor, branch, and idempotencyKey on error!
+      // Retain entered name, phone, doctor, branch, and idempotencyKey on error!
       setRegErrorMsg(err?.message || (isUz ? 'Bemor qo\'shishda xatolik yuz berdi' : 'Ошибка при регистрации пациента'));
+      // On conflict error, refresh availability to reflect occupied slots while preserving patient inputs
+      const isConflict =
+        err?.status === 409 ||
+        (err?.message && (err.message.includes('band') || err.message.includes('conflict') || err.message.includes('overrun')));
+      if (isConflict) {
+        setSlotRefreshSeq((s) => s + 1);
+      }
     } finally {
       setIsSubmittingReg(false);
     }
@@ -1637,10 +1745,10 @@ export default function AdminOverviewPage() {
                       />
                     </div>
 
-                    {branches.length > 1 && (
+                    {branches.length > 1 ? (
                       <div>
                         <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                          {isUz ? 'Filial' : 'Филиал'}
+                          {isUz ? 'Filial' : 'Филиал'} <span className="text-red-500">*</span>
                         </label>
                         <CustomSelect
                           id="admin-quickreg-branch-select"
@@ -1654,11 +1762,18 @@ export default function AdminOverviewPage() {
                           locale={isUz ? 'uz' : 'ru'}
                         />
                       </div>
-                    )}
+                    ) : branches.length === 1 ? (
+                      <div className="p-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl flex items-center justify-between text-xs">
+                        <span className="text-[#52696e] text-[11px] font-medium">{isUz ? 'Filial:' : 'Филиал:'}</span>
+                        <span className="font-bold text-[#152f34] text-[11px]">
+                          {isUz ? branches[0].nameUz : (branches[0].nameRu || branches[0].nameUz)}
+                        </span>
+                      </div>
+                    ) : null}
 
                     <div>
                       <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                        {isUz ? 'Shifokor' : 'Врач'}
+                        {isUz ? 'Shifokor' : 'Врач'} <span className="text-red-500">*</span>
                       </label>
                       <CustomSelect
                         id="admin-quickreg-doctor-select"
@@ -1675,7 +1790,7 @@ export default function AdminOverviewPage() {
 
                     <div>
                       <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                        {isUz ? 'Xizmat' : 'Услуга'}
+                        {isUz ? 'Xizmat' : 'Услуга'} <span className="text-red-500">*</span>
                       </label>
                       <CustomSelect
                         id="admin-quickreg-service-select"
@@ -1689,9 +1804,11 @@ export default function AdminOverviewPage() {
                         locale={isUz ? 'uz' : 'ru'}
                       />
                       {regDoctorId && availableServicesForReg.length === 0 && (
-                        <p className="text-[10px] text-amber-700 mt-1">
-                          {isUz ? 'Tanlangan shifokorga xizmatlar biriktirilmagan' : 'У выбранного врача нет прикрепленных услуг'}
-                        </p>
+                        <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 mt-1">
+                          {isUz
+                            ? 'Ushbu shifokorga xizmatlar biriktirilmagan. Qabulga yozish uchun avval shifokorga xizmat biriktiring.'
+                            : 'У выбранного врача нет прикрепленных услуг. Прикрепите услуги для записи.'}
+                        </div>
                       )}
                     </div>
 
@@ -1714,19 +1831,53 @@ export default function AdminOverviewPage() {
                     {/* Server-Authoritative Available Slots Selection */}
                     {regDoctorId && regServiceId && regBranchId && (
                       <div>
-                        <label className="text-[11px] font-bold text-[#52696e] block mb-1">
-                          {isUz ? 'Bugungi bo\'sh vaqt (Slot)' : 'Свободное время на сегодня'}
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-bold text-[#52696e]">
+                            {isUz ? 'Bugungi bo\'sh vaqt' : 'Свободное время на сегодня'}
+                          </label>
+                          {!isLoadingSlots && (
+                            <button
+                              type="button"
+                              onClick={() => setSlotRefreshSeq((s) => s + 1)}
+                              className="text-[10px] text-[#167b78] hover:underline flex items-center gap-1 font-bold"
+                              title={isUz ? 'Vaqtlarni yangilash' : 'Обновить слоты'}
+                            >
+                              <RefreshCw className="w-2.5 h-2.5" />
+                              <span>{isUz ? 'Yangilash' : 'Обновить'}</span>
+                            </button>
+                          )}
+                        </div>
+
                         {isLoadingSlots ? (
                           <div className="p-2.5 bg-[#f3f8f7] rounded-xl text-[11px] text-[#52696e] flex items-center gap-2">
                             <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#167b78]" />
                             <span>{isUz ? 'Bo\'sh vaqtlar tekshirilmoqda...' : 'Проверка свободных слотов...'}</span>
                           </div>
+                        ) : slotFetchError ? (
+                          <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-800 flex items-center justify-between gap-2">
+                            <span>{slotFetchError}</span>
+                            <button
+                              type="button"
+                              onClick={() => setSlotRefreshSeq((s) => s + 1)}
+                              className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-900 rounded font-bold text-[10px] shrink-0"
+                            >
+                              {isUz ? 'Qayta urinish' : 'Повторить'}
+                            </button>
+                          </div>
                         ) : regSlots.length === 0 ? (
-                          <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800">
-                            {isUz
-                              ? 'Bugungi kunga bo\'sh vaqt mavjud emas. Boshqa shifokor yoki kunni tanlang.'
-                              : 'На сегодня нет доступных слотов. Выберите другого врача или дату.'}
+                          <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 space-y-1.5">
+                            <p>
+                              {isUz
+                                ? 'Bugungi kunga bo\'sh vaqt mavjud emas.'
+                                : 'На сегодня нет свободного времени.'}
+                            </p>
+                            <Link
+                              href="/admin/calendar"
+                              className="inline-flex items-center gap-1 font-bold text-[#167b78] hover:underline text-[11px]"
+                            >
+                              <Calendar className="w-3.5 h-3.5" />
+                              <span>{isUz ? 'Taqvimda boshqa kunlarni ko\'rish' : 'Смотреть другие даты в календаре'}</span>
+                            </Link>
                           </div>
                         ) : (
                           <CustomSelect
@@ -1766,7 +1917,14 @@ export default function AdminOverviewPage() {
 
                     <button
                       type="submit"
-                      disabled={isSubmittingReg || !regSelectedSlot || !regConsentGiven || regSlots.length === 0}
+                      disabled={
+                        isSubmittingReg ||
+                        isLoadingSlots ||
+                        !regSelectedSlot ||
+                        !regConsentGiven ||
+                        regSlots.length === 0 ||
+                        availableServicesForReg.length === 0
+                      }
                       className="w-full ui-button ui-button--primary text-xs font-bold mt-2 disabled:opacity-50"
                     >
                       <Plus className="w-4 h-4" />

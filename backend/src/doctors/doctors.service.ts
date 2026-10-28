@@ -3,6 +3,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AppointmentStatus, StaffRole } from '@prisma/client';
 import { getDoctorLockKey, acquireDeterministicLocks } from '../common/concurrency-lock.helper';
+import {
+  checkEntityLifecycleBlockers,
+  assertLifecycleUnblocked,
+  resolveActorId,
+} from '../common/lifecycle.helper';
 
 export interface DoctorInputData {
   firstNameUz: string;
@@ -113,13 +118,103 @@ export class DoctorsService {
     });
   }
 
-  async update(id: string, data: Partial<DoctorInputData>) {
-    const existing = await this.prisma.doctor.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Shifokor topilmadi');
-
-    const { specialtyIds, branchIds, serviceIds, ...doctorData } = data;
+  async update(id: string, data: Partial<DoctorInputData>, actorUser?: any) {
+    const lockKey = getDoctorLockKey(id);
 
     return this.prisma.$transaction(async (tx) => {
+      // 1. Transactional advisory lock shared with booking and scheduling
+      await acquireDeterministicLocks(tx, [lockKey]);
+
+      const existing = await tx.doctor.findUnique({
+        where: { id },
+        include: {
+          branches: true,
+          services: true,
+        },
+      });
+      if (!existing) throw new NotFoundException('Shifokor topilmadi');
+
+      const { specialtyIds, branchIds, serviceIds, ...doctorData } = data;
+
+      // 2. If deactivating or archiving through update, enforce lifecycle blocker checks
+      if (doctorData.isActive === false || (doctorData as any).isArchived === true) {
+        const blockers = await checkEntityLifecycleBlockers(tx, {
+          doctorId: id,
+          defaultSafeAction: 'ARCHIVE',
+        });
+        assertLifecycleUnblocked(blockers, 'Shifokor');
+        if (blockers.historicalAppointmentCount > 0) {
+          await tx.doctorSchedule.updateMany({
+            where: { doctorId: id },
+            data: { isActive: false },
+          });
+        }
+      }
+
+      // 3. Audit branch assignment removal for impacts on existing appointments
+      if (branchIds !== undefined) {
+        const currentBranchIds = existing.branches.map((b) => b.branchId);
+        const removedBranchIds = currentBranchIds.filter((bid) => !branchIds.includes(bid));
+        if (removedBranchIds.length > 0) {
+          const branchBlockers = await checkEntityLifecycleBlockers(tx, {
+            doctorId: id,
+            removedBranchIds,
+          });
+          if (branchBlockers.activeTreatmentCount > 0) {
+            throw new ConflictException({
+              statusCode: 409,
+              error: 'ACTIVE_TREATMENT_AT_REMOVED_BRANCH',
+              message:
+                `Shifokordan filial biriktirmasini olib tashlab bo'lmaydi: ushbu filialda shifokor muolajasida bo'lgan ` +
+                `${branchBlockers.activeTreatmentCount} ta bemor mavjud. Avval muolajani yakunlang.`,
+              activeTreatments: branchBlockers.activeTreatments,
+            });
+          }
+          if (branchBlockers.futureAppointmentCount > 0) {
+            throw new ConflictException({
+              statusCode: 409,
+              error: 'FUTURE_APPOINTMENTS_AT_REMOVED_BRANCH',
+              message:
+                `Shifokordan filial biriktirmasini olib tashlab bo'lmaydi: ushbu filialda shifokorga rejalashtirilgan ` +
+                `${branchBlockers.futureAppointmentCount} ta kelgusi faol qabul mavjud. Avval ushbu qabullarni boshqa filial/shifokorga ko'chiring yoki bekor qiling.`,
+              futureAppointments: branchBlockers.futureAppointments,
+            });
+          }
+        }
+      }
+
+      // 4. Audit service assignment removal for impacts on existing appointments
+      if (serviceIds !== undefined) {
+        const currentServiceIds = existing.services.map((s) => s.serviceId);
+        const removedServiceIds = currentServiceIds.filter((sid) => !serviceIds.includes(sid));
+        if (removedServiceIds.length > 0) {
+          const serviceBlockers = await checkEntityLifecycleBlockers(tx, {
+            doctorId: id,
+            removedServiceIds,
+          });
+          if (serviceBlockers.activeTreatmentCount > 0) {
+            throw new ConflictException({
+              statusCode: 409,
+              error: 'ACTIVE_TREATMENT_FOR_REMOVED_SERVICE',
+              message:
+                `Shifokordan xizmat biriktirmasini olib tashlab bo'lmaydi: ushbu xizmat bo'yicha shifokor muolajasida bo'lgan ` +
+                `${serviceBlockers.activeTreatmentCount} ta bemor mavjud. Avval muolajani yakunlang.`,
+              activeTreatments: serviceBlockers.activeTreatments,
+            });
+          }
+          if (serviceBlockers.futureAppointmentCount > 0) {
+            throw new ConflictException({
+              statusCode: 409,
+              error: 'FUTURE_APPOINTMENTS_FOR_REMOVED_SERVICE',
+              message:
+                `Shifokordan xizmat biriktirmasini olib tashlab bo'lmaydi: ushbu xizmat bo'yicha shifokorga rejalashtirilgan ` +
+                `${serviceBlockers.futureAppointmentCount} ta kelgusi faol qabul mavjud. Avval ushbu qabullarni ko'chiring yoki bekor qiling.`,
+              futureAppointments: serviceBlockers.futureAppointments,
+            });
+          }
+        }
+      }
+
       if (specialtyIds !== undefined) {
         await tx.doctorSpecialty.deleteMany({ where: { doctorId: id } });
         if (specialtyIds.length > 0) {
@@ -147,7 +242,7 @@ export class DoctorsService {
         }
       }
 
-      return tx.doctor.update({
+      const updated = await tx.doctor.update({
         where: { id },
         data: doctorData,
         include: {
@@ -156,16 +251,92 @@ export class DoctorsService {
           services: { include: { service: true } },
         },
       });
+
+      if (actorUser) {
+        const actorId = resolveActorId(actorUser);
+        await this.auditService.logTransactional({
+          tx,
+          userId: actorId,
+          action: 'doctor.update',
+          entity: 'doctor',
+          entityId: id,
+          details: {
+            doctorName: `Dr. ${updated.firstNameUz} ${updated.lastNameUz}`,
+            updatedFields: Object.keys(data),
+          },
+        });
+      }
+
+      return updated;
     });
   }
 
-  async archive(id: string) {
-    const existing = await this.prisma.doctor.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Shifokor topilmadi');
+  async archive(id: string, actorUser?: any) {
+    const lockKey = getDoctorLockKey(id);
 
-    return this.prisma.doctor.update({
-      where: { id },
-      data: { isArchived: true, isActive: false },
+    return this.prisma.$transaction(async (tx) => {
+      await acquireDeterministicLocks(tx, [lockKey]);
+
+      const doctor = await tx.doctor.findUnique({
+        where: { id },
+        include: { staffUser: true },
+      });
+      if (!doctor) throw new NotFoundException('Shifokor topilmadi');
+
+      const blockers = await checkEntityLifecycleBlockers(tx, {
+        doctorId: id,
+        defaultSafeAction: 'ARCHIVE',
+      });
+      assertLifecycleUnblocked(blockers, 'Shifokor');
+
+      await tx.doctor.update({
+        where: { id },
+        data: { isArchived: true, isActive: false },
+      });
+
+      await tx.doctorSchedule.updateMany({
+        where: { doctorId: id },
+        data: { isActive: false },
+      });
+
+      if (doctor.staffUser) {
+        if (doctor.staffUser.role === StaffRole.DOCTOR) {
+          await tx.staffUser.update({
+            where: { id: doctor.staffUser.id },
+            data: {
+              isActive: false,
+              refreshTokenHash: null,
+              tokenVersion: { increment: 1 },
+            },
+          });
+        } else {
+          await tx.staffUser.update({
+            where: { id: doctor.staffUser.id },
+            data: { doctorId: null },
+          });
+        }
+      }
+
+      const actorId = resolveActorId(actorUser);
+      await this.auditService.logTransactional({
+        tx,
+        userId: actorId,
+        action: 'doctor.archive',
+        entity: 'doctor',
+        entityId: id,
+        details: {
+          doctorName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`,
+          historicalAppointments: blockers.historicalAppointmentCount,
+          reason: 'safe_lifecycle_archival',
+        },
+      });
+
+      return {
+        success: true,
+        action: 'ARCHIVE',
+        archived: true,
+        message: 'Shifokor arxivlandi va nofaol holatga o‘tkazildi',
+      };
     });
   }
 
@@ -190,74 +361,15 @@ export class DoctorsService {
           where: { isActive: true },
           select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
         },
-        appointments: {
-          select: {
-            id: true,
-            status: true,
-            startTime: true,
-            endTime: true,
-            actualStartTime: true,
-            overrunActive: true,
-            expiresAt: true,
-            patient: { select: { fullName: true, phone: true } },
-            branch: { select: { nameUz: true, nameRu: true } },
-          },
-          orderBy: { startTime: 'asc' },
-        },
       },
     });
 
     if (!doctor) throw new NotFoundException('Shifokor topilmadi');
 
-    const now = new Date();
-    const activeTreatments: any[] = [];
-    const futureAppointments: any[] = [];
-    let historicalCount = 0;
-
-    for (const appt of doctor.appointments) {
-      const isExpiredPending =
-        appt.status === AppointmentStatus.PENDING &&
-        appt.expiresAt &&
-        new Date(appt.expiresAt) <= now;
-
-      const isOngoing =
-        appt.status === AppointmentStatus.CHECKED_IN ||
-        (appt.actualStartTime &&
-          appt.status !== AppointmentStatus.COMPLETED &&
-          appt.status !== AppointmentStatus.CANCELLED) ||
-        appt.overrunActive;
-
-      if (isOngoing) {
-        activeTreatments.push({
-          id: appt.id,
-          patientName: appt.patient?.fullName || 'Bemor',
-          patientPhone: appt.patient?.phone || '',
-          startTime: appt.startTime.toISOString(),
-          status: appt.status,
-          branchName: appt.branch?.nameUz || '',
-          actualStartTime: appt.actualStartTime ? appt.actualStartTime.toISOString() : undefined,
-        });
-        continue;
-      }
-
-      const isFutureActive =
-        !isExpiredPending &&
-        new Date(appt.startTime) >= now &&
-        (appt.status === AppointmentStatus.PENDING || appt.status === AppointmentStatus.CONFIRMED);
-
-      if (isFutureActive) {
-        futureAppointments.push({
-          id: appt.id,
-          patientName: appt.patient?.fullName || 'Bemor',
-          patientPhone: appt.patient?.phone || '',
-          startTime: appt.startTime.toISOString(),
-          status: appt.status,
-          branchName: appt.branch?.nameUz || '',
-        });
-      } else {
-        historicalCount++;
-      }
-    }
+    const blockers = await checkEntityLifecycleBlockers(this.prisma, {
+      doctorId: id,
+      defaultSafeAction: 'ARCHIVE',
+    });
 
     const staffConsequences: string[] = [];
     if (doctor.staffUser) {
@@ -278,60 +390,43 @@ export class DoctorsService {
         `Shifokorning ${doctor.schedules.length} ta faol ish grafigi nofaol qilinadi.`,
       );
     }
-    if (doctor.branches.length > 0) {
-      scheduleConsequences.push(
-        `${doctor.branches.length} ta filial biriktirmasi olib tashlanadi.`,
-      );
-    }
-    if (doctor.services.length > 0) {
-      scheduleConsequences.push(
-        `${doctor.services.length} ta ko'rsatiladigan xizmat biriktirmasi olib tashlanadi.`,
-      );
-    }
 
-    let canDelete = true;
-    let actionType: 'DELETE' | 'ARCHIVE' | 'BLOCK' = 'DELETE';
-    let resolutionGuidance = '';
-
-    if (activeTreatments.length > 0) {
-      canDelete = false;
-      actionType = 'BLOCK';
-      resolutionGuidance =
-        `Hozirda shifokor qabulida davolanishi davom etayotgan ${activeTreatments.length} ta bemor mavjud. ` +
-        `O'chirish yoki arxivlashdan oldin avval taqvim sahifasiga o'tib, davolash jarayonini yakunlang.`;
-    } else if (futureAppointments.length > 0) {
-      canDelete = false;
-      actionType = 'BLOCK';
-      resolutionGuidance =
-        `Shifokorga rejalashtirilgan ${futureAppointments.length} ta kelgusi faol qabul mavjud. ` +
-        `Bemorlarni qabulsiz qoldirmaslik uchun avval ularni boshqa shifokorga qayta rejalashtiring yoki bekor qiling.`;
-    } else if (historicalCount > 0) {
-      canDelete = true;
-      actionType = 'ARCHIVE';
-      resolutionGuidance =
-        `Shifokorda o'tmishdagi qabullar tarixi (${historicalCount} ta) mavjud. ` +
-        `Klinik va moliyaviy yozuvlar yaxlitligini saqlash maqsadida shifokor profili arxivlanadi va nofaol qilinadi.`;
+    // Accurate consequence descriptions:
+    // Only on clean DELETE are branch and service assignments removed.
+    // On ARCHIVE, assignments are preserved for historical continuity.
+    if (blockers.actionType === 'DELETE') {
+      if (doctor.branches.length > 0) {
+        scheduleConsequences.push(
+          `${doctor.branches.length} ta filial biriktirmasi olib tashlanadi.`,
+        );
+      }
+      if (doctor.services.length > 0) {
+        scheduleConsequences.push(
+          `${doctor.services.length} ta ko'rsatiladigan xizmat biriktirmasi olib tashlanadi.`,
+        );
+      }
     } else {
-      canDelete = true;
-      actionType = 'DELETE';
-      resolutionGuidance =
-        `Shifokorga tegishli hech qanday qabullar mavjud emas. Shifokor profili va sozlamalari tizimdan to'liq o'chiriladi.`;
+      if (doctor.branches.length > 0 || doctor.services.length > 0) {
+        scheduleConsequences.push(
+          `Tarixiy yozuvlar yaxlitligini ta'minlash uchun filial va xizmat biriktirmalari arxivda saqlab qolinadi.`,
+        );
+      }
     }
 
     return {
       entityId: doctor.id,
       entityName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`,
-      canDelete,
-      actionType,
-      hasClinicalHistory: historicalCount > 0 || activeTreatments.length > 0 || futureAppointments.length > 0,
-      activeTreatmentCount: activeTreatments.length,
-      activeTreatments,
-      futureAppointmentCount: futureAppointments.length,
-      futureAppointments,
-      historicalAppointmentCount: historicalCount,
+      canDelete: blockers.canProceed,
+      actionType: blockers.actionType,
+      hasClinicalHistory: blockers.hasClinicalHistory,
+      activeTreatmentCount: blockers.activeTreatmentCount,
+      activeTreatments: blockers.activeTreatments,
+      futureAppointmentCount: blockers.futureAppointmentCount,
+      futureAppointments: blockers.futureAppointments,
+      historicalAppointmentCount: blockers.historicalAppointmentCount,
       staffConsequences,
       scheduleConsequences,
-      resolutionGuidance,
+      resolutionGuidance: blockers.resolutionGuidance,
     };
   }
 
@@ -349,94 +444,21 @@ export class DoctorsService {
 
       const doctor = await tx.doctor.findUnique({
         where: { id },
-        include: {
-          staffUser: true,
-          appointments: {
-            select: {
-              id: true,
-              status: true,
-              startTime: true,
-              actualStartTime: true,
-              overrunActive: true,
-              expiresAt: true,
-              patient: { select: { fullName: true } },
-            },
-          },
-        },
+        include: { staffUser: true },
       });
 
       if (!doctor) throw new NotFoundException('Shifokor topilmadi');
 
-      const now = new Date();
-      const activeTreatments: any[] = [];
-      const futureAppointments: any[] = [];
-      let historicalCount = 0;
+      const blockers = await checkEntityLifecycleBlockers(tx, {
+        doctorId: id,
+        defaultSafeAction: 'ARCHIVE',
+      });
+      assertLifecycleUnblocked(blockers, 'Shifokor');
 
-      for (const appt of doctor.appointments) {
-        const isExpiredPending =
-          appt.status === AppointmentStatus.PENDING &&
-          appt.expiresAt &&
-          new Date(appt.expiresAt) <= now;
-
-        const isOngoing =
-          appt.status === AppointmentStatus.CHECKED_IN ||
-          (appt.actualStartTime &&
-            appt.status !== AppointmentStatus.COMPLETED &&
-            appt.status !== AppointmentStatus.CANCELLED) ||
-          appt.overrunActive;
-
-        if (isOngoing) {
-          activeTreatments.push({
-            id: appt.id,
-            patientName: appt.patient?.fullName || 'Bemor',
-            status: appt.status,
-          });
-          continue;
-        }
-
-        const isFutureActive =
-          !isExpiredPending &&
-          new Date(appt.startTime) >= now &&
-          (appt.status === AppointmentStatus.PENDING || appt.status === AppointmentStatus.CONFIRMED);
-
-        if (isFutureActive) {
-          futureAppointments.push({
-            id: appt.id,
-            patientName: appt.patient?.fullName || 'Bemor',
-            startTime: appt.startTime.toISOString(),
-            status: appt.status,
-          });
-        } else {
-          historicalCount++;
-        }
-      }
-
-      // Block removal if ongoing treatments exist
-      if (activeTreatments.length > 0) {
-        throw new ConflictException({
-          statusCode: 409,
-          error: 'ACTIVE_TREATMENT_IN_PROGRESS',
-          message:
-            `Shifokorni o'chirish/arxivlash taqiqlanadi: ayni paytda muolajada bo'lgan ${activeTreatments.length} ta bemor mavjud. ` +
-            `Avval qabulni yakunlang.`,
-          activeTreatments,
-        });
-      }
-
-      // Block removal if future active reservations exist
-      if (futureAppointments.length > 0) {
-        throw new ConflictException({
-          statusCode: 409,
-          error: 'FUTURE_APPOINTMENTS_EXIST',
-          message:
-            `Shifokorni o'chirish/arxivlash taqiqlanadi: kelgusida ${futureAppointments.length} ta tasdiqlangan yoki kutilayotgan qabul mavjud. ` +
-            `Avval ushbu qabullarni boshqa shifokorga ko'chiring yoki bekor qiling.`,
-          futureAppointments,
-        });
-      }
+      const actorId = resolveActorId(actorUser);
 
       // Safe Archival if historical appointments exist
-      if (historicalCount > 0) {
+      if (blockers.historicalAppointmentCount > 0) {
         await tx.doctor.update({
           where: { id },
           data: { isArchived: true, isActive: false },
@@ -469,13 +491,13 @@ export class DoctorsService {
 
         await this.auditService.logTransactional({
           tx,
-          userId: actorUser?.id,
+          userId: actorId,
           action: 'doctor.archive',
           entity: 'doctor',
           entityId: id,
           details: {
             doctorName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`,
-            historicalAppointments: historicalCount,
+            historicalAppointments: blockers.historicalAppointmentCount,
             reason: 'safe_lifecycle_archival',
           },
         });
@@ -518,7 +540,7 @@ export class DoctorsService {
 
       await this.auditService.logTransactional({
         tx,
-        userId: actorUser?.id,
+        userId: actorId,
         action: 'doctor.delete',
         entity: 'doctor',
         entityId: id,

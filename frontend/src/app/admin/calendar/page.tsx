@@ -240,7 +240,26 @@ export default function AdminCalendarPage() {
       const parsed = new Date(dParam);
       if (!isNaN(parsed.getTime())) setCurrentDate(parsed);
     }
-  }, []);
+    const apptId = params.get('appointmentId');
+    if (apptId) {
+      api
+        .getAppointmentDetail(apptId)
+        .then((detail) => {
+          if (detail) {
+            if (detail.startTime) {
+              const apptDate = new Date(detail.startTime);
+              if (!isNaN(apptDate.getTime())) {
+                setCurrentDate(apptDate);
+              }
+            }
+            openAppointment(detail);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to load appointment from URL parameter', err);
+        });
+    }
+  }, [openAppointment]);
 
   // Load fixtures
   useEffect(() => {

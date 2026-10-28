@@ -40,7 +40,7 @@ import {
   StaffRole,
 } from '@prisma/client';
 import * as assert from 'assert';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, ConflictException, ForbiddenException } from '@nestjs/common';
 import request from 'supertest';
 import { JwtService } from '@nestjs/jwt';
 
@@ -2205,6 +2205,389 @@ async function runAllPrioritiesVerification() {
         foundOngoing.some((c) => c.id === ongoingAppt.id),
         'Candidate query must capture ongoing treatment that started in the past and is currently in the chair',
       );
+    });
+
+    // =========================================================================
+    // SECTION 10: Lifecycle Bypass Prevention, Audit Actor Identity & Concurrency Safety
+    // =========================================================================
+    console.log('\n--- SECTION 10: Lifecycle Bypass Prevention, Audit Actor & Concurrency ---');
+
+    await test('10.1 DoctorsService.archive() strictly blocks on active treatment and future appointments', async () => {
+      const activeDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Active',
+          lastNameUz: 'Doc',
+          firstNameRu: 'Активный',
+          lastNameRu: 'Врач',
+          slug: `active-archive-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(activeDoc.id);
+
+      const futureAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_fut_arch_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: activeDoc.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: new Date(Date.now() + 2 * 24 * 3600 * 1000),
+          endTime: new Date(Date.now() + 2 * 24 * 3600 * 1000 + 30 * 60 * 1000),
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(futureAppt.id);
+
+      // Attempting to archive active doctor MUST throw 409 ConflictException
+      let caughtErr: any = null;
+      try {
+        await doctorsService.archive(activeDoc.id, { sub: staff.id, role: StaffRole.ADMIN } as any);
+      } catch (err) {
+        caughtErr = err;
+      }
+
+      assert.ok(caughtErr instanceof ConflictException, 'Direct archive must throw ConflictException when future appointments exist');
+      assert.strictEqual((caughtErr.getResponse() as any).error, 'FUTURE_APPOINTMENTS_EXIST');
+
+      // Verify doctor was NOT archived
+      const recheckedDoc = await prisma.doctor.findUnique({ where: { id: activeDoc.id } });
+      assert.strictEqual(recheckedDoc?.isActive, true);
+      assert.strictEqual(recheckedDoc?.isArchived, false);
+    });
+
+    await test('10.2 DoctorsService.update({ isActive: false }) enforces lifecycle blocker check', async () => {
+      const busyDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Busy',
+          lastNameUz: 'Doc',
+          firstNameRu: 'Занятый',
+          lastNameRu: 'Врач',
+          slug: `busy-update-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(busyDoc.id);
+
+      const ongoingAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_ong_upd_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: busyDoc.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CHECKED_IN,
+          actualStartTime: new Date(Date.now() - 10 * 60 * 1000),
+          startTime: new Date(Date.now() - 10 * 60 * 1000),
+          endTime: new Date(Date.now() + 20 * 60 * 1000),
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(ongoingAppt.id);
+
+      let caughtErr: any = null;
+      try {
+        await doctorsService.update(busyDoc.id, { isActive: false }, { sub: staff.id, role: StaffRole.ADMIN } as any);
+      } catch (err) {
+        caughtErr = err;
+      }
+
+      assert.ok(caughtErr instanceof ConflictException, 'Deactivating busy doctor via update must throw ConflictException');
+      assert.strictEqual((caughtErr.getResponse() as any).error, 'ACTIVE_TREATMENT_IN_PROGRESS');
+
+      const recheckedDoc = await prisma.doctor.findUnique({ where: { id: busyDoc.id } });
+      assert.strictEqual(recheckedDoc?.isActive, true);
+    });
+
+    await test('10.3 DoctorsService.update() blocks removing a branch where doctor has future appointments', async () => {
+      const branch2 = await prisma.branch.create({
+        data: {
+          nameUz: `Filial 2 ${runId}`,
+          nameRu: `Филиал 2 ${runId}`,
+          addressUz: 'Manzil 2',
+          addressRu: 'Адрес 2',
+          phone: '+998901234568',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(branch2.id);
+
+      const multiBranchDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Multi',
+          lastNameUz: 'Branch',
+          firstNameRu: 'Мульти',
+          lastNameRu: 'Врач',
+          slug: `multibranch-doc-${runId}`,
+          isActive: true,
+          branches: {
+            create: [{ branchId: branch.id }, { branchId: branch2.id }],
+          },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(multiBranchDoc.id);
+
+      const apptAtBranch2 = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_b2_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: multiBranchDoc.id,
+          serviceId: service.id,
+          branchId: branch2.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: new Date(Date.now() + 24 * 3600 * 1000),
+          endTime: new Date(Date.now() + 24 * 3600 * 1000 + 30 * 60 * 1000),
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(apptAtBranch2.id);
+
+      // Attempt to remove branch2 from doctor's branches: branchIds: [branch.id]
+      let caughtErr: any = null;
+      try {
+        await doctorsService.update(
+          multiBranchDoc.id,
+          { branchIds: [branch.id] },
+          { sub: staff.id, role: StaffRole.ADMIN } as any,
+        );
+      } catch (err) {
+        caughtErr = err;
+      }
+
+      assert.ok(caughtErr instanceof ConflictException, 'Removing branch with future appointments must fail with ConflictException');
+      assert.strictEqual((caughtErr.getResponse() as any).error, 'FUTURE_APPOINTMENTS_AT_REMOVED_BRANCH');
+
+      // Verify branch2 was NOT removed
+      const docBranches = await prisma.doctorBranch.findMany({ where: { doctorId: multiBranchDoc.id } });
+      assert.strictEqual(docBranches.length, 2);
+    });
+
+    await test('10.4 DoctorsService.update() blocks removing a service where doctor has active/future appointments', async () => {
+      const service2 = await prisma.service.create({
+        data: {
+          nameUz: `Xizmat 2 ${runId}`,
+          nameRu: `Услуга 2 ${runId}`,
+          slug: `service-2-${runId}`,
+          durationMinutes: 45,
+          priceFrom: 200000,
+          isActive: true,
+        },
+      });
+      fixtures.services.push(service2.id);
+
+      const multiSrvDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Multi',
+          lastNameUz: 'Service',
+          firstNameRu: 'Мульти',
+          lastNameRu: 'Услуга',
+          slug: `multisrv-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: {
+            create: [{ serviceId: service.id }, { serviceId: service2.id }],
+          },
+        },
+      });
+      fixtures.doctors.push(multiSrvDoc.id);
+
+      const apptForSrv2 = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_s2_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: multiSrvDoc.id,
+          serviceId: service2.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: new Date(Date.now() + 24 * 3600 * 1000),
+          endTime: new Date(Date.now() + 24 * 3600 * 1000 + 45 * 60 * 1000),
+          serviceName: service2.nameUz,
+          durationMinutes: 45,
+          bufferMinutes: 5,
+        },
+      });
+      fixtures.appointments.push(apptForSrv2.id);
+
+      // Attempt to remove service2 from doctor's services
+      let caughtErr: any = null;
+      try {
+        await doctorsService.update(
+          multiSrvDoc.id,
+          { serviceIds: [service.id] },
+          { sub: staff.id, role: StaffRole.ADMIN } as any,
+        );
+      } catch (err) {
+        caughtErr = err;
+      }
+
+      assert.ok(caughtErr instanceof ConflictException, 'Removing service with future appointments must fail with ConflictException');
+      assert.strictEqual((caughtErr.getResponse() as any).error, 'FUTURE_APPOINTMENTS_FOR_REMOVED_SERVICE');
+
+      const docServices = await prisma.doctorService.findMany({ where: { doctorId: multiSrvDoc.id } });
+      assert.strictEqual(docServices.length, 2);
+    });
+
+    await test('10.5 ClinicService.updateBranch({ isActive: false }) rejects ADMIN with 403, allows OWNER with lifecycle checks', async () => {
+      const testBranch = await prisma.branch.create({
+        data: {
+          nameUz: `RBAC Branch ${runId}`,
+          nameRu: `РБАК Филиал ${runId}`,
+          addressUz: 'Manzil',
+          addressRu: 'Адрес',
+          phone: '+998901234569',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(testBranch.id);
+
+      // ADMIN role tries to set isActive: false via updateBranch -> MUST fail with 403 Forbidden
+      let adminErr: any = null;
+      try {
+        await clinicService.updateBranch(
+          testBranch.id,
+          { isActive: false },
+          { sub: staff.id, role: StaffRole.ADMIN } as any,
+        );
+      } catch (err) {
+        adminErr = err;
+      }
+
+      assert.ok(adminErr instanceof ForbiddenException, 'ADMIN cannot deactivate branch via updateBranch (ForbiddenException)');
+
+      // OWNER role sets isActive: false on clean branch -> delegates to deleteBranch and deletes
+      const ownerRes: any = await clinicService.updateBranch(
+        testBranch.id,
+        { isActive: false },
+        { sub: staff.id, role: StaffRole.OWNER } as any,
+      );
+
+      assert.strictEqual(ownerRes.success, true);
+      assert.strictEqual(ownerRes.action, 'DELETE');
+
+      const recheckedBranch = await prisma.branch.findUnique({ where: { id: testBranch.id } });
+      assert.strictEqual(recheckedBranch, null, 'Clean branch must be cleanly deleted by OWNER');
+    });
+
+    await test('10.6 Lifecycle audit records contain the authenticated actor ID (sub), NOT null', async () => {
+      const auditDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Audit',
+          lastNameUz: 'Actor',
+          firstNameRu: 'Аудит',
+          lastNameRu: 'Актор',
+          slug: `audit-actor-doc-${runId}`,
+          isActive: true,
+        },
+      });
+      fixtures.doctors.push(auditDoc.id);
+
+      // Authenticated deletion with real actor sub
+      const delRes = await doctorsService.delete(auditDoc.id, {
+        sub: staff.id,
+        email: staff.email,
+        role: StaffRole.OWNER,
+      } as any);
+
+      assert.strictEqual(delRes.success, true);
+
+      // Query audit log
+      const auditLog = await prisma.auditLog.findFirst({
+        where: {
+          action: 'doctor.delete',
+          entityId: auditDoc.id,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      assert.ok(auditLog, 'Audit log record must be created');
+      assert.strictEqual(auditLog.userId, staff.id, 'Audit log userId must match actor sub, NOT null');
+    });
+
+    await test('10.7 PostgreSQL concurrent booking vs branch deactivation guarantees consistent serializable result', async () => {
+      const concBranch = await prisma.branch.create({
+        data: {
+          nameUz: `Conc Branch ${runId}`,
+          nameRu: `Конк Филиал ${runId}`,
+          addressUz: 'Manzil',
+          addressRu: 'Адрес',
+          phone: '+998901234560',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(concBranch.id);
+
+      const concDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Conc',
+          lastNameUz: 'Doc',
+          firstNameRu: 'Конк',
+          lastNameRu: 'Врач',
+          slug: `conc-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: concBranch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(concDoc.id);
+
+      const sched = await prisma.doctorSchedule.create({
+        data: {
+          doctorId: concDoc.id,
+          branchId: concBranch.id,
+          dayOfWeek: 'MONDAY',
+          startTime: '09:00',
+          endTime: '18:00',
+          isActive: true,
+        },
+      });
+
+      // Target future slot on Monday
+      const nextMondayUtc = new Date('2026-11-09T05:00:00.000Z'); // 10:00 Tashkent time
+
+      // Fire concurrent booking and branch deactivation
+      const [bookingResult, deactivationResult] = await Promise.allSettled([
+        apptsService.createBooking({
+          patientName: 'Conc Patient',
+          patientPhone: '+998901234567',
+          doctorId: concDoc.id,
+          serviceId: service.id,
+          branchId: concBranch.id,
+          startTime: nextMondayUtc.toISOString(),
+          consentGiven: true,
+          idempotencyKey: `conc_book_${runId}_${Math.random()}`,
+        }),
+        clinicService.deleteBranch(concBranch.id, { sub: staff.id, role: StaffRole.OWNER } as any),
+      ]);
+
+      // Under PostgreSQL advisory locking:
+      // Either booking acquired locks first -> booking succeeded, and branch deactivation was BLOCKED (rejected with 409 Conflict)
+      // OR branch deactivation acquired locks first -> branch was deleted, and booking failed (rejected because branch not active/found)
+      if (bookingResult.status === 'fulfilled') {
+        fixtures.appointments.push(bookingResult.value.id);
+        assert.strictEqual(
+          deactivationResult.status,
+          'rejected',
+          'If booking commits first, branch deactivation must be rejected with 409 Conflict',
+        );
+      } else {
+        assert.strictEqual(
+          deactivationResult.status,
+          'fulfilled',
+          'If deactivation commits first, branch was deleted and booking was rejected',
+        );
+      }
     });
 
     console.log('\n================================================================');

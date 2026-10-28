@@ -1,8 +1,19 @@
-import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, StaffRole } from '@prisma/client';
 import { getBranchLockKey, acquireDeterministicLocks } from '../common/concurrency-lock.helper';
+import {
+  checkEntityLifecycleBlockers,
+  assertLifecycleUnblocked,
+  resolveActorId,
+} from '../common/lifecycle.helper';
 
 @Injectable()
 export class ClinicService {
@@ -239,9 +250,45 @@ export class ClinicService {
     return this.prisma.branch.create({ data });
   }
 
-  async updateBranch(id: string, data: any) {
+  async updateBranch(id: string, data: any, actorUser?: any) {
     this.validateBranchData(data);
-    return this.prisma.branch.update({ where: { id }, data });
+
+    // If attempting to deactivate branch
+    if (data.isActive !== undefined && data.isActive === false) {
+      if (actorUser && actorUser.role !== StaffRole.OWNER) {
+        throw new ForbiddenException('Faqat OWNER filiallarni nofaol qilish yoki o‘chirish huquqiga ega');
+      }
+      // Delegate to safe lifecycle deactivation/deletion
+      return this.deleteBranch(id, actorUser);
+    }
+
+    const lockKey = getBranchLockKey(id);
+
+    return this.prisma.$transaction(async (tx) => {
+      await acquireDeterministicLocks(tx, [lockKey]);
+
+      const existing = await tx.branch.findUnique({ where: { id } });
+      if (!existing) throw new NotFoundException('Filial topilmadi');
+
+      const updated = await tx.branch.update({ where: { id }, data });
+
+      if (actorUser) {
+        const actorId = resolveActorId(actorUser);
+        await this.auditService.logTransactional({
+          tx,
+          userId: actorId,
+          action: 'branch.update',
+          entity: 'branch',
+          entityId: id,
+          details: {
+            branchName: updated.nameUz,
+            updatedFields: Object.keys(data),
+          },
+        });
+      }
+
+      return updated;
+    });
   }
 
   /**
@@ -259,80 +306,27 @@ export class ClinicService {
           where: { isActive: true },
           select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
         },
-        appointments: {
-          select: {
-            id: true,
-            status: true,
-            startTime: true,
-            endTime: true,
-            actualStartTime: true,
-            overrunActive: true,
-            expiresAt: true,
-            patient: { select: { fullName: true, phone: true } },
-            doctor: { select: { firstNameUz: true, lastNameUz: true } },
-          },
-          orderBy: { startTime: 'asc' },
-        },
       },
     });
 
     if (!branch) throw new NotFoundException('Filial topilmadi');
 
-    const now = new Date();
-    const activeTreatments: any[] = [];
-    const futureAppointments: any[] = [];
-    let historicalCount = 0;
-
-    for (const appt of branch.appointments) {
-      const isExpiredPending =
-        appt.status === AppointmentStatus.PENDING &&
-        appt.expiresAt &&
-        new Date(appt.expiresAt) <= now;
-
-      const isOngoing =
-        appt.status === AppointmentStatus.CHECKED_IN ||
-        (appt.actualStartTime &&
-          appt.status !== AppointmentStatus.COMPLETED &&
-          appt.status !== AppointmentStatus.CANCELLED) ||
-        appt.overrunActive;
-
-      if (isOngoing) {
-        activeTreatments.push({
-          id: appt.id,
-          patientName: appt.patient?.fullName || 'Bemor',
-          patientPhone: appt.patient?.phone || '',
-          doctorName: appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}` : '',
-          startTime: appt.startTime.toISOString(),
-          status: appt.status,
-          actualStartTime: appt.actualStartTime ? appt.actualStartTime.toISOString() : undefined,
-        });
-        continue;
-      }
-
-      const isFutureActive =
-        !isExpiredPending &&
-        new Date(appt.startTime) >= now &&
-        (appt.status === AppointmentStatus.PENDING || appt.status === AppointmentStatus.CONFIRMED);
-
-      if (isFutureActive) {
-        futureAppointments.push({
-          id: appt.id,
-          patientName: appt.patient?.fullName || 'Bemor',
-          patientPhone: appt.patient?.phone || '',
-          doctorName: appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}` : '',
-          startTime: appt.startTime.toISOString(),
-          status: appt.status,
-        });
-      } else {
-        historicalCount++;
-      }
-    }
+    const blockers = await checkEntityLifecycleBlockers(this.prisma, {
+      branchId: id,
+      defaultSafeAction: 'DEACTIVATE',
+    });
 
     const staffConsequences: string[] = [];
     if (branch.doctors.length > 0) {
-      staffConsequences.push(
-        `Filialga biriktirilgan ${branch.doctors.length} ta shifokor bog'lanmasi olib tashlanadi.`,
-      );
+      if (blockers.actionType === 'DELETE') {
+        staffConsequences.push(
+          `Filialga biriktirilgan ${branch.doctors.length} ta shifokor bog'lanmasi olib tashlanadi.`,
+        );
+      } else {
+        staffConsequences.push(
+          `Filialga biriktirilgan ${branch.doctors.length} ta shifokor bog'lanmasi tarixiy yozuvlar yaxlitligi uchun saqlab qolinadi.`,
+        );
+      }
     }
 
     const scheduleConsequences: string[] = [];
@@ -342,49 +336,20 @@ export class ClinicService {
       );
     }
 
-    let canDelete = true;
-    let actionType: 'DELETE' | 'DEACTIVATE' | 'BLOCK' = 'DELETE';
-    let resolutionGuidance = '';
-
-    if (activeTreatments.length > 0) {
-      canDelete = false;
-      actionType = 'BLOCK';
-      resolutionGuidance =
-        `Ushbu filialda ayni paytda muolajada bo'lgan ${activeTreatments.length} ta bemor mavjud. ` +
-        `Filialni o'chirish yoki nofaol qilishdan oldin avval muolajani yakunlang.`;
-    } else if (futureAppointments.length > 0) {
-      canDelete = false;
-      actionType = 'BLOCK';
-      resolutionGuidance =
-        `Filialda kelgusiga rejalashtirilgan ${futureAppointments.length} ta faol qabul mavjud. ` +
-        `Bemorlarni qabulsiz qoldirmaslik uchun avval ushbu qabullarni boshqa filialga ko'chiring yoki bekor qiling.`;
-    } else if (historicalCount > 0) {
-      canDelete = true;
-      actionType = 'DEACTIVATE';
-      resolutionGuidance =
-        `Filialda o'tmishdagi qabullar tarixi (${historicalCount} ta) mavjud. ` +
-        `Tarixiy ma'lumotlar va hisobotlar yaxlitligini saqlash uchun filial nofaol holatga o'tkaziladi.`;
-    } else {
-      canDelete = true;
-      actionType = 'DELETE';
-      resolutionGuidance =
-        `Filialda hech qanday qabullar tarixi yo'q. Filial tizimdan to'liq o'chiriladi.`;
-    }
-
     return {
       entityId: branch.id,
       entityName: branch.nameUz,
-      canDelete,
-      actionType,
-      hasClinicalHistory: historicalCount > 0 || activeTreatments.length > 0 || futureAppointments.length > 0,
-      activeTreatmentCount: activeTreatments.length,
-      activeTreatments,
-      futureAppointmentCount: futureAppointments.length,
-      futureAppointments,
-      historicalAppointmentCount: historicalCount,
+      canDelete: blockers.canProceed,
+      actionType: blockers.actionType,
+      hasClinicalHistory: blockers.hasClinicalHistory,
+      activeTreatmentCount: blockers.activeTreatmentCount,
+      activeTreatments: blockers.activeTreatments,
+      futureAppointmentCount: blockers.futureAppointmentCount,
+      futureAppointments: blockers.futureAppointments,
+      historicalAppointmentCount: blockers.historicalAppointmentCount,
       staffConsequences,
       scheduleConsequences,
-      resolutionGuidance,
+      resolutionGuidance: blockers.resolutionGuidance,
     };
   }
 
@@ -402,93 +367,20 @@ export class ClinicService {
 
       const branch = await tx.branch.findUnique({
         where: { id },
-        include: {
-          appointments: {
-            select: {
-              id: true,
-              status: true,
-              startTime: true,
-              actualStartTime: true,
-              overrunActive: true,
-              expiresAt: true,
-              patient: { select: { fullName: true } },
-            },
-          },
-        },
       });
 
       if (!branch) throw new NotFoundException('Filial topilmadi');
 
-      const now = new Date();
-      const activeTreatments: any[] = [];
-      const futureAppointments: any[] = [];
-      let historicalCount = 0;
+      const blockers = await checkEntityLifecycleBlockers(tx, {
+        branchId: id,
+        defaultSafeAction: 'DEACTIVATE',
+      });
+      assertLifecycleUnblocked(blockers, 'Filial');
 
-      for (const appt of branch.appointments) {
-        const isExpiredPending =
-          appt.status === AppointmentStatus.PENDING &&
-          appt.expiresAt &&
-          new Date(appt.expiresAt) <= now;
-
-        const isOngoing =
-          appt.status === AppointmentStatus.CHECKED_IN ||
-          (appt.actualStartTime &&
-            appt.status !== AppointmentStatus.COMPLETED &&
-            appt.status !== AppointmentStatus.CANCELLED) ||
-          appt.overrunActive;
-
-        if (isOngoing) {
-          activeTreatments.push({
-            id: appt.id,
-            patientName: appt.patient?.fullName || 'Bemor',
-            status: appt.status,
-          });
-          continue;
-        }
-
-        const isFutureActive =
-          !isExpiredPending &&
-          new Date(appt.startTime) >= now &&
-          (appt.status === AppointmentStatus.PENDING || appt.status === AppointmentStatus.CONFIRMED);
-
-        if (isFutureActive) {
-          futureAppointments.push({
-            id: appt.id,
-            patientName: appt.patient?.fullName || 'Bemor',
-            startTime: appt.startTime.toISOString(),
-            status: appt.status,
-          });
-        } else {
-          historicalCount++;
-        }
-      }
-
-      // Block removal if ongoing treatments exist
-      if (activeTreatments.length > 0) {
-        throw new ConflictException({
-          statusCode: 409,
-          error: 'ACTIVE_TREATMENT_IN_PROGRESS',
-          message:
-            `Filialni o'chirish/nofaol qilish taqiqlanadi: filialda ayni paytda muolajada bo'lgan ${activeTreatments.length} ta bemor mavjud. ` +
-            `Avval qabulni yakunlang.`,
-          activeTreatments,
-        });
-      }
-
-      // Block removal if future active reservations exist
-      if (futureAppointments.length > 0) {
-        throw new ConflictException({
-          statusCode: 409,
-          error: 'FUTURE_APPOINTMENTS_EXIST',
-          message:
-            `Filialni o'chirish/nofaol qilish taqiqlanadi: kelgusida ${futureAppointments.length} ta tasdiqlangan yoki kutilayotgan qabul mavjud. ` +
-            `Avval ushbu qabullarni boshqa filialga ko'chiring yoki bekor qiling.`,
-          futureAppointments,
-        });
-      }
+      const actorId = resolveActorId(actorUser);
 
       // Safe Deactivation if historical appointments exist
-      if (historicalCount > 0) {
+      if (blockers.historicalAppointmentCount > 0) {
         await tx.branch.update({
           where: { id },
           data: { isActive: false },
@@ -501,13 +393,13 @@ export class ClinicService {
 
         await this.auditService.logTransactional({
           tx,
-          userId: actorUser?.id,
+          userId: actorId,
           action: 'branch.deactivate',
           entity: 'branch',
           entityId: id,
           details: {
             branchName: branch.nameUz,
-            historicalAppointments: historicalCount,
+            historicalAppointments: blockers.historicalAppointmentCount,
             reason: 'safe_lifecycle_deactivation',
           },
         });
@@ -528,7 +420,7 @@ export class ClinicService {
 
       await this.auditService.logTransactional({
         tx,
-        userId: actorUser?.id,
+        userId: actorId,
         action: 'branch.delete',
         entity: 'branch',
         entityId: id,

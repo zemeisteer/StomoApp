@@ -403,9 +403,10 @@ export class AppointmentsService {
     const cleanName = dto.patientName.trim();
 
     // 5. Atomic Concurrency Lock and DB Transaction with Bounded Retries
+    const effectiveBranchId = dto.branchId || resolvedBranchId;
     const lockKeys = [
       getDoctorLockKey(dto.doctorId),
-      ...(dto.branchId ? [getBranchLockKey(dto.branchId)] : []),
+      ...(effectiveBranchId ? [getBranchLockKey(effectiveBranchId)] : []),
     ];
     let createdAppointment: any;
     const maxRetries = 3;

@@ -339,8 +339,17 @@ All 48 comprehensive regression checks executed against the isolated `dentacare_
   [PASS] 9.7 Effective schedule validation: Regular + adjacent overtime at same branch are merged into continuous available interval
   [PASS] 9.8 Ongoing treatment lookback query captures active treatments currently in the chair
 
+--- SECTION 10: Lifecycle Bypass Prevention, Audit Actor & Concurrency ---
+  [PASS] 10.1 DoctorsService.archive() strictly blocks on active treatment and future appointments
+  [PASS] 10.2 DoctorsService.update({ isActive: false }) enforces lifecycle blocker check
+  [PASS] 10.3 DoctorsService.update() blocks removing a branch where doctor has future appointments
+  [PASS] 10.4 DoctorsService.update() blocks removing a service where doctor has active/future appointments
+  [PASS] 10.5 ClinicService.updateBranch({ isActive: false }) rejects ADMIN with 403, allows OWNER with lifecycle checks
+  [PASS] 10.6 Lifecycle audit records contain the authenticated actor ID (sub), NOT null
+  [PASS] 10.7 PostgreSQL concurrent booking vs branch deactivation guarantees consistent serializable result
+
 ================================================================
-   ALL 48/48 VERIFICATION CHECKS PASSED SUCCESSFULLY!
+   ALL 55/55 VERIFICATION CHECKS PASSED SUCCESSFULLY!
 ================================================================
 
 [PASS] Cleanup completed cleanly. Zero leaked fixtures.
@@ -348,38 +357,88 @@ All 48 comprehensive regression checks executed against the isolated `dentacare_
 
 ---
 
-### 4. Type Checks & Production Build Verification
+### 4. Implementation Details by Priority
+
+#### Priority 1: Close Lifecycle Bypasses
+- **Unified Lifecycle Policy**: Created [`backend/src/common/lifecycle.helper.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/common/lifecycle.helper.ts) with `checkEntityLifecycleBlockers` and `resolveActorId`.
+- **Active Treatment Interval**: Correctly classified active treatments in the chair: `(startTime <= now && (effectiveOccupiedEnd > now || treatmentEnd > now))`. In-progress appointments are never falsely treated as historical merely because `startTime < now`.
+- **DoctorsService Hardening**:
+  - `archive()`, `update()`, and `delete()` enforce the shared lifecycle blocker check inside the advisory-locked transaction.
+  - Doctor branch and service removals (`branchIds`, `serviceIds`) are pre-validated against future appointments, rejecting unsafe changes with actionable errors (`FUTURE_APPOINTMENTS_AT_REMOVED_BRANCH`, `FUTURE_APPOINTMENTS_FOR_REMOVED_SERVICE`).
+- **ClinicService & Branch Protection**:
+  - `updateBranch()` rejects `isActive: false` from non-OWNER actors with HTTP 403 Forbidden.
+  - OWNER branch deactivations are securely delegated to the deterministic advisory-locked `deleteBranch()` implementation.
+- **Bounded Queries**: Replaced unbounded loading of historical records with bounded blocker lists (`take: 5`) and database-level aggregation counts (`count()`).
+
+#### Priority 2: Fix Audit Actor Identification
+- **Actor Resolution**: Fixed actor user identification where `actorUser?.id` evaluated to `undefined` (because `JwtStrategy` returns `{ sub, email, role, doctorId, tokenVersion }`).
+- Implemented `resolveActorId(actor)` extracting `actor.sub || actor.id`, validating non-emptiness.
+- Passed `@CurrentUser()` consistently across all lifecycle controller endpoints (`doctors.controller.ts`, `clinic.controller.ts`).
+- Guaranteed all audit records are written inside the business transaction with atomic rollback if the audit write fails.
+
+#### Priority 3: Quick Registration State Hardening
+- **Service Fallback Elimination**: Removed `srvs[0]` fallback when doctor has no services. Shows a clear empty state notice and disables registration.
+- **Multi-Branch Selection**: Requires explicit branch selection when multiple branches exist; shows visible branch name badge when single active branch.
+- **Slot Invalidation After Booking**: `handleResetQuickReg` clears slots, slot selection, and triggers `slotRefreshSeq` to immediately refetch fresh availability.
+- **Branch Change Hardening**: Context tagging (`loadedSlotContext`) disallows stale slot submissions across branch transitions. Slots and quotes clear immediately and submit button is disabled while loading.
+- **Conflict Recovery**: On slot conflict (409), availability is refreshed while preserving entered patient name and phone number.
+- **Jargon Removal**: Replaced internal terms ("Slot", "+overrun") with clear clinical terminology ("Bugungi bo'sh vaqt", "oraliq", "vaqt oralig'i").
+- **Calendar Linking**: Added direct navigation to `/admin/calendar` when no slots are available for today. Updated `/admin/calendar` to read `appointmentId` from URL search parameters, navigate to the appointment date, and open the modal automatically.
+
+#### Priority 4 & 5: Honest Automated Verification & Finished UI
+- Replaced screenshot-only script with [`backend/scripts/verify-phases-browser.js`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/scripts/verify-phases-browser.js) featuring strict test database isolation (`dentacare_test`), controlled fixtures, and assertions:
+  1. Quick registration booking creation via UI (`CustomSelect`, `PhoneInput`).
+  2. Saved appointment details assertion in card and database.
+  3. Reset ("Yangi bemor") and verification that booked slot is unavailable.
+  4. Rapid branch switching slot invalidation and submit disabling.
+  5. Doctor without services warning and submit disabling.
+  6. Malformed phone number rejection.
+  7. Calendar deep-linking (`/admin/calendar?appointmentId=...`) opening the exact appointment modal.
+  8–11. Lifecycle bypasses, RBAC permissions, audit actor resolution, and advisory-locked concurrency.
+- **Zero Native Alerts**: Replaced remaining `alert()` calls in admin flows with accessible inline feedback (`setStatusFeedback`, `setBulkError`).
+- **Responsive Viewport Verification**: Verified zero dropdown clipping, fluid layouts, and mobile scrolling across 360px, 390px, 768px, and 1440px desktop.
+- **Preserved Public Visuals**: Verified homepage and interactive 3D tooth remain functional with zero regressions (`home_3d_tooth.png`).
+
+---
+
+### 5. Type Checks & Production Build Verification
 
 ```bash
-# Backend TypeScript Check
-cd backend && npx tsc --noEmit
-# Result: 0 errors (Exit code 0)
-
-# Frontend TypeScript Check
-cd frontend && npx tsc --noEmit
-# Result: 0 errors (Exit code 0)
-
-# Backend NestJS Build
+# Backend TypeScript Check & Build
 cd backend && npm run build
 # Result: Successfully compiled to dist/ (Exit code 0)
 
 # Frontend Next.js Build
 cd frontend && npm run build
 # Result: All 29 pages compiled successfully (Exit code 0)
+
+# Full Backend Lifecycle Suite
+cd backend && npx ts-node scripts/verify-all-priorities.ts
+# Result: ALL 55/55 VERIFICATION CHECKS PASSED (Exit code 0)
+
+# Automated Browser E2E Suite
+cd backend && node scripts/verify-phases-browser.js
+# Result: ALL 11 REQUIREMENTS PASSED (Exit code 0)
 ```
 
 ---
 
-### 5. Visual Artifacts Captured
-- [`admin_quick_reg_form.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_quick_reg_form.png): Quick registration form with server-authoritative slot calculations, duration and buffer badges, price quote, phone validation, and consent checkbox.
-- [`admin_calendar_verified.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_calendar_verified.png): Admin calendar day view with filter clearing and slot timeline.
-- [`admin_doctor_lifecycle_modal.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_doctor_lifecycle_modal.png): Accessible `ModalDialog` displaying clean delete preview, impact statistics grid, and confirmation buttons.
-- [`admin_branch_lifecycle_modal.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/d78b18da-a8bd-4ef2-8e5f-61c0f329fd59/admin_branch_lifecycle_modal.png): Accessible `ModalDialog` displaying branch lifecycle preview with real clinical impact statistics.
+### 6. Visual Artifacts Captured
+- [`admin_quickreg_filled.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/admin_quickreg_filled.png): Quick registration form with branch, doctor, service, slot calculation, plain language labels, and consent checkbox.
+- [`admin_quickreg_360.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/admin_quickreg_360.png): 360px mobile viewport of admin overview page with zero horizontal clipping.
+- [`admin_quickreg_390.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/admin_quickreg_390.png): 390px standard mobile viewport.
+- [`admin_quickreg_768.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/admin_quickreg_768.png): 768px tablet layout.
+- [`admin_quickreg_1440.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/admin_quickreg_1440.png): 1440px desktop layout.
+- [`admin_doctor_lifecycle_modal_1440.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/admin_doctor_lifecycle_modal_1440.png): Doctor management screen showing status badges and delete controls.
+- [`admin_doctor_lifecycle_modal_390.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/admin_doctor_lifecycle_modal_390.png): Mobile doctor management view at 390px.
+- [`home_3d_tooth.png`](file:///C:/Users/user/.gemini/antigravity-ide/brain/a4915e24-dcb1-4bc4-ae4e-cf106282e5d0/home_3d_tooth.png): Public homepage verifying the interactive 3D tooth model and animations.
 
 ---
 
-### 6. Preserved Invariants & Integrity
-- **Branch**: `dev`
-- **Integrity**: No push to remote, no merge to `main`, no deploy, no data reset, zero real clinic records deleted.
-- **Background Processes**: Backend API running on port 4000, Frontend running on port 3000.
+### 7. Preserved Invariants & Integrity
+- **Branch**: `dev` (Working tree clean and ready; no force push, no touch of `main`, no deploy).
+- **Integrity**: Zero real clinic data deleted; isolated test database `dentacare_test` with complete `finally` cleanup.
+- **Localization**: Full Uzbek (primary) and Russian UI text maintained.
+- **Design System**: Established white/mint/teal palette, accessible contrast, and responsive layout preserved.
+
 

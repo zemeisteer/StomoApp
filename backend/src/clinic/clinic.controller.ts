@@ -217,8 +217,12 @@ export class ClinicController {
   @Put('branches/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  async updateBranch(@Param('id') id: string, @Body() data: UpdateBranchDto) {
-    return this.clinicService.updateBranch(id, data);
+  async updateBranch(
+    @Param('id') id: string,
+    @Body() data: UpdateBranchDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.clinicService.updateBranch(id, data, user);
   }
 
   @Get('branches/:id/lifecycle-preview')

@@ -168,15 +168,19 @@ export class DoctorsController {
   @Put('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  update(@Param('id') id: string, @Body() dto: UpdateDoctorDto) {
-    return this.doctorsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDoctorDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.doctorsService.update(id, dto, user);
   }
 
   @Put('admin/:id/archive')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  archive(@Param('id') id: string) {
-    return this.doctorsService.archive(id);
+  archive(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.doctorsService.archive(id, user);
   }
 
   @Get('admin/:id/lifecycle-preview')

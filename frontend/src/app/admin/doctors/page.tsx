@@ -1609,6 +1609,7 @@ export default function AdminDoctorsManagePage() {
                     onClick={() => {
                       const mondaySched = schedules.find((s) => s.dayOfWeek === 'MONDAY');
                       if (mondaySched) {
+                        setBulkError(null);
                         setPreviewResult(null);
                         setBulkForm((prev) => ({
                           ...prev,
@@ -1618,7 +1619,7 @@ export default function AdminDoctorsManagePage() {
                           breakEnd: mondaySched.breakEnd || '14:00',
                         }));
                       } else {
-                        alert("Dushanba kuni uchun mavjud jadval topilmadi");
+                        setBulkError("Dushanba kuni uchun mavjud jadval topilmadi");
                       }
                     }}
                     className="text-[11px] text-teal-700 hover:text-teal-900 font-bold flex items-center gap-1 hover:underline"
