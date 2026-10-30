@@ -31,10 +31,12 @@ import {
   Activity,
   FileCheck,
   ShieldAlert,
+  BarChart3,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { PhoneInput } from '../../components/PhoneInput';
 import { CustomSelect } from '../../components/CustomSelect';
+import { InteractiveOdontogram } from '../../components/InteractiveOdontogram';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -109,7 +111,11 @@ export default function AdminOverviewPage() {
   const loadReqSeqRef = useRef<number>(0);
   const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const isDoctor = user?.role === 'DOCTOR';
+  // Dynamic role switching & preview
+  const [roleOverride, setRoleOverride] = useState<'AUTO' | 'DOCTOR' | 'RECEPTIONIST' | 'OWNER'>('AUTO');
+  const effectiveRole = roleOverride === 'AUTO' ? (user?.role || 'ADMIN') : roleOverride;
+  const isDoctor = effectiveRole === 'DOCTOR';
+  const isOwner = effectiveRole === 'OWNER';
 
   useEffect(() => {
     return () => {
@@ -811,8 +817,70 @@ export default function AdminOverviewPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* Role View Switcher */}
+            <div className="flex items-center gap-1 bg-[#f3f8f7] p-1 rounded-xl border border-[#d8e5e2] text-xs">
+              <span className="text-[10px] font-bold text-[#52696e] px-1.5 hidden xl:inline">
+                {isUz ? 'Rol:' : 'Роль:'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setRoleOverride('AUTO')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                  roleOverride === 'AUTO'
+                    ? 'bg-[#167b78] text-white shadow-xs'
+                    : 'text-[#52696e] hover:text-[#152f34]'
+                }`}
+                title={isUz ? 'Haqiqiy rol bo\'yicha' : 'По фактической роли'}
+              >
+                {isUz ? 'Asl' : 'Авто'} ({user?.role || 'ADMIN'})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleOverride('DOCTOR')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                  effectiveRole === 'DOCTOR' && roleOverride !== 'AUTO'
+                    ? 'bg-[#167b78] text-white shadow-xs'
+                    : 'text-[#52696e] hover:text-[#152f34]'
+                }`}
+              >
+                🦷 {isUz ? 'Shifokor' : 'Врач'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleOverride('RECEPTIONIST')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                  effectiveRole === 'RECEPTIONIST'
+                    ? 'bg-[#167b78] text-white shadow-xs'
+                    : 'text-[#52696e] hover:text-[#152f34]'
+                }`}
+              >
+                📋 {isUz ? 'Qabulxona' : 'Рецепция'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleOverride('OWNER')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                  effectiveRole === 'OWNER' && roleOverride !== 'AUTO'
+                    ? 'bg-[#167b78] text-white shadow-xs'
+                    : 'text-[#52696e] hover:text-[#152f34]'
+                }`}
+              >
+                💼 {isUz ? 'Rahbar' : 'Руководитель'}
+              </button>
+              <Link
+                href="/booking"
+                target="_blank"
+                className="px-2 py-1 rounded-lg text-xs font-bold text-[#167b78] hover:bg-[#e0f2ed] transition-all flex items-center gap-1"
+                title={isUz ? 'Bemor portali (Yangi oynada)' : 'Портал пациента (в новом окне)'}
+              >
+                <span>👤</span>
+                <span className="hidden sm:inline">{isUz ? 'Bemor' : 'Пациент'}</span>
+                <ExternalLink className="w-3 h-3" />
+              </Link>
+            </div>
+
             {/* Search Input */}
-            <div className="relative min-w-[220px]">
+            <div className="relative min-w-[200px]">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#52696e]" />
               <input
                 type="text"
@@ -825,7 +893,7 @@ export default function AdminOverviewPage() {
 
             {/* Doctor Filter (if not doctor) */}
             {!isDoctor && (
-              <div className="min-w-[180px]">
+              <div className="min-w-[170px]">
                 <CustomSelect
                   id="admin-filter-doctor-select"
                   value={filterDoctorId}
@@ -877,6 +945,42 @@ export default function AdminOverviewPage() {
             <button onClick={() => setStatusFeedback(null)}>
               <X className="w-4 h-4" />
             </button>
+          </div>
+        )}
+
+        {/* Owner CRM Intelligence Quick Banner */}
+        {isOwner && (
+          <div className="p-4 bg-gradient-to-r from-[#12353b] to-[#1a4a52] rounded-2xl text-white border border-[#245158] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#167b78] text-white flex items-center justify-center font-bold">
+                <BarChart3 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold">
+                  {isUz ? 'Klinika Rahbari boshqaruv markazi' : 'Центр управления руководителя клиники'}
+                </h3>
+                <p className="text-xs text-[#b2c9ca]">
+                  {isUz
+                    ? 'Filiallar daromadi, shifokorlar samaradorligi va moliyaviy konversiya'
+                    : 'Доход филиалов, эффективность врачей и финансовая конверсия'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/analytics"
+                className="px-3.5 py-2 bg-[#167b78] hover:bg-[#14bdac] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>{isUz ? 'Batafsil CRM Analitika' : 'Подробная CRM аналитика'}</span>
+              </Link>
+              <Link
+                href="/admin/staff"
+                className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition-colors"
+              >
+                {isUz ? 'Xodimlar' : 'Сотрудники'}
+              </Link>
+            </div>
           </div>
         )}
 
@@ -951,7 +1055,7 @@ export default function AdminOverviewPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left 8 Cols: Patient Header, Odontogram, Treatment Plan & X-Ray Viewer (Image 3) */}
             <div className="lg:col-span-8 space-y-6">
-              {/* Patient Header Card (Image 3) */}
+              {/* Doctor Workspace Left Column: Patient Header + Interactive Odontogram + X-Ray Viewer */}
               {(() => {
                 const activeAppt = filteredToday.find((a) => a.status === 'CHECKED_IN') || filteredToday[0];
                 const patientName = activeAppt?.patient?.fullName || activeAppt?.patientName || (isUz ? 'Aziz Rahimov' : 'Азиз Рахимов');
@@ -961,347 +1065,151 @@ export default function AdminOverviewPage() {
                   : (isUz ? 'Tish davolash / Molyar restavratsiyasi' : 'Лечение зуба / Реставрация моляра');
 
                 return (
-                  <div className="ui-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-l-4 border-l-[#167b78]">
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-12 h-12 rounded-full bg-[#167b78] text-white flex items-center justify-center font-bold text-base shadow-sm">
-                        {patientName.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h2 className="text-base sm:text-lg font-bold text-[#152f34]">
-                            {isUz ? 'Bemor' : 'Пациент'}: {patientName} <span className="text-sm font-normal text-[#52696e]">(ID: {patientId})</span>
-                          </h2>
-                          {activeAppt && renderStatusBadge(activeAppt)}
+                  <>
+                    {/* Patient Header Card (Image 3) */}
+                    <div className="ui-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-l-4 border-l-[#167b78]">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-12 h-12 rounded-full bg-[#167b78] text-white flex items-center justify-center font-bold text-base shadow-sm">
+                          {patientName.charAt(0)}
                         </div>
-                        <p className="text-xs text-[#52696e] mt-0.5">
-                          {serviceName} • {activeAppt ? `${activeAppt.durationMinutes} ${isUz ? 'daqiqa' : 'мин'}` : (isUz ? '45 daqiqa' : '45 мин')} • DentaCare Clinic
-                        </p>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-base sm:text-lg font-bold text-[#152f34]">
+                              {isUz ? 'Bemor' : 'Пациент'}: {patientName} <span className="text-sm font-normal text-[#52696e]">(ID: {patientId})</span>
+                            </h2>
+                            {activeAppt && renderStatusBadge(activeAppt)}
+                          </div>
+                          <p className="text-xs text-[#52696e] mt-0.5">
+                            {serviceName} • {activeAppt ? `${activeAppt.durationMinutes} ${isUz ? 'daqiqa' : 'мин'}` : (isUz ? '45 daqiqa' : '45 мин')} • DentaCare Clinic
+                          </p>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 self-start sm:self-center">
-                      {activeAppt && !activeAppt.actualStartTime && (
+                      <div className="flex items-center gap-2 self-start sm:self-center">
+                        {activeAppt && !activeAppt.actualStartTime && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartTreatment(activeAppt.id)}
+                            className="px-3.5 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>{isUz ? 'Muolajani boshlash' : 'Начать прием'}</span>
+                          </button>
+                        )}
+                        {activeAppt && activeAppt.actualStartTime && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleRecordDelay(activeAppt.id)}
+                              className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold"
+                            >
+                              {isUz ? '+15 daqiqa (Kechikish)' : '+15 минут (Задержка)'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleStatusChange(activeAppt.id, 'COMPLETED')}
+                              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>{isUz ? 'Yakunlash' : 'Завершить'}</span>
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
-                          onClick={() => handleStartTreatment(activeAppt.id)}
-                          className="px-3.5 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                          className="px-3.5 py-2 bg-[#f3f8f7] hover:bg-[#eaf5f2] text-[#152f34] border border-[#d8e5e2] rounded-xl text-xs font-bold"
                         >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>{isUz ? 'Muolajani boshlash' : 'Начать прием'}</span>
+                          {isUz ? 'Tezkor ma\'lumot' : 'Подробности'}
                         </button>
-                      )}
-                      {activeAppt && activeAppt.actualStartTime && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => handleRecordDelay(activeAppt.id)}
-                            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold"
-                          >
-                            {isUz ? '+15 daqiqa (Kechikish)' : '+15 минут (Задержка)'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleStatusChange(activeAppt.id, 'COMPLETED')}
-                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>{isUz ? 'Yakunlash' : 'Завершить'}</span>
-                          </button>
-                        </>
-                      )}
-                      <button
-                        type="button"
-                        className="px-3.5 py-2 bg-[#f3f8f7] hover:bg-[#eaf5f2] text-[#152f34] border border-[#d8e5e2] rounded-xl text-xs font-bold"
-                      >
-                        {isUz ? 'Tezkor ma\'lumot' : 'Подробности'}
-                      </button>
+                      </div>
                     </div>
-                  </div>
+
+                    {/* Interactive 3D Odontogram & Live Treatment Plan (FDI 11–48) */}
+                    <InteractiveOdontogram
+                      language={isUz ? 'uz' : 'ru'}
+                      patientName={patientName}
+                    />
+
+                    {/* X-Ray Image Viewer (Image 3) */}
+                    <div className="ui-card bg-[#12353b] text-white border-[#245158] space-y-3">
+                      <div className="flex items-center justify-between border-b border-[#245158] pb-2.5">
+                        <h2 className="text-sm font-bold text-white">
+                          {isUz ? 'Rentgen (X-Ray) ko\'rish oynasi' : 'Просмотр рентген-снимков (X-Ray)'}
+                        </h2>
+                        <div className="flex items-center gap-1 text-xs text-[#b2c9ca]">
+                          <button type="button" className="p-1 hover:text-white" title={isUz ? 'Oldingi' : 'Предыдущий'}>
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <button type="button" className="p-1 hover:text-white" title={isUz ? 'Keyingi' : 'Следующий'}>
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Panoramic Dental Radiograph Visualization */}
+                      <div className="relative h-40 w-full rounded-xl overflow-hidden bg-black/50 border border-[#245158] flex items-center justify-center">
+                        <svg
+                          viewBox="0 0 400 180"
+                          className="w-full h-full object-cover transition-all"
+                          style={{
+                            filter: `brightness(${xrayBrightness}%) contrast(${xrayContrast}%)`,
+                          }}
+                        >
+                          <rect width="400" height="180" fill="#081418" />
+                          <ellipse cx="200" cy="110" rx="170" ry="60" fill="none" stroke="#2a454d" strokeWidth="18" opacity="0.6" />
+                          <path d="M 40 120 Q 200 160 360 120" stroke="#3d626d" strokeWidth="24" fill="none" opacity="0.4" />
+                          {Array.from({ length: 16 }).map((_, i) => (
+                            <g key={`xray-up-${i}`}>
+                              <rect x={70 + i * 16} y="55" width="12" height="28" rx="3" fill="#8cbac7" opacity="0.75" />
+                              <line x1={76 + i * 16} y1="83" x2={76 + i * 16} y2="105" stroke="#a4d4e2" strokeWidth="3" opacity="0.6" />
+                            </g>
+                          ))}
+                          {Array.from({ length: 16 }).map((_, i) => (
+                            <g key={`xray-low-${i}`}>
+                              <rect x={70 + i * 16} y="112" width="12" height="26" rx="3" fill="#8cbac7" opacity="0.75" />
+                              <line x1={76 + i * 16} y1="95" x2={76 + i * 16} y2="112" stroke="#a4d4e2" strokeWidth="3" opacity="0.6" />
+                            </g>
+                          ))}
+                          <rect x={134} y="55" width="12" height="14" fill="#ffffff" opacity="0.95" />
+                          <circle cx="140" cy="62" r="8" fill="none" stroke="#14bdac" strokeWidth="2" strokeDasharray="3 2" />
+                        </svg>
+                        <span className="absolute bottom-2 left-2 text-[10px] bg-black/60 px-2 py-0.5 rounded text-[#b2c9ca]">
+                          {isUz ? 'Panoramali OPG • HD' : 'Панорамный снимок ОПТГ • HD'}
+                        </span>
+                      </div>
+
+                      {/* Sliders: Brightness & Contrast (Image 3) */}
+                      <div className="space-y-2 pt-1 text-xs">
+                        <div className="flex items-center justify-between text-[#b2c9ca] text-[11px]">
+                          <span>{isUz ? 'Yorug\'lik' : 'Яркость'}</span>
+                          <span className="font-mono">{xrayBrightness}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="50"
+                          max="150"
+                          value={xrayBrightness}
+                          onChange={(e) => setXrayBrightness(Number(e.target.value))}
+                          className="w-full accent-[#14bdac] h-1.5 bg-[#245158] rounded-lg cursor-pointer"
+                        />
+
+                        <div className="flex items-center justify-between text-[#b2c9ca] text-[11px] pt-1">
+                          <span>{isUz ? 'Kontrast' : 'Контраст'}</span>
+                          <span className="font-mono">{xrayContrast}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="50"
+                          max="150"
+                          value={xrayContrast}
+                          onChange={(e) => setXrayContrast(Number(e.target.value))}
+                          className="w-full accent-[#14bdac] h-1.5 bg-[#245158] rounded-lg cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </>
                 );
               })()}
-
-              {/* Interactive 3D Odontogram Dental Chart (Image 3) */}
-              <div className="ui-card space-y-4">
-                <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
-                  <div>
-                    <h2 className="text-base font-bold text-[#152f34]">
-                      {isUz ? 'Interaktiv 3D Odontogramma — Tishlar xaritasi' : 'Интерактивная 3D одонтограмма — Зубная карта'}
-                    </h2>
-                    <p className="text-xs text-[#52696e]">
-                      {isUz ? 'Inson tishlarining batafsil klinik vizualizatsiyasi (FDI 11–48)' : 'Клиническая визуализация зубного ряда человека (FDI 11–48)'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 bg-[#f3f8f7] p-1 rounded-xl text-xs border border-[#d8e5e2]">
-                    <span className="px-2.5 py-1 bg-white text-[#167b78] font-bold rounded-lg shadow-2xs">
-                      {isUz ? '3D Xarita' : '3D Карта'}
-                    </span>
-                    <span className="px-2.5 py-1 text-[#52696e]">
-                      {isUz ? 'Jadval' : 'Сетка'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Teeth Visual Grid (Upper and Lower arches) */}
-                <div className="p-4 bg-[#f8fbfa] rounded-2xl border border-[#d8e5e2] space-y-6">
-                  {/* Upper Arch (18 down to 11, 21 up to 28) */}
-                  <div>
-                    <div className="flex justify-between items-center text-[10px] font-bold text-[#52696e] mb-1.5 px-2">
-                      <span>{isUz ? 'Yuqori jag\' (Maxillary) • O\'ng (18-11)' : 'Верхняя челюсть (Maxillary) • Справа (18-11)'}</span>
-                      <span>{isUz ? 'Chap (21-28)' : 'Слева (21-28)'}</span>
-                    </div>
-                    <div className="grid grid-cols-16 gap-1 sm:gap-1.5 text-center" style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}>
-                      {[18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28].map((toothNum) => {
-                        const isSelected = selectedTooth === toothNum;
-                        // Status styling matching Image 3
-                        let toothBg = 'bg-white text-[#152f34] border-[#d8e5e2]';
-                        let toothLabel = isUz ? 'Sog\'lom' : 'Здоров';
-                        if (toothNum === 14 || toothNum === 15) {
-                          toothBg = 'bg-[#14bdac] text-white border-[#116460] shadow-sm';
-                          toothLabel = isUz ? 'Muolaja talab' : 'Требуется лечение';
-                        } else if (toothNum === 16 || toothNum === 26) {
-                          toothBg = 'bg-[#3b82f6] text-white border-blue-600 shadow-sm';
-                          toothLabel = isUz ? 'Tugallangan' : 'Завершено';
-                        } else if (toothNum === 21) {
-                          toothBg = 'bg-[#1d4ed8] text-white border-blue-900 shadow-sm';
-                          toothLabel = isUz ? 'Rejalashtirilgan' : 'Запланировано';
-                        } else if (toothNum === 11) {
-                          toothBg = 'bg-[#ef4444] text-white border-rose-600 shadow-sm animate-pulse';
-                          toothLabel = isUz ? 'Faol muolajada' : 'На лечении';
-                        }
-
-                        return (
-                          <button
-                            key={toothNum}
-                            type="button"
-                            onClick={() => setSelectedTooth(toothNum)}
-                            className={`flex flex-col items-center justify-between p-1 rounded-xl border transition-all duration-150 ${toothBg} ${
-                              isSelected ? 'ring-2 ring-[#167b78] ring-offset-2 scale-105' : 'hover:scale-102'
-                            }`}
-                            title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum} - ${toothLabel}`}
-                          >
-                            <span className="text-[10px] font-mono font-bold">{toothNum}</span>
-                            <div className="w-5 h-8 my-1 flex items-center justify-center">
-                              {/* Anatomical Upper Tooth SVG */}
-                              <svg viewBox="0 0 24 36" className="w-full h-full fill-current opacity-90">
-                                <path d="M12 2 C8 2, 4 6, 4 14 C4 20, 6 26, 7 34 C8 35, 10 35, 11 31 C11.5 28, 12.5 28, 13 31 C14 35, 16 35, 17 34 C18 26, 20 20, 20 14 C20 6, 16 2, 12 2 Z" />
-                              </svg>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Lower Arch (48 down to 41, 31 up to 38) */}
-                  <div>
-                    <div className="grid grid-cols-16 gap-1 sm:gap-1.5 text-center" style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}>
-                      {[48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38].map((toothNum) => {
-                        const isSelected = selectedTooth === toothNum;
-                        let toothBg = 'bg-white text-[#152f34] border-[#d8e5e2]';
-                        let toothLabel = isUz ? 'Sog\'lom' : 'Здоров';
-                        if (toothNum === 46) {
-                          toothBg = 'bg-[#3b82f6] text-white border-blue-600 shadow-sm';
-                          toothLabel = isUz ? 'Tugallangan' : 'Завершено';
-                        } else if (toothNum === 36) {
-                          toothBg = 'bg-[#ef4444] text-white border-rose-600 shadow-sm';
-                          toothLabel = isUz ? 'Faol muolaja' : 'На лечении';
-                        }
-
-                        return (
-                          <button
-                            key={toothNum}
-                            type="button"
-                            onClick={() => setSelectedTooth(toothNum)}
-                            className={`flex flex-col items-center justify-between p-1 rounded-xl border transition-all duration-150 ${toothBg} ${
-                              isSelected ? 'ring-2 ring-[#167b78] ring-offset-2 scale-105' : 'hover:scale-102'
-                            }`}
-                            title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum} - ${toothLabel}`}
-                          >
-                            <div className="w-5 h-8 my-1 flex items-center justify-center">
-                              {/* Anatomical Lower Tooth SVG */}
-                              <svg viewBox="0 0 24 36" className="w-full h-full fill-current opacity-90 transform rotate-180">
-                                <path d="M12 2 C8 2, 4 6, 4 14 C4 20, 6 26, 7 34 C8 35, 10 35, 11 31 C11.5 28, 12.5 28, 13 31 C14 35, 16 35, 17 34 C18 26, 20 20, 20 14 C20 6, 16 2, 12 2 Z" />
-                              </svg>
-                            </div>
-                            <span className="text-[10px] font-mono font-bold">{toothNum}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="flex justify-between items-center text-[10px] font-bold text-[#52696e] mt-1.5 px-2">
-                      <span>{isUz ? 'Pastki jag\' (Mandibular) • O\'ng (48-41)' : 'Нижняя челюсть (Mandibular) • Справа (48-41)'}</span>
-                      <span>{isUz ? 'Chap (31-38)' : 'Слева (31-38)'}</span>
-                    </div>
-                  </div>
-
-                  {/* Odontogram Status Legend (Image 3) */}
-                  <div className="flex flex-wrap items-center justify-center gap-4 pt-2 border-t border-[#d8e5e2] text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-[#14bdac]" />
-                      <span className="text-[#52696e]">{isUz ? 'Muolaja talab' : 'Требуется лечение'}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-[#3b82f6]" />
-                      <span className="text-[#52696e]">{isUz ? 'Tugallangan' : 'Завершено'}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-[#1d4ed8]" />
-                      <span className="text-[#52696e]">{isUz ? 'Rejalashtirilgan' : 'Запланировано'}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-[#ef4444]" />
-                      <span className="text-[#52696e]">{isUz ? 'Kresloda / Faol' : 'В кресле / Активно'}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom 2-Card Row: Patient Treatment Plan & X-Ray Image Viewer (Image 3) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Patient Treatment Plan (Image 3) */}
-                <div className="ui-card space-y-4">
-                  <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
-                    <h2 className="text-sm font-bold text-[#152f34]">
-                      {isUz ? 'Bemorning davolash rejasi' : 'План лечения пациента'}
-                    </h2>
-                    <div className="flex items-center gap-1 text-xs">
-                      <span className="px-2.5 py-0.5 rounded-full bg-[#167b78] text-white font-bold">
-                        {isUz ? 'Faol' : 'Активный'}
-                      </span>
-                      <span className="px-2.5 py-0.5 rounded-full bg-[#f3f8f7] text-[#52696e]">
-                        {isUz ? 'Muolajalar' : 'Процедуры'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {/* Item 1: Molar Restoration 80% */}
-                    <div className="p-3 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] space-y-2">
-                      <div className="flex items-center justify-between text-xs font-bold text-[#152f34]">
-                        <span className="flex items-center gap-1.5">
-                          <span>🦷</span>
-                          <span>
-                            {isUz
-                              ? `Molyar restavratsiyasi - #${selectedTooth}-tish`
-                              : `Реставрация моляра - Зуб #${selectedTooth}`}
-                          </span>
-                        </span>
-                        <span className="text-[#167b78]">80%</span>
-                      </div>
-                      <div className="w-full h-2 bg-[#d8e5e2] rounded-full overflow-hidden">
-                        <div className="h-full bg-[#14bdac] rounded-full transition-all duration-300" style={{ width: '80%' }} />
-                      </div>
-                    </div>
-
-                    {/* Item 2: Deep Cleaning Completed */}
-                    <div className="p-3 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1.5 font-bold text-[#152f34]">
-                        <span>✨</span>
-                        <span>{isUz ? 'Profilaktik tozalash' : 'Профессиональная чистка'}</span>
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px] flex items-center gap-1">
-                        <Check className="w-3 h-3" />
-                        <span>{isUz ? 'Tugallangan' : 'Выполнено'}</span>
-                      </span>
-                    </div>
-
-                    {/* Checklist items */}
-                    <div className="space-y-1.5 pt-1 text-xs text-[#52696e]">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" defaultChecked className="rounded text-[#167b78] focus:ring-[#167b78]" />
-                        <span>{isUz ? `Tugallangan - #${selectedTooth}-tish` : `Выполнено - Зуб #${selectedTooth}`}</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" className="rounded text-[#167b78] focus:ring-[#167b78]" />
-                        <span>{isUz ? `Qoplama (koronka) - #${selectedTooth}-tish` : `Коронка - Зуб #${selectedTooth}`}</span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                {/* X-Ray Image Viewer (Image 3) */}
-                <div className="ui-card bg-[#12353b] text-white border-[#245158] space-y-3">
-                  <div className="flex items-center justify-between border-b border-[#245158] pb-2.5">
-                    <h2 className="text-sm font-bold text-white">
-                      {isUz ? 'Rentgen (X-Ray) ko\'rish oynasi' : 'Просмотр рентген-снимков (X-Ray)'}
-                    </h2>
-                    <div className="flex items-center gap-1 text-xs text-[#b2c9ca]">
-                      <button type="button" className="p-1 hover:text-white" title={isUz ? 'Oldingi' : 'Предыдущий'}>
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      <button type="button" className="p-1 hover:text-white" title={isUz ? 'Keyingi' : 'Следующий'}>
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Panoramic Dental Radiograph Visualization */}
-                  <div className="relative h-40 w-full rounded-xl overflow-hidden bg-black/50 border border-[#245158] flex items-center justify-center">
-                    <svg
-                      viewBox="0 0 400 180"
-                      className="w-full h-full object-cover transition-all"
-                      style={{
-                        filter: `brightness(${xrayBrightness}%) contrast(${xrayContrast}%)`,
-                      }}
-                    >
-                      {/* Panoramic X-Ray Background Radiograph */}
-                      <rect width="400" height="180" fill="#081418" />
-                      <ellipse cx="200" cy="110" rx="170" ry="60" fill="none" stroke="#2a454d" strokeWidth="18" opacity="0.6" />
-                      {/* Jaw bone curve */}
-                      <path d="M 40 120 Q 200 160 360 120" stroke="#3d626d" strokeWidth="24" fill="none" opacity="0.4" />
-                      {/* Upper teeth radiopacity */}
-                      {Array.from({ length: 16 }).map((_, i) => (
-                        <g key={`xray-up-${i}`}>
-                          <rect x={70 + i * 16} y="55" width="12" height="28" rx="3" fill="#8cbac7" opacity="0.75" />
-                          <line x1={76 + i * 16} y1="83" x2={76 + i * 16} y2="105" stroke="#a4d4e2" strokeWidth="3" opacity="0.6" />
-                        </g>
-                      ))}
-                      {/* Lower teeth radiopacity */}
-                      {Array.from({ length: 16 }).map((_, i) => (
-                        <g key={`xray-low-${i}`}>
-                          <rect x={70 + i * 16} y="112" width="12" height="26" rx="3" fill="#8cbac7" opacity="0.75" />
-                          <line x1={76 + i * 16} y1="95" x2={76 + i * 16} y2="112" stroke="#a4d4e2" strokeWidth="3" opacity="0.6" />
-                        </g>
-                      ))}
-                      {/* Restoration wireframe on tooth 14 */}
-                      <rect x={134} y="55" width="12" height="14" fill="#ffffff" opacity="0.95" />
-                      <circle cx="140" cy="62" r="8" fill="none" stroke="#14bdac" strokeWidth="2" strokeDasharray="3 2" />
-                    </svg>
-                    <span className="absolute bottom-2 left-2 text-[10px] bg-black/60 px-2 py-0.5 rounded text-[#b2c9ca]">
-                      {isUz ? 'Panoramali OPG • HD' : 'Панорамный снимок ОПТГ • HD'}
-                    </span>
-                  </div>
-
-                  {/* Sliders: Brightness & Contrast (Image 3) */}
-                  <div className="space-y-2 pt-1 text-xs">
-                    <div className="flex items-center justify-between text-[#b2c9ca] text-[11px]">
-                      <span>{isUz ? 'Yorug\'lik' : 'Яркость'}</span>
-                      <span className="font-mono">{xrayBrightness}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="50"
-                      max="150"
-                      value={xrayBrightness}
-                      onChange={(e) => setXrayBrightness(Number(e.target.value))}
-                      className="w-full accent-[#14bdac] h-1.5 bg-[#245158] rounded-lg cursor-pointer"
-                    />
-
-                    <div className="flex items-center justify-between text-[#b2c9ca] text-[11px] pt-1">
-                      <span>{isUz ? 'Kontrast' : 'Контраст'}</span>
-                      <span className="font-mono">{xrayContrast}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="50"
-                      max="150"
-                      value={xrayContrast}
-                      onChange={(e) => setXrayContrast(Number(e.target.value))}
-                      className="w-full accent-[#14bdac] h-1.5 bg-[#245158] rounded-lg cursor-pointer"
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* Right 4 Cols: Daily Schedule (Image 3 Reference) */}

@@ -23,6 +23,8 @@ import {
   Building2,
   Globe,
   Bell,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuth, StaffRole } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
@@ -39,6 +41,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [clinicLogo, setClinicLogo] = useState<string | null>(null);
   const [logoError, setLogoError] = useState(false);
@@ -225,11 +228,15 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
 
   return (
     <div className="min-h-screen bg-[#f3f8f7] flex">
-      {/* Desktop Sidebar (Image 4 & 2 visual language: deep teal, clean active item, clear hierarchy) */}
-      <aside className="hidden lg:flex flex-col w-64 bg-[#12353b] text-[#e8f3f2] border-r border-[#1e464d] shrink-0 sticky top-0 h-screen z-20">
+      {/* Desktop Sidebar (Collapsible: w-64 vs w-20) */}
+      <aside
+        className={`hidden lg:flex flex-col bg-[#12353b] text-[#e8f3f2] border-r border-[#1e464d] shrink-0 sticky top-0 h-screen z-20 transition-all duration-200 ${
+          isCollapsed ? 'w-20' : 'w-64'
+        }`}
+      >
         {/* Brand Header */}
-        <div className="h-16 px-6 border-b border-[#1e464d] flex items-center justify-between">
-          <Link href="/admin" className="flex items-center gap-3">
+        <div className="h-16 px-4 border-b border-[#1e464d] flex items-center justify-between">
+          <Link href="/admin" className="flex items-center gap-3 overflow-hidden">
             {clinicLogo && !logoError ? (
               <img
                 src={clinicLogo}
@@ -239,51 +246,60 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
               />
             ) : (
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#167b78] flex items-center justify-center text-white shadow-sm">
+                <div className="w-9 h-9 rounded-xl bg-[#167b78] flex items-center justify-center text-white shadow-sm shrink-0">
                   <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                     <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
                   </svg>
                 </div>
-                <div>
-                  <span className="font-bold text-base tracking-tight text-white block leading-tight">
-                    {clinicName}
-                  </span>
-                  <span className="text-[10px] text-[#b2c9ca] font-medium tracking-wide block">
-                    Dental OS
-                  </span>
-                </div>
+                {!isCollapsed && (
+                  <div className="min-w-0">
+                    <span className="font-bold text-base tracking-tight text-white block leading-tight truncate">
+                      {clinicName}
+                    </span>
+                    <span className="text-[10px] text-[#b2c9ca] font-medium tracking-wide block">
+                      Dental OS
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </Link>
         </div>
 
         {/* User Card */}
-        <div className="p-3 mx-3 my-3 bg-[#18424a] rounded-xl border border-[#23535d]/60 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[#167b78] text-white flex items-center justify-center font-bold text-xs shrink-0">
+        <div className={`mx-2.5 my-3 bg-[#18424a] rounded-xl border border-[#23535d]/60 flex items-center ${isCollapsed ? 'p-2 justify-center' : 'p-3 gap-3'}`}>
+          <div
+            className="w-8 h-8 rounded-full bg-[#167b78] text-white flex items-center justify-center font-bold text-xs shrink-0"
+            title={`${user.fullName || user.email} (${user.role})`}
+          >
             {user.fullName ? user.fullName.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-white truncate leading-tight">
-              {user.fullName || user.email}
-            </p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#245158] text-[#86efac] font-bold tracking-wider uppercase">
-                {user.role}
-              </span>
+          {!isCollapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-white truncate leading-tight">
+                {user.fullName || user.email}
+              </p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#245158] text-[#86efac] font-bold tracking-wider uppercase">
+                  {user.role}
+                </span>
+              </div>
             </div>
-          </div>
-          <Link
-            href="/"
-            target="_blank"
-            className="p-1.5 text-[#b2c9ca] hover:text-white hover:bg-[#245158] rounded-lg transition-colors"
-            title={language === 'ru' ? "Перейти на сайт клиники" : "Klinika saytiga o'tish"}
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-          </Link>
+          )}
+          {!isCollapsed && (
+            <Link
+              href="/"
+              target="_blank"
+              className="p-1.5 text-[#b2c9ca] hover:text-white hover:bg-[#245158] rounded-lg transition-colors"
+              title={language === 'ru' ? "Перейти на сайт клиники" : "Klinika saytiga o'tish"}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          )}
         </div>
 
         {/* Navigation list */}
-        <nav className="flex-1 px-3 py-1 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-2.5 py-1 space-y-1 overflow-y-auto">
           {visibleNav.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -292,17 +308,20 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                title={item.label}
+                className={`flex items-center rounded-xl text-sm font-medium transition-all ${
+                  isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'
+                } ${
                   active
                     ? 'bg-[#245158] text-white shadow-xs font-semibold'
                     : 'text-[#b2c9ca] hover:bg-[#1a434a] hover:text-[#e8f3f2]'
                 }`}
               >
                 <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-[#a7f3d0]' : 'text-[#8ea9ab]'}`} />
-                <span className="truncate">{item.label}</span>
+                {!isCollapsed && <span className="truncate">{item.label}</span>}
                 {item.href === '/admin/calendar' && pendingCount > 0 && (
-                  <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 font-bold text-[11px] shadow-xs">
-                    {pendingCount}
+                  <span className={`${isCollapsed ? 'absolute top-1 right-1 w-2 h-2 rounded-full p-0' : 'ml-auto px-2 py-0.5 rounded-full text-[11px]'} bg-amber-400 text-slate-900 font-bold shadow-xs`}>
+                    {!isCollapsed && pendingCount}
                   </span>
                 )}
               </Link>
@@ -310,15 +329,30 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
           })}
         </nav>
 
-        {/* Logout Footer */}
-        <div className="p-3 border-t border-[#1e464d]">
+        {/* Sidebar Footer with Collapse Toggle & Logout */}
+        <div className="p-2.5 border-t border-[#1e464d] space-y-1">
+          <button
+            type="button"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className={`w-full flex items-center text-xs font-semibold text-[#b2c9ca] hover:bg-[#1a434a] hover:text-white rounded-xl transition-colors ${
+              isCollapsed ? 'justify-center p-2' : 'gap-3 px-3.5 py-2'
+            }`}
+            title={isCollapsed ? (language === 'ru' ? 'Развернуть меню' : 'Kengaytirish') : (language === 'ru' ? 'Свернуть меню' : 'Kichraytirish')}
+          >
+            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            {!isCollapsed && <span>{language === 'ru' ? 'Свернуть меню' : 'Kichraytirish'}</span>}
+          </button>
+
           <button
             type="button"
             onClick={logout}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 transition-colors"
+            className={`w-full flex items-center text-xs font-semibold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 rounded-xl transition-colors ${
+              isCollapsed ? 'justify-center p-2' : 'gap-3 px-3.5 py-2'
+            }`}
+            title={t.admin.logout}
           >
             <LogOut className="w-4 h-4" />
-            <span>{t.admin.logout}</span>
+            {!isCollapsed && <span>{t.admin.logout}</span>}
           </button>
         </div>
       </aside>
@@ -488,10 +522,65 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
         )}
 
         {/* Main Content Area */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-full">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-full pb-20 lg:pb-8">
           {children}
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation Bar (Image 2/4 Mobile UX) */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#12353b]/95 backdrop-blur-md border-t border-[#1e464d] px-2 py-1.5 flex items-center justify-around shadow-2xl">
+        <Link
+          href="/admin"
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs transition-colors ${
+            pathname === '/admin' ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Главная' : 'Asosiy'}</span>
+        </Link>
+
+        <Link
+          href="/admin/calendar"
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs relative transition-colors ${
+            pathname.startsWith('/admin/calendar') ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
+          }`}
+        >
+          <Calendar className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Календарь' : 'Taqvim'}</span>
+          {pendingCount > 0 && (
+            <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-[#12353b]" />
+          )}
+        </Link>
+
+        <Link
+          href="/admin/patients"
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs transition-colors ${
+            pathname.startsWith('/admin/patients') ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
+          }`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Пациенты' : 'Bemorlar'}</span>
+        </Link>
+
+        <Link
+          href="/admin/analytics"
+          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs transition-colors ${
+            pathname.startsWith('/admin/analytics') ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
+          }`}
+        >
+          <BarChart3 className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Аналитика' : 'Hisobot'}</span>
+        </Link>
+
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          className="flex flex-col items-center justify-center p-1.5 rounded-xl text-xs text-[#b2c9ca] hover:text-white transition-colors"
+        >
+          <Menu className="w-5 h-5" />
+          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Меню' : 'Menyu'}</span>
+        </button>
+      </nav>
     </div>
   );
 };
