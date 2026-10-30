@@ -31,6 +31,7 @@ import { PhoneInput } from '../../../components/PhoneInput';
 import { CustomSelect } from '../../../components/CustomSelect';
 import { ModalDialog } from '../../../components/ModalDialog';
 import { useI18n } from '../../../lib/i18n';
+import { translateBranchOrAddress } from '../../../lib/transliterate';
 
 interface ContactPhoneItem {
   id: string;
@@ -88,6 +89,8 @@ export default function AdminSettingsPage() {
   const [branchWorkHours, setBranchWorkHours] = useState('');
   const [branchMapUrl, setBranchMapUrl] = useState('');
   const [branchIsActive, setBranchIsActive] = useState(true);
+  const [branchModalError, setBranchModalError] = useState<string | null>(null);
+  const [branchModalSuccess, setBranchModalSuccess] = useState<string | null>(null);
   const [deletingBranchId, setDeletingBranchId] = useState<string | null>(null);
 
   // Branch Deletion & Lifecycle Modal State
@@ -371,12 +374,44 @@ export default function AdminSettingsPage() {
     }
   };
 
+  const openCreateBranch = () => {
+    setEditingBranch(null);
+    setBranchNameUz('');
+    setBranchNameRu('');
+    setBranchAddressUz('');
+    setBranchAddressRu('');
+    setBranchPhone('');
+    setBranchWorkHours('Du - Sha: 08:00 - 20:00');
+    setBranchMapUrl('');
+    setBranchIsActive(true);
+    setBranchModalError(null);
+    setBranchModalSuccess(null);
+    setShowBranchModal(true);
+  };
+
+  const openEditBranch = (b: any) => {
+    setEditingBranch(b);
+    setBranchNameUz(b.nameUz || '');
+    setBranchNameRu(b.nameRu || '');
+    setBranchAddressUz(b.addressUz || '');
+    setBranchAddressRu(b.addressRu || '');
+    setBranchPhone(b.phone || '');
+    setBranchWorkHours(b.workHours || '');
+    setBranchMapUrl(b.mapUrl || '');
+    setBranchIsActive(b.isActive !== false);
+    setBranchModalError(null);
+    setBranchModalSuccess(null);
+    setShowBranchModal(true);
+  };
+
   // Branch Save Handler
   const handleSaveBranch = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setIsSaving(true);
       setErrorMsg(null);
+      setBranchModalError(null);
+      setBranchModalSuccess(null);
 
       // Validate mapUrl
       let cleanedMapUrl = branchMapUrl.trim();
@@ -397,9 +432,9 @@ export default function AdminSettingsPage() {
 
       const payload = {
         nameUz: branchNameUz.trim(),
-        nameRu: branchNameRu.trim(),
+        nameRu: branchNameRu.trim() || branchNameUz.trim(),
         addressUz: branchAddressUz.trim(),
-        addressRu: branchAddressRu.trim(),
+        addressRu: branchAddressRu.trim() || branchAddressUz.trim(),
         phone: branchPhone.trim(),
         workHours: branchWorkHours.trim(),
         mapUrl: cleanedMapUrl || null,
@@ -411,12 +446,20 @@ export default function AdminSettingsPage() {
       } else {
         await api.createBranchAdmin(payload);
       }
-      setShowBranchModal(false);
-      setEditingBranch(null);
+
+      setBranchModalSuccess(isRu ? 'Данные филиала успешно сохранены!' : 'Filial ma\'lumotlari muvaffaqiyatli saqlandi!');
+      setSuccessMsg(isRu ? 'Филиал успешно сохранен' : 'Filial ma\'lumotlari muvaffaqiyatli saqlandi');
       await loadData();
-      setSuccessMsg('Filial ma\'lumotlari muvaffaqiyatli saqlandi');
+
+      setTimeout(() => {
+        setShowBranchModal(false);
+        setEditingBranch(null);
+        setBranchModalSuccess(null);
+      }, 600);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Filialni saqlashda xatolik');
+      const msg = err?.message || (isRu ? 'Ошибка при сохранении филиала' : 'Filialni saqlashda xatolik yuz berdi');
+      setBranchModalError(msg);
+      setErrorMsg(msg);
     } finally {
       setIsSaving(false);
     }
@@ -653,7 +696,15 @@ export default function AdminSettingsPage() {
                 type="text"
                 required
                 value={settings.name}
-                onChange={(e) => setSettings({ ...settings, name: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const shouldSyncRu = !settings.nameRu || settings.nameRu === settings.name;
+                  setSettings({
+                    ...settings,
+                    name: val,
+                    nameRu: shouldSyncRu ? val : settings.nameRu,
+                  });
+                }}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
               />
             </div>
@@ -1037,18 +1088,7 @@ export default function AdminSettingsPage() {
             </div>
             <button
               type="button"
-              onClick={() => {
-                setEditingBranch(null);
-                setBranchNameUz('');
-                setBranchNameRu('');
-                setBranchAddressUz('');
-                setBranchAddressRu('');
-                setBranchPhone('');
-                setBranchWorkHours('09:00 - 19:00');
-                setBranchMapUrl('');
-                setBranchIsActive(true);
-                setShowBranchModal(true);
-              }}
+              onClick={openCreateBranch}
               className="flex items-center gap-2 px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 rounded-xl text-xs font-bold"
             >
               <Plus className="w-4 h-4" />
@@ -1106,26 +1146,15 @@ export default function AdminSettingsPage() {
                     title="Filialni o'chirish"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>{deletingBranchId === b.id ? 'O\'chirilmoqda...' : 'O\'chirish'}</span>
+                    <span>{isRu ? 'Удалить' : 'O‘chirish'}</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditingBranch(b);
-                      setBranchNameUz(b.nameUz);
-                      setBranchNameRu(b.nameRu);
-                      setBranchAddressUz(b.addressUz);
-                      setBranchAddressRu(b.addressRu);
-                      setBranchPhone(b.phone || '');
-                      setBranchWorkHours(b.workHours || '');
-                      setBranchMapUrl(b.mapUrl || '');
-                      setBranchIsActive(b.isActive);
-                      setShowBranchModal(true);
-                    }}
+                    onClick={() => openEditBranch(b)}
                     className="text-xs font-bold text-teal-700 hover:underline cursor-pointer"
                   >
-                    Tahrirlash
+                    {isRu ? 'Редактировать' : 'Tahrirlash'}
                   </button>
                 </div>
               </div>
@@ -1138,32 +1167,47 @@ export default function AdminSettingsPage() {
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-extrabold text-slate-900">
-                {editingBranch ? 'Filialni tahrirlash' : 'Yangi filial qo\'shish'}
+                {editingBranch ? (isRu ? 'Редактировать филиал' : 'Filialni tahrirlash') : (isRu ? 'Добавить новый филиал' : 'Yangi filial qo\'shish')}
               </h3>
 
               <form onSubmit={handleSaveBranch} className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Nomi (UZ)
+                      Nomi (UZ - Lotin)
                     </label>
                     <input
                       type="text"
                       required
                       value={branchNameUz}
-                      onChange={(e) => setBranchNameUz(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBranchNameUz(val);
+                        const trans = translateBranchOrAddress(val);
+                        if (!editingBranch || !branchNameRu || branchNameRu === branchNameUz) {
+                          setBranchNameRu(trans.ru);
+                        }
+                      }}
+                      placeholder="Bektemir filiali"
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Nomi (RU)
+                      Nomi (RU - Кирил)
                     </label>
                     <input
                       type="text"
                       required
                       value={branchNameRu}
-                      onChange={(e) => setBranchNameRu(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBranchNameRu(val);
+                        if (!branchNameUz) {
+                          setBranchNameUz(translateBranchOrAddress(val).uz);
+                        }
+                      }}
+                      placeholder="Филиал Бектемир"
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
@@ -1172,58 +1216,100 @@ export default function AdminSettingsPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Manzili (UZ)
+                      Manzili (UZ - Lotin)
                     </label>
                     <input
                       type="text"
                       required
                       value={branchAddressUz}
-                      onChange={(e) => setBranchAddressUz(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBranchAddressUz(val);
+                        const trans = translateBranchOrAddress(val);
+                        if (!editingBranch || !branchAddressRu || branchAddressRu === branchAddressUz) {
+                          setBranchAddressRu(trans.ru);
+                        }
+                      }}
+                      placeholder="Toshkent sh., Bektemir tumani"
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Manzili (RU)
+                      Manzili (RU - Кирил)
                     </label>
                     <input
                       type="text"
                       required
                       value={branchAddressRu}
-                      onChange={(e) => setBranchAddressRu(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBranchAddressRu(val);
+                        if (!branchAddressUz) {
+                          setBranchAddressUz(translateBranchOrAddress(val).uz);
+                        }
+                      }}
+                      placeholder="г. Ташкент, Бектемирский район"
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Telefon raqami
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Telefon raqami
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={branchPhone}
+                    onChange={(e) => setBranchPhone(e.target.value)}
+                    placeholder="+998711234567"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                  />
+                </div>
+
+                {/* Structured Working Hours with Quick Presets */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Ish tartibi (Ish kunlari va soatlari)
                     </label>
-                    <input
-                      type="text"
-                      required
-                      value={branchPhone}
-                      onChange={(e) => setBranchPhone(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
-                    />
+                    <span className="text-[10px] text-slate-400">Tezkor namunalar:</span>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Ish tartibi
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={branchWorkHours}
-                      onChange={(e) => setBranchWorkHours(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
-                    />
+                  <input
+                    type="text"
+                    required
+                    value={branchWorkHours}
+                    onChange={(e) => setBranchWorkHours(e.target.value)}
+                    placeholder="Dushanba - Shanba: 08:00 - 20:00"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 mb-1.5"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'Du - Sha: 08:00 - 20:00',
+                      'Du - Sha: 09:00 - 18:00',
+                      'Har kuni: 08:00 - 20:00',
+                      'Har kuni: 09:00 - 21:00',
+                      '24/7 (Kechayu-kunduz)',
+                    ].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setBranchWorkHours(preset)}
+                        className={`text-[10px] px-2 py-0.5 rounded-lg border transition-colors cursor-pointer ${
+                          branchWorkHours === preset
+                            ? 'bg-teal-700 text-white border-teal-700 font-bold'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* Location URL (Req 17) */}
+                {/* Location URL */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Xarita havolasi (Google Maps, Yandex yoki 2GIS)
@@ -1236,7 +1322,7 @@ export default function AdminSettingsPage() {
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Faqat xavfsiz <code>http://</code> yoki <code>https://</code> havolalari qabul qilinadi. To&apos;g&apos;ridan-to&apos;g&apos;ri iframe kodi kiritilmasligi kerak.
+                    Faqat xavfsiz <code>http://</code> yoki <code>https://</code> havolalari qabul qilinadi.
                   </p>
                 </div>
 
@@ -1253,11 +1339,28 @@ export default function AdminSettingsPage() {
                   />
                 </div>
 
+                {/* In-Modal Feedback Alerts */}
+                {branchModalError && (
+                  <div role="alert" className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{branchModalError}</span>
+                  </div>
+                )}
+                {branchModalSuccess && (
+                  <div role="status" className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{branchModalSuccess}</span>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                   {editingBranch ? (
                     <button
                       type="button"
-                      onClick={() => promptDeleteBranch(editingBranch)}
+                      onClick={() => {
+                        setShowBranchModal(false);
+                        promptDeleteBranch(editingBranch);
+                      }}
                       className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -1269,7 +1372,11 @@ export default function AdminSettingsPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowBranchModal(false)}
+                      onClick={() => {
+                        setShowBranchModal(false);
+                        setBranchModalError(null);
+                        setBranchModalSuccess(null);
+                      }}
                       className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                     >
                       Bekor qilish
@@ -1277,9 +1384,10 @@ export default function AdminSettingsPage() {
                     <button
                       type="submit"
                       disabled={isSaving}
-                      className="px-5 py-2.5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl shadow-md disabled:opacity-50 cursor-pointer"
+                      className="px-5 py-2.5 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
                     >
-                      {isSaving ? 'Saqlanmoqda...' : 'Filialni saqlash'}
+                      {isSaving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                      <span>{isSaving ? (isRu ? 'Сохранение...' : 'Saqlanmoqda...') : (isRu ? 'Сохранить филиал' : 'Filialni saqlash')}</span>
                     </button>
                   </div>
                 </div>
@@ -1288,6 +1396,7 @@ export default function AdminSettingsPage() {
           </div>
         )}
       </div>
+
       {/* Accessible Branch Deletion / Lifecycle Modal */}
       <ModalDialog
         isOpen={Boolean(branchToDelete)}
@@ -1303,9 +1412,9 @@ export default function AdminSettingsPage() {
           branchPreview
             ? (branchPreview.action === 'BLOCKED_ACTIVE_TREATMENT'
                 ? (isRu ? 'Удаление филиала заблокировано: идет лечение' : 'Filialni o\'chirish taqiqlanadi: muolaja jarayonda')
-                : branchPreview.action === 'BLOCKED_FUTURE_APPOINTMENTS'
+                : (branchPreview.action === 'BLOCKED_FUTURE_APPOINTMENTS' || (branchPreview.futureAppointmentsCount || 0) > 0)
                 ? (isRu ? 'Удаление филиала заблокировано: есть будущие приемы' : 'Filialni o\'chirish taqiqlanadi: kelgusi qabullar mavjud')
-                : branchPreview.action === 'DEACTIVATE'
+                : (branchPreview.action === 'DEACTIVATE' || branchPreview.actionType === 'ARCHIVE')
                 ? (isRu ? 'Деактивация филиала' : 'Filialni nofaol holatga o\'tkazish')
                 : (isRu ? 'Полное удаление филиала' : 'Filialni butunlay o\'chirish'))
             : (isRu ? 'Удаление филиала' : 'Filialni o\'chirish')
@@ -1321,14 +1430,14 @@ export default function AdminSettingsPage() {
           ) : (
             <>
               {deleteBranchSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 font-bold flex items-center gap-2">
+                <div role="status" aria-live="polite" className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 font-bold flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>{deleteBranchSuccess}</span>
                 </div>
               )}
 
               {deleteBranchError && (
-                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 font-bold flex items-center gap-2">
+                <div role="alert" aria-live="assertive" className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 font-bold flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>{deleteBranchError}</span>
                 </div>
@@ -1347,94 +1456,145 @@ export default function AdminSettingsPage() {
 
               {branchPreview && (
                 <div className="space-y-3">
-                  <div
-                    className={`p-3.5 rounded-xl border ${
-                      !branchPreview.canDelete
-                        ? 'bg-rose-50 border-rose-200 text-rose-900'
-                        : branchPreview.action === 'DEACTIVATE'
-                        ? 'bg-amber-50 border-amber-200 text-amber-900'
-                        : 'bg-teal-50 border-teal-200 text-teal-900'
-                    }`}
-                  >
-                    <p className="font-bold mb-1">
-                      {!branchPreview.canDelete
-                        ? (isRu ? 'Внимание! Операция заблокирована системой:' : 'Diqqat! Ushbu amal tizim tomonidan taqiqlangan:')
-                        : branchPreview.action === 'DEACTIVATE'
-                        ? (isRu ? 'Внимание! Филиал будет переведен в неактивное состояние:' : 'Diqqat! Filial nofaol holatga o\'tkaziladi:')
-                        : (isRu ? 'Филиал не имеет клинической истории и будет полностью удален:' : 'Filialda hech qanday klinik tarix yo\'q va u butunlay o\'chiriladi:')
-                      }
-                    </p>
-                    <p className="text-[11px] leading-relaxed">
-                      {branchPreview.reason}
-                    </p>
-                  </div>
+                  {(() => {
+                    const activeCount = branchPreview.activeTreatmentsCount ?? branchPreview.activeTreatmentCount ?? 0;
+                    const futureCount = branchPreview.futureAppointmentsCount ?? branchPreview.futureAppointmentCount ?? 0;
+                    const historyCount = branchPreview.historicalAppointmentsCount ?? branchPreview.historicalAppointmentCount ?? 0;
+                    const assignedDocCount = branchPreview.assignedDoctorsCount ?? 0;
+                    const isBlocked = activeCount > 0 || futureCount > 0 || !branchPreview.canDelete;
+                    const isDeactivate = !isBlocked && (branchPreview.action === 'DEACTIVATE' || branchPreview.actionType === 'ARCHIVE' || historyCount > 0);
 
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
-                      <strong className={`text-sm ${branchPreview.activeTreatmentsCount > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
-                        {branchPreview.activeTreatmentsCount} ta
-                      </strong>
-                    </div>
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
-                      <strong className={`text-sm ${branchPreview.futureAppointmentsCount > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
-                        {branchPreview.futureAppointmentsCount} ta
-                      </strong>
-                    </div>
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
-                      <strong className="text-sm text-slate-800">
-                        {branchPreview.historicalAppointmentsCount} ta
-                      </strong>
-                    </div>
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Прикрепленные врачи:' : 'Biriktirilgan shifokorlar:'}</span>
-                      <strong className="text-sm text-slate-800">
-                        {branchPreview.assignedDoctorsCount} ta
-                      </strong>
-                    </div>
-                  </div>
+                    return (
+                      <>
+                        <div
+                          className={`p-3.5 rounded-xl border ${
+                            isBlocked
+                              ? 'bg-rose-50 border-rose-200 text-rose-900'
+                              : isDeactivate
+                              ? 'bg-amber-50 border-amber-200 text-amber-900'
+                              : 'bg-teal-50 border-teal-200 text-teal-900'
+                          }`}
+                        >
+                          <p className="font-bold mb-1">
+                            {isBlocked
+                              ? (isRu ? 'Внимание! Операция заблокирована системой:' : 'Diqqat! Ushbu amal tizim tomonidan taqiqlangan:')
+                              : isDeactivate
+                              ? (isRu ? 'Внимание! Филиал будет переведен в неактивное состояние:' : 'Diqqat! Filial nofaol holatga o\'tkaziladi:')
+                              : (isRu ? 'Филиал не имеет клинической истории и будет полностью удален:' : 'Filialda hech qanday klinik tarix yo\'q va u butunlay o\'chiriladi:')
+                            }
+                          </p>
+                          <p className="text-[11px] leading-relaxed">
+                            {branchPreview.reason || branchPreview.resolutionGuidance || (
+                              futureCount > 0
+                                ? (isRu
+                                    ? `В данном филиале запланировано ${futureCount} будущих приемов. Перед удалением перенесите или отмените приемы.`
+                                    : `Ushbu filialda kelgusiga ${futureCount} ta faol qabul rejalashtirilgan. Filialni o'chirishdan oldin ushbu qabullarni boshqa mutaxassis yoki filialga ko'chiring yoki bekor qiling.`)
+                                : (isRu ? 'Действие невозможно выполнить.' : 'Ushbu amalni bajarish imkonsiz.')
+                            )}
+                          </p>
+                        </div>
 
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                    <button
-                      type="button"
-                      disabled={isDeletingBranch}
-                      onClick={() => {
-                        setBranchToDelete(null);
-                        setBranchPreview(null);
-                      }}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
-                    >
-                      {isRu ? 'Отмена' : 'Bekor qilish'}
-                    </button>
+                        {/* Impact Statistics Grid */}
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
+                            <strong className={`text-sm ${activeCount > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+                              {activeCount} ta
+                            </strong>
+                          </div>
+                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
+                            <strong className={`text-sm ${futureCount > 0 ? 'text-amber-600 font-extrabold' : 'text-slate-800'}`}>
+                              {futureCount} ta
+                            </strong>
+                          </div>
+                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
+                            <strong className="text-sm text-slate-800">
+                              {historyCount} ta
+                            </strong>
+                          </div>
+                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                            <span className="text-slate-500 block">{isRu ? 'Прикрепленные врачи:' : 'Biriktirilgan shifokorlar:'}</span>
+                            <strong className="text-sm text-slate-800">
+                              {assignedDocCount} ta
+                            </strong>
+                          </div>
+                        </div>
 
-                    {branchPreview.canDelete ? (
-                      <button
-                        type="button"
-                        disabled={isDeletingBranch}
-                        onClick={confirmDeleteBranch}
-                        className={`px-4 py-2 text-white rounded-xl font-bold flex items-center gap-1.5 ${
-                          branchPreview.action === 'DEACTIVATE'
-                            ? 'bg-amber-600 hover:bg-amber-700'
-                            : 'bg-rose-600 hover:bg-rose-700'
-                        }`}
-                      >
-                        {isDeletingBranch && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                        <span>
-                          {isDeletingBranch
-                            ? (isRu ? 'Выполняется...' : 'Bajarilmoqda...')
-                            : branchPreview.action === 'DEACTIVATE'
-                            ? (isRu ? 'Деактивировать филиал' : 'Filialni nofaol qilish')
-                            : (isRu ? 'Удалить навсегда' : 'Butunlay o\'chirish')}
-                        </span>
-                      </button>
-                    ) : (
-                      <div className="text-[11px] font-bold text-rose-700 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200">
-                        {isRu ? 'Действие заблокировано' : 'Amal bloklangan'}
-                      </div>
-                    )}
-                  </div>
+                        {/* List of blocking future appointments */}
+                        {branchPreview.futureAppointments && branchPreview.futureAppointments.length > 0 && (
+                          <div className="space-y-1.5 p-3 bg-amber-50/80 border border-amber-200 rounded-xl">
+                            <span className="font-bold text-[11px] text-amber-950 block">
+                              {isRu ? 'Блокирующие будущие приемы филиала:' : 'Filialni bloklayotgan kelgusi qabullar:'}
+                            </span>
+                            <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
+                              {branchPreview.futureAppointments.map((appt: any) => (
+                                <div key={appt.id} className="p-2 bg-white rounded-lg border border-amber-200/80 flex items-center justify-between text-[11px]">
+                                  <div>
+                                    <strong className="text-slate-900 block">{appt.patientName}</strong>
+                                    <span className="text-slate-500 text-[10px]">
+                                      {new Date(appt.startTime).toLocaleString('uz-UZ', {
+                                        year: 'numeric',
+                                        month: '2-digit',
+                                        day: '2-digit',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                      {appt.serviceName ? ` • ${appt.serviceName}` : ''}
+                                    </span>
+                                  </div>
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
+                                    {appt.doctorName || appt.status}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            disabled={isDeletingBranch}
+                            onClick={() => {
+                              setBranchToDelete(null);
+                              setBranchPreview(null);
+                            }}
+                            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer"
+                          >
+                            {isRu ? 'Отмена' : 'Bekor qilish'}
+                          </button>
+
+                          {!isBlocked ? (
+                            <button
+                              type="button"
+                              disabled={isDeletingBranch}
+                              onClick={confirmDeleteBranch}
+                              className={`px-4 py-2 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer ${
+                                isDeactivate
+                                  ? 'bg-amber-600 hover:bg-amber-700'
+                                  : 'bg-rose-600 hover:bg-rose-700'
+                              }`}
+                            >
+                              {isDeletingBranch && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                              <span>
+                                {isDeletingBranch
+                                  ? (isRu ? 'Выполняется...' : 'Bajarilmoqda...')
+                                  : isDeactivate
+                                  ? (isRu ? 'Деактивировать филиал' : 'Filialni nofaol qilish')
+                                  : (isRu ? 'Удалить навсегда' : 'Butunlay o\'chirish')}
+                              </span>
+                            </button>
+                          ) : (
+                            <div className="text-[11px] font-bold text-rose-700 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-200">
+                              {isRu ? 'Действие заблокировано' : 'Amal bloklangan'}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </>

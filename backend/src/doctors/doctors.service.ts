@@ -7,7 +7,81 @@ import {
   checkEntityLifecycleBlockers,
   assertLifecycleUnblocked,
   resolveActorId,
+  AuthenticatedActor,
 } from '../common/lifecycle.helper';
+
+/**
+ * Shared transaction helper for doctor deactivation / archival / deletion side effects.
+ * 
+ * Enforces unified policy:
+ * 1. Schedules: Consistently deactivates (or deletes on clean hard delete) schedules,
+ *    regardless of whether appointment history exists.
+ * 2. Linked Staff Account:
+ *    - Role DOCTOR: Deactivated (isActive: false), sessions invalidated (refreshTokenHash: null, tokenVersion incremented).
+ *      For clean deletion, unlinks doctorId: null.
+ *    - Role OWNER / ADMIN: Preserved active! Never deactivates owner/admin accounts; unlinks doctorId: null on archive/delete.
+ * 3. Restoration / Reactivation Policy:
+ *    - When a doctor is reactivated (isActive: true or isArchived: false), staff accounts and schedules
+ *      are NOT silently auto-reactivated. Staff accounts and schedules remain inactive until explicitly
+ *      configured by an administrator.
+ */
+async function applyDoctorLifecycleSideEffects(
+  tx: any,
+  doctorId: string,
+  staffUser: any | null,
+  mode: 'DEACTIVATE' | 'ARCHIVE' | 'DELETE_CLEAN',
+) {
+  if (mode === 'DELETE_CLEAN') {
+    await tx.doctorSchedule.deleteMany({ where: { doctorId } });
+    await tx.scheduleException.deleteMany({ where: { doctorId } });
+
+    if (staffUser) {
+      if (staffUser.role === StaffRole.DOCTOR) {
+        await tx.staffUser.update({
+          where: { id: staffUser.id },
+          data: {
+            doctorId: null,
+            isActive: false,
+            refreshTokenHash: null,
+            tokenVersion: { increment: 1 },
+          },
+        });
+      } else {
+        // Preserve OWNER / ADMIN active status, only disconnect doctor linkage
+        await tx.staffUser.update({
+          where: { id: staffUser.id },
+          data: { doctorId: null },
+        });
+      }
+    }
+  } else {
+    // Both DEACTIVATE and ARCHIVE disable schedules consistently, even with zero history
+    await tx.doctorSchedule.updateMany({
+      where: { doctorId },
+      data: { isActive: false },
+    });
+
+    if (staffUser) {
+      if (staffUser.role === StaffRole.DOCTOR) {
+        await tx.staffUser.update({
+          where: { id: staffUser.id },
+          data: {
+            isActive: false,
+            refreshTokenHash: null,
+            tokenVersion: { increment: 1 },
+            ...(mode === 'ARCHIVE' ? { doctorId: null } : {}),
+          },
+        });
+      } else if (mode === 'ARCHIVE') {
+        // Preserve OWNER / ADMIN active status, only disconnect doctor linkage on archive
+        await tx.staffUser.update({
+          where: { id: staffUser.id },
+          data: { doctorId: null },
+        });
+      }
+    }
+  }
+}
 
 export interface DoctorInputData {
   firstNameUz: string;
@@ -130,6 +204,7 @@ export class DoctorsService {
         include: {
           branches: true,
           services: true,
+          staffUser: true,
         },
       });
       if (!existing) throw new NotFoundException('Shifokor topilmadi');
@@ -137,18 +212,19 @@ export class DoctorsService {
       const { specialtyIds, branchIds, serviceIds, ...doctorData } = data;
 
       // 2. If deactivating or archiving through update, enforce lifecycle blocker checks
+      const isDeactivating =
+        (doctorData.isActive === false && existing.isActive) ||
+        ((doctorData as any).isArchived === true && !existing.isArchived);
+
       if (doctorData.isActive === false || (doctorData as any).isArchived === true) {
         const blockers = await checkEntityLifecycleBlockers(tx, {
           doctorId: id,
           defaultSafeAction: 'ARCHIVE',
         });
         assertLifecycleUnblocked(blockers, 'Shifokor');
-        if (blockers.historicalAppointmentCount > 0) {
-          await tx.doctorSchedule.updateMany({
-            where: { doctorId: id },
-            data: { isActive: false },
-          });
-        }
+
+        const mode = (doctorData as any).isArchived === true ? 'ARCHIVE' : 'DEACTIVATE';
+        await applyDoctorLifecycleSideEffects(tx, id, existing.staffUser, mode);
       }
 
       // 3. Audit branch assignment removal for impacts on existing appointments
@@ -254,10 +330,11 @@ export class DoctorsService {
 
       if (actorUser) {
         const actorId = resolveActorId(actorUser);
+        const action = isDeactivating ? 'doctor.deactivate' : 'doctor.update';
         await this.auditService.logTransactional({
           tx,
           userId: actorId,
-          action: 'doctor.update',
+          action,
           entity: 'doctor',
           entityId: id,
           details: {
@@ -271,7 +348,7 @@ export class DoctorsService {
     });
   }
 
-  async archive(id: string, actorUser?: any) {
+  async archive(id: string, actorUser?: AuthenticatedActor | any) {
     const lockKey = getDoctorLockKey(id);
 
     return this.prisma.$transaction(async (tx) => {
@@ -294,28 +371,7 @@ export class DoctorsService {
         data: { isArchived: true, isActive: false },
       });
 
-      await tx.doctorSchedule.updateMany({
-        where: { doctorId: id },
-        data: { isActive: false },
-      });
-
-      if (doctor.staffUser) {
-        if (doctor.staffUser.role === StaffRole.DOCTOR) {
-          await tx.staffUser.update({
-            where: { id: doctor.staffUser.id },
-            data: {
-              isActive: false,
-              refreshTokenHash: null,
-              tokenVersion: { increment: 1 },
-            },
-          });
-        } else {
-          await tx.staffUser.update({
-            where: { id: doctor.staffUser.id },
-            data: { doctorId: null },
-          });
-        }
-      }
+      await applyDoctorLifecycleSideEffects(tx, id, doctor.staffUser, 'ARCHIVE');
 
       const actorId = resolveActorId(actorUser);
       await this.auditService.logTransactional({
@@ -413,20 +469,42 @@ export class DoctorsService {
       }
     }
 
+    const action =
+      blockers.actionType === 'DELETE'
+        ? 'CLEAN_DELETE'
+        : blockers.actionType === 'ARCHIVE'
+          ? 'ARCHIVE'
+          : blockers.activeTreatmentCount > 0
+            ? 'BLOCKED_ACTIVE_TREATMENT'
+            : 'BLOCKED_FUTURE_APPOINTMENTS';
+
     return {
       entityId: doctor.id,
       entityName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`,
       canDelete: blockers.canProceed,
+      action,
       actionType: blockers.actionType,
+      reason: blockers.resolutionGuidance,
+      resolutionGuidance: blockers.resolutionGuidance,
       hasClinicalHistory: blockers.hasClinicalHistory,
       activeTreatmentCount: blockers.activeTreatmentCount,
+      activeTreatmentsCount: blockers.activeTreatmentCount,
       activeTreatments: blockers.activeTreatments,
       futureAppointmentCount: blockers.futureAppointmentCount,
+      futureAppointmentsCount: blockers.futureAppointmentCount,
       futureAppointments: blockers.futureAppointments,
       historicalAppointmentCount: blockers.historicalAppointmentCount,
+      historicalAppointmentsCount: blockers.historicalAppointmentCount,
+      scheduleRecordsCount: doctor.schedules.length,
+      linkedStaffAccount: doctor.staffUser
+        ? {
+            username: doctor.staffUser.fullName || doctor.staffUser.email,
+            email: doctor.staffUser.email,
+            role: doctor.staffUser.role,
+          }
+        : null,
       staffConsequences,
       scheduleConsequences,
-      resolutionGuidance: blockers.resolutionGuidance,
     };
   }
 
@@ -464,30 +542,7 @@ export class DoctorsService {
           data: { isArchived: true, isActive: false },
         });
 
-        await tx.doctorSchedule.updateMany({
-          where: { doctorId: id },
-          data: { isActive: false },
-        });
-
-        // Linked staff account handling: deactivate DOCTOR role to avoid zombie unusable state
-        if (doctor.staffUser) {
-          if (doctor.staffUser.role === StaffRole.DOCTOR) {
-            await tx.staffUser.update({
-              where: { id: doctor.staffUser.id },
-              data: {
-                isActive: false,
-                refreshTokenHash: null,
-                tokenVersion: { increment: 1 },
-              },
-            });
-          } else {
-            // Keep admin/owner access, just clear doctor link
-            await tx.staffUser.update({
-              where: { id: doctor.staffUser.id },
-              data: { doctorId: null },
-            });
-          }
-        }
+        await applyDoctorLifecycleSideEffects(tx, id, doctor.staffUser, 'ARCHIVE');
 
         await this.auditService.logTransactional({
           tx,
@@ -514,27 +569,8 @@ export class DoctorsService {
       await tx.doctorSpecialty.deleteMany({ where: { doctorId: id } });
       await tx.doctorBranch.deleteMany({ where: { doctorId: id } });
       await tx.doctorService.deleteMany({ where: { doctorId: id } });
-      await tx.doctorSchedule.deleteMany({ where: { doctorId: id } });
-      await tx.scheduleException.deleteMany({ where: { doctorId: id } });
 
-      if (doctor.staffUser) {
-        if (doctor.staffUser.role === StaffRole.DOCTOR) {
-          await tx.staffUser.update({
-            where: { id: doctor.staffUser.id },
-            data: {
-              doctorId: null,
-              isActive: false,
-              refreshTokenHash: null,
-              tokenVersion: { increment: 1 },
-            },
-          });
-        } else {
-          await tx.staffUser.update({
-            where: { id: doctor.staffUser.id },
-            data: { doctorId: null },
-          });
-        }
-      }
+      await applyDoctorLifecycleSideEffects(tx, id, doctor.staffUser, 'DELETE_CLEAN');
 
       await tx.doctor.delete({ where: { id } });
 

@@ -253,13 +253,11 @@ export class ClinicService {
   async updateBranch(id: string, data: any, actorUser?: any) {
     this.validateBranchData(data);
 
-    // If attempting to deactivate branch
+    // If attempting to deactivate branch, only OWNER is authorized
     if (data.isActive !== undefined && data.isActive === false) {
       if (actorUser && actorUser.role !== StaffRole.OWNER) {
         throw new ForbiddenException('Faqat OWNER filiallarni nofaol qilish yoki o‘chirish huquqiga ega');
       }
-      // Delegate to safe lifecycle deactivation/deletion
-      return this.deleteBranch(id, actorUser);
     }
 
     const lockKey = getBranchLockKey(id);
@@ -270,19 +268,39 @@ export class ClinicService {
       const existing = await tx.branch.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException('Filial topilmadi');
 
+      const isDeactivating = data.isActive !== undefined && data.isActive === false && existing.isActive;
+
+      let blockers: any = null;
+      if (data.isActive === false) {
+        // Enforce lifecycle blocker checks
+        blockers = await checkEntityLifecycleBlockers(tx, {
+          branchId: id,
+          defaultSafeAction: 'DEACTIVATE',
+        });
+        assertLifecycleUnblocked(blockers, 'Filial');
+
+        // Consistently deactivate doctor schedules for this branch
+        await tx.doctorSchedule.updateMany({
+          where: { branchId: id },
+          data: { isActive: false },
+        });
+      }
+
       const updated = await tx.branch.update({ where: { id }, data });
 
       if (actorUser) {
         const actorId = resolveActorId(actorUser);
+        const action = isDeactivating ? 'branch.deactivate' : 'branch.update';
         await this.auditService.logTransactional({
           tx,
           userId: actorId,
-          action: 'branch.update',
+          action,
           entity: 'branch',
           entityId: id,
           details: {
             branchName: updated.nameUz,
             updatedFields: Object.keys(data),
+            ...(isDeactivating && blockers ? { historicalAppointments: blockers.historicalAppointmentCount } : {}),
           },
         });
       }
@@ -336,20 +354,36 @@ export class ClinicService {
       );
     }
 
+    const action =
+      blockers.actionType === 'DELETE'
+        ? 'CLEAN_DELETE'
+        : blockers.actionType === 'DEACTIVATE' || blockers.actionType === 'ARCHIVE'
+          ? 'DEACTIVATE'
+          : blockers.activeTreatmentCount > 0
+            ? 'BLOCKED_ACTIVE_TREATMENT'
+            : 'BLOCKED_FUTURE_APPOINTMENTS';
+
     return {
       entityId: branch.id,
       entityName: branch.nameUz,
       canDelete: blockers.canProceed,
+      action,
       actionType: blockers.actionType,
+      reason: blockers.resolutionGuidance,
+      resolutionGuidance: blockers.resolutionGuidance,
       hasClinicalHistory: blockers.hasClinicalHistory,
       activeTreatmentCount: blockers.activeTreatmentCount,
+      activeTreatmentsCount: blockers.activeTreatmentCount,
       activeTreatments: blockers.activeTreatments,
       futureAppointmentCount: blockers.futureAppointmentCount,
+      futureAppointmentsCount: blockers.futureAppointmentCount,
       futureAppointments: blockers.futureAppointments,
       historicalAppointmentCount: blockers.historicalAppointmentCount,
+      historicalAppointmentsCount: blockers.historicalAppointmentCount,
+      assignedDoctorsCount: branch.doctors.length,
+      scheduleRecordsCount: branch.schedules.length,
       staffConsequences,
       scheduleConsequences,
-      resolutionGuidance: blockers.resolutionGuidance,
     };
   }
 

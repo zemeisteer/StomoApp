@@ -26,6 +26,12 @@ import { ModalDialog } from '../../../components/ModalDialog';
 import { api } from '../../../lib/api';
 import { formatClinicDate } from '../../../lib/dateFormat';
 import { useI18n } from '../../../lib/i18n';
+import {
+  translateName,
+  translateSpecialty,
+  generateDoctorSlug,
+  latinToCyrillic,
+} from '../../../lib/transliterate';
 
 const DAYS_OF_WEEK = [
   { value: 'MONDAY', label: 'Dushanba' },
@@ -43,6 +49,31 @@ const EXCEPTION_TYPE_LABELS: Record<string, string> = {
   BLOCKED: 'Band soat',
   OVERTIME: "Qo'shimcha ish vaqti (Overtime)",
 };
+
+const AVAILABLE_LANGUAGES = [
+  { code: 'uz', label: "O'zbekcha", flag: '🇺🇿' },
+  { code: 'ru', label: 'Русский', flag: '🇷🇺' },
+  { code: 'en', label: 'English', flag: '🇬🇧' },
+  { code: 'tr', label: 'Türkçe', flag: '🇹🇷' },
+];
+
+const SPECIALTY_PRESETS = [
+  { uz: 'Stomatolog-terapevt', ru: 'Стоматолог-терапевт' },
+  { uz: 'Stomatolog-ortoped', ru: 'Стоматолог-ортопед' },
+  { uz: 'Stomatolog-jarroh', ru: 'Стоматолог-хирург' },
+  { uz: 'Ortodont', ru: 'Ортодонт' },
+  { uz: 'Implantolog', ru: 'Имплантолог' },
+  { uz: 'Bolalar stomatologi', ru: 'Детский стоматолог' },
+  { uz: 'Parodontolog', ru: 'Пародонтолог' },
+  { uz: 'Bosh shifokor', ru: 'Главный врач' },
+];
+
+const EDUCATION_PRESETS = [
+  'Toshkent Davlat Stomatologiya Instituti',
+  'Samarqand Davlat Tibbiyot Universiteti',
+  'Toshkent Tibbiyot Akademiyasi',
+  'Andijon Davlat Tibbiyot Instituti',
+];
 
 export default function AdminDoctorsManagePage() {
   const { language } = useI18n();
@@ -88,7 +119,7 @@ export default function AdminDoctorsManagePage() {
     educationUz: string;
     educationRu: string;
     experienceYears: number;
-    languages: string;
+    languages: string[];
     photoUrl: string;
     isActive: boolean;
     serviceIds: string[];
@@ -106,7 +137,7 @@ export default function AdminDoctorsManagePage() {
     educationUz: '',
     educationRu: '',
     experienceYears: 0,
-    languages: 'uz, ru',
+    languages: ['uz', 'ru'],
     photoUrl: '',
     isActive: true,
     serviceIds: [],
@@ -254,7 +285,7 @@ export default function AdminDoctorsManagePage() {
       educationUz: '',
       educationRu: '',
       experienceYears: 0,
-      languages: 'uz, ru',
+      languages: ['uz', 'ru'],
       photoUrl: '',
       isActive: true,
       serviceIds: [],
@@ -268,6 +299,12 @@ export default function AdminDoctorsManagePage() {
     setEditingDoctor(doc);
     const existingServiceIds = doc.services?.map((s: any) => s.serviceId || s.service?.id).filter(Boolean) || [];
     const existingBranchIds = doc.branches?.map((b: any) => b.branchId || b.branch?.id).filter(Boolean) || [];
+    const existingLangs = Array.isArray(doc.languages)
+      ? doc.languages
+      : typeof doc.languages === 'string'
+      ? doc.languages.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+      : ['uz', 'ru'];
+
     setDoctorForm({
       firstNameUz: doc.firstNameUz || '',
       lastNameUz: doc.lastNameUz || '',
@@ -281,7 +318,7 @@ export default function AdminDoctorsManagePage() {
       educationUz: doc.educationUz || '',
       educationRu: doc.educationRu || '',
       experienceYears: Number(doc.experienceYears) || 0,
-      languages: Array.isArray(doc.languages) ? doc.languages.join(', ') : 'uz, ru',
+      languages: existingLangs.length > 0 ? existingLangs : ['uz', 'ru'],
       photoUrl: doc.photoUrl || '',
       isActive: doc.isActive !== false,
       serviceIds: existingServiceIds,
@@ -297,13 +334,19 @@ export default function AdminDoctorsManagePage() {
       setIsSavingDoctor(true);
       setDoctorError(null);
 
-      const langs = doctorForm.languages
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
+      // Auto-generate slug if not explicitly set
+      const autoSlug = doctorForm.slug || generateDoctorSlug(doctorForm.firstNameUz, doctorForm.lastNameUz);
+
+      const langs = Array.isArray(doctorForm.languages) && doctorForm.languages.length > 0
+        ? doctorForm.languages
+        : ['uz', 'ru'];
 
       const payload = {
         ...doctorForm,
+        slug: autoSlug,
+        titleRu: doctorForm.titleRu || translateSpecialty(doctorForm.titleUz).ru,
+        bioRu: doctorForm.bioRu || latinToCyrillic(doctorForm.bioUz),
+        educationRu: doctorForm.educationRu || latinToCyrillic(doctorForm.educationUz),
         experienceYears: Number(doctorForm.experienceYears) || 0,
         languages: langs,
         serviceIds: doctorForm.serviceIds,
@@ -322,7 +365,7 @@ export default function AdminDoctorsManagePage() {
         await loadDoctorScheduleData(selectedDoctorId);
       }
     } catch (err: any) {
-      setDoctorError(err?.message || 'Shifokorni saqlashda xatolik yuz berdi');
+      setDoctorError(err?.message || (isRu ? 'Ошибка при сохранении врача' : 'Shifokorni saqlashda xatolik yuz berdi'));
     } finally {
       setIsSavingDoctor(false);
     }
@@ -1046,33 +1089,52 @@ export default function AdminDoctorsManagePage() {
             )}
 
             <form onSubmit={handleSaveDoctor} className="space-y-4 text-xs">
+              {/* Names: Uzbek Latin and Russian Cyrillic with bidirectional auto-sync */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Ism (O&apos;zbekcha) *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700">Ism (O&apos;zbekcha) *</label>
+                    <span className="text-[10px] text-teal-600 font-semibold">Avto-tarjima</span>
+                  </div>
                   <input
                     type="text"
                     required
+                    placeholder="Masalan: Anvar"
                     value={doctorForm.firstNameUz}
-                    onChange={(e) => setDoctorForm({ ...doctorForm, firstNameUz: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const { uz, ru } = translateName(val);
+                      setDoctorForm((prev) => ({
+                        ...prev,
+                        firstNameUz: val,
+                        firstNameRu: ru || prev.firstNameRu,
+                        slug: editingDoctor ? prev.slug : generateDoctorSlug(uz || val, prev.lastNameUz),
+                      }));
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Familiya (O&apos;zbekcha) *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700">Familiya (O&apos;zbekcha) *</label>
+                    <span className="text-[10px] text-teal-600 font-semibold">Avto-tarjima</span>
+                  </div>
                   <input
                     type="text"
                     required
+                    placeholder="Masalan: Karimov"
                     value={doctorForm.lastNameUz}
                     onChange={(e) => {
-                      const last = e.target.value;
-                      const slug = `${doctorForm.firstNameUz}-${last}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-                      setDoctorForm({
-                        ...doctorForm,
-                        lastNameUz: last,
-                        slug: editingDoctor ? doctorForm.slug : slug,
-                      });
+                      const val = e.target.value;
+                      const { uz, ru } = translateName(val);
+                      setDoctorForm((prev) => ({
+                        ...prev,
+                        lastNameUz: val,
+                        lastNameRu: ru || prev.lastNameRu,
+                        slug: editingDoctor ? prev.slug : generateDoctorSlug(prev.firstNameUz, uz || val),
+                      }));
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
               </div>
@@ -1083,9 +1145,19 @@ export default function AdminDoctorsManagePage() {
                   <input
                     type="text"
                     required
+                    placeholder="Анвар"
                     value={doctorForm.firstNameRu}
-                    onChange={(e) => setDoctorForm({ ...doctorForm, firstNameRu: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const { uz } = translateName(val);
+                      setDoctorForm((prev) => ({
+                        ...prev,
+                        firstNameRu: val,
+                        firstNameUz: uz || prev.firstNameUz,
+                        slug: editingDoctor ? prev.slug : generateDoctorSlug(uz || prev.firstNameUz, prev.lastNameUz),
+                      }));
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
                 <div>
@@ -1093,76 +1165,227 @@ export default function AdminDoctorsManagePage() {
                   <input
                     type="text"
                     required
+                    placeholder="Каримов"
                     value={doctorForm.lastNameRu}
-                    onChange={(e) => setDoctorForm({ ...doctorForm, lastNameRu: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const { uz } = translateName(val);
+                      setDoctorForm((prev) => ({
+                        ...prev,
+                        lastNameRu: val,
+                        lastNameUz: uz || prev.lastNameUz,
+                        slug: editingDoctor ? prev.slug : generateDoctorSlug(prev.firstNameUz, uz || prev.lastNameUz),
+                      }));
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Slug (URL) *</label>
-                  <input
-                    type="text"
-                    required
-                    value={doctorForm.slug}
-                    onChange={(e) => setDoctorForm({ ...doctorForm, slug: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                  />
-                </div>
+              {/* Tajriba and Tillar selection (Interactive Pill selector) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Tajriba (yil) *</label>
                   <input
                     type="number"
                     required
                     min={0}
+                    max={60}
                     value={doctorForm.experienceYears}
                     onChange={(e) => setDoctorForm({ ...doctorForm, experienceYears: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
+
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Tillar</label>
+                  <label className="block font-bold text-slate-700 mb-1">Muloqot tillari *</label>
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {AVAILABLE_LANGUAGES.map((lang) => {
+                      const isSelected = doctorForm.languages.includes(lang.code);
+                      return (
+                        <button
+                          key={lang.code}
+                          type="button"
+                          onClick={() => {
+                            setDoctorForm((prev) => {
+                              const exists = prev.languages.includes(lang.code);
+                              const updated = exists
+                                ? prev.languages.filter((c) => c !== lang.code)
+                                : [...prev.languages, lang.code];
+                              return {
+                                ...prev,
+                                languages: updated.length > 0 ? updated : [lang.code],
+                              };
+                            });
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                            isSelected
+                              ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span>{lang.flag}</span>
+                          <span>{lang.label}</span>
+                          {isSelected && <span className="text-[10px]">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Mutaxassislik va Unvon */}
+              <div className="space-y-1.5 p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-800">
+                    Mutaxassislik va Unvon *
+                  </label>
+                  <span className="text-[10px] text-slate-500">
+                    💡 Shifokor yo&apos;nalishi va toifasi
+                  </span>
+                </div>
+
+                {/* Quick specialty presets */}
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {SPECIALTY_PRESETS.map((spec) => {
+                    const isCurrent = doctorForm.titleUz === spec.uz;
+                    return (
+                      <button
+                        key={spec.uz}
+                        type="button"
+                        onClick={() => {
+                          setDoctorForm((prev) => ({
+                            ...prev,
+                            titleUz: spec.uz,
+                            titleRu: spec.ru,
+                          }));
+                        }}
+                        className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                          isCurrent
+                            ? 'bg-teal-700 text-white'
+                            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {spec.uz}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-0.5">O&apos;zbekcha</label>
+                    <input
+                      type="text"
+                      placeholder="Stomatolog-terapevt"
+                      value={doctorForm.titleUz}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const spec = translateSpecialty(val);
+                        setDoctorForm((prev) => ({
+                          ...prev,
+                          titleUz: val,
+                          titleRu: spec.ru || latinToCyrillic(val),
+                        }));
+                      }}
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-white focus:border-teal-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-0.5">Ruscha</label>
+                    <input
+                      type="text"
+                      placeholder="Стоматолог-терапевт"
+                      value={doctorForm.titleRu}
+                      onChange={(e) => setDoctorForm({ ...doctorForm, titleRu: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-white focus:border-teal-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Biografiya */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">Biografiya</label>
+                  <span className="text-[10px] text-teal-600 font-semibold">Ruscha avto-sinxronlanadi</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <textarea
+                      rows={2}
+                      placeholder="Biografiya (O'zbekcha)"
+                      value={doctorForm.bioUz}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDoctorForm((prev) => ({
+                          ...prev,
+                          bioUz: val,
+                          bioRu: latinToCyrillic(val),
+                        }));
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
+                    />
+                  </div>
+                  <div>
+                    <textarea
+                      rows={2}
+                      placeholder="Биография (Русский)"
+                      value={doctorForm.bioRu}
+                      onChange={(e) => setDoctorForm({ ...doctorForm, bioRu: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Ta'lim ma'lumotlari */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700">Ta&apos;lim ma&apos;lumotlari</label>
+                  <span className="text-[10px] text-teal-600 font-semibold">Avto-tarjima</span>
+                </div>
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {EDUCATION_PRESETS.map((uni) => (
+                    <button
+                      key={uni}
+                      type="button"
+                      onClick={() => {
+                        setDoctorForm((prev) => ({
+                          ...prev,
+                          educationUz: uni,
+                          educationRu: latinToCyrillic(uni),
+                        }));
+                      }}
+                      className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-teal-50 hover:text-teal-700 border border-slate-200"
+                    >
+                      {uni}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <input
                     type="text"
-                    value={doctorForm.languages}
-                    onChange={(e) => setDoctorForm({ ...doctorForm, languages: e.target.value })}
-                    placeholder="uz, ru, en"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                    placeholder="Toshkent Davlat Stomatologiya Instituti (2012)"
+                    value={doctorForm.educationUz}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDoctorForm((prev) => ({
+                        ...prev,
+                        educationUz: val,
+                        educationRu: latinToCyrillic(val),
+                      }));
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Ташкентский Государственный Стоматологический Институт (2012)"
+                    value={doctorForm.educationRu}
+                    onChange={(e) => setDoctorForm({ ...doctorForm, educationRu: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Unvon / Mutaxassislik (O&apos;zbekcha)</label>
-                <input
-                  type="text"
-                  value={doctorForm.titleUz}
-                  onChange={(e) => setDoctorForm({ ...doctorForm, titleUz: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Biografiya (O&apos;zbekcha)</label>
-                <textarea
-                  rows={2}
-                  value={doctorForm.bioUz}
-                  onChange={(e) => setDoctorForm({ ...doctorForm, bioUz: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Ta&apos;lim ma&apos;lumotlari (O&apos;zbekcha)</label>
-                <input
-                  type="text"
-                  value={doctorForm.educationUz}
-                  onChange={(e) => setDoctorForm({ ...doctorForm, educationUz: e.target.value })}
-                  placeholder="Toshkent Davlat Stomatologiya Instituti (2012)"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                />
               </div>
 
               {/* Connected Services */}
@@ -2143,14 +2366,22 @@ export default function AdminDoctorsManagePage() {
           ) : (
             <>
               {deleteDoctorSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 font-bold flex items-center gap-2">
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 font-bold flex items-center gap-2"
+                >
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>{deleteDoctorSuccess}</span>
                 </div>
               )}
 
               {deleteDoctorError && (
-                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 font-bold flex items-center gap-2">
+                <div
+                  role="alert"
+                  aria-live="assertive"
+                  className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 font-bold flex items-center gap-2"
+                >
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>{deleteDoctorError}</span>
                 </div>
@@ -2174,7 +2405,7 @@ export default function AdminDoctorsManagePage() {
                     className={`p-3.5 rounded-xl border ${
                       !doctorPreview.canDelete
                         ? 'bg-rose-50 border-rose-200 text-rose-900'
-                        : doctorPreview.action === 'ARCHIVE'
+                        : doctorPreview.action === 'ARCHIVE' || doctorPreview.actionType === 'ARCHIVE'
                         ? 'bg-amber-50 border-amber-200 text-amber-900'
                         : 'bg-teal-50 border-teal-200 text-teal-900'
                     }`}
@@ -2182,43 +2413,89 @@ export default function AdminDoctorsManagePage() {
                     <p className="font-bold mb-1">
                       {!doctorPreview.canDelete
                         ? (isRu ? 'Внимание! Операция заблокирована системой:' : 'Diqqat! Ushbu amal tizim tomonidan taqiqlangan:')
-                        : doctorPreview.action === 'ARCHIVE'
+                        : doctorPreview.action === 'ARCHIVE' || doctorPreview.actionType === 'ARCHIVE'
                         ? (isRu ? 'Внимание! Врач будет заархивирован:' : 'Diqqat! Shifokor profili arxivlanadi:')
                         : (isRu ? 'Врач не имеет клинической истории и будет полностью удален:' : 'Shifokorda hech qanday klinik tarix yo\'q va u butunlay o\'chiriladi:')
                       }
                     </p>
                     <p className="text-[11px] leading-relaxed">
-                      {doctorPreview.reason}
+                      {doctorPreview.reason || doctorPreview.resolutionGuidance || (isRu ? 'Сведения о блокировке получены от сервера.' : 'Tizim tomonidan cheklov aniqlandi.')}
                     </p>
                   </div>
 
-                  {/* Impact Statistics Grid */}
+                  {/* Impact Statistics Grid with robust fallbacks */}
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
                       <span className="text-slate-500 block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
-                      <strong className={`text-sm ${doctorPreview.activeTreatmentsCount > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
-                        {doctorPreview.activeTreatmentsCount} ta
+                      <strong className={`text-sm ${(doctorPreview.activeTreatmentsCount ?? doctorPreview.activeTreatmentCount ?? 0) > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+                        {doctorPreview.activeTreatmentsCount ?? doctorPreview.activeTreatmentCount ?? 0} ta
                       </strong>
                     </div>
                     <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
                       <span className="text-slate-500 block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
-                      <strong className={`text-sm ${doctorPreview.futureAppointmentsCount > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
-                        {doctorPreview.futureAppointmentsCount} ta
+                      <strong className={`text-sm ${(doctorPreview.futureAppointmentsCount ?? doctorPreview.futureAppointmentCount ?? 0) > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
+                        {doctorPreview.futureAppointmentsCount ?? doctorPreview.futureAppointmentCount ?? 0} ta
                       </strong>
                     </div>
                     <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
                       <span className="text-slate-500 block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
                       <strong className="text-sm text-slate-800">
-                        {doctorPreview.historicalAppointmentsCount} ta
+                        {doctorPreview.historicalAppointmentsCount ?? doctorPreview.historicalAppointmentCount ?? 0} ta
                       </strong>
                     </div>
                     <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
                       <span className="text-slate-500 block">{isRu ? 'Записи расписания:' : 'Ish jadvallari:'}</span>
                       <strong className="text-sm text-slate-800">
-                        {doctorPreview.scheduleRecordsCount} ta
+                        {doctorPreview.scheduleRecordsCount ?? 0} ta
                       </strong>
                     </div>
                   </div>
+
+                  {/* Blocking active chair treatments if any */}
+                  {doctorPreview.activeTreatments && doctorPreview.activeTreatments.length > 0 && (
+                    <div className="space-y-1.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl">
+                      <strong className="text-rose-900 text-[11px] block">
+                        {isRu ? 'Активные сеансы в кресле:' : 'Hozirda stulda davolanayotgan bemorlar:'}
+                      </strong>
+                      <div className="max-h-28 overflow-y-auto space-y-1">
+                        {doctorPreview.activeTreatments.map((t: any) => (
+                          <div key={t.id} className="p-1.5 bg-white rounded border border-rose-100 text-[10px]">
+                            <div className="font-bold text-slate-800">{t.patientName} ({t.chairName})</div>
+                            <div className="text-slate-500">{t.treatmentType} • {new Date(t.startedAt).toLocaleTimeString('uz-UZ')} dan buyon</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Blocking future appointments list */}
+                  {doctorPreview.futureAppointments && doctorPreview.futureAppointments.length > 0 && (
+                    <div className="space-y-1.5 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                      <strong className="text-amber-900 text-[11px] block">
+                        {isRu ? 'Блокирующие будущие записи:' : 'O‘chirishni to‘sib turgan kelgusi qabullar:'}
+                      </strong>
+                      <div className="max-h-36 overflow-y-auto space-y-1">
+                        {doctorPreview.futureAppointments.map((app: any) => (
+                          <div key={app.id} className="p-1.5 bg-white rounded border border-amber-100 flex items-center justify-between text-[10px]">
+                            <div>
+                              <div className="font-bold text-slate-800">{app.patientName}</div>
+                              <div className="text-slate-500">
+                                {new Date(app.startTime).toLocaleString('uz-UZ')} {app.serviceName ? `• ${app.serviceName}` : ''}
+                              </div>
+                            </div>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 uppercase">
+                              {app.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-amber-800 mt-1">
+                        {isRu
+                          ? 'Чтобы удалить или архивировать врача, сначала отмените или перенесите эти записи на другого врача.'
+                          : 'Shifokorni o‘chirish yoki arxivlash uchun avval ushbu qabullarni bekor qiling yoki boshqa shifokorga ko‘chiring.'}
+                      </p>
+                    </div>
+                  )}
 
                   {doctorPreview.linkedStaffAccount && (
                     <div className="p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-950 text-[11px]">
@@ -2247,7 +2524,7 @@ export default function AdminDoctorsManagePage() {
                         disabled={isDeletingDoctor}
                         onClick={confirmDeleteDoctor}
                         className={`px-4 py-2 text-white rounded-xl font-bold flex items-center gap-1.5 ${
-                          doctorPreview.action === 'ARCHIVE'
+                          doctorPreview.action === 'ARCHIVE' || doctorPreview.actionType === 'ARCHIVE'
                             ? 'bg-amber-600 hover:bg-amber-700'
                             : 'bg-rose-600 hover:bg-rose-700'
                         }`}
@@ -2256,7 +2533,7 @@ export default function AdminDoctorsManagePage() {
                         <span>
                           {isDeletingDoctor
                             ? (isRu ? 'Выполняется...' : 'Bajarilmoqda...')
-                            : doctorPreview.action === 'ARCHIVE'
+                            : doctorPreview.action === 'ARCHIVE' || doctorPreview.actionType === 'ARCHIVE'
                             ? (isRu ? 'Архивировать врача' : 'Shifokorni arxivlash')
                             : (isRu ? 'Удалить навсегда' : 'Butunlay o\'chirish')}
                         </span>

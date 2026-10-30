@@ -1647,13 +1647,21 @@ export default function AdminOverviewPage() {
                 </div>
 
                 {regSuccessMsg && (
-                  <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2"
+                  >
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>{regSuccessMsg}</span>
                   </div>
                 )}
                 {regErrorMsg && (
-                  <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-semibold flex items-center gap-2">
+                  <div
+                    role="alert"
+                    aria-live="assertive"
+                    className="p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-semibold flex items-center gap-2"
+                  >
                     <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                     <span>{regErrorMsg}</span>
                   </div>

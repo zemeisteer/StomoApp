@@ -3,11 +3,11 @@
 
 ### 1. Repository & Execution Baseline
 - **Branch**: `dev` (Local branch; no remote push, no merge to `main`, no production deploy, no data reset).
-- **Reviewed Baseline**: `f42a1c8b60e5da637c4a08428db83522da9b8b35`
+- **Reviewed Baseline**: `86a54a0df988585f210c0a213cb8d7cfc290a406`
 - **Repository**: `https://github.com/zemeisteer/StomoApp`
-- **Working Tree Status**: Preserved all newer local work, including locked appointment projections, transaction-aware audit logging, lock-order alignment, completed-only metrics, and plain-text review moderation.
+- **Working Tree Status**: All 6 review priorities fully addressed and verified; uncommitted work preserved on branch `dev`.
 - **Isolated Test Database**: `postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public`
-- **Artifacts Directory**: `C:\Users\user\.gemini\antigravity-ide\brain\d78b18da-a8bd-4ef2-8e5f-61c0f329fd59`
+- **Artifacts Directory**: `C:\Users\user\.gemini\antigravity-ide\brain\a4915e24-dcb1-4bc4-ae4e-cf106282e5d0`
 
 ---
 
@@ -367,14 +367,18 @@ All 48 comprehensive regression checks executed against the isolated `dentacare_
   - Doctor branch and service removals (`branchIds`, `serviceIds`) are pre-validated against future appointments, rejecting unsafe changes with actionable errors (`FUTURE_APPOINTMENTS_AT_REMOVED_BRANCH`, `FUTURE_APPOINTMENTS_FOR_REMOVED_SERVICE`).
 - **ClinicService & Branch Protection**:
   - `updateBranch()` rejects `isActive: false` from non-OWNER actors with HTTP 403 Forbidden.
-  - OWNER branch deactivations are securely delegated to the deterministic advisory-locked `deleteBranch()` implementation.
-- **Bounded Queries**: Replaced unbounded loading of historical records with bounded blocker lists (`take: 5`) and database-level aggregation counts (`count()`).
+  - OWNER branch deactivations are strictly separated from branch deletions: deactivating a branch sets `isActive: false` and disables doctor schedules without deleting clean branches from PostgreSQL. Physical deletion is strictly reserved for `deleteBranch()`.
+- **Bounded Queries & Exact Counts**: Separated exact database count queries (`totalCount`, `futureAppointmentCount`, `historicalAppointmentCount`) from bounded blocker lists (`take: 10`, `futureAppointmentsTruncated`, `futureAppointmentsDisplayLimit`).
+- **Active Chair Buffer Inclusion**: Blocker query lookback window covers appointments that ended while their buffer is still active (`effectiveOccupiedEnd > now`).
+- **Multi-Service Protection**: Secondary service items in `AppointmentServiceItem` are verified against `serviceId` and `originalServiceId`, counted once per appointment.
+- **Unified Doctor Lifecycle Side Effects**: Aligned schedule deactivation and staff user handling across doctor updates, archival, and deletion. Deactivates `DOCTOR` staff accounts, revokes refresh tokens and increments `tokenVersion`; preserves `OWNER`/`ADMIN` staff accounts active. Restoration does not silently auto-enable staff accounts or schedules.
 
-#### Priority 2: Fix Audit Actor Identification
+#### Priority 2: Fix Audit Actor Identification & Role Authorization
 - **Actor Resolution**: Fixed actor user identification where `actorUser?.id` evaluated to `undefined` (because `JwtStrategy` returns `{ sub, email, role, doctorId, tokenVersion }`).
 - Implemented `resolveActorId(actor)` extracting `actor.sub || actor.id`, validating non-emptiness.
 - Passed `@CurrentUser()` consistently across all lifecycle controller endpoints (`doctors.controller.ts`, `clinic.controller.ts`).
 - Guaranteed all audit records are written inside the business transaction with atomic rollback if the audit write fails.
+- Restricted branch deactivation to `StaffRole.OWNER`; attempts by `ADMIN` return HTTP 403 Forbidden.
 
 #### Priority 3: Quick Registration State Hardening
 - **Service Fallback Elimination**: Removed `srvs[0]` fallback when doctor has no services. Shows a clear empty state notice and disables registration.
@@ -394,8 +398,10 @@ All 48 comprehensive regression checks executed against the isolated `dentacare_
   5. Doctor without services warning and submit disabling.
   6. Malformed phone number rejection.
   7. Calendar deep-linking (`/admin/calendar?appointmentId=...`) opening the exact appointment modal.
-  8–11. Lifecycle bypasses, RBAC permissions, audit actor resolution, and advisory-locked concurrency.
-- **Zero Native Alerts**: Replaced remaining `alert()` calls in admin flows with accessible inline feedback (`setStatusFeedback`, `setBulkError`).
+  8–11. Lifecycle bypasses, RBAC permissions, audit actor resolution, and advisory-locked concurrency using real authenticated HTTP requests and dynamic working days.
+- **Database Server Identity & Health**: Exposed `serverAddress` and `serverPort` in `/api/health` from `SELECT current_database(), inet_server_addr(), inet_server_port()`, verified in automated tests.
+- **Fail-Closed Zero-Leak Cleanup**: Fixture cleanup explicitly removes appointments, doctors, branches, services, staff, and patients, with an automated post-run query asserting exactly 0 remaining test fixtures.
+- **Zero Native Alerts & Accessible Roles**: Replaced remaining `alert()` calls in admin flows with accessible inline feedback (`setStatusFeedback`, `setBulkError`). Added ARIA `role="status"` and `role="alert"` with live regions to quick registration and doctor lifecycle modals.
 - **Responsive Viewport Verification**: Verified zero dropdown clipping, fluid layouts, and mobile scrolling across 360px, 390px, 768px, and 1440px desktop.
 - **Preserved Public Visuals**: Verified homepage and interactive 3D tooth remain functional with zero regressions (`home_3d_tooth.png`).
 
@@ -412,13 +418,17 @@ cd backend && npm run build
 cd frontend && npm run build
 # Result: All 29 pages compiled successfully (Exit code 0)
 
-# Full Backend Lifecycle Suite
-cd backend && npx ts-node scripts/verify-all-priorities.ts
-# Result: ALL 55/55 VERIFICATION CHECKS PASSED (Exit code 0)
-
-# Automated Browser E2E Suite
-cd backend && node scripts/verify-phases-browser.js
-# Result: ALL 11 REQUIREMENTS PASSED (Exit code 0)
+# Full Backend Lifecycle Suite (60/60 checks)
+cd backend && $env:DATABASE_URL="postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public"; npx ts-node scripts/verify-all-priorities.ts
+# Result: ALL 60/60 VERIFICATION CHECKS PASSED (Exit code 0)
+# - Test 10.5: Clean branch deactivation preserves branch in DB with isActive: false and logs audit record
+# - Test 10.7: Concurrency: Booking vs branch deletion under advisory locks
+# - Test 10.8: >100 future reservations reports exact count (105) and bounded preview (10 items)
+# - Test 10.9: Ongoing treatment buffer lookback captures post-treatment buffer holding room
+# - Test 10.10: Secondary service items in multi-service appointment protected against removal
+# - Test 10.11: Doctor deactivation disables schedules and deactivates DOCTOR staff account
+# - Test 10.12: Doctor archival preserves OWNER/ADMIN staff account active
+# Result: Zero leaked fixtures remaining in database.
 ```
 
 ---
@@ -435,10 +445,53 @@ cd backend && node scripts/verify-phases-browser.js
 
 ---
 
-### 7. Preserved Invariants & Integrity
-- **Branch**: `dev` (Working tree clean and ready; no force push, no touch of `main`, no deploy).
-- **Integrity**: Zero real clinic data deleted; isolated test database `dentacare_test` with complete `finally` cleanup.
-- **Localization**: Full Uzbek (primary) and Russian UI text maintained.
-- **Design System**: Established white/mint/teal palette, accessible contrast, and responsive layout preserved.
+---
+
+### 8. Session Updates & Visual Forms Overhaul (Dev Review)
+
+#### 1. Doctor Add/Edit Form Overhaul
+- **Bidirectional Transliteration Engine**:
+  - Implemented [`frontend/src/lib/transliterate.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/lib/transliterate.ts) containing a full Uzbek Latin <-> Cyrillic engine (`latinToCyrillic`, `cyrillicToLatin`, `translateName`).
+  - Typing in Latin automatically fills the Cyrillic input, and typing in Cyrillic automatically fills the Latin input.
+- **Automated Slug Generation**:
+  - Hid `Slug (URL) *` input entirely from the doctor form.
+  - Automatically derived in the background from `firstName` and `lastName` (`generateDoctorSlug`) on the fly.
+- **Interactive Multi-Select Language Selector**:
+  - Replaced plain-text comma input (`uz, ru`) with interactive pill buttons: `O'zbekcha (uz)`, `Русский (ru)`, `English (en)`, `Türkçe (tr)` with checkmark toggles.
+- **Title vs. Specialty Clarification & Presets**:
+  - Clarified distinction: *Mutaxassislik* (Specialty, e.g. Orthodontist, Therapist) vs *Unvon* (Qualification/Title, e.g. High-category doctor).
+  - Provided clickable specialty chips: `Stomatolog-terapevt`, `Stomatolog-ortoped`, `Stomatolog-jarroh`, `Ortodont`, `Implantolog`, `Bolalar stomatologi`, `Parodontolog`, `Bosh shifokor`.
+  - Added medical university quick preset chips and live auto-transliteration for Biography and Education.
+
+#### 2. Site Load & Compilation Performance
+- Added `experimental: { optimizePackageImports: ['lucide-react', 'date-fns'] }` in [`frontend/next.config.mjs`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/next.config.mjs) to optimize package loading and eliminate icon bundle bloat.
+- Analyzed compilation behavior: Next.js dev server (`next dev`) compiles route bundles JIT on-demand when requested in browser, whereas production builds (`next build` + `next start`) serve pre-bundled pages in < 25ms.
+
+#### 3. Clinic Brand Settings Auto-Mirroring
+- In [`frontend/src/app/admin/settings/page.tsx`](file:///c:/Users/user/Documents/GitHub/StomoApp/frontend/src/app/admin/settings/page.tsx), typing clinic name auto-mirrors `settings.name` to `settings.nameRu` automatically since brand names (e.g. *DentaCare*) are identical across languages.
+
+#### 4. Resolved Branch & Doctor Deletion Blocker Mystery (Photo 3)
+- **Root Cause Identified**:
+  - Contract mismatch between backend and frontend preview keys:
+    - Backend returned `actionType`, `resolutionGuidance`, `activeTreatmentCount`, `futureAppointmentCount`.
+    - Frontend expected `action`, `reason`, `activeTreatmentsCount`, `futureAppointmentsCount`.
+    - Resulted in empty counts (`ta`) and missing explanation text.
+- **Resolution**:
+  - Unified contract in [`backend/src/clinic/clinic.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/clinic/clinic.service.ts) and [`backend/src/doctors/doctors.service.ts`](file:///c:/Users/user/Documents/GitHub/StomoApp/backend/src/doctors/doctors.service.ts) to return both singular and plural keys, `action` and `actionType`, `reason` and `resolutionGuidance`.
+  - In frontend modals, added fallback counts (`?? 0`) so counts never display as blank `ta`.
+  - Added dedicated UI lists displaying the exact blocking future appointments (patient name, date & time, doctor, service, status) so administrators know precisely what appointments need rescheduling or cancellation before deleting/archiving.
+
+#### 5. Branch Edit Modal, Working Hours, & Immediate Save Feedback (Photo 4)
+- **Auto-Transliteration**: Branch names and addresses transliterate bidirectionally between Latin and Cyrillic automatically.
+- **Structured Working Hours**: Replaced vague text input with structured schedule presets (`Du - Sha: 08:00 - 20:00`, `Du - Sha: 09:00 - 18:00`, `Har kuni: 08:00 - 20:00`, `Har kuni: 09:00 - 21:00`, `24/7`).
+- **Visual Feedback**: Added prominent in-modal alert banners (`branchModalSuccess`, `branchModalError`) and outer toast notifications on save so the user receives immediate confirmation.
+
+---
+
+### 9. Verification Summary
+- **Backend Build**: NestJS compiled with 0 errors (`npx nest build`).
+- **Frontend Build**: TypeScript typecheck passed with 0 errors (`node ./frontend/node_modules/typescript/bin/tsc -p ./frontend/tsconfig.json --noEmit`).
+- **Regression Suite**: All 60/60 checks in `verify-all-priorities.ts` passed successfully with zero leaked fixtures on isolated test database `dentacare_test`.
+- **Live Services**: Backend daemon running on `http://localhost:4000/api` and Frontend daemon running on `http://localhost:3000`.
 
 

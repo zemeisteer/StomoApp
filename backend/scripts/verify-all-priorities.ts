@@ -28,6 +28,7 @@ import {
   InvalidAppointmentTimeError,
   MAX_SUPPORTED_DURATION_MINUTES,
 } from '../src/appointments/appointment-time.helper';
+import { checkEntityLifecycleBlockers } from '../src/common/lifecycle.helper';
 import { runTimeContractMigration } from './migrate-appointment-time-contract';
 import {
   AppointmentStatus,
@@ -2466,18 +2467,38 @@ async function runAllPrioritiesVerification() {
 
       assert.ok(adminErr instanceof ForbiddenException, 'ADMIN cannot deactivate branch via updateBranch (ForbiddenException)');
 
-      // OWNER role sets isActive: false on clean branch -> delegates to deleteBranch and deletes
+      // OWNER role sets isActive: false on clean branch -> deactivates branch, does NOT physically delete
       const ownerRes: any = await clinicService.updateBranch(
         testBranch.id,
         { isActive: false },
         { sub: staff.id, role: StaffRole.OWNER } as any,
       );
 
-      assert.strictEqual(ownerRes.success, true);
-      assert.strictEqual(ownerRes.action, 'DELETE');
+      assert.strictEqual(ownerRes.id, testBranch.id);
+      assert.strictEqual(ownerRes.isActive, false, 'Branch must be deactivated');
 
       const recheckedBranch = await prisma.branch.findUnique({ where: { id: testBranch.id } });
-      assert.strictEqual(recheckedBranch, null, 'Clean branch must be cleanly deleted by OWNER');
+      assert.ok(recheckedBranch, 'Deactivated clean branch must continue to exist in DB');
+      assert.strictEqual(recheckedBranch.isActive, false, 'Branch isActive must be false');
+
+      // Audit log must record branch.deactivate
+      const deactAudit = await prisma.auditLog.findFirst({
+        where: { action: 'branch.deactivate', entityId: testBranch.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      assert.ok(deactAudit, 'Deactivation must write transactional audit log');
+      assert.strictEqual(deactAudit.userId, staff.id, 'Audit log userId must match actor sub');
+
+      // Explicit delete on clean branch -> physically deletes
+      const deleteRes: any = await clinicService.deleteBranch(
+        testBranch.id,
+        { sub: staff.id, role: StaffRole.OWNER } as any,
+      );
+      assert.strictEqual(deleteRes.success, true);
+      assert.strictEqual(deleteRes.action, 'DELETE');
+
+      const finalCheck = await prisma.branch.findUnique({ where: { id: testBranch.id } });
+      assert.strictEqual(finalCheck, null, 'Clean branch must only be physically deleted via explicit deleteBranch');
     });
 
     await test('10.6 Lifecycle audit records contain the authenticated actor ID (sub), NOT null', async () => {
@@ -2553,8 +2574,17 @@ async function runAllPrioritiesVerification() {
         },
       });
 
-      // Target future slot on Monday
-      const nextMondayUtc = new Date('2026-11-09T05:00:00.000Z'); // 10:00 Tashkent time
+      // Target future slot on upcoming Monday (dynamic valid working day)
+      const nextMondayUtc = getNextRelativeMonday(14, 5); // 05:00 UTC = 10:00 Tashkent time
+
+      // Pre-flight check: Prove the booking slot is valid BEFORE the race
+      const slots = await schedService.getAvailableSlots(
+        concDoc.id,
+        nextMondayUtc.toISOString().split('T')[0],
+        service.id,
+        concBranch.id,
+      );
+      assert.ok(slots.slots.length > 0, 'Doctor must have available slots on the target dynamic Monday');
 
       // Fire concurrent booking and branch deactivation
       const [bookingResult, deactivationResult] = await Promise.allSettled([
@@ -2573,7 +2603,7 @@ async function runAllPrioritiesVerification() {
 
       // Under PostgreSQL advisory locking:
       // Either booking acquired locks first -> booking succeeded, and branch deactivation was BLOCKED (rejected with 409 Conflict)
-      // OR branch deactivation acquired locks first -> branch was deleted, and booking failed (rejected because branch not active/found)
+      // OR branch deactivation acquired locks first -> branch was deleted, and booking failed
       if (bookingResult.status === 'fulfilled') {
         fixtures.appointments.push(bookingResult.value.id);
         assert.strictEqual(
@@ -2581,13 +2611,376 @@ async function runAllPrioritiesVerification() {
           'rejected',
           'If booking commits first, branch deactivation must be rejected with 409 Conflict',
         );
+        const rejectionErr = (deactivationResult as PromiseRejectedResult).reason;
+        assert.ok(rejectionErr instanceof ConflictException, 'Rejection must be ConflictException');
+        assert.strictEqual((rejectionErr.getResponse() as any).error, 'FUTURE_APPOINTMENTS_EXIST');
+
+        const recheckedBranch = await prisma.branch.findUnique({ where: { id: concBranch.id } });
+        assert.ok(recheckedBranch, 'Branch must remain in DB when deactivation is blocked');
+        assert.strictEqual(recheckedBranch.isActive, true, 'Branch must remain active');
       } else {
         assert.strictEqual(
           deactivationResult.status,
           'fulfilled',
           'If deactivation commits first, branch was deleted and booking was rejected',
         );
+        const bookingErr = (bookingResult as PromiseRejectedResult).reason;
+        assert.ok(bookingErr, 'Booking must fail with descriptive error when branch is deleted');
+
+        const recheckedBranch = await prisma.branch.findUnique({ where: { id: concBranch.id } });
+        assert.strictEqual(recheckedBranch, null, 'Branch must be deleted if deactivation committed first');
       }
+
+      // Exercise Order B deterministically: Branch deactivation acquires lock first
+      const orderBBranch = await prisma.branch.create({
+        data: {
+          nameUz: `OrderB Branch ${runId}`,
+          nameRu: `ОрдерБ Филиал ${runId}`,
+          addressUz: 'Manzil',
+          addressRu: 'Адрес',
+          phone: '+998901234561',
+          isActive: true,
+        },
+      });
+      fixtures.branches.push(orderBBranch.id);
+
+      // Explicitly delete clean branch first
+      const delBRes = await clinicService.deleteBranch(orderBBranch.id, { sub: staff.id, role: StaffRole.OWNER } as any);
+      assert.strictEqual(delBRes.action, 'DELETE');
+
+      // Attempt booking on now-deleted branch -> MUST fail closed
+      let bookFailErr: any = null;
+      try {
+        await apptsService.createBooking({
+          patientName: 'OrderB Patient',
+          patientPhone: '+998901234567',
+          doctorId: concDoc.id,
+          serviceId: service.id,
+          branchId: orderBBranch.id,
+          startTime: nextMondayUtc.toISOString(),
+          consentGiven: true,
+          idempotencyKey: `orderb_book_${runId}_${Math.random()}`,
+        });
+      } catch (err) {
+        bookFailErr = err;
+      }
+      assert.ok(bookFailErr, 'Booking on deleted branch must fail closed');
+    });
+
+    await test('10.8 Lifecycle counts: >100 future reservations reports exact count and bounded display preview', async () => {
+      const busyBatchDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Batch',
+          lastNameUz: 'Doc',
+          firstNameRu: 'Батч',
+          lastNameRu: 'Врач',
+          slug: `batch-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(busyBatchDoc.id);
+
+      // Create 105 future reservations (more than the preview limit of 10 or candidate slice of 100)
+      const baseTime = Date.now() + 48 * 3600 * 1000;
+      const apptData = [];
+      for (let i = 0; i < 105; i++) {
+        const start = new Date(baseTime + i * 3600 * 1000);
+        const end = new Date(start.getTime() + 30 * 60 * 1000);
+        apptData.push({
+          publicToken: `tok_batch_${runId}_${i}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: busyBatchDoc.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: start,
+          endTime: end,
+          serviceName: service.nameUz,
+          durationMinutes: 30,
+          bufferMinutes: 5,
+        });
+      }
+
+      await prisma.appointment.createMany({ data: apptData });
+
+      const createdBatchAppts = await prisma.appointment.findMany({
+        where: { doctorId: busyBatchDoc.id },
+        select: { id: true },
+      });
+      createdBatchAppts.forEach((a) => fixtures.appointments.push(a.id));
+
+      const blockers = await checkEntityLifecycleBlockers(prisma, { doctorId: busyBatchDoc.id });
+
+      assert.strictEqual(blockers.canProceed, false);
+      assert.strictEqual(blockers.actionType, 'BLOCK');
+      assert.strictEqual(blockers.futureAppointmentCount, 105, 'futureAppointmentCount must be EXACT (105), not truncated to 100');
+      assert.strictEqual(blockers.historicalAppointmentCount, 0, 'historicalAppointmentCount must be 0, NOT falsely calculated from truncated array');
+      assert.strictEqual(blockers.totalAppointmentCount, 105);
+      assert.strictEqual(blockers.futureAppointments.length, 10, 'Display preview must be bounded to display limit (10)');
+      assert.strictEqual(blockers.futureAppointmentsTruncated, true, 'Truncation metadata must indicate more rows exist');
+    });
+
+    await test('10.9 Lifecycle counts: Treatment ended but buffer remains active blocks deactivation', async () => {
+      const bufferDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Buffer',
+          lastNameUz: 'Doc',
+          firstNameRu: 'Буфер',
+          lastNameRu: 'Врач',
+          slug: `buffer-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: { create: { serviceId: service.id } },
+        },
+      });
+      fixtures.doctors.push(bufferDoc.id);
+
+      // Treatment started 25 minutes ago, treatment duration 20m, ended 5 minutes ago!
+      // But bufferMinutes is 10m, so occupied end is in the future (+5m from now)!
+      const start = new Date(Date.now() - 25 * 60 * 1000);
+      const end = new Date(Date.now() - 5 * 60 * 1000); // endTime <= now!
+      const bufferAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_buf_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: bufferDoc.id,
+          serviceId: service.id,
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: start,
+          endTime: end,
+          serviceName: service.nameUz,
+          durationMinutes: 20,
+          bufferMinutes: 10,
+        },
+      });
+      fixtures.appointments.push(bufferAppt.id);
+
+      const blockers = await checkEntityLifecycleBlockers(prisma, { doctorId: bufferDoc.id });
+
+      assert.strictEqual(blockers.canProceed, false, 'Must block when buffer is still active');
+      assert.strictEqual(blockers.actionType, 'BLOCK');
+      assert.strictEqual(blockers.activeTreatmentCount, 1, 'Must count ongoing active buffer as active treatment');
+      assert.strictEqual(blockers.activeTreatments[0].id, bufferAppt.id);
+    });
+
+    await test('10.10 Secondary service items in multi-service appointment are protected against removal', async () => {
+      const srvA = await prisma.service.create({
+        data: {
+          nameUz: `Xizmat A ${runId}`,
+          nameRu: `Услуга А ${runId}`,
+          slug: `service-a-${runId}`,
+          durationMinutes: 30,
+          isActive: true,
+        },
+      });
+      fixtures.services.push(srvA.id);
+
+      const srvB = await prisma.service.create({
+        data: {
+          nameUz: `Xizmat B ${runId}`,
+          nameRu: `Услуга Б ${runId}`,
+          slug: `service-b-${runId}`,
+          durationMinutes: 30,
+          isActive: true,
+        },
+      });
+      fixtures.services.push(srvB.id);
+
+      const multiSrvDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Multi',
+          lastNameUz: 'Srv',
+          firstNameRu: 'Мульти',
+          lastNameRu: 'Срв',
+          slug: `multisrv2-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+          services: {
+            create: [{ serviceId: srvA.id }, { serviceId: srvB.id }],
+          },
+        },
+      });
+      fixtures.doctors.push(multiSrvDoc.id);
+
+      // Create appointment with primary service A, but secondary item service B
+      const multiSrvAppt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_multi_${runId}_${Math.random()}`,
+          patientId: patient.id,
+          doctorId: multiSrvDoc.id,
+          serviceId: srvA.id, // Primary service A
+          branchId: branch.id,
+          status: AppointmentStatus.CONFIRMED,
+          startTime: new Date(Date.now() + 24 * 3600 * 1000),
+          endTime: new Date(Date.now() + 24 * 3600 * 1000 + 60 * 60 * 1000),
+          serviceName: srvA.nameUz,
+          durationMinutes: 60,
+          bufferMinutes: 5,
+          serviceItems: {
+            create: [
+              {
+                serviceId: srvA.id,
+                serviceNameUz: srvA.nameUz,
+                durationMinutes: 30,
+                sortOrder: 0,
+              },
+              {
+                serviceId: srvB.id, // Secondary item B!
+                serviceNameUz: srvB.nameUz,
+                durationMinutes: 30,
+                sortOrder: 1,
+              },
+            ],
+          },
+        },
+      });
+      fixtures.appointments.push(multiSrvAppt.id);
+
+      // Attempt to remove service B from doctor -> MUST BE BLOCKED
+      let caughtErr: any = null;
+      try {
+        await doctorsService.update(
+          multiSrvDoc.id,
+          { serviceIds: [srvA.id] },
+          { sub: staff.id, role: StaffRole.ADMIN } as any,
+        );
+      } catch (err) {
+        caughtErr = err;
+      }
+
+      assert.ok(caughtErr instanceof ConflictException, 'Removing secondary service B must fail with ConflictException');
+      assert.strictEqual((caughtErr.getResponse() as any).error, 'FUTURE_APPOINTMENTS_FOR_REMOVED_SERVICE');
+
+      // Now set appointment to COMPLETED (historical)
+      await prisma.appointment.update({
+        where: { id: multiSrvAppt.id },
+        data: { status: AppointmentStatus.COMPLETED },
+      });
+
+      // Attempt to remove service B again -> MUST SUCCEED (historical appointments do not block indefinitely)
+      const updatedDoc = await doctorsService.update(
+        multiSrvDoc.id,
+        { serviceIds: [srvA.id] },
+        { sub: staff.id, role: StaffRole.ADMIN } as any,
+      );
+      assert.ok(updatedDoc);
+      const remainingDocServices = await prisma.doctorService.findMany({ where: { doctorId: multiSrvDoc.id } });
+      assert.strictEqual(remainingDocServices.length, 1);
+      assert.strictEqual(remainingDocServices[0].serviceId, srvA.id);
+    });
+
+    await test('10.11 Doctor lifecycle side effects: deactivating clean doctor disables schedules and deactivates DOCTOR staff account', async () => {
+      const cleanDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Clean',
+          lastNameUz: 'Doc',
+          firstNameRu: 'Чистый',
+          lastNameRu: 'Врач',
+          slug: `clean-doc-${runId}`,
+          isActive: true,
+          branches: { create: { branchId: branch.id } },
+        },
+      });
+      fixtures.doctors.push(cleanDoc.id);
+
+      const docSched = await prisma.doctorSchedule.create({
+        data: {
+          doctorId: cleanDoc.id,
+          branchId: branch.id,
+          dayOfWeek: 'TUESDAY',
+          startTime: '09:00',
+          endTime: '17:00',
+          isActive: true,
+        },
+      });
+
+      const docStaff = await prisma.staffUser.create({
+        data: {
+          email: `docstaff_${runId}@dentacare.local`,
+          passwordHash: 'dummy',
+          fullName: 'Doc Staff',
+          role: StaffRole.DOCTOR,
+          doctorId: cleanDoc.id,
+          isActive: true,
+          tokenVersion: 1,
+        },
+      });
+      fixtures.staff.push(docStaff.id);
+
+      // Deactivate doctor via update
+      await doctorsService.update(
+        cleanDoc.id,
+        { isActive: false },
+        { sub: staff.id, role: StaffRole.ADMIN } as any,
+      );
+
+      // Verify schedule is deactivated even with 0 history
+      const recheckedSched = await prisma.doctorSchedule.findUnique({ where: { id: docSched.id } });
+      assert.strictEqual(recheckedSched?.isActive, false, 'Schedule must be deactivated on doctor deactivation');
+
+      // Verify DOCTOR staff account is deactivated and tokenVersion incremented
+      const recheckedStaff = await prisma.staffUser.findUnique({ where: { id: docStaff.id } });
+      assert.strictEqual(recheckedStaff?.isActive, false, 'Linked DOCTOR staff account must be deactivated');
+      assert.strictEqual(recheckedStaff?.tokenVersion, 2, 'Token version must be incremented to revoke sessions');
+
+      // Reactivation policy: restoring doctor MUST NOT silently auto-enable schedules or staff account
+      await doctorsService.update(
+        cleanDoc.id,
+        { isActive: true },
+        { sub: staff.id, role: StaffRole.ADMIN } as any,
+      );
+
+      const restoredDoc = await prisma.doctor.findUnique({ where: { id: cleanDoc.id } });
+      assert.strictEqual(restoredDoc?.isActive, true, 'Doctor is restored to active');
+
+      const schedAfterRestore = await prisma.doctorSchedule.findUnique({ where: { id: docSched.id } });
+      assert.strictEqual(schedAfterRestore?.isActive, false, 'Schedules must remain inactive upon doctor reactivation');
+
+      const staffAfterRestore = await prisma.staffUser.findUnique({ where: { id: docStaff.id } });
+      assert.strictEqual(staffAfterRestore?.isActive, false, 'Staff account must remain inactive upon doctor reactivation');
+    });
+
+    await test('10.12 Doctor lifecycle side effects: ADMIN/OWNER linked account is PRESERVED when doctor is archived', async () => {
+      const ownerDoc = await prisma.doctor.create({
+        data: {
+          firstNameUz: 'Owner',
+          lastNameUz: 'Doc',
+          firstNameRu: 'Владелец',
+          lastNameRu: 'Врач',
+          slug: `owner-doc-${runId}`,
+          isActive: true,
+        },
+      });
+      fixtures.doctors.push(ownerDoc.id);
+
+      const ownerStaff = await prisma.staffUser.create({
+        data: {
+          email: `ownerstaff_${runId}@dentacare.local`,
+          passwordHash: 'dummy',
+          fullName: 'Owner Staff',
+          role: StaffRole.OWNER,
+          doctorId: ownerDoc.id,
+          isActive: true,
+          tokenVersion: 1,
+        },
+      });
+      fixtures.staff.push(ownerStaff.id);
+
+      // Archive doctor
+      await doctorsService.archive(ownerDoc.id, { sub: staff.id, role: StaffRole.OWNER } as any);
+
+      // Verify doctor is archived
+      const recheckedDoc = await prisma.doctor.findUnique({ where: { id: ownerDoc.id } });
+      assert.strictEqual(recheckedDoc?.isArchived, true);
+      assert.strictEqual(recheckedDoc?.isActive, false);
+
+      // Verify OWNER staff account is PRESERVED active (not deactivated!)
+      const recheckedOwnerStaff = await prisma.staffUser.findUnique({ where: { id: ownerStaff.id } });
+      assert.strictEqual(recheckedOwnerStaff?.isActive, true, 'OWNER staff account must remain active');
+      assert.strictEqual(recheckedOwnerStaff?.doctorId, null, 'Doctor ID link must be detached on archive');
     });
 
     console.log('\n================================================================');

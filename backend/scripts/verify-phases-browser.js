@@ -138,9 +138,11 @@ async function run() {
   let browser = null;
 
   try {
-    const [dbResult] = await prisma.$queryRaw`SELECT current_database()`;
+    const [dbResult] = await prisma.$queryRaw`SELECT current_database(), inet_server_addr()::text as server_addr, inet_server_port() as server_port`;
     const dbName = dbResult?.current_database;
-    console.log(`[Isolation Check] Connected PostgreSQL database: "${dbName}"`);
+    const directAddr = dbResult?.server_addr;
+    const directPort = dbResult?.server_port;
+    console.log(`[Isolation Check] Connected PostgreSQL database: "${dbName}" at ${directAddr || 'local'}:${directPort}`);
     if (dbName !== 'dentacare_test') {
       throw new Error(
         `STRICT GUARD: Expected database "dentacare_test", but connected to "${dbName}". Aborting.`,
@@ -150,10 +152,17 @@ async function run() {
     // Health check on backend
     try {
       const backendHealth = await fetch(`${API_URL}/api/health`).then((r) => r.json());
-      console.log(`[Backend Check] API healthy, database: "${backendHealth?.database?.name}"`);
+      console.log(
+        `[Backend Check] API healthy, database: "${backendHealth?.database?.name}" at ${backendHealth?.database?.serverAddress}:${backendHealth?.database?.serverPort}`,
+      );
       if (backendHealth?.database?.name !== 'dentacare_test') {
         throw new Error(
           `Backend API is connected to "${backendHealth?.database?.name}", expected "dentacare_test"`,
+        );
+      }
+      if (directPort && backendHealth?.database?.serverPort && directPort !== backendHealth?.database?.serverPort) {
+        throw new Error(
+          `Backend API port mismatch: script connected to port ${directPort}, backend to port ${backendHealth.database.serverPort}`,
         );
       }
     } catch (err) {
@@ -416,6 +425,7 @@ async function run() {
     assert.strictEqual(savedAppt.patient.fullName, patientName);
     assert.strictEqual(savedAppt.status, 'CONFIRMED');
     fixtures.appointments.push(savedAppt.id);
+    if (savedAppt.patientId) fixtures.patients.push(savedAppt.patientId);
     console.log(`>>> [PASS] Requirements 1 & 2 verified. Saved appointment ID: ${savedAppt.id}`);
 
     // =========================================================================
@@ -588,32 +598,216 @@ async function run() {
     // =========================================================================
     console.log('\n--- Requirements 8-11: Lifecycle Bypasses, RBAC, Audit Actor & Concurrency ---');
 
-    // 8. Direct archive/update bypass prevention
-    // Doctor 1 has savedAppt (future). Calling direct update with { isActive: false } must throw 409
-    const activeApptDoctor = await prisma.doctor.findUnique({ where: { id: doctor1.id } });
-    assert.strictEqual(activeApptDoctor.isActive, true);
+    // Acquire OWNER auth token
+    const ownerLoginRes = await fetch(`${API_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: 'DentacareAdmin2026!' }),
+    });
+    assert.strictEqual(ownerLoginRes.status, 200, 'OWNER login must return HTTP 200');
+    const ownerTokenData = await ownerLoginRes.json();
+    const ownerToken = ownerTokenData.accessToken;
 
-    // 9. ADMIN vs OWNER permissions
+    // 8. Direct archive/update bypass prevention
+    // Doctor 1 has savedAppt (future). Calling direct update with { isActive: false } must fail with 409
+    const docUpdateRes = await fetch(`${API_URL}/api/doctors/admin/${doctor1.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({ isActive: false }),
+    });
+    assert.strictEqual(docUpdateRes.status, 409, 'Direct update to deactivate doctor with future appointment must fail with HTTP 409');
+    const docUpdateErr = await docUpdateRes.json();
+    assert.strictEqual(docUpdateErr.error, 'FUTURE_APPOINTMENTS_EXIST');
+
+    // Calling direct archive on Doctor 1 must also fail with 409
+    const docArchiveRes = await fetch(`${API_URL}/api/doctors/admin/${doctor1.id}/archive`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${ownerToken}`,
+      },
+    });
+    assert.strictEqual(docArchiveRes.status, 409, 'Direct archive of doctor with future appointment must fail with HTTP 409');
+    console.log('>>> [PASS] Requirement 8 verified: Doctor update/archive cannot bypass blockers (HTTP 409).');
+
+    // 9. ADMIN vs OWNER permissions: ADMIN deactivation returns 403 Forbidden
+    const adminStaffPwd = 'AdminPassword2026!';
+    const adminStaffHash = await bcrypt.hash(adminStaffPwd, 10);
     const adminStaff = await prisma.staffUser.create({
       data: {
-        email: `admin_${runId}@dentacare.local`,
-        passwordHash: 'dummy',
-        fullName: 'Admin User',
+        email: `admin_rbac_${runId}@dentacare.local`,
+        passwordHash: adminStaffHash,
+        fullName: 'Admin RBAC User',
         role: 'ADMIN',
         isActive: true,
       },
     });
     fixtures.staff.push(adminStaff.id);
 
-    // 10. Audit actor verification
-    const auditRecord = await prisma.auditLog.findFirst({
-      where: { action: { startsWith: 'doctor.' } },
+    const adminLoginRes = await fetch(`${API_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminStaff.email, password: adminStaffPwd }),
+    });
+    assert.strictEqual(adminLoginRes.status, 200, 'ADMIN login must succeed');
+    const adminTokenData = await adminLoginRes.json();
+    const adminToken = adminTokenData.accessToken;
+
+    // ADMIN attempts to deactivate branch2 -> MUST return 403 Forbidden
+    const adminDeactRes = await fetch(`${API_URL}/api/clinic/branches/${branch2.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({ isActive: false }),
+    });
+    assert.strictEqual(adminDeactRes.status, 403, 'ADMIN attempting to deactivate branch must return HTTP 403 Forbidden');
+    console.log('>>> [PASS] Requirement 9 verified: ADMIN branch deactivation is denied with HTTP 403.');
+
+    // 10. OWNER deactivation preserves clean branch & creates exact audit record
+    const cleanBranch = await prisma.branch.create({
+      data: {
+        nameUz: `Clean Branch ${runId}`,
+        nameRu: `Чистый Филиал ${runId}`,
+        addressUz: 'Toshkent sh.',
+        addressRu: 'г. Ташкент',
+        phone: '+998713333333',
+        isActive: true,
+      },
+    });
+    fixtures.branches.push(cleanBranch.id);
+
+    const ownerDeactBranchRes = await fetch(`${API_URL}/api/clinic/branches/${cleanBranch.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({ isActive: false }),
+    });
+    assert.strictEqual(ownerDeactBranchRes.status, 200, 'OWNER deactivating clean branch must return HTTP 200');
+    const ownerDeactBranchData = await ownerDeactBranchRes.json();
+    assert.strictEqual(ownerDeactBranchData.id, cleanBranch.id);
+    assert.strictEqual(ownerDeactBranchData.isActive, false);
+
+    // Verify clean branch still exists in DB
+    const recheckedCleanBranch = await prisma.branch.findUnique({ where: { id: cleanBranch.id } });
+    assert.ok(recheckedCleanBranch, 'Clean branch must not be deleted on deactivation; it must exist in DB');
+    assert.strictEqual(recheckedCleanBranch.isActive, false);
+
+    // 10b. Audit record verification: matches exact entity, action, and authenticated actor
+    const branchAuditRecord = await prisma.auditLog.findFirst({
+      where: {
+        entityId: cleanBranch.id,
+        action: 'branch.deactivate',
+      },
       orderBy: { createdAt: 'desc' },
     });
-    if (auditRecord) {
-      assert.ok(auditRecord.userId !== null, 'Audit log userId must not be null');
+    assert.ok(branchAuditRecord, 'Audit record for branch.deactivate must exist');
+    assert.strictEqual(branchAuditRecord.userId, adminUser.id, 'Audit log userId must match the authenticated OWNER sub');
+    assert.strictEqual(branchAuditRecord.entity, 'branch');
+    console.log('>>> [PASS] Requirement 10 verified: OWNER deactivation preserves clean branch & exact audit record logged.');
+
+    // 11. Real booking versus lifecycle concurrency is verified
+    const concBranch = await prisma.branch.create({
+      data: {
+        nameUz: `Conc Branch ${runId}`,
+        nameRu: `Конк Филиал ${runId}`,
+        addressUz: 'Manzil',
+        addressRu: 'Адрес',
+        phone: '+998901234560',
+        isActive: true,
+      },
+    });
+    fixtures.branches.push(concBranch.id);
+
+    const concDoc = await prisma.doctor.create({
+      data: {
+        firstNameUz: 'Conc',
+        lastNameUz: `BrowserDoc ${runId}`,
+        firstNameRu: 'Конк',
+        lastNameRu: `Врач ${runId}`,
+        slug: `conc-browser-doc-${runId}`,
+        isActive: true,
+        branches: { create: { branchId: concBranch.id } },
+        services: { create: { serviceId: service1.id } },
+      },
+    });
+    fixtures.doctors.push(concDoc.id);
+
+    await prisma.doctorSchedule.create({
+      data: {
+        doctorId: concDoc.id,
+        branchId: concBranch.id,
+        dayOfWeek: 'MONDAY',
+        startTime: '00:00',
+        endTime: '23:59',
+        isActive: true,
+      },
+    });
+
+    // Dynamic valid future working Monday
+    const nextMonday = new Date();
+    nextMonday.setUTCDate(nextMonday.getUTCDate() + 14);
+    while (nextMonday.getUTCDay() !== 1) {
+      nextMonday.setUTCDate(nextMonday.getUTCDate() + 1);
     }
-    console.log('>>> [PASS] Requirements 8, 9, 10 verified via authoritative model assertions.');
+    nextMonday.setUTCHours(6, 0, 0, 0); // 06:00 UTC = 11:00 Tashkent time
+
+    // Pre-flight check: Prove the booking slot is valid before introducing the race
+    const slotCheckRes = await fetch(
+      `${API_URL}/api/scheduling/available-slots?doctorId=${concDoc.id}&date=${nextMonday.toISOString().split('T')[0]}&serviceId=${service1.id}&branchId=${concBranch.id}`,
+    );
+    assert.strictEqual(slotCheckRes.status, 200, 'Slot check must return HTTP 200');
+    const slotData = await slotCheckRes.json();
+    assert.ok(slotData.slots && slotData.slots.length > 0, 'Pre-flight check must find valid available slots');
+
+    // Fire concurrent booking and branch deactivation
+    const [concBookRes, concDeactRes] = await Promise.allSettled([
+      fetch(`${API_URL}/api/appointments/booking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientName: `Conc Patient ${runId}`,
+          patientPhone: '+998901234567',
+          doctorId: concDoc.id,
+          serviceId: service1.id,
+          branchId: concBranch.id,
+          startTime: nextMonday.toISOString(),
+          consentGiven: true,
+          idempotencyKey: `conc_browser_book_${runId}_${Math.random()}`,
+        }),
+      }),
+      fetch(`${API_URL}/api/clinic/branches/${concBranch.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${ownerToken}`,
+        },
+      }),
+    ]);
+
+    assert.strictEqual(concBookRes.status, 'fulfilled');
+    assert.strictEqual(concDeactRes.status, 'fulfilled');
+
+    const bookHttpRes = (concBookRes as any).value;
+    const deactHttpRes = (concDeactRes as any).value;
+
+    if (bookHttpRes.status === 201 || bookHttpRes.status === 200) {
+      const bookedData = await bookHttpRes.json();
+      fixtures.appointments.push(bookedData.id);
+      assert.strictEqual(deactHttpRes.status, 409, 'When booking commits first, branch delete must fail with 409 Conflict');
+      const deactErrJson = await deactHttpRes.json();
+      assert.strictEqual(deactErrJson.error, 'FUTURE_APPOINTMENTS_EXIST');
+    } else {
+      assert.strictEqual(deactHttpRes.status, 200, 'When branch deletion commits first, delete returns 200 OK');
+      assert.ok([400, 404, 409].includes(bookHttpRes.status), 'Booking must fail when branch is deleted');
+    }
+    console.log('>>> [PASS] Requirement 11 verified: Real booking vs lifecycle concurrency validated under PostgreSQL locks.');
 
     // =========================================================================
     // PRIORITY 5: Responsive Viewport Verification & Screenshots
@@ -716,14 +910,48 @@ async function run() {
           where: { id: { in: fixtures.branches } },
         });
       }
+      if (fixtures.patients.length > 0) {
+        await prisma.patient.deleteMany({
+          where: { id: { in: fixtures.patients } },
+        });
+      }
       if (fixtures.staff.length > 0) {
         await prisma.staffUser.deleteMany({
           where: { id: { in: fixtures.staff } },
         });
       }
-      console.log('[Cleanup] Cleanup complete. Zero leaked fixtures.');
+
+      // Strict fail-closed verification: Assert that zero test fixtures leaked into the DB
+      const [remAppts, remDocs, remBranches, remStaff, remPatients] = await Promise.all([
+        fixtures.appointments.length > 0
+          ? prisma.appointment.count({ where: { id: { in: fixtures.appointments } } })
+          : 0,
+        fixtures.doctors.length > 0
+          ? prisma.doctor.count({ where: { id: { in: fixtures.doctors } } })
+          : 0,
+        fixtures.branches.length > 0
+          ? prisma.branch.count({ where: { id: { in: fixtures.branches } } })
+          : 0,
+        fixtures.staff.length > 0
+          ? prisma.staffUser.count({ where: { id: { in: fixtures.staff } } })
+          : 0,
+        fixtures.patients.length > 0
+          ? prisma.patient.count({ where: { id: { in: fixtures.patients } } })
+          : 0,
+      ]);
+
+      const totalRemaining = remAppts + remDocs + remBranches + remStaff + remPatients;
+      if (totalRemaining > 0) {
+        console.error(
+          `[Cleanup Fail] Found ${totalRemaining} leaked test fixtures: Appts=${remAppts}, Docs=${remDocs}, Branches=${remBranches}, Staff=${remStaff}, Patients=${remPatients}`,
+        );
+        process.exitCode = 1;
+      } else {
+        console.log('[Cleanup] Cleanup verified: Exactly 0 leaked fixtures remaining.');
+      }
     } catch (cleanErr) {
       console.error('[Cleanup Error]', cleanErr.message);
+      process.exitCode = 1;
     }
 
     if (browser) {

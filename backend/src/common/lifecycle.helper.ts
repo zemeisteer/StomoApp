@@ -35,6 +35,14 @@ export interface BlockerAppointmentSummary {
   actualStartTime?: string;
 }
 
+import {
+  getAppointmentEffectiveOccupiedEnd,
+  getAppointmentTreatmentEnd,
+  ENFORCED_MAX_BUFFER_MS,
+  MAX_CANONICAL_LOOKBACK_MS,
+  MAX_SUPPORTED_DURATION_MINUTES,
+} from '../appointments/appointment-time.helper';
+
 export interface EntityLifecycleBlockers {
   canProceed: boolean;
   actionType: 'DELETE' | 'ARCHIVE' | 'DEACTIVATE' | 'BLOCK';
@@ -46,6 +54,8 @@ export interface EntityLifecycleBlockers {
   historicalAppointmentCount: number;
   totalAppointmentCount: number;
   resolutionGuidance: string;
+  futureAppointmentsTruncated?: boolean;
+  futureAppointmentsDisplayLimit?: number;
 }
 
 export interface CheckLifecycleOptions {
@@ -58,16 +68,43 @@ export interface CheckLifecycleOptions {
 }
 
 /**
+ * Builds Prisma where-clause conditions for matching appointments that reference
+ * any of the specified service IDs, checking both primary serviceId and secondary
+ * AppointmentServiceItem entries (including originalServiceId for legacy provenance).
+ */
+function buildServiceCondition(serviceIds: string[]): Prisma.AppointmentWhereInput {
+  if (serviceIds.length === 0) return {};
+  return {
+    OR: [
+      { serviceId: { in: serviceIds } },
+      {
+        serviceItems: {
+          some: {
+            OR: [
+              { serviceId: { in: serviceIds } },
+              { originalServiceId: { in: serviceIds } },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+/**
  * Shared lifecycle policy helper used by every doctor and branch mutation path.
  * 
  * Invariants:
- * 1. Active treatments (in chair, checked in, actualStartTime active, active overruns,
- *    or reserved intervals that started but have not concluded) strictly BLOCK deletion/deactivation.
- * 2. Future active reservations (startTime > now, PENDING/CONFIRMED, unexpired) strictly BLOCK deletion/deactivation.
- * 3. Terminal appointments (COMPLETED, CANCELLED, NO_SHOW) and expired pending NEVER block;
+ * 1. Exact counts / existence checks are strictly separated from bounded display lists.
+ *    A display limit must never alter lifecycle decisions or reported counts.
+ * 2. Active treatments (in chair, checked in, actualStartTime active, active overruns,
+ *    or reserved intervals that started whose effective occupied interval including buffer is still active)
+ *    strictly BLOCK deletion/deactivation.
+ * 3. Future active reservations (startTime > now, PENDING/CONFIRMED, unexpired) strictly BLOCK deletion/deactivation.
+ * 4. Multi-service appointments protect every relevant service item (both primary serviceId
+ *    and secondary serviceItems entries) counted once per appointment.
+ * 5. Terminal appointments (COMPLETED, CANCELLED, NO_SHOW) and expired pending NEVER block;
  *    they count towards historical records.
- * 4. Bounded blocker candidate queries avoid loading unbounded historical records into Node.js memory.
- * 5. Historical records are counted at the database level.
  */
 export async function checkEntityLifecycleBlockers(
   tx: Prisma.TransactionClient,
@@ -76,18 +113,52 @@ export async function checkEntityLifecycleBlockers(
   const { doctorId, branchId, serviceId, removedBranchIds, removedServiceIds } = options;
   const now = new Date();
 
-  // 1. Database-level total count
-  const countWhere: Prisma.AppointmentWhereInput = {
-    ...(doctorId ? { doctorId } : {}),
-    ...(branchId ? { branchId } : {}),
-    ...(serviceId ? { serviceId } : {}),
-    ...(removedBranchIds && removedBranchIds.length > 0 ? { branchId: { in: removedBranchIds } } : {}),
-    ...(removedServiceIds && removedServiceIds.length > 0 ? { serviceId: { in: removedServiceIds } } : {}),
-  };
+  // 1. Build authoritative scoping filter (combining doctor, branch, and service conditions)
+  const andConditions: Prisma.AppointmentWhereInput[] = [];
+
+  if (doctorId) {
+    andConditions.push({ doctorId });
+  }
+
+  if (branchId) {
+    andConditions.push({ branchId });
+  } else if (removedBranchIds && removedBranchIds.length > 0) {
+    andConditions.push({ branchId: { in: removedBranchIds } });
+  }
+
+  const targetServiceIds: string[] = [];
+  if (serviceId) {
+    targetServiceIds.push(serviceId);
+  }
+  if (removedServiceIds && removedServiceIds.length > 0) {
+    targetServiceIds.push(...removedServiceIds);
+  }
+  if (targetServiceIds.length > 0) {
+    const uniqueServiceIds = Array.from(new Set(targetServiceIds));
+    andConditions.push(buildServiceCondition(uniqueServiceIds));
+  }
+
+  const countWhere: Prisma.AppointmentWhereInput = andConditions.length > 0 ? { AND: andConditions } : {};
+
+  // 2. Exact Database-level total count
   const totalCount = await tx.appointment.count({ where: countWhere });
 
-  // 2. Query only non-terminal, unexpired candidates that could be active or future
-  const candidateWhere: Prisma.AppointmentWhereInput = {
+  // 3. Exact Database-level future appointment count (PENDING / CONFIRMED, startTime > now, unexpired)
+  const futureAppointmentCount = await tx.appointment.count({
+    where: {
+      ...countWhere,
+      startTime: { gt: now },
+      status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
+      NOT: {
+        status: AppointmentStatus.PENDING,
+        expiresAt: { lte: now },
+      },
+    },
+  });
+
+  // 4. Candidate query for currently active treatments
+  // Query all non-terminal, unexpired appointments with startTime <= now whose treatment or buffer could be ongoing
+  const candidateActiveWhere: Prisma.AppointmentWhereInput = {
     ...countWhere,
     status: {
       notIn: [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
@@ -96,17 +167,21 @@ export async function checkEntityLifecycleBlockers(
       status: AppointmentStatus.PENDING,
       expiresAt: { lte: now },
     },
+    startTime: { lte: now },
     OR: [
       { status: AppointmentStatus.CHECKED_IN },
       { actualStartTime: { not: null } },
       { overrunActive: true },
-      { endTime: { gt: now } },
       { overrunEstimatedEndTime: { gt: now } },
+      // Treatment ended recently but occupied interval including buffer may still be active:
+      { endTime: { gt: new Date(now.getTime() - ENFORCED_MAX_BUFFER_MS) } },
+      { startTime: { gt: new Date(now.getTime() - MAX_CANONICAL_LOOKBACK_MS) } },
+      { durationMinutes: { gt: MAX_SUPPORTED_DURATION_MINUTES } },
     ],
   };
 
-  const candidates = await tx.appointment.findMany({
-    where: candidateWhere,
+  const activeCandidates = await tx.appointment.findMany({
+    where: candidateActiveWhere,
     select: {
       id: true,
       status: true,
@@ -122,15 +197,14 @@ export async function checkEntityLifecycleBlockers(
       branch: { select: { nameUz: true, nameRu: true } },
       doctor: { select: { firstNameUz: true, lastNameUz: true } },
       service: { select: { nameUz: true, nameRu: true } },
+      serviceItems: { select: { serviceId: true, originalServiceId: true, serviceNameUz: true } },
     },
     orderBy: { startTime: 'asc' },
-    take: 100, // Bounded candidate list
   });
 
   const activeTreatments: BlockerAppointmentSummary[] = [];
-  const futureAppointments: BlockerAppointmentSummary[] = [];
 
-  for (const appt of candidates) {
+  for (const appt of activeCandidates) {
     const isTerminal =
       appt.status === AppointmentStatus.COMPLETED ||
       appt.status === AppointmentStatus.CANCELLED ||
@@ -143,64 +217,108 @@ export async function checkEntityLifecycleBlockers(
       new Date(appt.expiresAt) <= now;
     if (isExpiredPending) continue;
 
-    // Occupied end calculation
-    const treatmentEnd = new Date(appt.endTime);
-    const occupiedEnd = new Date(
-      appt.startTime.getTime() + (appt.durationMinutes + (appt.bufferMinutes || 0)) * 60 * 1000,
-    );
-    const effectiveOccupiedEnd =
-      appt.overrunEstimatedEndTime && appt.overrunEstimatedEndTime > occupiedEnd
-        ? appt.overrunEstimatedEndTime
-        : occupiedEnd;
-
-    // An appointment is ongoing / active if:
-    // a) Explicitly checked in or actively in chair
-    // b) Has active overrun
-    // c) Reserved start time has passed, but the occupied interval is STILL ACTIVE (do not classify as historical!)
-    const isOngoing =
-      appt.status === AppointmentStatus.CHECKED_IN ||
-      (appt.actualStartTime && !isTerminal) ||
-      appt.overrunActive ||
-      (appt.startTime <= now && (effectiveOccupiedEnd > now || treatmentEnd > now));
+    let isOngoing = false;
+    if (appt.status === AppointmentStatus.CHECKED_IN || (appt.actualStartTime && !isTerminal) || appt.overrunActive) {
+      isOngoing = true;
+    } else {
+      try {
+        const effectiveOccupiedEnd = getAppointmentEffectiveOccupiedEnd(appt);
+        const treatmentEnd = getAppointmentTreatmentEnd(appt);
+        if (appt.startTime <= now && (effectiveOccupiedEnd > now || treatmentEnd > now)) {
+          isOngoing = true;
+        }
+      } catch {
+        // Fail-closed policy for legacy / ambiguous records:
+        // If timestamps or duration are ambiguous/invalid and started <= now, treat as ongoing blocker
+        isOngoing = true;
+      }
+    }
 
     if (isOngoing) {
+      let resolvedServiceName = appt.service?.nameUz || '';
+      if (targetServiceIds.length > 0 && appt.serviceItems && appt.serviceItems.length > 0) {
+        const matchedItem = appt.serviceItems.find(
+          (item) =>
+            (item.serviceId && targetServiceIds.includes(item.serviceId)) ||
+            (item.originalServiceId && targetServiceIds.includes(item.originalServiceId)),
+        );
+        if (matchedItem && matchedItem.serviceNameUz) {
+          resolvedServiceName = matchedItem.serviceNameUz;
+        }
+      }
+
       activeTreatments.push({
         id: appt.id,
         patientName: appt.patient?.fullName || 'Bemor',
         patientPhone: appt.patient?.phone || '',
         startTime: appt.startTime.toISOString(),
-        endTime: appt.endTime.toISOString(),
+        endTime: appt.endTime ? appt.endTime.toISOString() : undefined,
         status: appt.status,
         branchName: appt.branch?.nameUz || '',
         doctorName: appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}` : '',
-        serviceName: appt.service?.nameUz || '',
+        serviceName: resolvedServiceName,
         actualStartTime: appt.actualStartTime ? appt.actualStartTime.toISOString() : undefined,
-      });
-      continue;
-    }
-
-    // Future active reservation
-    const isFutureActive =
-      appt.startTime > now &&
-      (appt.status === AppointmentStatus.PENDING || appt.status === AppointmentStatus.CONFIRMED);
-
-    if (isFutureActive) {
-      futureAppointments.push({
-        id: appt.id,
-        patientName: appt.patient?.fullName || 'Bemor',
-        patientPhone: appt.patient?.phone || '',
-        startTime: appt.startTime.toISOString(),
-        endTime: appt.endTime.toISOString(),
-        status: appt.status,
-        branchName: appt.branch?.nameUz || '',
-        doctorName: appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}` : '',
-        serviceName: appt.service?.nameUz || '',
       });
     }
   }
 
   const activeTreatmentCount = activeTreatments.length;
-  const futureAppointmentCount = futureAppointments.length;
+
+  // 5. Bounded display preview list for future appointments (does NOT affect decision counts!)
+  const DISPLAY_PREVIEW_LIMIT = 10;
+  const futurePreviewCandidates = await tx.appointment.findMany({
+    where: {
+      ...countWhere,
+      startTime: { gt: now },
+      status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
+      NOT: {
+        status: AppointmentStatus.PENDING,
+        expiresAt: { lte: now },
+      },
+    },
+    select: {
+      id: true,
+      status: true,
+      startTime: true,
+      endTime: true,
+      actualStartTime: true,
+      patient: { select: { fullName: true, phone: true } },
+      branch: { select: { nameUz: true, nameRu: true } },
+      doctor: { select: { firstNameUz: true, lastNameUz: true } },
+      service: { select: { nameUz: true, nameRu: true } },
+      serviceItems: { select: { serviceId: true, originalServiceId: true, serviceNameUz: true } },
+    },
+    orderBy: { startTime: 'asc' },
+    take: DISPLAY_PREVIEW_LIMIT,
+  });
+
+  const futureAppointments: BlockerAppointmentSummary[] = futurePreviewCandidates.map((appt) => {
+    let resolvedServiceName = appt.service?.nameUz || '';
+    if (targetServiceIds.length > 0 && appt.serviceItems && appt.serviceItems.length > 0) {
+      const matchedItem = appt.serviceItems.find(
+        (item) =>
+          (item.serviceId && targetServiceIds.includes(item.serviceId)) ||
+          (item.originalServiceId && targetServiceIds.includes(item.originalServiceId)),
+      );
+      if (matchedItem && matchedItem.serviceNameUz) {
+        resolvedServiceName = matchedItem.serviceNameUz;
+      }
+    }
+
+    return {
+      id: appt.id,
+      patientName: appt.patient?.fullName || 'Bemor',
+      patientPhone: appt.patient?.phone || '',
+      startTime: appt.startTime.toISOString(),
+      endTime: appt.endTime ? appt.endTime.toISOString() : undefined,
+      status: appt.status,
+      branchName: appt.branch?.nameUz || '',
+      doctorName: appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}` : '',
+      serviceName: resolvedServiceName,
+    };
+  });
+
+  // 6. Compute exact historical appointment count using exact counts
   const historicalAppointmentCount = Math.max(
     0,
     totalCount - activeTreatmentCount - futureAppointmentCount,
@@ -246,6 +364,8 @@ export async function checkEntityLifecycleBlockers(
     historicalAppointmentCount,
     totalAppointmentCount: totalCount,
     resolutionGuidance,
+    futureAppointmentsTruncated: futureAppointmentCount > futureAppointments.length,
+    futureAppointmentsDisplayLimit: DISPLAY_PREVIEW_LIMIT,
   };
 }
 

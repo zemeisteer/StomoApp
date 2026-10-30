@@ -12,10 +12,16 @@ export class HealthController {
     let dbStatus = 'ok';
     let dbLatencyMs = 0;
     let dbName = '';
+    let dbServerAddr: string | null = null;
+    let dbServerPort: number | null = null;
     try {
       const start = Date.now();
-      const [res] = await this.prisma.$queryRaw<Array<{ current_database: string }>>`SELECT current_database();`;
+      const [res] = await this.prisma.$queryRaw<
+        Array<{ current_database: string; server_addr: string | null; server_port: number | null }>
+      >`SELECT current_database(), inet_server_addr()::text as server_addr, inet_server_port() as server_port;`;
       dbName = res?.current_database || '';
+      dbServerAddr = res?.server_addr ?? null;
+      dbServerPort = res?.server_port ?? null;
       dbLatencyMs = Date.now() - start;
     } catch {
       dbStatus = 'disconnected';
@@ -29,6 +35,8 @@ export class HealthController {
       database: {
         status: dbStatus,
         name: dbName,
+        serverAddress: dbServerAddr,
+        serverPort: dbServerPort,
         latencyMs: dbLatencyMs,
       },
       clinicTimezone: 'Asia/Tashkent',
