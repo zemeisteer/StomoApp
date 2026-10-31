@@ -176,6 +176,17 @@ export default function AdminOverviewPage() {
     return unsub;
   }, []);
 
+  // Trigger lucide.createIcons() automatically after every dynamic DOM render
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).lucide?.createIcons) {
+      try {
+        (window as any).lucide.createIcons();
+      } catch (e) {
+        // Safe fallback
+      }
+    }
+  });
+
   const handleOpenDebtModal = (patientId?: string) => {
     const debtors = clinicState.patients.filter((p) => p.totalDebt > 0);
     const targetId = patientId || (debtors.length > 0 ? debtors[0].id : '');

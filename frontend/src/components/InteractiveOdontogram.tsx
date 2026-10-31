@@ -157,6 +157,17 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
     return () => unsubscribe();
   }, [patientId, patientName]);
 
+  // Trigger lucide.createIcons() on DOM render
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).lucide?.createIcons) {
+      try {
+        (window as any).lucide.createIcons();
+      } catch (e) {
+        // Safe fallback
+      }
+    }
+  });
+
   // Active tooth record
   const currentRecord: ToothRecord = useMemo(() => {
     return (
