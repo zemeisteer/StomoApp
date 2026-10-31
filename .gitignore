@@ -10,3 +10,8 @@ coverage
 .turbo
 uploads
 *.tsbuildinfo
+__pycache__
+*.pyc
+*.db
+*.sqlite
+.pytest_cache

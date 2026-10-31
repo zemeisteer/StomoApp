@@ -32,11 +32,26 @@ import {
   FileCheck,
   ShieldAlert,
   BarChart3,
+  Wallet,
+  CreditCard,
+  Package,
+  Percent,
+  Filter,
+  Sparkles,
+  Shield,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { PhoneInput } from '../../components/PhoneInput';
 import { CustomSelect } from '../../components/CustomSelect';
 import { InteractiveOdontogram } from '../../components/InteractiveOdontogram';
+import {
+  clinicStore,
+  Invoice,
+  Patient,
+  PaymentMethod,
+  InventoryItem,
+  ToothRecord,
+} from '../../lib/clinicState';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -116,6 +131,96 @@ export default function AdminOverviewPage() {
   const effectiveRole = roleOverride === 'AUTO' ? (user?.role || 'ADMIN') : roleOverride;
   const isDoctor = effectiveRole === 'DOCTOR';
   const isOwner = effectiveRole === 'OWNER';
+
+  // Unified Reactive Clinic State (Phase 2 & Phase 3 Cross-Role Sync)
+  const [clinicState, setClinicState] = useState(() => clinicStore.getState());
+  const [debtModalOpen, setDebtModalOpen] = useState(false);
+  const [debtPatientId, setDebtPatientId] = useState<string>('');
+  const [debtAmount, setDebtAmount] = useState<number>(0);
+  const [debtMethod, setDebtMethod] = useState<PaymentMethod>('CASH');
+  const [debtNotes, setDebtNotes] = useState<string>('');
+  const [debtSuccessMsg, setDebtSuccessMsg] = useState<string | null>(null);
+  const [debtErrorMsg, setDebtErrorMsg] = useState<string | null>(null);
+
+  // Doctor Commission Calculator (Owner CRM)
+  const [selectedCommissionDocId, setSelectedCommissionDocId] = useState<string>('');
+  const [doctorCommissionRates, setDoctorCommissionRates] = useState<Record<string, number>>({
+    'doc-1': 40,
+    'doc-2': 45,
+    'doc-3': 35,
+  });
+
+  useEffect(() => {
+    const unsub = clinicStore.subscribe((newState) => {
+      setClinicState(newState);
+    });
+    return unsub;
+  }, []);
+
+  const handleOpenDebtModal = (patientId?: string) => {
+    const debtors = clinicState.patients.filter((p) => p.totalDebt > 0);
+    const targetId = patientId || (debtors.length > 0 ? debtors[0].id : '');
+    const patient = clinicState.patients.find((p) => p.id === targetId);
+    setDebtPatientId(targetId);
+    setDebtAmount(patient ? patient.totalDebt : 0);
+    setDebtMethod('CASH');
+    setDebtNotes('');
+    setDebtSuccessMsg(null);
+    setDebtErrorMsg(null);
+    setDebtModalOpen(true);
+  };
+
+  const handleRepayDebtSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setDebtErrorMsg(null);
+    setDebtSuccessMsg(null);
+    if (!debtPatientId) {
+      setDebtErrorMsg(isUz ? 'Bemor tanlanmagan' : 'Пациент не выбран');
+      return;
+    }
+    if (debtAmount <= 0) {
+      setDebtErrorMsg(isUz ? "To'lov summasi 0 dan katta bo'lishi kerak" : 'Сумма оплаты должна быть больше 0');
+      return;
+    }
+
+    const res = clinicStore.repayPatientDebt({
+      patientId: debtPatientId,
+      amount: debtAmount,
+      paymentMethod: debtMethod,
+      notes: debtNotes || (isUz ? "Qarz to'lovi" : "Погашение задолженности"),
+    });
+
+    if (res.success) {
+      setDebtSuccessMsg(
+        isUz
+          ? `To'lov muvaffaqiyatli qabul qilindi! Qoldiq qarz: ${res.remainingDebt.toLocaleString()} so'm`
+          : `Оплата успешно принята! Остаток долга: ${res.remainingDebt.toLocaleString()} сум`
+      );
+      setStatusFeedback(
+        isUz ? "Bemor qarzi muvaffaqiyatli so'ndirildi" : "Задолженность пациента успешно погашена"
+      );
+      setTimeout(() => {
+        setDebtModalOpen(false);
+      }, 1500);
+    } else {
+      setDebtErrorMsg(res.error || (isUz ? "To'lovda xatolik yuz berdi" : "Ошибка при оплате"));
+    }
+  };
+
+  const handleRestockInventory = (itemId: string, qty: number = 10) => {
+    clinicStore.updateInventoryQuantity(itemId, qty);
+    setStatusFeedback(
+      isUz ? `Zaxira +${qty} birlikka to'ldirildi` : `Склад пополнен на +${qty} ед.`
+    );
+  };
+
+  const handleUpdateDoctorCommissionRate = (doctorId: string, rate: number) => {
+    setDoctorCommissionRates((prev) => ({ ...prev, [doctorId]: rate }));
+    clinicStore.setDoctorCommission(doctorId, rate, 10);
+    setStatusFeedback(
+      isUz ? `Shifokor komissiyasi ${rate}% ga belgilandi` : `Комиссия врача установлена на ${rate}%`
+    );
+  };
 
   useEffect(() => {
     return () => {
@@ -1124,10 +1229,18 @@ export default function AdminOverviewPage() {
                       </div>
                     </div>
 
-                    {/* Interactive 3D Odontogram & Live Treatment Plan (FDI 11–48) */}
+                    {/* Interactive 3D Odontogram & Live Treatment Plan (FDI 11–48 adult & 51–85 pediatric) */}
                     <InteractiveOdontogram
                       language={isUz ? 'uz' : 'ru'}
+                      patientId={activeAppt?.patientId || activeAppt?.id || 'pat-101'}
                       patientName={patientName}
+                      onSavePlan={() => {
+                        setStatusFeedback(
+                          isUz
+                            ? "Davolash rejasi saqlandi va bemor hisob-fakturasi yangilandi"
+                            : "План лечения сохранен и счет пациента обновлен"
+                        );
+                      }}
                     />
 
                     {/* X-Ray Image Viewer (Image 3) */}
@@ -1286,6 +1399,369 @@ export default function AdminOverviewPage() {
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        ) : isOwner ? (
+          /* =========================================================================
+             CLINIC OWNER CRM & EXECUTIVE DASHBOARD (Phase 3 Requirements)
+             ========================================================================= */
+          <div className="space-y-6">
+            {/* Owner KPI Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* KPI 1: Gross Clinic Revenue */}
+              <div className="ui-card flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Jami tushum (Klinika daromadi)' : 'Общая выручка клиники'}</span>
+                  <p className="text-2xl font-black text-[#152f34] mt-0.5">
+                    {clinicState.invoices.reduce((acc, inv) => acc + inv.paidAmount, 0).toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so'm</span>
+                  </p>
+                  <span className="text-[11px] text-emerald-700 font-medium">{isUz ? "Muolajalar va to'lovlar" : 'Оплаченные процедуры'}</span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <DollarSign className="w-5 h-5" />
+                </div>
+              </div>
+
+              {/* KPI 2: Total Debt (Qarzlar) */}
+              <div className="ui-card flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Bemorlar qarzdorligi (Qarzlar)' : 'Задолженность пациентов'}</span>
+                  <p className="text-2xl font-black text-rose-600 mt-0.5">
+                    {clinicState.patients.reduce((acc, p) => acc + p.totalDebt, 0).toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so'm</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDebtModal()}
+                    className="text-[11px] text-[#167b78] hover:underline font-bold flex items-center gap-1"
+                  >
+                    <Wallet className="w-3 h-3" />
+                    <span>{isUz ? "Qarzni to'lash" : 'Погасить долг'}</span>
+                  </button>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+              </div>
+
+              {/* KPI 3: Total Active Patients */}
+              <div className="ui-card flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Ro\'yxatdagi bemorlar' : 'Всего пациентов'}</span>
+                  <p className="text-2xl font-black text-[#152f34] mt-0.5">
+                    {clinicState.patients.length} <span className="text-xs font-bold text-[#52696e]">{isUz ? 'nafar' : 'чел.'}</span>
+                  </p>
+                  <span className="text-[11px] text-teal-700 font-medium">{isUz ? '94% qayta murojaat' : '94% лояльность'}</span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-[#e0f2ed] text-[#167b78] flex items-center justify-center">
+                  <Users className="w-5 h-5" />
+                </div>
+              </div>
+
+              {/* KPI 4: Consumables Health */}
+              {(() => {
+                const lowStockCount = clinicState.inventory.filter((i) => i.quantity <= i.minThreshold).length;
+                return (
+                  <div className="ui-card flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Sarf materiallari zaxirasi' : 'Состояние склада расходников'}</span>
+                      <p className={`text-2xl font-black mt-0.5 ${lowStockCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                        {lowStockCount > 0 ? `${lowStockCount} ${isUz ? 'ta kam qoldi' : 'в дефиците'}` : (isUz ? 'Normada' : 'В норме')}
+                      </p>
+                      <span className="text-[11px] text-[#52696e] font-medium">
+                        {lowStockCount > 0 ? (isUz ? "Zaxirani to'ldirish zarur" : 'Требуется пополнение') : (isUz ? "Barcha mahsulotlar yetarli" : 'Все позиции в достатке')}
+                      </span>
+                    </div>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${lowStockCount > 0 ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                      <Package className="w-5 h-5" />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Main Owner CRM Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left 7 Cols: Doctor Commission & Payouts + Consumables Inventory */}
+              <div className="lg:col-span-7 space-y-6">
+                {/* Card 1: Doctor Commission & Payout Calculator (Phase 3 Requirement 2) */}
+                <div className="ui-card space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
+                        <Percent className="w-4 h-4 text-[#167b78]" />
+                        <span>{isUz ? 'Shifokorlar komissiyasi va oylik daromadi' : 'Калькулятор комиссии и выплат врачам'}</span>
+                      </h2>
+                      <p className="text-xs text-[#52696e]">
+                        {isUz
+                          ? 'Bajarilgan muolajalar summasidan materiallar harajati (10%) chegirilib, shifokor ulushi (30%-50%) hisoblanadi'
+                          : 'Расчет выплат врачам (30%-50%) от стоимости завершенных процедур за вычетом материалов (10%)'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {doctors.map((doc) => {
+                      const docId = doc.id;
+                      const currentRate = doctorCommissionRates[docId] ?? 40;
+                      const earnings = clinicStore.calculateDoctorEarnings(docId);
+                      const docName = isUz
+                        ? `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`
+                        : `Др. ${doc.firstNameRu || doc.firstNameUz} ${doc.lastNameRu || doc.lastNameUz}`;
+
+                      return (
+                        <div
+                          key={docId}
+                          className="p-3.5 bg-[#f8fbfa] hover:bg-[#eef7f5] rounded-2xl border border-[#d8e5e2] space-y-3 transition-colors"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-[#167b78] text-white font-bold flex items-center justify-center text-sm shadow-xs">
+                                {doc.firstNameUz?.charAt(0) || 'D'}
+                              </div>
+                              <div>
+                                <h3 className="font-bold text-sm text-[#152f34]">{docName}</h3>
+                                <p className="text-xs text-[#52696e]">
+                                  {isUz ? (doc.specializationUz || 'Stomatolog-terapevt') : (doc.specializationRu || 'Стоматолог-терапевт')} • {earnings.completedVisits} {isUz ? 'ta muolaja' : 'процедур'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Commission Rate Selector (30% - 50%) */}
+                            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-[#d8e5e2]">
+                              <span className="text-xs text-[#52696e] font-semibold">{isUz ? 'Ulush:' : 'Ставка:'}</span>
+                              <select
+                                value={currentRate}
+                                onChange={(e) => handleUpdateDoctorCommissionRate(docId, Number(e.target.value))}
+                                className="text-xs font-bold text-[#167b78] bg-transparent focus:outline-none cursor-pointer"
+                              >
+                                <option value={30}>30%</option>
+                                <option value={35}>35%</option>
+                                <option value={40}>40%</option>
+                                <option value={45}>45%</option>
+                                <option value={50}>50%</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Earnings Breakdown */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-[#d8e5e2]/60 text-xs">
+                            <div className="bg-white p-2 rounded-xl border border-[#e2eeee]">
+                              <span className="text-[10px] text-[#52696e] block">{isUz ? 'Jami xizmat:' : 'Валовый сбор:'}</span>
+                              <strong className="text-xs text-[#152f34] block mt-0.5">
+                                {earnings.grossClinicalRevenue.toLocaleString()} so'm
+                              </strong>
+                            </div>
+                            <div className="bg-white p-2 rounded-xl border border-[#e2eeee]">
+                              <span className="text-[10px] text-[#52696e] block">{isUz ? 'Material (10%):' : 'Материалы (10%):'}</span>
+                              <strong className="text-xs text-amber-700 block mt-0.5">
+                                -{earnings.materialCosts.toLocaleString()} so'm
+                              </strong>
+                            </div>
+                            <div className="bg-[#e0f2ed] p-2 rounded-xl border border-[#167b78]/30">
+                              <span className="text-[10px] text-[#167b78] font-bold block">{isUz ? 'Shifokorga to\'lov:' : 'Выплата врачу:'}</span>
+                              <strong className="text-xs text-[#116460] block mt-0.5 font-black">
+                                {earnings.doctorPayout.toLocaleString()} so'm
+                              </strong>
+                            </div>
+                            <div className="bg-white p-2 rounded-xl border border-[#e2eeee]">
+                              <span className="text-[10px] text-[#52696e] block">{isUz ? 'Klinika foydasi:' : 'Прибыль клиники:'}</span>
+                              <strong className="text-xs text-emerald-700 block mt-0.5 font-bold">
+                                {earnings.clinicNetProfit.toLocaleString()} so'm
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Card 2: Consumables Inventory Tracker & Low-Stock Alerts (Phase 3 Requirement 3) */}
+                <div className="ui-card space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
+                        <Package className="w-4 h-4 text-[#167b78]" />
+                        <span>{isUz ? 'Sarf materiallari va qoldiq monitoringi' : 'Склад расходных материалов и мониторинг'}</span>
+                      </h2>
+                      <p className="text-xs text-[#52696e]">
+                        {isUz
+                          ? 'Minimal me\'yordan past bo\'lgan materiallar avtomatik qizil ogohlantirish beradi'
+                          : 'Позиции ниже минимального порога автоматически подсвечиваются предупреждением'}
+                      </p>
+                    </div>
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#e0f2ed] text-[#167b78]">
+                      {clinicState.inventory.length} {isUz ? 'ta tovar' : 'позиций'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {clinicState.inventory.map((item) => {
+                      const isLow = item.quantity <= item.minThreshold;
+                      const pct = Math.min(100, Math.round((item.quantity / (item.minThreshold * 2.5)) * 100));
+
+                      return (
+                        <div
+                          key={item.id}
+                          className={`p-3 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                            isLow
+                              ? 'bg-rose-50/70 border-rose-300'
+                              : 'bg-white border-[#d8e5e2] hover:bg-[#f8fbfa]'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-xs sm:text-sm text-[#152f34] truncate">
+                                {isUz ? item.nameUz : item.nameRu}
+                              </h3>
+                              {isLow ? (
+                                <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white font-bold text-[10px] animate-pulse">
+                                  {isUz ? 'Kam qoldi!' : 'Мало!'}
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                                  {isUz ? 'Yetarli' : 'Норма'}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-[#52696e] mt-0.5">
+                              {isUz ? 'Kategoriya:' : 'Категория:'} <span className="font-semibold">{item.category}</span> • {isUz ? 'Minimal chegara:' : 'Мин. порог:'}{' '}
+                              <strong>{item.minThreshold} {item.unit}</strong>
+                            </p>
+
+                            {/* Stock progress */}
+                            <div className="w-full h-1.5 bg-black/5 rounded-full overflow-hidden mt-2 max-w-xs">
+                              <div
+                                className={`h-full rounded-full ${isLow ? 'bg-rose-600' : 'bg-[#167b78]'}`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                            <div className="text-right">
+                              <span className="text-xs font-black text-[#152f34]">
+                                {item.quantity} {item.unit}
+                              </span>
+                              <span className="text-[10px] text-[#52696e] block">
+                                {item.costPerUnit.toLocaleString()} so'm/{item.unit}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRestockInventory(item.id, 10)}
+                              className="px-3 py-1.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1 transition-colors"
+                              title={isUz ? "10 ta qo'shish" : 'Добавить 10'}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>+10</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right 5 Cols: Debt Registry & Recent Payments */}
+              <div className="lg:col-span-5 space-y-6">
+                {/* Card 3: Debt Registry ("Qarz Daftari" - Phase 3 Requirement 1) */}
+                <div className="ui-card space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
+                        <Wallet className="w-4 h-4 text-rose-600" />
+                        <span>{isUz ? 'Qarz daftari ("Qarzlar")' : 'Книга задолженностей'}</span>
+                      </h2>
+                      <p className="text-xs text-[#52696e]">
+                        {isUz ? 'Klinikadan qarzi bor bemorlar ro\'yxati va to\'lov qabul qilish' : 'Список пациентов с долгом и прием оплат'}
+                      </p>
+                    </div>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                      {clinicState.patients.filter((p) => p.totalDebt > 0).length} {isUz ? 'bemor' : 'пац.'}
+                    </span>
+                  </div>
+
+                  {clinicState.patients.filter((p) => p.totalDebt > 0).length === 0 ? (
+                    <div className="p-8 text-center text-[#52696e] space-y-2 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
+                      <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-600" />
+                      <p className="text-xs font-semibold">
+                        {isUz ? 'Klinikada muddati o\'tgan qarzlar yo\'q!' : 'У клиники нет задолженностей!'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                      {clinicState.patients
+                        .filter((p) => p.totalDebt > 0)
+                        .map((patient) => (
+                          <div
+                            key={patient.id}
+                            className="p-3 bg-white hover:bg-rose-50/40 rounded-2xl border border-rose-200 flex items-center justify-between gap-3 shadow-2xs transition-all"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-bold text-xs text-[#152f34] truncate">{patient.fullName}</p>
+                              <p className="text-[11px] font-mono text-[#52696e]">{patient.phone}</p>
+                              <p className="text-xs font-black text-rose-600 mt-0.5">
+                                {isUz ? 'Qarz:' : 'Долг:'} {patient.totalDebt.toLocaleString()} so'm
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDebtModal(patient.id)}
+                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1 shrink-0 transition-colors"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>{isUz ? "To'lash" : 'Погасить'}</span>
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Card 4: Recent Payments Stream */}
+                <div className="ui-card space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>{isUz ? 'So\'nggi to\'lovlar va kassa' : 'Недавние платежи и касса'}</span>
+                      </h2>
+                      <p className="text-xs text-[#52696e]">
+                        {isUz ? 'Naqd, Uzcard/Humo, Payme va Click orqali tushumlar' : 'Поступления через Наличные, Карты, Payme и Click'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {clinicState.invoices
+                      .flatMap((inv) => inv.payments.map((p) => ({ ...p, patientName: inv.patientName })))
+                      .slice(0, 6)
+                      .map((pay) => (
+                        <div
+                          key={pay.id}
+                          className="p-2.5 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] flex items-center justify-between text-xs"
+                        >
+                          <div>
+                            <p className="font-bold text-[#152f34]">{pay.patientName}</p>
+                            <span className="text-[10px] text-[#52696e]">
+                              {formatClinicTime(pay.createdAt)} • {pay.paymentMethod}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-bold text-xs text-emerald-700 block">
+                              +{pay.amount.toLocaleString()} so'm
+                            </span>
+                            <span className="text-[10px] text-slate-500">{pay.notes || (isUz ? 'Qabul' : 'Прием')}</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1854,56 +2330,81 @@ export default function AdminOverviewPage() {
                 )}
               </div>
 
-              {/* Card 2: Billing Status (Image 2) */}
+              {/* Card 2: Billing Status & Debt Action (Phase 3 Requirement 1) */}
               <div className="ui-card space-y-3.5">
                 <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-2.5">
                   <div>
                     <h2 className="text-sm font-bold text-[#152f34]">
-                      {isUz ? 'Hisob-kitob holati' : 'Статус оплаты'}
+                      {isUz ? 'Hisob-kitob va Qarzlar' : 'Статус оплаты и долги'}
                     </h2>
                     <span className="text-[11px] text-[#52696e]">
-                      {isUz ? 'So\'nggi hisob-fakturalar' : 'Недавние счета'}
+                      {isUz ? 'Bemorlar hisob-fakturalari' : 'Счета пациентов'}
                     </span>
                   </div>
-                  <Link href="/admin/analytics" className="text-xs text-[#167b78] font-bold hover:underline">
-                    {isUz ? 'Barchasi' : 'Все'}
-                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDebtModal()}
+                    className="text-xs text-rose-600 font-bold hover:underline flex items-center gap-1"
+                  >
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span>{isUz ? "Qarz to'lash" : 'Погасить'}</span>
+                  </button>
                 </div>
 
-                <div className="space-y-2 text-xs">
-                  <div className="p-2.5 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] flex items-center justify-between">
-                    <div>
-                      <p className="font-bold text-[#152f34]">
-                        {isUz ? 'So\'nggi hisob-faktura' : 'Последний счет'}
-                      </p>
-                      <span className="text-[10px] text-[#52696e]">
-                        {formatClinicDate(new Date().toISOString(), language, { includeWeekday: false })}
-                      </span>
+                {/* Total Clinic Debt Pill */}
+                {(() => {
+                  const totalDebt = clinicState.patients.reduce((acc, p) => acc + p.totalDebt, 0);
+                  return (
+                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-[10px] text-rose-800 font-bold uppercase block">
+                          {isUz ? 'Jami qarzlar:' : 'Общий долг:'}
+                        </span>
+                        <span className="text-xs font-black text-rose-900">{totalDebt.toLocaleString()} so'm</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDebtModal()}
+                        className="px-2.5 py-1 bg-rose-600 text-white rounded-lg text-[11px] font-bold shadow-2xs hover:bg-rose-700"
+                      >
+                        {isUz ? "To'lash" : 'Погасить'}
+                      </button>
                     </div>
-                    <div className="text-right">
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] block mb-0.5">
-                        {isUz ? 'To\'langan' : 'Оплачено'}
-                      </span>
-                      <strong className="text-xs text-[#152f34]">350 000 {isUz ? "so'm" : "сум"}</strong>
-                    </div>
-                  </div>
+                  );
+                })()}
 
-                  <div className="p-2.5 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] flex items-center justify-between">
-                    <div>
-                      <p className="font-bold text-[#152f34]">
-                        {isUz ? 'Konsultatsiya' : 'Консультация'}
-                      </p>
-                      <span className="text-[10px] text-[#52696e]">
-                        {formatClinicDate(new Date().toISOString(), language, { includeWeekday: false })}
-                      </span>
+                {/* Live Invoices list */}
+                <div className="space-y-2 text-xs">
+                  {clinicState.invoices.slice(0, 3).map((inv) => (
+                    <div key={inv.id} className="p-2.5 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] flex items-center justify-between">
+                      <div className="min-w-0 pr-2">
+                        <p className="font-bold text-[#152f34] truncate">{inv.patientName}</p>
+                        <span className="text-[10px] text-[#52696e] block truncate">
+                          {inv.procedures[0]?.nameUz || (isUz ? 'Stomatologik muolaja' : 'Стоматологическая процедура')}
+                        </span>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span
+                          className={`px-2 py-0.5 rounded-full font-bold text-[10px] block mb-0.5 ${
+                            inv.status === 'PAID'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : inv.status === 'PARTIALLY_PAID'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {inv.status === 'PAID'
+                            ? (isUz ? "To'langan" : 'Оплачено')
+                            : inv.status === 'PARTIALLY_PAID'
+                            ? (isUz ? 'Qisman' : 'Частично')
+                            : (isUz ? 'Kutilmoqda' : 'В ожидании')}
+                        </span>
+                        <strong className="text-xs text-[#152f34]">
+                          {inv.totalAmount.toLocaleString()} {isUz ? "so'm" : "сум"}
+                        </strong>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[10px] block mb-0.5">
-                        {isUz ? 'Kutilmoqda' : 'В ожидании'}
-                      </span>
-                      <strong className="text-xs text-[#152f34]">150 000 {isUz ? "so'm" : "сум"}</strong>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1959,6 +2460,207 @@ export default function AdminOverviewPage() {
                   {isUz ? 'Ha, bekor qilinsin' : 'Да, отменить'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Debt Repayment Modal ("Qarzni to'lash" - Phase 3 Requirement 1) */}
+        {debtModalOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#d8e5e2] space-y-4">
+              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-[#152f34]">
+                      {isUz ? "Bemor qarzini so'ndirish" : 'Погашение долга пациента'}
+                    </h3>
+                    <p className="text-xs text-[#52696e]">
+                      {isUz ? 'Qarzlar daftari orqali to\'lov qabul qilish' : 'Прием оплаты по книге задолженностей'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDebtModalOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {debtSuccessMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{debtSuccessMsg}</span>
+                </div>
+              )}
+              {debtErrorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{debtErrorMsg}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleRepayDebtSubmit} className="space-y-3.5 text-xs">
+                {/* Select Patient with Debt */}
+                <div>
+                  <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                    {isUz ? 'Qarzdor bemor' : 'Пациент с долгом'} <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={debtPatientId}
+                    onChange={(e) => {
+                      const pId = e.target.value;
+                      setDebtPatientId(pId);
+                      const pat = clinicState.patients.find((p) => p.id === pId);
+                      if (pat) setDebtAmount(pat.totalDebt);
+                    }}
+                    className="w-full px-3 py-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] focus:outline-none focus:border-[#167b78] font-medium"
+                    required
+                  >
+                    <option value="">{isUz ? 'Bemorni tanlang' : 'Выберите пациента'}</option>
+                    {clinicState.patients
+                      .filter((p) => p.totalDebt > 0)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.fullName} ({p.phone}) — {isUz ? 'Qarz:' : 'Долг:'} {p.totalDebt.toLocaleString()} so'm
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Repayment Amount */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-[#52696e]">
+                      {isUz ? "To'lov summasi (so'm)" : 'Сумма оплаты (сум)'} <span className="text-red-500">*</span>
+                    </label>
+                    {(() => {
+                      const activePat = clinicState.patients.find((p) => p.id === debtPatientId);
+                      return activePat ? (
+                        <span className="text-[10px] text-rose-600 font-bold">
+                          {isUz ? 'Jami qarz:' : 'Всего долг:'} {activePat.totalDebt.toLocaleString()} so'm
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
+                  <input
+                    type="number"
+                    min={1000}
+                    step={10000}
+                    value={debtAmount || ''}
+                    onChange={(e) => setDebtAmount(Number(e.target.value))}
+                    placeholder="500000"
+                    className="w-full px-3 py-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] font-mono font-bold focus:outline-none focus:border-[#167b78]"
+                    required
+                  />
+                </div>
+
+                {/* Quick Amount Chips */}
+                {(() => {
+                  const activePat = clinicState.patients.find((p) => p.id === debtPatientId);
+                  if (!activePat || activePat.totalDebt <= 0) return null;
+                  return (
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setDebtAmount(activePat.totalDebt)}
+                        className="px-2.5 py-1 bg-[#e0f2ed] hover:bg-[#cbeae3] text-[#116460] rounded-lg text-[10px] font-bold"
+                      >
+                        {isUz ? "To'liq (100%)" : 'Полностью (100%)'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDebtAmount(Math.round(activePat.totalDebt / 2))}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-[10px] font-semibold"
+                      >
+                        50%
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDebtAmount(Math.min(activePat.totalDebt, 300000))}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-[10px] font-semibold"
+                      >
+                        300 000
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDebtAmount(Math.min(activePat.totalDebt, 500000))}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-[10px] font-semibold"
+                      >
+                        500 000
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                {/* Payment Method Selector */}
+                <div>
+                  <label className="text-[11px] font-bold text-[#52696e] block mb-1.5">
+                    {isUz ? "To'lov usuli" : 'Способ оплаты'}
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { id: 'CASH' as PaymentMethod, label: isUz ? 'Naqd' : 'Наличные', icon: '💵' },
+                      { id: 'UZCARD_HUMO' as PaymentMethod, label: 'Uzcard/Humo', icon: '💳' },
+                      { id: 'PAYME' as PaymentMethod, label: 'Payme', icon: '📱' },
+                      { id: 'CLICK' as PaymentMethod, label: 'Click', icon: '⚡' },
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setDebtMethod(m.id)}
+                        className={`p-2 rounded-xl border text-center transition-all ${
+                          debtMethod === m.id
+                            ? 'bg-[#167b78] text-white border-[#116460] shadow-2xs font-bold'
+                            : 'bg-[#f3f8f7] text-[#52696e] border-[#d8e5e2] hover:bg-[#eaf5f2]'
+                        }`}
+                      >
+                        <span className="block text-sm mb-0.5">{m.icon}</span>
+                        <span className="text-[10px] block leading-tight">{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                    {isUz ? 'Izoh' : 'Примечание'}
+                  </label>
+                  <input
+                    type="text"
+                    value={debtNotes}
+                    onChange={(e) => setDebtNotes(e.target.value)}
+                    placeholder={isUz ? "Qarz to'lovi izohi..." : "Примечание к оплате..."}
+                    className="w-full px-3 py-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] focus:outline-none focus:border-[#167b78]"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#d8e5e2]">
+                  <button
+                    type="button"
+                    onClick={() => setDebtModalOpen(false)}
+                    className="px-4 py-2 border border-[#d8e5e2] text-[#152f34] rounded-xl text-xs font-semibold hover:bg-[#f3f8f7]"
+                  >
+                    {isUz ? 'Yopish' : 'Закрыть'}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isUz ? "To'lovni tasdiqlash" : 'Подтвердить оплату'}</span>
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

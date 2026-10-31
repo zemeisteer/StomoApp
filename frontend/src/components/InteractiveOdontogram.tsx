@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Check,
   AlertCircle,
@@ -14,286 +14,150 @@ import {
   DollarSign,
   Layers,
   Info,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Baby,
+  Smile,
+  Shield,
+  Activity,
 } from 'lucide-react';
-
-export type ToothCondition =
-  | 'HEALTHY'
-  | 'CARIES'
-  | 'FILLING'
-  | 'CROWN'
-  | 'PULPITIS'
-  | 'IMPLANT'
-  | 'EXTRACTION';
-
-export type ToothSurface = 'O' | 'M' | 'D' | 'V' | 'L'; // Occlusal, Mesial, Distal, Vestibular, Lingual
-
-export interface ToothRecord {
-  toothNum: number;
-  condition: ToothCondition;
-  surfaces: ToothSurface[];
-  note?: string;
-  treatmentNameUz: string;
-  treatmentNameRu: string;
-  costUzs: number;
-  status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED';
-}
-
-const CONDITION_METADATA: Record<
+import {
+  clinicStore,
   ToothCondition,
-  {
-    nameUz: string;
-    nameRu: string;
-    treatmentUz: string;
-    treatmentRu: string;
-    defaultCost: number;
-    bgClass: string;
-    textClass: string;
-    borderClass: string;
-    badgeBg: string;
-    badgeText: string;
-    hexColor: string;
-    icon: string;
-  }
-> = {
-  HEALTHY: {
-    nameUz: "Sog'lom",
-    nameRu: 'Здоров',
-    treatmentUz: "Profilaktik ko'rik",
-    treatmentRu: 'Профилактический осмотр',
-    defaultCost: 0,
-    bgClass: 'bg-white',
-    textClass: 'text-slate-800',
-    borderClass: 'border-slate-200',
-    badgeBg: 'bg-slate-100',
-    badgeText: 'text-slate-700',
-    hexColor: '#ffffff',
-    icon: '✨',
-  },
-  CARIES: {
-    nameUz: 'Karies',
-    nameRu: 'Кариес',
-    treatmentUz: 'Karies davolash va plombalash',
-    treatmentRu: 'Лечение кариеса и пломбирование',
-    defaultCost: 350000,
-    bgClass: 'bg-amber-500',
-    textClass: 'text-white',
-    borderClass: 'border-amber-600',
-    badgeBg: 'bg-amber-100',
-    badgeText: 'text-amber-800',
-    hexColor: '#f59e0b',
-    icon: '🦷',
-  },
-  FILLING: {
-    nameUz: 'Plomba',
-    nameRu: 'Пломбирован',
-    treatmentUz: 'Fotopolimer kompozit restavratsiya',
-    treatmentRu: 'Фотополимерная реставрация',
-    defaultCost: 450000,
-    bgClass: 'bg-[#14bdac]',
-    textClass: 'text-white',
-    borderClass: 'border-[#116460]',
-    badgeBg: 'bg-[#e0f2ed]',
-    badgeText: 'text-[#167b78]',
-    hexColor: '#14bdac',
-    icon: '🛡️',
-  },
-  CROWN: {
-    nameUz: 'Qoplama (Koronka)',
-    nameRu: 'Коронка',
-    treatmentUz: "Sirkoniy / metallokeramika qoplama o'rnatish",
-    treatmentRu: 'Установка циркониевой / металлокерамической коронки',
-    defaultCost: 1200000,
-    bgClass: 'bg-blue-600',
-    textClass: 'text-white',
-    borderClass: 'border-blue-700',
-    badgeBg: 'bg-blue-100',
-    badgeText: 'text-blue-800',
-    hexColor: '#2563eb',
-    icon: '👑',
-  },
-  PULPITIS: {
-    nameUz: 'Pulpit / Endodontiya',
-    nameRu: 'Пульпит / Каналы',
-    treatmentUz: 'Ildiz kanallarini mexanik va dori bilan davolash',
-    treatmentRu: 'Эндодонтическое лечение корневых каналов',
-    defaultCost: 650000,
-    bgClass: 'bg-rose-500',
-    textClass: 'text-white',
-    borderClass: 'border-rose-600',
-    badgeBg: 'bg-rose-100',
-    badgeText: 'text-rose-800',
-    hexColor: '#f43f5e',
-    icon: '⚡',
-  },
-  IMPLANT: {
-    nameUz: 'Implantat',
-    nameRu: 'Имплант',
-    treatmentUz: "Titan implantat o'rnatish",
-    treatmentRu: 'Установка титанового имплантата',
-    defaultCost: 3800000,
-    bgClass: 'bg-purple-600',
-    textClass: 'text-white',
-    borderClass: 'border-purple-700',
-    badgeBg: 'bg-purple-100',
-    badgeText: 'text-purple-800',
-    hexColor: '#9333ea',
-    icon: '🔩',
-  },
-  EXTRACTION: {
-    nameUz: "Sug'urilgan / Yo'q",
-    nameRu: 'Удален / Отсутствует',
-    treatmentUz: "Jarrohlik yo'li bilan olib tashlash",
-    treatmentRu: 'Хирургическое удаление зуба',
-    defaultCost: 250000,
-    bgClass: 'bg-slate-700',
-    textClass: 'text-white',
-    borderClass: 'border-slate-800',
-    badgeBg: 'bg-slate-200',
-    badgeText: 'text-slate-800',
-    hexColor: '#334155',
-    icon: '❌',
-  },
+  ToothSurface,
+  DentalChartType,
+  ToothRecord,
+  CONDITION_METADATA,
+} from '../lib/clinicState';
+
+// Tooth Anatomical Names (Uzbek & Russian)
+export const TOOTH_NAMES: Record<number, { uz: string; ru: string }> = {
+  // Adult Upper Right (Quadrant 1)
+  18: { uz: "O'ng yuqori aql tishi", ru: 'Правый верхний зуб мудрости' },
+  17: { uz: "O'ng yuqori 2-molyar", ru: 'Правый верхний 2-й моляр' },
+  16: { uz: "O'ng yuqori 1-molyar", ru: 'Правый верхний 1-й моляр' },
+  15: { uz: "O'ng yuqori 2-premolyar", ru: 'Правый верхний 2-й премоляр' },
+  14: { uz: "O'ng yuqori 1-premolyar", ru: 'Правый верхний 1-й премоляр' },
+  13: { uz: "O'ng yuqori qoziq tish", ru: 'Правый верхний клык' },
+  12: { uz: "O'ng yuqori yon kurak tish", ru: 'Правый верхний латеральный резец' },
+  11: { uz: "O'ng yuqori markaziy kurak tish", ru: 'Правый верхний центральный резец' },
+
+  // Adult Upper Left (Quadrant 2)
+  21: { uz: 'Chap yuqori markaziy kurak tish', ru: 'Левый верхний центральный резец' },
+  22: { uz: 'Chap yuqori yon kurak tish', ru: 'Левый верхний латеральный резец' },
+  23: { uz: 'Chap yuqori qoziq tish', ru: 'Левый верхний клык' },
+  24: { uz: 'Chap yuqori 1-premolyar', ru: 'Левый верхний 1-й премоляр' },
+  25: { uz: 'Chap yuqori 2-premolyar', ru: 'Левый верхний 2-й премоляр' },
+  26: { uz: 'Chap yuqori 1-molyar', ru: 'Левый верхний 1-й моляр' },
+  27: { uz: 'Chap yuqori 2-molyar', ru: 'Левый верхний 2-й моляр' },
+  28: { uz: 'Chap yuqori aql tishi', ru: 'Левый верхний зуб мудрости' },
+
+  // Adult Lower Right (Quadrant 4)
+  48: { uz: "O'ng pastki aql tishi", ru: 'Правый нижний зуб мудрости' },
+  47: { uz: "O'ng pastki 2-molyar", ru: 'Правый нижний 2-й моляр' },
+  46: { uz: "O'ng pastki 1-molyar", ru: 'Правый нижний 1-й моляр' },
+  45: { uz: "O'ng pastki 2-premolyar", ru: 'Правый нижний 2-й премоляр' },
+  44: { uz: "O'ng pastki 1-premolyar", ru: 'Правый нижний 1-й премоляр' },
+  43: { uz: "O'ng pastki qoziq tish", ru: 'Правый нижний клык' },
+  42: { uz: "O'ng pastki yon kurak tish", ru: 'Правый нижний латеральный резец' },
+  41: { uz: "O'ng pastki markaziy kurak tish", ru: 'Правый нижний центральный резец' },
+
+  // Adult Lower Left (Quadrant 3)
+  31: { uz: 'Chap pastki markaziy kurak tish', ru: 'Левый нижний центральный резец' },
+  32: { uz: 'Chap pastki yon kurak tish', ru: 'Левый нижний латеральный резец' },
+  33: { uz: 'Chap pastki qoziq tish', ru: 'Левый нижний клык' },
+  34: { uz: 'Chap pastki 1-premolyar', ru: 'Левый нижний 1-й премоляр' },
+  35: { uz: 'Chap pastki 2-premolyar', ru: 'Левый нижний 2-й премоляр' },
+  36: { uz: 'Chap pastki 1-molyar', ru: 'Левый нижний 1-й моляр' },
+  37: { uz: 'Chap pastki 2-molyar', ru: 'Левый нижний 2-й моляр' },
+  38: { uz: 'Chap pastki aql tishi', ru: 'Левый нижний зуб мудрости' },
+
+  // Pediatric Upper Right (Quadrant 5)
+  55: { uz: "O'ng yuqori 2-sut molyari", ru: 'Правый верхний 2-й молочный моляр' },
+  54: { uz: "O'ng yuqori 1-sut molyari", ru: 'Правый верхний 1-й молочный моляр' },
+  53: { uz: "O'ng yuqori sut qoziq tishi", ru: 'Правый верхний молочный клык' },
+  52: { uz: "O'ng yuqori yon sut kuragi", ru: 'Правый верхний боковой молочный резец' },
+  51: { uz: "O'ng yuqori markaziy sut kuragi", ru: 'Правый верхний центральный молочный резец' },
+
+  // Pediatric Upper Left (Quadrant 6)
+  61: { uz: 'Chap yuqori markaziy sut kuragi', ru: 'Левый верхний центральный молочный резец' },
+  62: { uz: 'Chap yuqori yon sut kuragi', ru: 'Левый верхний боковой молочный резец' },
+  63: { uz: 'Chap yuqori sut qoziq tishi', ru: 'Левый верхний молочный клык' },
+  64: { uz: 'Chap yuqori 1-sut molyari', ru: 'Левый верхний 1-й молочный моляр' },
+  65: { uz: 'Chap yuqori 2-sut molyari', ru: 'Левый верхний 2-й молочный моляр' },
+
+  // Pediatric Lower Right (Quadrant 8)
+  85: { uz: "O'ng pastki 2-sut molyari", ru: 'Правый нижний 2-й молочный моляр' },
+  84: { uz: "O'ng pastki 1-sut molyari", ru: 'Правый нижний 1-й молочный моляр' },
+  83: { uz: "O'ng pastki sut qoziq tishi", ru: 'Правый нижний молочный клык' },
+  82: { uz: "O'ng pastki yon sut kuragi", ru: 'Правый нижний боковой молочный резец' },
+  81: { uz: "O'ng pastki markaziy sut kuragi", ru: 'Правый нижний центральный молочный резец' },
+
+  // Pediatric Lower Left (Quadrant 7)
+  71: { uz: 'Chap pastki markaziy sut kuragi', ru: 'Левый нижний центральный молочный резец' },
+  72: { uz: 'Chap pastki yon sut kuragi', ru: 'Левый нижний боковой молочный резец' },
+  73: { uz: 'Chap pastki sut qoziq tishi', ru: 'Левый нижний молочный клык' },
+  74: { uz: 'Chap pastki 1-sut molyari', ru: 'Левый нижний 1-й молочный моляр' },
+  75: { uz: 'Chap pastki 2-sut molyari', ru: 'Левый нижний 2-й молочный моляр' },
 };
 
-const TOOTH_NAMES: Record<number, { uz: string; ru: string }> = {
-  // Upper Right
-  18: { uz: "Yuqori o'ng 3-molyar (Aql tishi)", ru: 'Верхний правый 3-й моляр (зуб мудрости)' },
-  17: { uz: "Yuqori o'ng 2-molyar", ru: 'Верхний правый 2-й моляр' },
-  16: { uz: "Yuqori o'ng 1-molyar", ru: 'Верхний правый 1-й моляр' },
-  15: { uz: "Yuqori o'ng 2-premolyar", ru: 'Верхний правый 2-й премоляр' },
-  14: { uz: "Yuqori o'ng 1-premolyar", ru: 'Верхний правый 1-й премоляр' },
-  13: { uz: "Yuqori o'ng qoziq tish (Kanin)", ru: 'Верхний правый клык' },
-  12: { uz: "Yuqori o'ng yon kesuvchi", ru: 'Верхний правый латеральный резец' },
-  11: { uz: "Yuqori o'ng markaziy kesuvchi", ru: 'Верхний правый центральный резец' },
-  // Upper Left
-  21: { uz: "Yuqori chap markaziy kesuvchi", ru: 'Верхний левый центральный резец' },
-  22: { uz: "Yuqori chap yon kesuvchi", ru: 'Верхний левый латеральный резец' },
-  23: { uz: "Yuqori chap qoziq tish (Kanin)", ru: 'Верхний левый клык' },
-  24: { uz: "Yuqori chap 1-premolyar", ru: 'Верхний левый 1-й премоляр' },
-  25: { uz: "Yuqori chap 2-premolyar", ru: 'Верхний левый 2-й премоляр' },
-  26: { uz: "Yuqori chap 1-molyar", ru: 'Верхний левый 1-й моляр' },
-  27: { uz: "Yuqori chap 2-molyar", ru: 'Верхний левый 2-й моляр' },
-  28: { uz: "Yuqori chap 3-molyar (Aql tishi)", ru: 'Верхний левый 3-й моляр (зуб мудрости)' },
-  // Lower Right
-  48: { uz: "Pastki o'ng 3-molyar (Aql tishi)", ru: 'Нижний правый 3-й моляр (зуб мудрости)' },
-  47: { uz: "Pastki o'ng 2-molyar", ru: 'Нижний правый 2-й моляр' },
-  46: { uz: "Pastki o'ng 1-molyar", ru: 'Нижний правый 1-й моляр' },
-  45: { uz: "Pastki o'ng 2-premolyar", ru: 'Нижний правый 2-й премоляр' },
-  44: { uz: "Pastki o'ng 1-premolyar", ru: 'Нижний правый 1-й премоляр' },
-  43: { uz: "Pastki o'ng qoziq tish (Kanin)", ru: 'Нижний правый клык' },
-  42: { uz: "Pastki o'ng yon kesuvchi", ru: 'Нижний правый латеральный резец' },
-  41: { uz: "Pastki o'ng markaziy kesuvchi", ru: 'Нижний правый центральный резец' },
-  // Lower Left
-  31: { uz: "Pastki chap markaziy kesuvchi", ru: 'Нижний левый центральный резец' },
-  32: { uz: "Pastki chap yon kesuvchi", ru: 'Нижний левый латеральный резец' },
-  33: { uz: "Pastki chap qoziq tish (Kanin)", ru: 'Нижний левый клык' },
-  34: { uz: "Pastki chap 1-premolyar", ru: 'Нижний левый 1-й премоляр' },
-  35: { uz: "Pastki chap 2-premolyar", ru: 'Нижний левый 2-й премоляр' },
-  36: { uz: "Pastki chap 1-molyar", ru: 'Нижний левый 1-й моляр' },
-  37: { uz: "Pastki chap 2-molyar", ru: 'Нижний левый 2-й моляр' },
-  38: { uz: "Pastki chap 3-molyar (Aql tishi)", ru: 'Нижний левый 3-й моляр (зуб мудрости)' },
-};
+const ADULT_UPPER = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
+const ADULT_LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
-const INITIAL_TEETH_RECORDS: Record<number, ToothRecord> = {
-  14: {
-    toothNum: 14,
-    condition: 'CARIES',
-    surfaces: ['O', 'M'],
-    note: "Chuqur okluzal karies. Anesteziya ostida tozalash kerak.",
-    treatmentNameUz: "Molyar restavratsiyasi (Karies davolash)",
-    treatmentNameRu: 'Реставрация моляра (Лечение кариеса)',
-    costUzs: 350000,
-    status: 'IN_PROGRESS',
-  },
-  15: {
-    toothNum: 15,
-    condition: 'FILLING',
-    surfaces: ['O'],
-    note: 'Eski plomba, holati yaxshi.',
-    treatmentNameUz: 'Kompozit plomba nazorati',
-    treatmentNameRu: 'Контроль композитной пломбы',
-    costUzs: 150000,
-    status: 'COMPLETED',
-  },
-  16: {
-    toothNum: 16,
-    condition: 'CROWN',
-    surfaces: ['O', 'M', 'D', 'V', 'L'],
-    note: "Sirkoniy qoplama o'rnatilgan.",
-    treatmentNameUz: "Sirkoniy to'liq qoplama",
-    treatmentNameRu: 'Циркониевая коронка',
-    costUzs: 1200000,
-    status: 'COMPLETED',
-  },
-  21: {
-    toothNum: 21,
-    condition: 'CARIES',
-    surfaces: ['M'],
-    note: "Oldingi tishda emal kariesi.",
-    treatmentNameUz: 'Estetik kompozit restavratsiya',
-    treatmentNameRu: 'Эстетическая реставрация',
-    costUzs: 400000,
-    status: 'PLANNED',
-  },
-  11: {
-    toothNum: 11,
-    condition: 'PULPITIS',
-    surfaces: ['O', 'L'],
-    note: "O'tkir pulpit. Ildiz kanalini tozalash va davolash.",
-    treatmentNameUz: 'Ildiz kanallarini endodontik davolash',
-    treatmentNameRu: 'Эндодонтическое лечение каналов',
-    costUzs: 650000,
-    status: 'IN_PROGRESS',
-  },
-  26: {
-    toothNum: 26,
-    condition: 'CROWN',
-    surfaces: ['O', 'M', 'D', 'V', 'L'],
-    note: 'Metallokeramika qoplama.',
-    treatmentNameUz: 'Metallokeramika qoplama',
-    treatmentNameRu: 'Металлокерамическая коронка',
-    costUzs: 900000,
-    status: 'COMPLETED',
-  },
-  36: {
-    toothNum: 36,
-    condition: 'CARIES',
-    surfaces: ['O', 'D'],
-    note: "O'rtacha karies.",
-    treatmentNameUz: 'Karies davolash va plombalash',
-    treatmentNameRu: 'Лечение кариеса и пломба',
-    costUzs: 350000,
-    status: 'PLANNED',
-  },
-  46: {
-    toothNum: 46,
-    condition: 'FILLING',
-    surfaces: ['O'],
-    note: 'Fotopolimer plomba muvaffaqiyatli qilingan.',
-    treatmentNameUz: 'Fotopolimer plomba',
-    treatmentNameRu: 'Фотополимерная пломба',
-    costUzs: 450000,
-    status: 'COMPLETED',
-  },
-};
+const PEDIATRIC_UPPER = [55, 54, 53, 52, 51, 61, 62, 63, 64, 65];
+const PEDIATRIC_LOWER = [85, 84, 83, 82, 81, 71, 72, 73, 74, 75];
 
 interface InteractiveOdontogramProps {
   language?: 'uz' | 'ru';
+  patientId?: string;
   patientName?: string;
   onSavePlan?: (records: Record<number, ToothRecord>) => void;
 }
 
 export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
   language = 'uz',
+  patientId = 'pat-101',
   patientName = 'Aziz Rahimov',
   onSavePlan,
 }) => {
   const isUz = language === 'uz';
+
+  // Odontogram Chart Type: Adult (32 teeth) vs Pediatric (20 teeth)
+  const [chartType, setChartType] = useState<DentalChartType>('ADULT');
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
-  const [teethRecords, setTeethRecords] = useState<Record<number, ToothRecord>>(INITIAL_TEETH_RECORDS);
+  const [teethRecords, setTeethRecords] = useState<Record<number, ToothRecord>>({});
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
-  // Active tooth record helper
+  // Mobile Zoom & Pan Controls
+  const [zoomScale, setZoomScale] = useState<number>(1.0);
+
+  // Load from reactive clinicStore
+  useEffect(() => {
+    const state = clinicStore.getState();
+    const patientOdonto = state.odontograms[patientId] || {};
+    setTeethRecords(patientOdonto);
+
+    // If patient is pediatric, default to pediatric chart
+    if (patientName.toLowerCase().includes('bola') || patientName.toLowerCase().includes('diyorbek')) {
+      setChartType('PEDIATRIC');
+      setSelectedTooth(54);
+    } else {
+      setChartType('ADULT');
+      setSelectedTooth(14);
+    }
+
+    const unsubscribe = clinicStore.subscribe((newState) => {
+      const updated = newState.odontograms[patientId];
+      if (updated) {
+        setTeethRecords(updated);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [patientId, patientName]);
+
+  // Active tooth record
   const currentRecord: ToothRecord = useMemo(() => {
     return (
       teethRecords[selectedTooth] || {
@@ -305,17 +169,17 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
         treatmentNameRu: 'Профилактический осмотр',
         costUzs: 0,
         status: 'PLANNED',
+        chartType,
       }
     );
-  }, [teethRecords, selectedTooth]);
+  }, [teethRecords, selectedTooth, chartType]);
 
-  // Update tooth condition
+  // Set Condition for Selected Tooth
   const handleSetCondition = (condition: ToothCondition) => {
     const meta = CONDITION_METADATA[condition];
     setTeethRecords((prev) => {
       const next = { ...prev };
       if (condition === 'HEALTHY') {
-        // Remove from active treatment plan
         delete next[selectedTooth];
       } else {
         const existing = prev[selectedTooth];
@@ -328,13 +192,15 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
           treatmentNameRu: meta.treatmentRu,
           costUzs: meta.defaultCost,
           status: existing?.status || 'PLANNED',
+          chartType,
+          updatedAt: new Date().toISOString(),
         };
       }
       return next;
     });
   };
 
-  // Toggle surface
+  // Toggle Surface Sector (Occlusal, Mesial, Distal, Vestibular, Lingual)
   const handleToggleSurface = (surface: ToothSurface) => {
     setTeethRecords((prev) => {
       const existing = prev[selectedTooth] || {
@@ -342,14 +208,15 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
         condition: 'CARIES',
         surfaces: [],
         note: '',
-        treatmentNameUz: 'Karies davolash',
-        treatmentNameRu: 'Лечение кариеса',
-        costUzs: 350000,
+        treatmentNameUz: CONDITION_METADATA.CARIES.treatmentUz,
+        treatmentNameRu: CONDITION_METADATA.CARIES.treatmentRu,
+        costUzs: CONDITION_METADATA.CARIES.defaultCost,
         status: 'PLANNED',
+        chartType,
       };
 
       const hasSurface = existing.surfaces.includes(surface);
-      const updatedSurfaces = hasSurface
+      const nextSurfaces = hasSurface
         ? existing.surfaces.filter((s) => s !== surface)
         : [...existing.surfaces, surface];
 
@@ -357,28 +224,48 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
         ...prev,
         [selectedTooth]: {
           ...existing,
-          surfaces: updatedSurfaces.length > 0 ? updatedSurfaces : ['O'],
+          condition: existing.condition === 'HEALTHY' ? 'CARIES' : existing.condition,
+          surfaces: nextSurfaces,
+          updatedAt: new Date().toISOString(),
         },
       };
     });
   };
 
-  // Update status
-  const handleSetStatus = (status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED') => {
+  // Update Status of Item in Treatment Plan
+  const handleUpdateStatus = (
+    toothNum: number,
+    status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED'
+  ) => {
     setTeethRecords((prev) => {
-      const existing = prev[selectedTooth];
-      if (!existing) return prev;
+      if (!prev[toothNum]) return prev;
       return {
         ...prev,
-        [selectedTooth]: {
-          ...existing,
+        [toothNum]: {
+          ...prev[toothNum],
           status,
+          updatedAt: new Date().toISOString(),
         },
       };
     });
   };
 
-  // Update note
+  // Update Custom Cost
+  const handleUpdateCost = (toothNum: number, costUzs: number) => {
+    setTeethRecords((prev) => {
+      if (!prev[toothNum]) return prev;
+      return {
+        ...prev,
+        [toothNum]: {
+          ...prev[toothNum],
+          costUzs: Math.max(0, costUzs),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    });
+  };
+
+  // Update Doctor Note
   const handleUpdateNote = (note: string) => {
     setTeethRecords((prev) => {
       const existing = prev[selectedTooth];
@@ -388,14 +275,29 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
         [selectedTooth]: {
           ...existing,
           note,
+          updatedAt: new Date().toISOString(),
         },
       };
     });
   };
 
-  // Calculate Treatment Plan Totals
+  // Save to Centralized Clinic Store
+  const handleSaveTreatmentPlan = () => {
+    clinicStore.savePatientOdontogram(patientId, teethRecords);
+    if (onSavePlan) {
+      onSavePlan(teethRecords);
+    }
+    setSaveSuccessMsg(
+      isUz
+        ? "Davolash rejasi va odontogramma muvaffaqiyatli saqlandi hamda hisob-kitobga yo'naltirildi!"
+        : 'План лечения и зубная карта успешно сохранены и синхронизированы с биллингом!'
+    );
+    setTimeout(() => setSaveSuccessMsg(null), 4000);
+  };
+
+  // Treatment Plan Summaries
   const treatmentItems = useMemo(() => {
-    return Object.values(teethRecords).sort((a, b) => a.toothNum - b.toothNum);
+    return Object.values(teethRecords).filter((r) => r.condition !== 'HEALTHY');
   }, [teethRecords]);
 
   const totalCost = useMemo(() => {
@@ -409,62 +311,106 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
   }, [treatmentItems]);
 
   const completionPercent = useMemo(() => {
-    if (totalCost === 0) return 100;
+    if (totalCost === 0) return 0;
     return Math.round((completedCost / totalCost) * 100);
-  }, [completedCost, totalCost]);
+  }, [totalCost, completedCost]);
 
-  // Handle Save
-  const handleSave = () => {
-    if (onSavePlan) {
-      onSavePlan(teethRecords);
-    }
-    setSaveSuccessMsg(
-      isUz
-        ? `Davolash rejasi saqlandi! (${treatmentItems.length} ta tish, jami: ${totalCost.toLocaleString('uz-UZ')} so'm)`
-        : `План лечения сохранен! (${treatmentItems.length} зубов, всего: ${totalCost.toLocaleString('uz-UZ')} сум)`
-    );
-    setTimeout(() => setSaveSuccessMsg(null), 3000);
-  };
-
-  const selectedToothInfo = TOOTH_NAMES[selectedTooth] || {
-    uz: `Tish #${selectedTooth}`,
-    ru: `Зуб #${selectedTooth}`,
-  };
+  // Current Arch Teeth
+  const upperTeeth = chartType === 'ADULT' ? ADULT_UPPER : PEDIATRIC_UPPER;
+  const lowerTeeth = chartType === 'ADULT' ? ADULT_LOWER : PEDIATRIC_LOWER;
 
   return (
     <div className="space-y-6">
-      {/* Save Success Alert */}
-      {saveSuccessMsg && (
-        <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-800 text-xs font-bold flex items-center gap-2 shadow-sm animate-fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>{saveSuccessMsg}</span>
-        </div>
-      )}
-
-      {/* Main Odontogram Dental Arch Card */}
+      {/* ODONTOGRAM HEADER & CONTROLS */}
       <div className="ui-card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#d8e5e2] pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-3">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-extrabold text-[#152f34]">
-                {isUz ? 'Interaktiv 3D Odontogramma — Tishlar xaritasi' : 'Интерактивная 3D одонтограмма — Зубная карта'}
+                {isUz ? 'Interaktiv FDI Odontogramma' : 'Интерактивная FDI Одонтограмма'}
               </h2>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#e0f2ed] text-[#167b78] border border-[#167b78]/30">
-                FDI (11–48)
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#167b78] text-white">
+                {chartType === 'ADULT' ? (isUz ? "Kattalar (32 ta tish)" : "Взрослые (32 зуба)") : (isUz ? "Bolalar (20 ta tish)" : "Детские (20 зубов)")}
               </span>
             </div>
             <p className="text-xs text-[#52696e] mt-0.5">
               {isUz
-                ? `Bemor: ${patientName} • Tishni tanlang, tashxis va sirtlarni belgilang`
-                : `Пациент: ${patientName} • Выберите зуб для назначения диагноза и поверхностей`}
+                ? `Bemor: ${patientName} • Tishni yoki sirtini bosing va tashxis tanlang`
+                : `Пациент: ${patientName} • Выберите зуб или поверхность для назначения лечения`}
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Adult vs Pediatric Chart Switcher */}
+            <div className="flex items-center bg-[#f3f8f7] p-1 rounded-xl border border-[#d8e5e2] text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setChartType('ADULT');
+                  setSelectedTooth(14);
+                }}
+                className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${
+                  chartType === 'ADULT'
+                    ? 'bg-[#167b78] text-white shadow-xs'
+                    : 'text-[#52696e] hover:text-[#152f34]'
+                }`}
+              >
+                <Smile className="w-3.5 h-3.5" />
+                <span>{isUz ? 'Kattalar' : 'Взрослая'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setChartType('PEDIATRIC');
+                  setSelectedTooth(54);
+                }}
+                className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${
+                  chartType === 'PEDIATRIC'
+                    ? 'bg-[#167b78] text-white shadow-xs'
+                    : 'text-[#52696e] hover:text-[#152f34]'
+                }`}
+              >
+                <Baby className="w-3.5 h-3.5" />
+                <span>{isUz ? 'Bolalar' : 'Детская'}</span>
+              </button>
+            </div>
+
+            {/* Zoom / Scale Controls for Mobile / Tablet */}
+            <div className="flex items-center bg-[#f3f8f7] p-1 rounded-xl border border-[#d8e5e2] text-xs">
+              <button
+                type="button"
+                onClick={() => setZoomScale((s) => Math.max(0.75, s - 0.1))}
+                className="p-1.5 text-[#52696e] hover:text-[#152f34] rounded-lg"
+                title={isUz ? 'Kichraytirish' : 'Уменьшить'}
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-[10px] font-mono font-bold px-1.5 text-[#152f34]">
+                {Math.round(zoomScale * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomScale((s) => Math.min(1.4, s + 0.1))}
+                className="p-1.5 text-[#52696e] hover:text-[#152f34] rounded-lg"
+                title={isUz ? 'Kattalashtirish' : 'Увеличить'}
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoomScale(1.0)}
+                className="p-1.5 text-[#52696e] hover:text-[#152f34] rounded-lg"
+                title={isUz ? 'Asl holat' : 'Сброс масштаба'}
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Save Button */}
             <button
               type="button"
-              onClick={handleSave}
-              className="px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+              onClick={handleSaveTreatmentPlan}
+              className="px-3.5 py-1.5 bg-[#167b78] hover:bg-[#116460] text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all"
             >
               <Save className="w-3.5 h-3.5" />
               <span>{isUz ? 'Rejani saqlash' : 'Сохранить план'}</span>
@@ -472,257 +418,280 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
           </div>
         </div>
 
-        {/* 32-Teeth Anatomical Grid */}
-        <div className="p-4 bg-[#f8fbfa] rounded-2xl border border-[#d8e5e2] space-y-6">
-          {/* Upper Arch (Maxillary): 18-11 and 21-28 */}
-          <div>
-            <div className="flex justify-between items-center text-[10px] font-bold text-[#52696e] mb-1.5 px-2">
-              <span className="flex items-center gap-1">
-                <span>🦷</span>
-                <span>{isUz ? "Yuqori jag' (Maxilla) • O'ng (18–11)" : 'Верхняя челюсть (Maxilla) • Справа (18–11)'}</span>
-              </span>
-              <span>{isUz ? 'Chap (21–28)' : 'Слева (21–28)'}</span>
+        {/* Save Success Toast */}
+        {saveSuccessMsg && (
+          <div className="p-3 bg-[#e0f2ed] border border-[#167b78]/40 text-[#116460] rounded-xl text-xs font-bold flex items-center justify-between animate-fade-in">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[#167b78] shrink-0" />
+              <span>{saveSuccessMsg}</span>
             </div>
-
-            <div className="grid grid-cols-16 gap-1 sm:gap-1.5 text-center" style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}>
-              {[18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28].map((toothNum) => {
-                const isSelected = selectedTooth === toothNum;
-                const rec = teethRecords[toothNum];
-                const cond = rec?.condition || 'HEALTHY';
-                const meta = CONDITION_METADATA[cond];
-
-                return (
-                  <button
-                    key={toothNum}
-                    type="button"
-                    onClick={() => setSelectedTooth(toothNum)}
-                    className={`flex flex-col items-center justify-between p-1 rounded-xl border transition-all duration-150 cursor-pointer ${meta.bgClass} ${meta.textClass} ${meta.borderClass} ${
-                      isSelected ? 'ring-3 ring-[#167b78] ring-offset-2 scale-105 shadow-md' : 'hover:scale-102 hover:shadow-xs'
-                    }`}
-                    title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum}: ${isUz ? meta.nameUz : meta.nameRu}`}
-                  >
-                    <span className="text-[10px] font-mono font-bold">{toothNum}</span>
-                    <div className="w-5 h-8 my-1 flex items-center justify-center">
-                      <svg viewBox="0 0 24 36" className="w-full h-full fill-current opacity-95">
-                        <path d="M12 2 C8 2, 4 6, 4 14 C4 20, 6 26, 7 34 C8 35, 10 35, 11 31 C11.5 28, 12.5 28, 13 31 C14 35, 16 35, 17 34 C18 26, 20 20, 20 14 C20 6, 16 2, 12 2 Z" />
-                      </svg>
-                    </div>
-                    {rec && rec.condition !== 'HEALTHY' && (
-                      <span className="text-[8px] font-bold px-1 rounded bg-black/20 truncate max-w-full">
-                        {rec.surfaces.join('')}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            <button onClick={() => setSaveSuccessMsg(null)}>✕</button>
           </div>
+        )}
 
-          {/* Lower Arch (Mandibular): 48-41 and 31-38 */}
-          <div>
-            <div className="grid grid-cols-16 gap-1 sm:gap-1.5 text-center" style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}>
-              {[48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38].map((toothNum) => {
-                const isSelected = selectedTooth === toothNum;
-                const rec = teethRecords[toothNum];
-                const cond = rec?.condition || 'HEALTHY';
-                const meta = CONDITION_METADATA[cond];
-
-                return (
-                  <button
-                    key={toothNum}
-                    type="button"
-                    onClick={() => setSelectedTooth(toothNum)}
-                    className={`flex flex-col items-center justify-between p-1 rounded-xl border transition-all duration-150 cursor-pointer ${meta.bgClass} ${meta.textClass} ${meta.borderClass} ${
-                      isSelected ? 'ring-3 ring-[#167b78] ring-offset-2 scale-105 shadow-md' : 'hover:scale-102 hover:shadow-xs'
-                    }`}
-                    title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum}: ${isUz ? meta.nameUz : meta.nameRu}`}
-                  >
-                    {rec && rec.condition !== 'HEALTHY' && (
-                      <span className="text-[8px] font-bold px-1 rounded bg-black/20 truncate max-w-full">
-                        {rec.surfaces.join('')}
-                      </span>
-                    )}
-                    <div className="w-5 h-8 my-1 flex items-center justify-center">
-                      <svg viewBox="0 0 24 36" className="w-full h-full fill-current opacity-95 transform rotate-180">
-                        <path d="M12 2 C8 2, 4 6, 4 14 C4 20, 6 26, 7 34 C8 35, 10 35, 11 31 C11.5 28, 12.5 28, 13 31 C14 35, 16 35, 17 34 C18 26, 20 20, 20 14 C20 6, 16 2, 12 2 Z" />
-                      </svg>
-                    </div>
-                    <span className="text-[10px] font-mono font-bold">{toothNum}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex justify-between items-center text-[10px] font-bold text-[#52696e] mt-1.5 px-2">
-              <span className="flex items-center gap-1">
-                <span>🦷</span>
-                <span>{isUz ? "Pastki jag' (Mandibula) • O'ng (48–41)" : 'Нижняя челюсть (Mandibula) • Справа (48–41)'}</span>
-              </span>
-              <span>{isUz ? 'Chap (31–38)' : 'Слева (31–38)'}</span>
-            </div>
-          </div>
-
-          {/* Quick Condition Legend */}
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-3 border-t border-[#d8e5e2] text-xs">
-            {Object.entries(CONDITION_METADATA).map(([key, meta]) => (
-              <div key={key} className="flex items-center gap-1.5">
-                <span
-                  className="w-3 h-3 rounded-full border border-black/10 shrink-0"
-                  style={{ backgroundColor: meta.hexColor }}
-                />
-                <span className="text-[#52696e] text-[11px] font-medium">
-                  {isUz ? meta.nameUz : meta.nameRu}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Selected Tooth Interactive Inspector & Surface Sector Editor */}
-        <div className="p-4 bg-white rounded-2xl border border-[#167b78]/30 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+        {/* TEETH ARCH DISPLAY (Touch scrollable & zoomable) */}
+        <div className="overflow-x-auto pb-2 scrollbar-thin">
+          <div
+            className="min-w-[620px] p-4 bg-[#f8fbfa] rounded-2xl border border-[#d8e5e2] space-y-6 transition-transform origin-top-left"
+            style={{ transform: `scale(${zoomScale})` }}
+          >
+            {/* Upper Jaw (Maxillary) */}
             <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-lg bg-[#167b78] text-white font-mono font-extrabold text-sm">
-                  #{selectedTooth}
+              <div className="flex justify-between items-center text-[11px] font-bold text-[#52696e] mb-2 px-2">
+                <span>{isUz ? "Yuqori jag' (Maxillary) • O'ng" : 'Верхняя челюсть • Справа'}</span>
+                <span className="text-[10px] bg-slate-200/70 text-slate-700 px-2 py-0.5 rounded-full uppercase">
+                  {chartType}
                 </span>
-                <h3 className="font-bold text-sm sm:text-base text-[#152f34]">
-                  {isUz ? selectedToothInfo.uz : selectedToothInfo.ru}
-                </h3>
+                <span>{isUz ? 'Chap' : 'Слева'}</span>
               </div>
-              <p className="text-xs text-[#52696e] mt-0.5">
-                {isUz ? 'Holat:' : 'Статус:'}{' '}
-                <strong className="text-[#167b78]">
-                  {isUz
-                    ? CONDITION_METADATA[currentRecord.condition].nameUz
-                    : CONDITION_METADATA[currentRecord.condition].nameRu}
-                </strong>
-                {currentRecord.surfaces.length > 0 && ` • Sirtlar: ${currentRecord.surfaces.join(', ')}`}
-              </p>
-            </div>
+              <div
+                className="gap-1 sm:gap-1.5 text-center"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${upperTeeth.length}, minmax(0, 1fr))`,
+                }}
+              >
+                {upperTeeth.map((toothNum) => {
+                  const record = teethRecords[toothNum];
+                  const condition = record?.condition || 'HEALTHY';
+                  const meta = CONDITION_METADATA[condition];
+                  const isSelected = selectedTooth === toothNum;
 
-            {/* Status pill (Planned, In Progress, Completed) */}
-            <div className="flex items-center gap-1.5 text-xs">
-              {(['PLANNED', 'IN_PROGRESS', 'COMPLETED'] as const).map((st) => {
-                const isActive = currentRecord.status === st;
-                return (
-                  <button
-                    key={st}
-                    type="button"
-                    onClick={() => handleSetStatus(st)}
-                    className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors cursor-pointer ${
-                      isActive
-                        ? st === 'COMPLETED'
-                          ? 'bg-emerald-600 text-white'
-                          : st === 'IN_PROGRESS'
-                          ? 'bg-amber-600 text-white'
-                          : 'bg-[#167b78] text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {st === 'PLANNED'
-                      ? isUz
-                        ? 'Rejalashtirilgan'
-                        : 'Запланировано'
-                      : st === 'IN_PROGRESS'
-                      ? isUz
-                        ? 'Jarayonda'
-                        : 'В процессе'
-                      : isUz
-                      ? 'Bajarildi'
-                      : 'Завершено'}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Condition Selector Chips */}
-          <div>
-            <label className="block text-xs font-bold text-[#152f34] mb-2">
-              {isUz ? "Tish holatini tanlang (Tashxis):" : 'Выберите диагноз / процедуру:'}
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-              {(Object.keys(CONDITION_METADATA) as ToothCondition[]).map((cond) => {
-                const meta = CONDITION_METADATA[cond];
-                const isCurrent = currentRecord.condition === cond;
-                return (
-                  <button
-                    key={cond}
-                    type="button"
-                    onClick={() => handleSetCondition(cond)}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                      isCurrent
-                        ? 'bg-[#167b78] text-white border-[#116460] shadow-sm scale-102 ring-2 ring-[#167b78]/40'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="text-base">{meta.icon}</span>
-                    <span className="text-center text-[11px] leading-tight">
-                      {isUz ? meta.nameUz : meta.nameRu}
-                    </span>
-                    {meta.defaultCost > 0 && (
-                      <span className={`text-[9px] ${isCurrent ? 'text-teal-100' : 'text-slate-500'}`}>
-                        {meta.defaultCost.toLocaleString('uz-UZ')} {isUz ? "so'm" : 'сум'}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Surface & Note Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
-            {/* Clickable Tooth Surface Sectors (Occlusal, Mesial, Distal, Vestibular, Lingual) */}
-            <div>
-              <label className="block text-xs font-bold text-[#152f34] mb-1.5">
-                {isUz ? "Zararlangan tish sirtlari (Surfaces):" : 'Поверхности зуба:'}
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { key: 'O' as ToothSurface, labelUz: 'Okluzal (O)', labelRu: 'Окклюзионная (O)' },
-                  { key: 'M' as ToothSurface, labelUz: 'Mezial (M)', labelRu: 'Медиальная (M)' },
-                  { key: 'D' as ToothSurface, labelUz: 'Distal (D)', labelRu: 'Дистальная (D)' },
-                  { key: 'V' as ToothSurface, labelUz: 'Vestibulyar (V)', labelRu: 'Вестибулярная (V)' },
-                  { key: 'L' as ToothSurface, labelUz: 'Til / Tanglay (L)', labelRu: 'Язычная (L)' },
-                ].map((surf) => {
-                  const isChecked = currentRecord.surfaces.includes(surf.key);
                   return (
                     <button
-                      key={surf.key}
+                      key={toothNum}
                       type="button"
-                      onClick={() => handleToggleSurface(surf.key)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                        isChecked
-                          ? 'bg-[#14bdac] text-white border-[#116460] shadow-xs'
-                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      onClick={() => setSelectedTooth(toothNum)}
+                      className={`flex flex-col items-center justify-between p-1.5 rounded-xl border transition-all duration-150 ${meta.bgClass} ${meta.textClass} ${meta.borderClass} ${
+                        isSelected ? 'ring-3 ring-[#167b78] ring-offset-2 scale-105 shadow-md z-10' : 'hover:scale-102 shadow-2xs'
                       }`}
+                      title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum} - ${isUz ? meta.nameUz : meta.nameRu}`}
                     >
-                      {isUz ? surf.labelUz : surf.labelRu} {isChecked && '✓'}
+                      <span className="text-[10px] font-mono font-bold leading-none">{toothNum}</span>
+                      <div className="w-5 h-8 my-1 flex items-center justify-center">
+                        <svg viewBox="0 0 24 36" className="w-full h-full fill-current opacity-95">
+                          <path d="M12 2 C8 2, 4 6, 4 14 C4 20, 6 26, 7 34 C8 35, 10 35, 11 31 C11.5 28, 12.5 28, 13 31 C14 35, 16 35, 17 34 C18 26, 20 20, 20 14 C20 6, 16 2, 12 2 Z" />
+                        </svg>
+                      </div>
+                      <span className="text-[9px] leading-tight font-extrabold">{meta.icon}</span>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Doctor Note */}
+            {/* Lower Jaw (Mandibular) */}
             <div>
-              <label className="block text-xs font-bold text-[#152f34] mb-1.5">
-                {isUz ? "Shifokor klinik izohi:" : 'Клиническая заметка врача:'}
-              </label>
-              <input
-                type="text"
-                placeholder={isUz ? "Masalan: Chuqur karies, anesteziya qilindi..." : 'Например: Глубокий кариес, анестезия...'}
-                value={currentRecord.note || ''}
-                onChange={(e) => handleUpdateNote(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:border-[#167b78] focus:ring-1 focus:ring-[#167b78]"
-              />
+              <div
+                className="gap-1 sm:gap-1.5 text-center"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${lowerTeeth.length}, minmax(0, 1fr))`,
+                }}
+              >
+                {lowerTeeth.map((toothNum) => {
+                  const record = teethRecords[toothNum];
+                  const condition = record?.condition || 'HEALTHY';
+                  const meta = CONDITION_METADATA[condition];
+                  const isSelected = selectedTooth === toothNum;
+
+                  return (
+                    <button
+                      key={toothNum}
+                      type="button"
+                      onClick={() => setSelectedTooth(toothNum)}
+                      className={`flex flex-col items-center justify-between p-1.5 rounded-xl border transition-all duration-150 ${meta.bgClass} ${meta.textClass} ${meta.borderClass} ${
+                        isSelected ? 'ring-3 ring-[#167b78] ring-offset-2 scale-105 shadow-md z-10' : 'hover:scale-102 shadow-2xs'
+                      }`}
+                      title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum} - ${isUz ? meta.nameUz : meta.nameRu}`}
+                    >
+                      <span className="text-[9px] leading-tight font-extrabold">{meta.icon}</span>
+                      <div className="w-5 h-8 my-1 flex items-center justify-center">
+                        <svg viewBox="0 0 24 36" className="w-full h-full fill-current opacity-95 transform rotate-180">
+                          <path d="M12 2 C8 2, 4 6, 4 14 C4 20, 6 26, 7 34 C8 35, 10 35, 11 31 C11.5 28, 12.5 28, 13 31 C14 35, 16 35, 17 34 C18 26, 20 20, 20 14 C20 6, 16 2, 12 2 Z" />
+                        </svg>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold leading-none">{toothNum}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between items-center text-[11px] font-bold text-[#52696e] mt-2 px-2">
+                <span>{isUz ? "Pastki jag' (Mandibular) • O'ng" : 'Нижняя челюсть • Справа'}</span>
+                <span>{isUz ? 'Chap' : 'Слева'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* CONDITION STATUS PALETTE (Clickable Quick Set) */}
+        <div className="space-y-2 pt-2 border-t border-[#d8e5e2]">
+          <span className="text-xs font-bold text-[#52696e] block">
+            {isUz
+              ? `Tashxis tanlash (#${selectedTooth}-tish uchun):`
+              : `Выберите статус для зуба #${selectedTooth}:`}
+          </span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2">
+            {(Object.keys(CONDITION_METADATA) as ToothCondition[]).map((cond) => {
+              const meta = CONDITION_METADATA[cond];
+              const isCurrent = currentRecord.condition === cond;
+
+              return (
+                <button
+                  key={cond}
+                  type="button"
+                  onClick={() => handleSetCondition(cond)}
+                  className={`p-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 border transition-all ${
+                    isCurrent
+                      ? 'ring-2 ring-slate-900 border-transparent shadow-sm scale-102'
+                      : 'bg-white hover:bg-slate-50 border-slate-200 text-[#152f34]'
+                  }`}
+                  style={{
+                    backgroundColor: isCurrent ? meta.hexColor : undefined,
+                    color: isCurrent && meta.hexColor !== '#ffffff' ? '#ffffff' : undefined,
+                  }}
+                >
+                  <span className="text-base">{meta.icon}</span>
+                  <span className="text-[11px] text-center leading-tight">
+                    {isUz ? meta.nameUz : meta.nameRu}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* TOOTH DETAIL & SURFACE SELECTOR PANEL */}
+        <div className="p-4 bg-[#f8fbfa] rounded-2xl border border-[#d8e5e2] grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+          {/* Surface Sector Clicker (5 Sectors) */}
+          <div className="md:col-span-5 flex flex-col items-center justify-center space-y-2">
+            <span className="text-xs font-bold text-[#152f34]">
+              {isUz ? `Anatomik sirtlar (#${selectedTooth})` : `Поверхности зуба (#${selectedTooth})`}
+            </span>
+            <div className="relative w-28 h-28">
+              {/* Vestibular / Buccal (Top) */}
+              <button
+                type="button"
+                onClick={() => handleToggleSurface('V')}
+                className={`absolute top-0 left-6 right-6 h-8 rounded-t-xl text-[10px] font-bold border transition-colors ${
+                  currentRecord.surfaces.includes('V')
+                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+                title={isUz ? 'Vestibulyar (Daxliz) sirt' : 'Вестибулярная поверхность'}
+              >
+                V
+              </button>
+
+              {/* Mesial (Left) */}
+              <button
+                type="button"
+                onClick={() => handleToggleSurface('M')}
+                className={`absolute top-6 bottom-6 left-0 w-8 rounded-l-xl text-[10px] font-bold border transition-colors ${
+                  currentRecord.surfaces.includes('M')
+                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+                title={isUz ? 'Mezial (Oldingi) sirt' : 'Медиальная поверхность'}
+              >
+                M
+              </button>
+
+              {/* Occlusal (Center) */}
+              <button
+                type="button"
+                onClick={() => handleToggleSurface('O')}
+                className={`absolute top-8 bottom-8 left-8 right-8 rounded-lg text-[10px] font-bold border transition-colors ${
+                  currentRecord.surfaces.includes('O')
+                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+                title={isUz ? 'Okluzal (Chaynash) sirt' : 'Окклюзионная поверхность'}
+              >
+                O
+              </button>
+
+              {/* Distal (Right) */}
+              <button
+                type="button"
+                onClick={() => handleToggleSurface('D')}
+                className={`absolute top-6 bottom-6 right-0 w-8 rounded-r-xl text-[10px] font-bold border transition-colors ${
+                  currentRecord.surfaces.includes('D')
+                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+                title={isUz ? 'Distal (Orqa) sirt' : 'Дистальная поверхность'}
+              >
+                D
+              </button>
+
+              {/* Lingual (Bottom) */}
+              <button
+                type="button"
+                onClick={() => handleToggleSurface('L')}
+                className={`absolute bottom-0 left-6 right-6 h-8 rounded-b-xl text-[10px] font-bold border transition-colors ${
+                  currentRecord.surfaces.includes('L')
+                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+                title={isUz ? 'Lingval (Til tomoni) sirt' : 'Язычная поверхность'}
+              >
+                L
+              </button>
+            </div>
+            <p className="text-[10px] text-[#52696e] text-center">
+              {currentRecord.surfaces.length > 0
+                ? `${isUz ? 'Tanlangan sirtlar:' : 'Выбранные поверхности:'} [${currentRecord.surfaces.join(', ')}]`
+                : (isUz ? 'To‘liq tish tanlangan' : 'Выбран весь зуб целиком')}
+            </p>
+          </div>
+
+          {/* Quick Doctor Note Field */}
+          <div className="md:col-span-7 space-y-2">
+            <label className="text-xs font-bold text-[#152f34] flex items-center justify-between">
+              <span>{isUz ? 'Klinik izoh va tavsiyalar:' : 'Клинические заметки врача:'}</span>
+              <span className="text-[11px] text-[#52696e] font-normal">
+                {TOOTH_NAMES[selectedTooth]?.[language] || `#${selectedTooth}-tish`}
+              </span>
+            </label>
+            <textarea
+              rows={2}
+              placeholder={
+                isUz
+                  ? "Masalan: Anesteziya ostida tozalash kerak, ildiz kanali tor..."
+                  : 'Например: Требуется анестезия, корневой канал сужен...'
+              }
+              value={currentRecord.note || ''}
+              onChange={(e) => handleUpdateNote(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:border-[#167b78] focus:ring-1 focus:ring-[#167b78] bg-white text-[#152f34]"
+            />
+            {/* Quick Note Presets */}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {[
+                isUz ? "O'tkir og'riq" : 'Острая боль',
+                isUz ? 'Rentgen kerak' : 'Нужен рентген',
+                isUz ? 'Eski plomba' : 'Старая пломба',
+                isUz ? 'Kanal tozalash' : 'Чистка каналов',
+              ].map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() =>
+                    handleUpdateNote(
+                      currentRecord.note ? `${currentRecord.note}, ${chip}` : chip
+                    )
+                  }
+                  className="px-2 py-0.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-medium text-slate-700"
+                >
+                  + {chip}
+                </button>
+              ))}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Dynamic Treatment Plan & Real-time Cost Summary */}
+      {/* DYNAMIC TREATMENT PLAN & REAL-TIME COST BREAKDOWN */}
       <div className="ui-card space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-3">
           <div>
@@ -741,7 +710,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
             </p>
           </div>
 
-          {/* Real-time Financial Breakdown */}
+          {/* Real-time Financial Summary */}
           <div className="flex items-center gap-3 bg-[#f8fbfa] px-4 py-2 rounded-xl border border-[#d8e5e2]">
             <div>
               <span className="text-[10px] text-[#52696e] block">
@@ -786,7 +755,9 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 : 'В зубной карте нет назначенных процедур (Все зубы здоровы).'}
             </p>
             <p className="text-[11px] mt-1 text-slate-400">
-              {isUz ? "Yuqoridagi tish xaritasidan tishni tanlab karies, plomba yoki koronka belgilang." : 'Выберите зуб на карте сверху, чтобы назначить лечение.'}
+              {isUz
+                ? 'Yuqoridagi tish xaritasidan tishni tanlab karies, plomba, kanal yoki koronka belgilang.'
+                : 'Выберите зуб на карте сверху, чтобы назначить лечение.'}
             </p>
           </div>
         ) : (
@@ -822,7 +793,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-[#52696e] mt-0.5">
-                        {isUz ? TOOTH_NAMES[item.toothNum]?.uz : TOOTH_NAMES[item.toothNum]?.ru}
+                        {TOOTH_NAMES[item.toothNum]?.[language]}
                         {item.surfaces.length > 0 && ` • Sirtlar: [${item.surfaces.join(', ')}]`}
                         {item.note && ` • Izoh: ${item.note}`}
                       </p>
@@ -830,42 +801,52 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                    <span className="font-mono text-xs font-extrabold text-[#167b78]">
-                      {item.costUzs.toLocaleString('uz-UZ')} {isUz ? "so'm" : 'сум'}
-                    </span>
+                    {/* Editable Cost input */}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={item.costUzs}
+                        onChange={(e) => handleUpdateCost(item.toothNum, Number(e.target.value))}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-24 text-right px-2 py-1 text-xs font-bold rounded-lg border border-slate-200 focus:border-[#167b78] bg-white text-[#152f34]"
+                      />
+                      <span className="text-[10px] text-[#52696e] font-semibold">{isUz ? "so'm" : 'сум'}</span>
+                    </div>
 
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-1 rounded-lg ${
+                    {/* Procedure Status Selector */}
+                    <select
+                      value={item.status}
+                      onChange={(e) =>
+                        handleUpdateStatus(
+                          item.toothNum,
+                          e.target.value as 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED'
+                        )
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      className={`text-[11px] font-bold px-2 py-1 rounded-lg border cursor-pointer ${
                         item.status === 'COMPLETED'
-                          ? 'bg-emerald-100 text-emerald-800'
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
                           : item.status === 'IN_PROGRESS'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-blue-100 text-blue-800'
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : 'bg-blue-100 text-blue-800 border-blue-300'
                       }`}
                     >
-                      {item.status === 'COMPLETED'
-                        ? isUz
-                          ? 'Bajarildi'
-                          : 'Выполнено'
-                        : item.status === 'IN_PROGRESS'
-                        ? isUz
-                          ? 'Jarayonda'
-                          : 'В процессе'
-                        : isUz
-                        ? 'Rejada'
-                        : 'Запланировано'}
-                    </span>
+                      <option value="PLANNED">{isUz ? 'Rejada' : 'Запланировано'}</option>
+                      <option value="IN_PROGRESS">{isUz ? 'Jarayonda' : 'В процессе'}</option>
+                      <option value="COMPLETED">{isUz ? 'Bajarildi' : 'Выполнено'}</option>
+                    </select>
 
+                    {/* Delete handler */}
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleSetCondition('HEALTHY');
                       }}
-                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
+                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
                       title={isUz ? "Rejadan o'chirish" : 'Удалить из плана'}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
