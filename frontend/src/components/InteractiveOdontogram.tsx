@@ -239,7 +239,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
   ) => {
     setTeethRecords((prev) => {
       if (!prev[toothNum]) return prev;
-      return {
+      const updated = {
         ...prev,
         [toothNum]: {
           ...prev[toothNum],
@@ -247,6 +247,12 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
           updatedAt: new Date().toISOString(),
         },
       };
+      if (status === 'COMPLETED') {
+        clinicStore.completeProcedureAndGenerateInvoice(patientId, toothNum, updated[toothNum]);
+      } else {
+        clinicStore.savePatientOdontogram(patientId, updated);
+      }
+      return updated;
     });
   };
 

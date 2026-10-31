@@ -7,7 +7,7 @@ from app.config import settings
 from app.database import engine, Base, AsyncSessionLocal
 from app.models import User, DoctorProfile, PatientProfile, InventoryItem
 from app.auth import get_password_hash
-from app.routers import auth, appointments, odontogram, billing, inventory, analytics
+from app.routers import auth, appointments, odontogram, billing, inventory, analytics, patients, finance
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -105,6 +105,8 @@ app.include_router(odontogram.router)
 app.include_router(billing.router)
 app.include_router(inventory.router)
 app.include_router(analytics.router)
+app.include_router(patients.router)
+app.include_router(finance.router)
 
 @app.get("/health")
 async def health_check():

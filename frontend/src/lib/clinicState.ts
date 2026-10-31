@@ -15,6 +15,7 @@ export type ToothCondition =
   | 'HEALTHY'
   | 'CARIES'
   | 'PULPITIS'
+  | 'PERIODONTITIS'
   | 'FILLING'
   | 'CROWN'
   | 'EXTRACTION'
@@ -40,11 +41,14 @@ export interface ToothRecord {
 
 export type AppointmentStatus =
   | 'PENDING'
+  | 'SCHEDULED'
   | 'CONFIRMED'
   | 'CHECKED_IN'
+  | 'IN_CHAIR'
   | 'IN_TREATMENT'
   | 'COMPLETED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'NO_SHOW';
 
 export interface Appointment {
   id: string;
@@ -68,7 +72,7 @@ export interface Appointment {
   createdAt: string;
 }
 
-export type PaymentMethod = 'CASH' | 'UZCARD_HUMO' | 'PAYME' | 'CLICK';
+export type PaymentMethod = 'CASH' | 'UZCARD' | 'HUMO' | 'PAYME' | 'CLICK' | 'UZCARD_HUMO';
 
 export interface PaymentTransaction {
   id: string;
@@ -201,6 +205,20 @@ export const CONDITION_METADATA: Record<
     badgeText: 'text-rose-800',
     hexColor: '#f43f5e',
     icon: '⚡',
+  },
+  PERIODONTITIS: {
+    nameUz: 'Periodontit',
+    nameRu: 'Периодонтит',
+    treatmentUz: "Periodontitni kompleks davolash va yallig'lanishni bartaraf etish",
+    treatmentRu: 'Комплексное эндодонтическое лечение периодонтита',
+    defaultCost: 750000,
+    bgClass: 'bg-amber-700',
+    textClass: 'text-white',
+    borderClass: 'border-amber-800',
+    badgeBg: 'bg-amber-100',
+    badgeText: 'text-amber-900',
+    hexColor: '#b45309',
+    icon: '🔥',
   },
   FILLING: {
     nameUz: 'Plomba',
@@ -1100,6 +1118,82 @@ class ClinicStateManager {
   // =========================================================================
   // INVENTORY & LOW-STOCK CONSUMABLES
   // =========================================================================
+
+  public addStock(itemId: string, qty: number) {
+    this.updateInventoryQuantity(itemId, Math.abs(qty));
+  }
+
+  public deductStock(itemId: string, qty: number) {
+    this.updateInventoryQuantity(itemId, -Math.abs(qty));
+  }
+
+  public completeProcedureAndGenerateInvoice(
+    patientId: string,
+    toothNum: number,
+    record: ToothRecord
+  ) {
+    // 1. Mark tooth record as COMPLETED
+    if (!this.state.odontograms[patientId]) {
+      this.state.odontograms[patientId] = {};
+    }
+    this.state.odontograms[patientId][toothNum] = {
+      ...record,
+      status: 'COMPLETED',
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 2. Generate or update invoice
+    const patient = this.state.patients.find((p) => p.id === patientId);
+    const cost = record.costUzs;
+    const procNameUz = `${record.treatmentNameUz} #${toothNum}`;
+    const procNameRu = `${record.treatmentNameRu} #${toothNum}`;
+
+    let invoice = this.state.invoices.find(
+      (inv) => inv.patientId === patientId && inv.status !== 'PAID'
+    );
+
+    if (!invoice) {
+      invoice = {
+        id: `inv-${Date.now()}`,
+        patientId,
+        patientName: patient ? patient.fullName : `Bemor #${patientId}`,
+        totalAmount: cost,
+        paidAmount: 0,
+        debtAmount: cost,
+        status: 'PENDING',
+        procedures: [
+          {
+            nameUz: procNameUz,
+            nameRu: procNameRu,
+            toothNum,
+            cost,
+          },
+        ],
+        payments: [],
+        createdAt: new Date().toISOString(),
+      };
+      this.state.invoices.unshift(invoice);
+    } else {
+      const existingProc = invoice.procedures.find((p) => p.toothNum === toothNum);
+      if (!existingProc) {
+        invoice.procedures.push({
+          nameUz: procNameUz,
+          nameRu: procNameRu,
+          toothNum,
+          cost,
+        });
+        invoice.totalAmount += cost;
+        invoice.debtAmount += cost;
+      }
+    }
+
+    if (patient) {
+      patient.totalDebt = invoice.debtAmount;
+    }
+
+    this.persist();
+    return invoice;
+  }
 
   public updateInventoryQuantity(itemId: string, delta: number) {
     const item = this.state.inventory.find((i) => i.id === itemId);

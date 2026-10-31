@@ -19,6 +19,7 @@ class UserRegister(BaseModel):
     phone: str
     password: str
     role: str = "patient" # patient | receptionist | dentist | owner
+    telegram_id: Optional[int] = None
 
 class UserLogin(BaseModel):
     phone: str
@@ -29,6 +30,7 @@ class UserOut(BaseModel):
     full_name: str
     phone: str
     role: str
+    telegram_id: Optional[int] = None
     is_active: bool
     created_at: datetime
 
@@ -40,9 +42,11 @@ class PatientProfileOut(BaseModel):
     id: str
     user_id: str
     birth_date: Optional[str] = None
+    gender: Optional[str] = None
     allergies: Optional[str] = None
+    chronic_conditions: Optional[str] = None
     medical_notes: Optional[str] = None
-    total_debt: float
+    total_debt: float = 0.0
     full_name: Optional[str] = None
     phone: Optional[str] = None
 
@@ -53,7 +57,10 @@ class DoctorProfileOut(BaseModel):
     id: str
     user_id: str
     specialization: str
-    commission_rate: float
+    room_number: Optional[str] = "Kabinet 101"
+    commission_percent: float = 40.0
+    commission_rate: float = 40.0
+    working_hours: Optional[str] = None
     full_name: Optional[str] = None
     phone: Optional[str] = None
 
@@ -69,10 +76,12 @@ class AppointmentCreate(BaseModel):
     start_time: datetime
     end_time: Optional[datetime] = None
     duration_minutes: int = 30
+    complaint: Optional[str] = None
     notes: Optional[str] = None
 
 class AppointmentUpdate(BaseModel):
-    status: Optional[str] = None # scheduled | checked_in | in_progress | completed | cancelled
+    status: Optional[str] = None # scheduled | checked_in | in_chair | completed | cancelled | no_show
+    complaint: Optional[str] = None
     notes: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
@@ -84,6 +93,7 @@ class AppointmentOut(BaseModel):
     start_time: datetime
     end_time: datetime
     status: str
+    complaint: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
     patient_name: Optional[str] = None
@@ -95,12 +105,20 @@ class AppointmentOut(BaseModel):
 
 # Odontogram
 class OdontogramRecordIn(BaseModel):
-    tooth_number_fdi: int
+    tooth_fdi: Optional[int] = None
+    tooth_number_fdi: Optional[int] = None
     surface: str = "ALL"
-    condition: str = "HEALTHY"
+    diagnosis: Optional[str] = None
+    condition: Optional[str] = None
     procedure_name: str = "Profilaktik ko'rik"
     price: float = 0.0
     status: str = "planned"
+
+    def get_tooth_fdi(self) -> int:
+        return self.tooth_fdi or self.tooth_number_fdi or 11
+
+    def get_diagnosis(self) -> str:
+        return self.diagnosis or self.condition or "HEALTHY"
 
 class OdontogramBulkUpsert(BaseModel):
     patient_id: str
@@ -111,12 +129,16 @@ class OdontogramOut(BaseModel):
     id: str
     patient_id: str
     doctor_id: Optional[str] = None
-    tooth_number_fdi: int
+    appointment_id: Optional[str] = None
+    tooth_fdi: int = 11
+    tooth_number_fdi: int = 11
     surface: str
-    condition: str
+    diagnosis: str = "HEALTHY"
+    condition: str = "HEALTHY"
     procedure_name: str
     price: float
     status: str
+    created_at: Optional[datetime] = None
     updated_at: datetime
 
     class Config:
@@ -127,7 +149,7 @@ class PaymentCreate(BaseModel):
     invoice_id: Optional[str] = None
     patient_id: str
     amount: float
-    payment_method: str = "cash" # cash | uzcard_humo | payme | click
+    payment_method: str = "cash" # cash | uzcard | humo | payme | click
     notes: Optional[str] = None
 
 class PaymentOut(BaseModel):
@@ -142,13 +164,17 @@ class PaymentOut(BaseModel):
     class Config:
         from_attributes = True
 
+PaymentTransactionOut = PaymentOut
+
 class InvoiceOut(BaseModel):
     id: str
     appointment_id: Optional[str] = None
     patient_id: str
     total_amount: float
+    discount: float = 0.0
     paid_amount: float
     debt_amount: float
+    payment_method: Optional[str] = "cash"
     payment_status: str
     created_at: datetime
     patient_name: Optional[str] = None
@@ -170,12 +196,14 @@ class InventoryItemCreate(BaseModel):
     quantity: int = 0
     unit: str = "dona"
     min_threshold: int = 10
-    cost_per_unit: float = 0.0
+    unit_cost: float = 0.0
+    cost_per_unit: Optional[float] = None
 
 class InventoryItemUpdate(BaseModel):
     quantity_delta: Optional[int] = None
     quantity: Optional[int] = None
     min_threshold: Optional[int] = None
+    unit_cost: Optional[float] = None
     cost_per_unit: Optional[float] = None
 
 class InventoryItemOut(BaseModel):
@@ -185,7 +213,8 @@ class InventoryItemOut(BaseModel):
     quantity: int
     unit: str
     min_threshold: int
-    cost_per_unit: float
+    unit_cost: float = 0.0
+    cost_per_unit: float = 0.0
     is_low_stock: bool
     updated_at: datetime
 

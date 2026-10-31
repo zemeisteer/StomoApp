@@ -5,10 +5,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def resolve_database_url() -> str:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    canonical_db_path = os.path.join(repo_root, "stomo_app.db")
+    sqlite_fallback = f"sqlite+aiosqlite:///{canonical_db_path}"
+
     fastapi_db = os.getenv("FASTAPI_DATABASE_URL")
     if fastapi_db:
         if fastapi_db.startswith("postgresql://"):
-            return fastapi_db.replace("postgresql://", "postgresql+asyncpg://")
+            try:
+                import asyncpg
+                return fastapi_db.replace("postgresql://", "postgresql+asyncpg://")
+            except ImportError:
+                return sqlite_fallback
         return fastapi_db
 
     raw_db = os.getenv("DATABASE_URL")
@@ -17,10 +25,10 @@ def resolve_database_url() -> str:
             import asyncpg
             return raw_db.replace("postgresql://", "postgresql+asyncpg://")
         except ImportError:
-            # When asyncpg binary is not present, seamlessly use robust local async SQLite
-            return "sqlite+aiosqlite:///./stomo_app.db"
+            return sqlite_fallback
     
-    return raw_db or "sqlite+aiosqlite:///./stomo_app.db"
+    return raw_db or sqlite_fallback
+
 
 class Settings:
     APP_NAME: str = "StomoApp Dental Clinic Management API"
