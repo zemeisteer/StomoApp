@@ -131,8 +131,17 @@ export default function AdminCalendarPage() {
   const [confirmedToast, setConfirmedToast] = useState<{
     id: string;
     patientName: string;
+    patientPhone?: string;
     startTime: string;
     doctorName?: string;
+  } | null>(null);
+
+  // Banner for recently cancelled appointment with SMS notification feedback
+  const [cancelToast, setCancelToast] = useState<{
+    patientName: string;
+    patientPhone?: string;
+    startTime: string;
+    reason?: string;
   } | null>(null);
 
   // Search by patient name or phone
@@ -648,12 +657,30 @@ export default function AdminCalendarPage() {
           (selectedAppt.doctor
             ? `${selectedAppt.doctor.firstNameUz || ''} ${selectedAppt.doctor.lastNameUz || ''}`.trim()
             : undefined);
+        const pName = selectedAppt.patient?.fullName || selectedAppt.patientName || 'Bemor';
+        const pPhone = selectedAppt.patient?.phone || selectedAppt.patientPhone;
+
         setConfirmedToast({
           id: selectedAppt.id,
-          patientName: selectedAppt.patientName,
+          patientName: pName,
+          patientPhone: pPhone,
           startTime: selectedAppt.startTime,
           doctorName: docName,
         });
+
+        // Automatically exit inbox mode and switch to working calendar
+        setIsInboxMode(false);
+        setSelectedStatus('');
+
+        // Focus calendar on the confirmed appointment's date
+        const targetDate = new Date(selectedAppt.startTime);
+        if (!isNaN(targetDate.getTime())) {
+          setCurrentDate(targetDate);
+        }
+
+        // Highlight this appointment in the calendar schedule
+        setHighlightedApptId(selectedAppt.id);
+        setViewMode('day');
       }
 
       closeAppointment();
@@ -680,6 +707,17 @@ export default function AdminCalendarPage() {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('pendingCountChanged'));
       }
+
+      const pName = cancelModalAppt.patient?.fullName || cancelModalAppt.patientName || 'Bemor';
+      const pPhone = cancelModalAppt.patient?.phone || cancelModalAppt.patientPhone;
+
+      setCancelToast({
+        patientName: pName,
+        patientPhone: pPhone,
+        startTime: cancelModalAppt.startTime,
+        reason: cancelReason.trim() || undefined,
+      });
+
       setCancelModalAppt(null);
       closeAppointment();
       if (appointments.length === 1 && currentPage > 1) {
@@ -693,6 +731,65 @@ export default function AdminCalendarPage() {
       setIsUpdating(false);
       setMutatingStatus(null);
     }
+  };
+
+  const handleQuickConfirm = async (e: React.MouseEvent, appt: any) => {
+    e.stopPropagation();
+    try {
+      setIsUpdating(true);
+      setMutatingStatus('CONFIRMED');
+      setActionError(null);
+      await api.updateAppointmentStatus(appt.id, 'CONFIRMED');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('pendingCountChanged'));
+      }
+      const docName =
+        appt.doctor?.user?.fullName ||
+        (appt.doctor
+          ? `${appt.doctor.firstNameUz || ''} ${appt.doctor.lastNameUz || ''}`.trim()
+          : undefined);
+      const pName = appt.patient?.fullName || appt.patientName || 'Bemor';
+      const pPhone = appt.patient?.phone || appt.patientPhone;
+
+      setConfirmedToast({
+        id: appt.id,
+        patientName: pName,
+        patientPhone: pPhone,
+        startTime: appt.startTime,
+        doctorName: docName,
+      });
+
+      // Automatically exit inbox mode and switch to working calendar
+      setIsInboxMode(false);
+      setSelectedStatus('');
+
+      // Focus calendar on the confirmed appointment's date
+      const targetDate = new Date(appt.startTime);
+      if (!isNaN(targetDate.getTime())) {
+        setCurrentDate(targetDate);
+      }
+
+      // Highlight this appointment in the calendar schedule
+      setHighlightedApptId(appt.id);
+      setViewMode('day');
+
+      if (appointments.length === 1 && currentPage > 1) {
+        setCurrentPage((prev) => Math.max(1, prev - 1));
+      } else {
+        await loadAppointments();
+      }
+    } catch (err: any) {
+      setActionError(err?.message || 'Holatni yangilashda xatolik yuz berdi');
+    } finally {
+      setIsUpdating(false);
+      setMutatingStatus(null);
+    }
+  };
+
+  const handleQuickCancel = (e: React.MouseEvent, appt: any) => {
+    e.stopPropagation();
+    setCancelModalAppt(appt);
+    setCancelReason('');
   };
 
   const handleReschedule = async () => {
@@ -917,21 +1014,29 @@ export default function AdminCalendarPage() {
 
         {/* Confirmed Appointment Notification Banner */}
         {confirmedToast && (
-          <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 flex-shrink-0">
+          <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm animate-fade-in">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
               <div>
                 <p className="text-sm font-bold text-emerald-900">
                   {isRu ? 'Заявка успешно подтверждена!' : 'Ariza muvaffaqiyatli tasdiqlandi!'}
                 </p>
-                <p className="text-xs text-emerald-700 mt-0.5">
+                <p className="text-xs text-emerald-800 font-semibold mt-0.5">
                   {confirmedToast.patientName} &bull; {formatClinicDate(confirmedToast.startTime)} {formatClinicTime(confirmedToast.startTime)} {confirmedToast.doctorName ? `(${confirmedToast.doctorName})` : ''}
                 </p>
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-md font-mono">
+                  <span>📱</span>
+                  <span>
+                    {isRu
+                      ? `SMS-уведомление отправлено на номер ${confirmedToast.patientPhone || 'пациента'}: "DentaCare: Ваша запись подтверждена..."`
+                      : `Bemorga (${confirmedToast.patientPhone || 'telefoniga'}) SMS xabarnoma yuborildi: "DentaCare: Qabulingiz tasdiqlandi..."`}
+                  </span>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -957,6 +1062,41 @@ export default function AdminCalendarPage() {
                 <XCircle className="w-4 h-4" />
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Cancelled / Rejected Appointment Notification Banner */}
+        {cancelToast && (
+          <div className="bg-rose-50 border border-rose-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm animate-fade-in">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center text-rose-700 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-rose-900">
+                  {isRu ? 'Заявка отклонена / отменена' : 'Ariza bekor qilindi / rad etildi'}
+                </p>
+                <p className="text-xs text-rose-800 font-semibold mt-0.5">
+                  {cancelToast.patientName} &bull; {formatClinicDate(cancelToast.startTime)} {formatClinicTime(cancelToast.startTime)} {cancelToast.reason ? `(Sabab: ${cancelToast.reason})` : ''}
+                </p>
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-rose-700 bg-rose-100/70 px-2 py-0.5 rounded-md font-mono">
+                  <span>📱</span>
+                  <span>
+                    {isRu
+                      ? `SMS-уведомление отправлено на номер ${cancelToast.patientPhone || 'пациента'}: "DentaCare: Ваша запись отменена..."`
+                      : `Bemorga (${cancelToast.patientPhone || 'telefoniga'}) SMS xabarnoma yuborildi: "DentaCare: Qabulingiz bekor qilindi..."`}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCancelToast(null)}
+              className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-rose-100/50 cursor-pointer self-end sm:self-center"
+              title={isRu ? 'Закрыть' : 'Yopish'}
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -1539,7 +1679,31 @@ export default function AdminCalendarPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 self-end sm:self-center">
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      {appt.status === 'PENDING' && (
+                        <div className="flex items-center gap-1.5 mr-2">
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickConfirm(e, appt)}
+                            disabled={isUpdating && mutatingStatus === 'CONFIRMED'}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+                            title={isRu ? 'Подтвердить и отправить SMS' : 'Tasdiqlash va bemorga SMS jo\'natish'}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{isRu ? 'Подтвердить (SMS)' : 'Tasdiqlash (SMS)'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickCancel(e, appt)}
+                            disabled={isUpdating}
+                            className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                            title={isRu ? 'Отклонить заявку' : 'Arizani rad etish'}
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>{isRu ? 'Отклонить' : 'Rad etish'}</span>
+                          </button>
+                        </div>
+                      )}
                       <span className={`text-xs font-bold px-3 py-1 rounded-full border ${badge.color}`}>
                         {badge.label}
                       </span>
@@ -1781,11 +1945,15 @@ export default function AdminCalendarPage() {
                     type="button"
                     disabled={isUpdating}
                     onClick={() => handleStatusUpdate('CONFIRMED')}
-                    className="py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                    className="py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5 shadow-xs"
+                    title={isRu ? 'Подтвердить и отправить SMS' : 'Tasdiqlash va bemorga SMS jo\'natish'}
                   >
-                    {isUpdating && mutatingStatus === 'CONFIRMED'
-                      ? 'Tasdiqlanmoqda...'
-                      : 'Tasdiqlash'}
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>
+                      {isUpdating && mutatingStatus === 'CONFIRMED'
+                        ? (isRu ? 'Подтверждение (SMS)...' : 'Tasdiqlanmoqda (SMS)...')
+                        : (isRu ? 'Подтвердить (SMS)' : 'Tasdiqlash (SMS)')}
+                    </span>
                   </button>
                 )}
                 {validTransitions.includes('CHECKED_IN') && (

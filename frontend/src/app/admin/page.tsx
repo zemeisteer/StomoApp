@@ -128,16 +128,10 @@ export default function AdminOverviewPage() {
   const loadReqSeqRef = useRef<number>(0);
   const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Dynamic role switching & preview
-  const [roleOverride, setRoleOverride] = useState<'AUTO' | 'DOCTOR' | 'RECEPTIONIST' | 'OWNER' | 'PATIENT'>('AUTO');
-  const effectiveRole = roleOverride === 'AUTO' ? (user?.role || 'ADMIN') : roleOverride;
+  // Staff Role (Strictly derived from authenticated login credentials)
+  const effectiveRole = user?.role || 'ADMIN';
   const isDoctor = effectiveRole === 'DOCTOR';
   const isOwner = effectiveRole === 'OWNER';
-  const isPatient = effectiveRole === 'PATIENT';
-
-  // Demo Auth & Role Switching Modal
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [activePatientPortalId, setActivePatientPortalId] = useState<string>('pat-101');
 
   // Owner CRM Date Filter
   const [ownerDateFilter, setOwnerDateFilter] = useState<'today' | 'week' | 'month' | 'custom'>('today');
@@ -449,13 +443,17 @@ export default function AdminOverviewPage() {
 
       const msg =
         newStatus === 'CONFIRMED'
-          ? (language === 'ru' ? 'Запись подтверждена' : 'Qabul muvaffaqiyatli tasdiqlandi')
+          ? (language === 'ru'
+              ? 'Запись подтверждена! Пациенту отправлено SMS-уведомление.'
+              : 'Qabul muvaffaqiyatli tasdiqlandi! Bemorga SMS xabarnoma yuborildi.')
           : newStatus === 'CHECKED_IN'
           ? (language === 'ru' ? 'Пациент прибыл в клинику' : 'Bemor klinikaga kelgani qayd etildi')
           : newStatus === 'COMPLETED'
           ? (language === 'ru' ? 'Прием успешно завершен' : 'Qabul yakunlandi')
           : newStatus === 'CANCELLED'
-          ? (language === 'ru' ? 'Запись отменена' : 'Qabul bekor qilindi')
+          ? (language === 'ru'
+              ? 'Запись отменена. Пациенту отправлено SMS-уведомление.'
+              : 'Qabul bekor qilindi. Bemorga SMS xabarnoma yuborildi.')
           : 'Holat yangilandi';
 
       setStatusFeedback(msg);
@@ -959,86 +957,21 @@ export default function AdminOverviewPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Role View Switcher */}
-            <div className="flex items-center gap-1 bg-[#f3f8f7] p-1 rounded-xl border border-[#d8e5e2] text-xs">
-              <span className="text-[10px] font-bold text-[#52696e] px-1.5 hidden xl:inline">
-                {isUz ? 'Rol:' : 'Роль:'}
+            {/* Authenticated Staff Identity Chip */}
+            <div className="flex items-center gap-2.5 bg-[#f3f8f7] px-3 py-1.5 rounded-xl border border-[#d8e5e2] text-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+              <div className="flex flex-col">
+                <span className="font-extrabold text-[#152f34] text-xs leading-tight">
+                  {user?.fullName || user?.email || (isUz ? 'Xodim' : 'Сотрудник')}
+                </span>
+              </div>
+              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-[#167b78] text-white tracking-wider">
+                {effectiveRole === 'DOCTOR'
+                  ? (isUz ? 'Shifokor' : 'Врач')
+                  : effectiveRole === 'OWNER'
+                  ? (isUz ? 'Rahbar' : 'Руководитель')
+                  : (isUz ? 'Administrator' : 'Администратор')}
               </span>
-              <button
-                type="button"
-                onClick={() => setRoleOverride('AUTO')}
-                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
-                  roleOverride === 'AUTO'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
-                }`}
-                title={isUz ? 'Haqiqiy rol bo\'yicha' : 'По фактической роли'}
-              >
-                {isUz ? 'Asl' : 'Авто'} ({user?.role || 'ADMIN'})
-              </button>
-              <button
-                type="button"
-                onClick={() => setRoleOverride('DOCTOR')}
-                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
-                  effectiveRole === 'DOCTOR' && roleOverride !== 'AUTO'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
-                }`}
-              >
-                🦷 {isUz ? 'Shifokor' : 'Врач'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRoleOverride('RECEPTIONIST')}
-                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
-                  effectiveRole === 'RECEPTIONIST'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
-                }`}
-              >
-                📋 {isUz ? 'Qabulxona' : 'Рецепция'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRoleOverride('OWNER')}
-                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
-                  effectiveRole === 'OWNER' && roleOverride !== 'AUTO'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
-                }`}
-              >
-                💼 {isUz ? 'Rahbar' : 'Руководитель'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRoleOverride('PATIENT')}
-                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
-                  effectiveRole === 'PATIENT'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
-                }`}
-              >
-                👤 {isUz ? 'Bemor' : 'Пациент'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAuthModalOpen(true)}
-                className="px-2 py-1 rounded-lg text-xs font-bold bg-[#167b78]/10 text-[#167b78] hover:bg-[#167b78]/20 transition-all flex items-center gap-1"
-                title={isUz ? "Rollarni almashtirish / Kirish" : "Смена роли / Авторизация"}
-              >
-                <Shield className="w-3 h-3" />
-                <span className="hidden sm:inline">{isUz ? 'Kirish' : 'Вход'}</span>
-              </button>
-              <Link
-                href="/booking"
-                target="_blank"
-                className="px-2 py-1 rounded-lg text-xs font-bold text-[#167b78] hover:bg-[#e0f2ed] transition-all flex items-center gap-1"
-                title={isUz ? 'Bemor portali (Yangi oynada)' : 'Портал пациента (в новом окне)'}
-              >
-                <span>🌐</span>
-                <span className="hidden xl:inline">{isUz ? 'Portal' : 'Портал'}</span>
-                <ExternalLink className="w-3 h-3" />
-              </Link>
             </div>
 
             {/* Search Input */}
@@ -2013,228 +1946,6 @@ export default function AdminOverviewPage() {
               </div>
             </div>
           </div>
-        ) : isPatient ? (
-          /* =========================================================================
-             PATIENT PORTAL DASHBOARD (Phase 2 & Phase 3 Cross-Role Sync)
-             ========================================================================= */
-          <div className="space-y-6">
-            {/* Patient Header & Quick Patient Switcher */}
-            {(() => {
-              const activePatient =
-                clinicState.patients.find((p) => p.id === activePatientPortalId) ||
-                clinicState.patients[0];
-              const patAppt = clinicState.appointments.find(
-                (a) => a.patientId === activePatient?.id || a.patientPhone === activePatient?.phone
-              );
-
-              return (
-                <>
-                  <div className="ui-card bg-gradient-to-r from-[#12353b] to-[#1a4a52] text-white border-[#245158] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
-                    <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-[#167b78] text-white flex items-center justify-center font-black text-xl shadow-md shrink-0">
-                        {activePatient?.fullName.charAt(0) || 'B'}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] uppercase font-bold tracking-wider bg-[#167b78] px-2 py-0.5 rounded text-white">
-                            {isUz ? 'Bemor portali' : 'Портал пациента'}
-                          </span>
-                          <span className="text-xs text-[#b2c9ca] font-mono">
-                            ID: {activePatient?.id}
-                          </span>
-                        </div>
-                        <h2 className="text-xl font-black text-white mt-0.5">
-                          {activePatient?.fullName}
-                        </h2>
-                        <p className="text-xs text-[#b2c9ca] mt-0.5">
-                          📞 {activePatient?.phone} • {isUz ? 'Tug‘ilgan sana:' : 'Дата рождения:'}{' '}
-                          {activePatient?.birthDate || '1992-05-14'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Quick Demo Switch to another patient */}
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                      <div className="bg-white/10 p-2 rounded-xl text-xs">
-                        <span className="text-[10px] text-[#b2c9ca] block mb-1">
-                          {isUz ? 'Bemor almashtirish (Demo):' : 'Переключить пациента (Демо):'}
-                        </span>
-                        <select
-                          value={activePatientPortalId}
-                          onChange={(e) => setActivePatientPortalId(e.target.value)}
-                          className="bg-[#12353b] text-white text-xs font-bold px-2 py-1 rounded-lg border border-[#245158] focus:outline-none cursor-pointer"
-                        >
-                          {clinicState.patients.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.fullName} ({p.phone})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <Link
-                        href="/booking"
-                        target="_blank"
-                        className="px-4 py-2.5 bg-[#14bdac] hover:bg-[#11998b] text-[#12353b] font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all shrink-0"
-                      >
-                        <CalendarCheck className="w-4 h-4" />
-                        <span>{isUz ? 'Yangi qabulga yozilish' : 'Записаться на прием'}</span>
-                      </Link>
-                    </div>
-                  </div>
-
-                  {/* Real-time Queue & Chair Status Indicator */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Status Card */}
-                    <div className="ui-card md:col-span-2 flex flex-col justify-between">
-                      <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
-                        <div className="flex items-center gap-2">
-                          <Activity className="w-5 h-5 text-[#167b78]" />
-                          <h3 className="text-sm font-bold text-[#152f34]">
-                            {isUz ? 'Hozirgi qabul va kreslo holati' : 'Текущий статус визита и кресла'}
-                          </h3>
-                        </div>
-                        <span className="text-xs text-[#52696e]">
-                          {formatClinicDate(new Date().toISOString(), language, { includeWeekday: true })}
-                        </span>
-                      </div>
-
-                      <div className="py-4">
-                        {patAppt ? (
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-[#f8fbfa] border border-[#d8e5e2]">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1.5">
-                                {patAppt.status === 'IN_TREATMENT' || (patAppt.status === 'CHECKED_IN' && patAppt.actualStartTime) ? (
-                                  <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-900 border border-blue-300 font-extrabold text-xs flex items-center gap-1.5">
-                                    <span className="w-2 h-2 rounded-full bg-blue-600 animate-ping" />
-                                    <span>{isUz ? '🟢 Siz hozir shifokor kreslosidasiz' : '🟢 Вы находитесь в кресле стоматолога'}</span>
-                                  </span>
-                                ) : patAppt.status === 'CHECKED_IN' ? (
-                                  <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-xs flex items-center gap-1.5">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                                    <span>{isUz ? '🟡 Siz kutish zalidasiz (Keling, xush kelibsiz!)' : '🟡 Вы в зале ожидания (Добро пожаловать!)'}</span>
-                                  </span>
-                                ) : patAppt.status === 'COMPLETED' ? (
-                                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-800 border border-slate-300 font-bold text-xs">
-                                    {isUz ? '✅ Bugungi muolaja muvaffaqiyatli yakunlandi' : '✅ Прием успешно завершен'}
-                                  </span>
-                                ) : (
-                                  <span className="px-3 py-1 rounded-full bg-teal-100 text-teal-900 border border-teal-300 font-bold text-xs">
-                                    {isUz ? '🔵 Qabulingiz tasdiqlangan va rejalashtirilgan' : '🔵 Прием подтвержден и запланирован'}
-                                  </span>
-                                )}
-                              </div>
-                              <h4 className="font-bold text-sm text-[#152f34] mt-1">
-                                {patAppt.serviceName}
-                              </h4>
-                              <p className="text-xs text-[#52696e] mt-0.5">
-                                {isUz ? 'Shifokor:' : 'Врач:'} {patAppt.doctorName} • {isUz ? 'Boshlanish vaqti:' : 'Время:'}{' '}
-                                <strong className="text-[#152f34]">{formatClinicTime(patAppt.startTime)}</strong> ({patAppt.durationMinutes} {isUz ? 'daqiqa' : 'мин'})
-                              </p>
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <span className="text-[10px] text-[#52696e] block">{isUz ? 'Filial:' : 'Филиал:'}</span>
-                              <strong className="text-xs text-[#152f34] block">{patAppt.branchName || 'DentaCare Markaziy'}</strong>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="p-6 text-center bg-[#f8fbfa] rounded-2xl border border-dashed border-[#d8e5e2] text-xs text-[#52696e]">
-                            <p className="font-semibold text-sm text-[#152f34]">
-                              {isUz ? 'Bugungi kunga rejalashtirilgan qabulingiz yo‘q' : 'На сегодня у вас нет запланированных визитов'}
-                            </p>
-                            <p className="text-[11px] mt-1 text-[#52696e]">
-                              {isUz
-                                ? 'Tishlar salomatligi uchun profilaktik ko‘rikka yoziling'
-                                : 'Запишитесь на профилактический осмотр для поддержания здоровья зубов'}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="pt-3 border-t border-[#d8e5e2] flex items-center justify-between text-xs text-[#52696e]">
-                        <span>{isUz ? 'Allergiya va eslatmalar:' : 'Аллергии и противопоказания:'}</span>
-                        <span className="font-bold text-rose-600">
-                          {activePatient?.allergies && activePatient.allergies.length > 0
-                            ? activePatient.allergies.join(', ')
-                            : (isUz ? "Allergiya yo'q" : 'Аллергий не зафиксировано')}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Debt & Billing Balance Card */}
-                    <div className="ui-card flex flex-col justify-between border-t-4 border-t-rose-500">
-                      <div>
-                        <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
-                          <h3 className="text-sm font-bold text-[#152f34]">
-                            {isUz ? 'Moliyaviy hisob-kitob' : 'Финансовый расчет'}
-                          </h3>
-                          <Wallet className="w-4 h-4 text-rose-600" />
-                        </div>
-
-                        <div className="py-4 space-y-3">
-                          <div>
-                            <span className="text-xs text-[#52696e] block">{isUz ? 'Qarzdorlik holati ("Qarzlar"):' : 'Текущий долг:'}</span>
-                            <p className={`text-2xl font-black mt-0.5 ${activePatient?.totalDebt && activePatient.totalDebt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                              {(activePatient?.totalDebt || 0).toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so'm</span>
-                            </p>
-                          </div>
-
-                          <div className="bg-[#f8fbfa] p-2.5 rounded-xl border border-[#d8e5e2] text-xs">
-                            <span className="text-[10px] text-[#52696e] block">{isUz ? 'Jami to‘langan:' : 'Всего оплачено:'}</span>
-                            <strong className="text-xs text-emerald-700 block">
-                              {(activePatient?.totalPaid || 0).toLocaleString()} so'm
-                            </strong>
-                          </div>
-                        </div>
-                      </div>
-
-                      {activePatient?.totalDebt && activePatient.totalDebt > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDebtModal(activePatient.id)}
-                          className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition-colors"
-                        >
-                          <CreditCard className="w-3.5 h-3.5" />
-                          <span>{isUz ? "Qarzni to'lash (Payme / Click / Karta)" : 'Погасить долг (Payme / Click / Карта)'}</span>
-                        </button>
-                      ) : (
-                        <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl text-center text-xs font-bold border border-emerald-200">
-                          {isUz ? "Sizda qarz mavjud emas. Rahmat!" : "У вас нет задолженностей. Спасибо!"}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Patient Interactive Odontogram Chart & Treatment Plan */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-2">
-                      <div>
-                        <h3 className="text-base font-extrabold text-[#152f34]">
-                          {isUz ? 'Sizning tish xaritangiz va davolash rejasi' : 'Ваша зубная карта и план лечения'}
-                        </h3>
-                        <p className="text-xs text-[#52696e]">
-                          {isUz
-                            ? 'Shifokor tomonidan belgilangan holatlar va muolaja narxlari'
-                            : 'Состояние зубов и стоимость назначенных врачом процедур'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <InteractiveOdontogram
-                      language={isUz ? 'uz' : 'ru'}
-                      patientId={activePatient?.id || 'pat-101'}
-                      patientName={activePatient?.fullName || 'Bemor'}
-                      onSavePlan={() => {
-                        setStatusFeedback(
-                          isUz ? "Davolash rejasi yangilandi" : "План лечения обновлен"
-                        );
-                      }}
-                    />
-                  </div>
-                </>
-              );
-            })()}
-          </div>
         ) : (
           /* =========================================================================
              RECEPTIONIST / ADMIN WORKSPACE (Image 2 Reference: DentalCare OS)
@@ -3132,139 +2843,6 @@ export default function AdminOverviewPage() {
                   </button>
                 </div>
               </form>
-            </div>
-          </div>
-        )}
-
-        {/* Role Switching / Auth Demo Modal */}
-        {authModalOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-[#d8e5e2] space-y-4">
-              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#e0f2ed] text-[#167b78] flex items-center justify-center font-bold">
-                    <Shield className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-[#152f34]">
-                      {isUz ? 'Foydalanuvchi roli va avtorizatsiya (Demo)' : 'Роль пользователя и авторизация (Демо)'}
-                    </h3>
-                    <p className="text-xs text-[#52696e]">
-                      {isUz ? 'Tizimni 4 xil rol nigohi bilan sinovdan o\'tkazing' : 'Тестируйте систему от лица 4 ролей'}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAuthModalOpen(false)}
-                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* 1. Patient */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoleOverride('PATIENT');
-                    setActivePatientPortalId('pat-101');
-                    setAuthModalOpen(false);
-                    setStatusFeedback(isUz ? "Bemor roli faollashtirildi (Aziz Rahimov)" : "Активирована роль пациента (Азиз Рахимов)");
-                  }}
-                  className={`p-3.5 rounded-2xl border text-left transition-all ${
-                    effectiveRole === 'PATIENT' ? 'border-[#167b78] bg-[#e0f2ed]/50 shadow-xs' : 'border-[#d8e5e2] hover:bg-[#f8fbfa]'
-                  }`}
-                >
-                  <span className="text-xl">👤</span>
-                  <h4 className="font-bold text-xs text-[#152f34] mt-1">{isUz ? 'Bemor' : 'Пациент'}</h4>
-                  <p className="text-[10px] text-[#52696e] mt-0.5">Aziz Rahimov (+998 90 123 45 67)</p>
-                  <span className="inline-block mt-2 text-[9px] font-bold text-[#167b78] bg-white px-2 py-0.5 rounded border border-[#d8e5e2]">
-                    {isUz ? 'Odontogramma, qarz, qabul' : 'Карта, долг, визиты'}
-                  </span>
-                </button>
-
-                {/* 2. Receptionist */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoleOverride('RECEPTIONIST');
-                    setAuthModalOpen(false);
-                    setStatusFeedback(isUz ? "Qabulxona administratori roli faollashtirildi" : "Активирована роль регистратора");
-                  }}
-                  className={`p-3.5 rounded-2xl border text-left transition-all ${
-                    effectiveRole === 'RECEPTIONIST' ? 'border-[#167b78] bg-[#e0f2ed]/50 shadow-xs' : 'border-[#d8e5e2] hover:bg-[#f8fbfa]'
-                  }`}
-                >
-                  <span className="text-xl">📋</span>
-                  <h4 className="font-bold text-xs text-[#152f34] mt-1">{isUz ? 'Qabulxona (Resepshn)' : 'Регистратура'}</h4>
-                  <p className="text-[10px] text-[#52696e] mt-0.5">Nilufar Qosimova</p>
-                  <span className="inline-block mt-2 text-[9px] font-bold text-[#167b78] bg-white px-2 py-0.5 rounded border border-[#d8e5e2]">
-                    {isUz ? 'Navbat, ro\'yxat, kassa' : 'Очередь, слоты, касса'}
-                  </span>
-                </button>
-
-                {/* 3. Dentist */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoleOverride('DOCTOR');
-                    setAuthModalOpen(false);
-                    setStatusFeedback(isUz ? "Shifokor-stomatolog roli faollashtirildi (Dr. Aziz Karimov)" : "Активирована роль врача (Др. Азиз Каримов)");
-                  }}
-                  className={`p-3.5 rounded-2xl border text-left transition-all ${
-                    effectiveRole === 'DOCTOR' ? 'border-[#167b78] bg-[#e0f2ed]/50 shadow-xs' : 'border-[#d8e5e2] hover:bg-[#f8fbfa]'
-                  }`}
-                >
-                  <span className="text-xl">🦷</span>
-                  <h4 className="font-bold text-xs text-[#152f34] mt-1">{isUz ? 'Shifokor-stomatolog' : 'Врач-стоматолог'}</h4>
-                  <p className="text-[10px] text-[#52696e] mt-0.5">Dr. Aziz Karimov (Terapevt)</p>
-                  <span className="inline-block mt-2 text-[9px] font-bold text-[#167b78] bg-white px-2 py-0.5 rounded border border-[#d8e5e2]">
-                    {isUz ? 'Odontogramma, rentgen, reja' : 'Карта, X-Ray, лечение'}
-                  </span>
-                </button>
-
-                {/* 4. Owner */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoleOverride('OWNER');
-                    setAuthModalOpen(false);
-                    setStatusFeedback(isUz ? "Klinika rahbari (Owner) roli faollashtirildi" : "Активирована роль руководителя клиники");
-                  }}
-                  className={`p-3.5 rounded-2xl border text-left transition-all ${
-                    effectiveRole === 'OWNER' ? 'border-[#167b78] bg-[#e0f2ed]/50 shadow-xs' : 'border-[#d8e5e2] hover:bg-[#f8fbfa]'
-                  }`}
-                >
-                  <span className="text-xl">💼</span>
-                  <h4 className="font-bold text-xs text-[#152f34] mt-1">{isUz ? 'Klinika Rahbari' : 'Руководитель (Owner)'}</h4>
-                  <p className="text-[10px] text-[#52696e] mt-0.5">Bosh shifokor / Klinika egasi</p>
-                  <span className="inline-block mt-2 text-[9px] font-bold text-[#167b78] bg-white px-2 py-0.5 rounded border border-[#d8e5e2]">
-                    {isUz ? 'CRM, komissiya, zaxira, qarz' : 'CRM, комиссия, склад, долг'}
-                  </span>
-                </button>
-              </div>
-
-              <div className="pt-3 border-t border-[#d8e5e2] flex items-center justify-between text-xs">
-                <span className="text-[#52696e]">
-                  {isUz ? 'Joriy faol rol:' : 'Текущая роль:'} <strong className="text-[#167b78]">{effectiveRole}</strong>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRoleOverride('AUTO');
-                    setAuthModalOpen(false);
-                  }}
-                  className="px-3 py-1.5 rounded-xl border border-[#d8e5e2] hover:bg-[#f3f8f7] text-xs font-bold text-[#152f34]"
-                >
-                  {isUz ? 'Asl rolga qaytish' : 'Сбросить на оригинал'}
-                </button>
-              </div>
             </div>
           </div>
         )}
