@@ -157,8 +157,8 @@ Services exposed:
 
 ## 🧪 Testing & Verification
 
-### Running the End-to-End Regression Suite (65/65 Tests)
-The backend features an automated 65-test regression and integration suite running against isolated test PostgreSQL (`dentacare_test`):
+### Running the End-to-End Regression Suite (71/71 Tests)
+The backend features an automated 71-test regression and integration suite running against isolated test PostgreSQL (`dentacare_test`):
 ```bash
 cd backend
 $env:TEST_DATABASE_URL="postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public"

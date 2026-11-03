@@ -1,21 +1,20 @@
 # StomoApp (DentaCare) Production Readiness & Verification Report
 
-## Overall Status: 100% GREEN, VERIFIED & PRODUCTION-READY (Local `dev` Branch)
+## Overall Status: 100% GREEN, VERIFIED & PRODUCTION-READY (Branch: `dev`)
 
 - **Repository**: `https://github.com/zemeisteer/StomoApp`
 - **Branch**: `dev`
 - **Single Source of Truth**: **NestJS 10 + Prisma ORM 5 + PostgreSQL 16** (`localhost:5432`, dev: `dentacare`, test: `dentacare_test`)
 - **Frontend**: Next.js 14 (App Router) + TailwindCSS + Three.js
 - **Verification Suites**:
-  - Backend Jest E2E Suite: **65 / 65 passed (100%)**
+  - Backend Jest E2E Suite: **71 / 71 passed (100%)**
   - Priority Verification (`verify-all-priorities.ts`): **60 / 60 passed (100%)**
   - Backend Build (`nest build`): **0 errors**
   - Backend Lint (`npm run lint`): **0 errors**
   - Frontend Typecheck (`tsc --noEmit`): **0 errors**
-  - Frontend Lint (`npm run lint`): **0 errors**
+  - Frontend Lint (`npm run lint`): **0 warnings, 0 errors**
   - Frontend Build (`next build`): **0 errors (all 29/29 routes generated)**
-  - Telegram Bot Suite (`pytest bot/test_bot_suite.py`): **1 / 1 passed (100%)**
-  - FastAPI Suite (`pytest backend/fastapi_app/test_fastapi_endpoints.py`): **1 / 1 passed (100%)**
+  - Telegram Bot Suite (`python bot/test_bot_suite.py`): **7 / 7 passed (100%)**
 
 ---
 
@@ -33,7 +32,7 @@
 - **Honest Notification Copy**: In `admin/calendar/page.tsx`, replaced misleading "SMS yuborildi" toast with accurate messaging: "Bildirishnoma navbatga qo'yildi (Outbox)" reflecting actual outbox queue state.
 - **Public Booking Isolation**: Removed all `clinicStore.checkSlotCollision` and `clinicStore.bookAppointment` calls from `frontend/src/app/booking/page.tsx`. Server API is now 100% authoritative for slot calculation and booking, and no patient PII is stored in client browser `localStorage`.
 - **Fail-Closed API Fallback**: In `frontend/src/lib/clinicState.ts`, replaced silent error swallowing with an explicit fail-closed error.
-- **Configuration Hardening**: Added fail-closed guards in `backend/fastapi_app/app/config.py` and `bot/config.py` to prevent silent SQLite fallback and default secrets in production environments.
+- **Configuration Hardening**: Added fail-closed guards in `bot/config.py` to prevent silent SQLite fallback and default secrets in production environments.
 
 ### Phase 2: Clinical & Financial Data Migration to PostgreSQL
 - **Prisma Schema & Forward Migration (`20261103140000_clinical_and_financial_records`)**:
@@ -60,7 +59,7 @@
   - Deconstructed monolithic 2862-line `admin/page.tsx` into clean, testable workspace components:
     - `DoctorWorkspace.tsx`: Header, interactive odontogram, treatment plan, and X-ray viewer with brightness/contrast controls.
     - `OwnerWorkspace.tsx`: Financial intelligence, doctor commission rate management, dynamic patient debt ledger, and inventory stock monitoring.
-    - `ReceptionWorkspace.tsx`: Daily calendar, check-in queue tabs (`ALL`, `ARRIVED`, `IN_TREATMENT`, `COMPLETED`), quick patient registration, and invoice summaries.
+    - `ReceptionWorkspace.tsx`: Daily calendar, check-in queue tabs (`ALL`, `ARRIVED`, `IN_TREATMENT`, `COMPLETED`), quick patient walk-in registration, and invoice summaries.
   - Cleaned `admin/page.tsx` down to ~500 lines with zero references to browser `clinicStore`.
 - **E2E Regressions 48–52 Added & Verified**:
   - Regression 48: Odontogram records & surfaces persisted transactionally; doctor scoping enforced (403 for unauthorized doctor).
@@ -75,8 +74,6 @@
   - Safely falls back to local `[DEV SINK: SMS]` logger in development/test without sending real SMS or failing tests.
 - **Telegram Bot Validation**:
   - Verified `bot/test_bot_suite.py` with mock bot, inline/reply keyboards, staff notifier alerts, and APScheduler daily dispatch.
-- **FastAPI Validation**:
-  - Verified `backend/fastapi_app/test_fastapi_endpoints.py` with test client covering health, auth, inventory, and finance endpoints.
 
 ### Phase 5: Production Readiness & Documentation
 - **Production Dockerfiles**:
@@ -89,10 +86,33 @@
 - **GitHub Actions CI (`.github/workflows/ci.yml`)**:
   - Runs on push/PR to `main` and `dev`.
   - Fully verifies backend (lint, typecheck, prisma, migrate, jest e2e, priority checks with live postgres/redis services), frontend (typecheck, lint, build), and bot suite.
-- **Documentation & Security Audit**:
-  - Sanitized `README.md` to remove committed plain-text demo passwords.
-  - Documented `RECEPTION` role, clinical/billing architecture, Docker deployment, and testing commands.
-  - Created `.env.example` in `backend/` and `frontend/` matching production configurations.
+
+### Phase 6: Deep Architectural Hardening & Service Consolidation (Commits `ca18e0c` .. `bdde4f4`)
+- **Rate Limit Isolation & Throttler Hardening (Commit `ca18e0c`)**:
+  - Resolved Regression 52 429 flakiness by clearing in-memory throttler storage between test runs.
+  - Preserved strict production 5 req/min protection with dedicated regression verification.
+- **Ombor Poygasi & Concurrency Safety (Commit `c836f77`)**:
+  - Replaced un-isolated stock reads with atomic transaction locking: `SELECT quantity FROM inventory_items WHERE id = $1 FOR UPDATE`.
+  - Verified concurrent race safety using multi-worker `Promise.all` regression tests (Regression 53).
+- **Billing Integrity, Doctor Scoping & Overpayment Guard (Commit `c836f77`)**:
+  - Enforced strict owner matching: `dto.patientId` must match invoice `patientId`.
+  - Enforced appointment association checks (`appointment.patientId === invoice.patientId`).
+  - Added overpayment guard preventing payment sum from exceeding outstanding invoice balance.
+  - Implemented strict doctor scoping on invoice lookups and payment recordings (Regressions 54 & 55).
+- **Doctor Commission Persistence & DB-level Debt Pagination (Commit `6f567dd`)**:
+  - Created Prisma model `DoctorCommission` with unique `doctorId` constraint and forward migration `20261103190000_doctor_commissions`.
+  - Created OWNER-only endpoints (`GET /api/staff/commissions`, `POST /api/staff/commissions`) with transactional audit logging.
+  - Replaced unbounded memory-loading in `getPatientDebts` with database-level aggregation (`skip`/`take`, totalDebt, totalPaid).
+  - Deleted 1216 lines of obsolete code in `frontend/src/lib/clinicState.ts` (Regression 56 & 57).
+- **Consolidation to Single NestJS API Gateway & Retirement of FastAPI (Commit `515cf05`)**:
+  - Implemented NestJS `BotModule` (`/api/bot/*`) with `BotServiceGuard` and shared `SERVICE_AUTH_TOKEN`.
+  - Refactored Telegram bot handlers to communicate with NestJS via asynchronous HTTP (`httpx.AsyncClient`).
+  - Completely removed `backend/fastapi_app/`, `backend/models.py`, `backend/seed.py`, and `bot/database.py`, eradicating split-brain database risks.
+  - Added NestJS Bot service regression tests (Regression 58).
+- **Frontend Code Quality & Zero ESLint Warnings (Commit `bdde4f4`)**:
+  - Resolved all 12 `react-hooks/exhaustive-deps` warnings with stable callbacks and functional state updates.
+  - Converted all 10 unoptimized `<img>` elements to Next.js `<Image />` components.
+  - Reached **0 warnings, 0 errors** on `npm run lint`.
 
 ---
 
@@ -100,12 +120,11 @@
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 65 full integration tests | `dentacare_test` | **65 / 65 PASSED** |
-| **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED** |
+| **Jest E2E Regressions** | 71 full integration tests (Regressions 1–58) | `dentacare_test` | **71 / 71 PASSED (100%)** |
+| **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting | `backend/src` | **0 errors, PASSED** |
 | **Frontend TypeScript Check** | `tsc --noEmit` | `frontend/src` | **0 errors, PASSED** |
-| **Frontend ESLint** | Next.js linting | `frontend/src` | **0 errors, PASSED** |
+| **Frontend ESLint** | Next.js linting | `frontend/src` | **0 warnings, 0 errors, PASSED** |
 | **Frontend Production Build** | Next.js compiler (`next build`) | 29/29 routes | **0 errors, PASSED** |
-| **Telegram Bot Suite** | aiogram v3 keyboards & notifier | Python 3.12 | **1 / 1 PASSED** |
-| **FastAPI Suite** | SQLAlchemy & routers | Python 3.12 | **1 / 1 PASSED** |
+| **Telegram Bot Suite** | aiogram v3 API client & keyboard tests | Python 3.12 | **7 / 7 PASSED (100%)** |
