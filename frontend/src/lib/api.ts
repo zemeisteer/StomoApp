@@ -704,4 +704,57 @@ export const api = {
     }),
   getNotificationIntegrationStatus: () =>
     fetcher<any>('/api/admin/notifications/integration-status'),
+
+  // Clinical: Odontogram & Treatment Plans
+  getOdontogram: (patientId: string) =>
+    fetcher<any[]>(`/api/admin/clinical/odontogram/${patientId}`),
+  saveOdontogram: (patientId: string, teeth: any[], appointmentId?: string) =>
+    fetcher<any>(`/api/admin/clinical/odontogram/${patientId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ teeth, appointmentId }),
+    }),
+  getTreatmentPlan: (patientId: string) =>
+    fetcher<any[]>(`/api/admin/clinical/treatment-plan/${patientId}`),
+  createTreatmentPlanItem: (patientId: string, payload: any) =>
+    fetcher<any>(`/api/admin/clinical/treatment-plan/${patientId}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateTreatmentPlanStatus: (id: string, status: string) =>
+    fetcher<any>(`/api/admin/clinical/treatment-plan/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  // Billing & Invoices & Debts
+  getInvoices: (params?: { patientId?: string; appointmentId?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.patientId) q.set('patientId', params.patientId);
+    if (params?.appointmentId) q.set('appointmentId', params.appointmentId);
+    return fetcher<any[]>(`/api/admin/billing/invoices?${q.toString()}`);
+  },
+  createInvoice: (payload: { patientId: string; totalAmount: number; discount?: number; appointmentId?: string; notes?: string }) =>
+    fetcher<any>('/api/admin/billing/invoices', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  recordPayment: (payload: { amount: number; method?: string; invoiceId?: string; patientId?: string; appointmentId?: string; note?: string }) =>
+    fetcher<any>('/api/admin/billing/payments', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getDebts: () => fetcher<any[]>('/api/admin/billing/debts'),
+
+  // Inventory
+  getInventoryItems: () => fetcher<any[]>('/api/admin/inventory'),
+  createInventoryItem: (payload: any) =>
+    fetcher<any>('/api/admin/inventory', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  recordStockMovement: (id: string, payload: { changeType: string; quantityDelta: number; reason?: string }) =>
+    fetcher<any>(`/api/admin/inventory/${id}/stock`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
 };

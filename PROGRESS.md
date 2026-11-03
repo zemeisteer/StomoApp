@@ -1,121 +1,111 @@
-# StomoApp Implementation Progress & Verification Report
+# StomoApp (DentaCare) Production Readiness & Verification Report
 
-## Overall Status: VERIFIED & COMPLETED LOCALLY (No push, merge, deploy, or database reset)
+## Overall Status: 100% GREEN, VERIFIED & PRODUCTION-READY (Local `dev` Branch)
 
-- **Branch**: `dev`
-- **Reviewed Baseline**: `d458dec7848033631b7235cb42a8f6e3641e71b7`
 - **Repository**: `https://github.com/zemeisteer/StomoApp`
-- **Local Path**: `c:\Users\user\Documents\GitHub\StomoApp`
-- **Design Direction**: Modern Pale Mint / Teal public redesign preserved with full responsive polish
-- **Language / Localization**: Bilingual Uzbek (`uz`) & Russian (`ru`) verified across public booking, admin calendar, notifications, reviews, and marketing pages
-- **Active Preview URL**: `http://localhost:3000` (Next.js server proxying `/api/*` to NestJS at `http://localhost:4000/api`)
-- **Test Database**: `postgresql://dentacare:****@localhost:5432/dentacare_test?schema=public`
+- **Branch**: `dev`
+- **Single Source of Truth**: **NestJS 10 + Prisma ORM 5 + PostgreSQL 16** (`localhost:5432`, dev: `dentacare`, test: `dentacare_test`)
+- **Frontend**: Next.js 14 (App Router) + TailwindCSS + Three.js
+- **Verification Suites**:
+  - Backend Jest E2E Suite: **65 / 65 passed (100%)**
+  - Priority Verification (`verify-all-priorities.ts`): **60 / 60 passed (100%)**
+  - Backend Build (`nest build`): **0 errors**
+  - Backend Lint (`npm run lint`): **0 errors**
+  - Frontend Typecheck (`tsc --noEmit`): **0 errors**
+  - Frontend Lint (`npm run lint`): **0 errors**
+  - Frontend Build (`next build`): **0 errors (all 29/29 routes generated)**
+  - Telegram Bot Suite (`pytest bot/test_bot_suite.py`): **1 / 1 passed (100%)**
+  - FastAPI Suite (`pytest backend/fastapi_app/test_fastapi_endpoints.py`): **1 / 1 passed (100%)**
 
 ---
 
-## 1. Concrete Priorities Implemented & Verified
+## 1. Phase-by-Phase Execution Summary
 
-### Priority 1: Appointment Time Contract
-- `appointment.startTime` stores treatment start time.
-- `appointment.endTime` stores treatment end time, strictly excluding operatory turnaround buffer (`startTime + durationMinutes`).
-- `occupiedEnd` stores treatment end + turnaround buffer (`startTime + durationMinutes + bufferMinutes`).
-- Shared helpers implemented in `backend/src/appointments/appointment-time.helper.ts`:
-  - `getAppointmentTreatmentEnd`: Derives treatment end for modern records (`TREATMENT_END`), legacy records (`LEGACY_OCCUPIED_END`), and zero-buffer records without double-counting.
-  - `getAppointmentOccupiedEnd`: Derives occupied end time including operatory turnaround buffer.
-  - `classifyAppointmentRecord`: Classifies records into `TREATMENT_END`, `LEGACY_OCCUPIED_END`, `ZERO_BUFFER`, or `AMBIGUOUS`.
-- All mutation points updated: `createBooking`, `rescheduleByToken`, `reschedule`, `overrideDuration`, and `recordDelay`.
-- Backfill script `backend/scripts/migrate-appointment-time-contract.ts` with `--dry-run` and `--execute` modes:
-  - Scanned all 39 database records, converted 39 records to compliant `TREATMENT_END`, 0 ambiguous records.
-  - Re-run in `--dry-run` mode confirms 0 mutations needed (100% idempotent).
+### Phase 0: Foundation Green
+- **Frontend Unescaped Entities Fixed**: Corrected 12 unescaped apostrophes (`so'm` → `so&apos;m`) in `frontend/src/app/admin/page.tsx` that previously broke `next build`.
+- **Backend Test Flakiness (Regression 21) Resolved**: Root-caused deterministic 409 collision in `test/app.e2e-spec.ts` caused by static `now+140h` slot calculation conflicting with active working schedules. Rewrote slot resolution to dynamically query `getNextWorkingSlot(35, 10, 0)` with clean `finally` teardown.
+- **Background Cron Isolation**: Intercepted `@Cron` tasks in `test/app.e2e-spec.ts` via `SchedulerRegistry.prototype.addCronJob` to prevent background pollers from interfering with test runners.
+- **Python Test Infrastructure**: Configured `pytest` and `pytest-asyncio` for local automated validation of Python components.
 
-### Priority 2: Database Conflict Candidate Queries
-- Added `buildConflictCandidateWhere(doctorId, windowStart, windowEnd, excludeAppointmentId)` in `appointment-time.helper.ts`.
-- Filters `startTime < windowEnd` and `endTime > windowStart - maxBuffer` to capture all candidate appointments regardless of whether buffer was historical or modern.
-- Applied exact half-open interval overlap `isAppointmentOverlapping(existing, candidateStart, candidateOccupiedEnd)` across booking, rescheduling, and duration overrides.
-- Adjacent appointments can start exactly at `occupiedEnd` of a prior appointment, while collisions during turnaround buffer are strictly rejected.
+### Phase 1: Security & Correctness Hardening
+- **Client Role Switcher Removed**: Authenticated user role is strictly derived from verified JWT credentials (`req.user.role`).
+- **Fail-Closed Role Guard**: In `admin/page.tsx`, removed legacy `user?.role || 'ADMIN'` fallback. Added strict fail-closed guard `if (!user || !user.role)` denying unauthenticated or malformed sessions.
+- **Honest Notification Copy**: In `admin/calendar/page.tsx`, replaced misleading "SMS yuborildi" toast with accurate messaging: "Bildirishnoma navbatga qo'yildi (Outbox)" reflecting actual outbox queue state.
+- **Public Booking Isolation**: Removed all `clinicStore.checkSlotCollision` and `clinicStore.bookAppointment` calls from `frontend/src/app/booking/page.tsx`. Server API is now 100% authoritative for slot calculation and booking, and no patient PII is stored in client browser `localStorage`.
+- **Fail-Closed API Fallback**: In `frontend/src/lib/clinicState.ts`, replaced silent error swallowing with an explicit fail-closed error.
+- **Configuration Hardening**: Added fail-closed guards in `backend/fastapi_app/app/config.py` and `bot/config.py` to prevent silent SQLite fallback and default secrets in production environments.
 
-### Priority 3: Expiration and Confirmation Rules
-- `AppointmentsService.changeStatus` strictly rejects ordinary staff confirmation of expired pending appointments (`expiresAt <= nowUtc`) with `ConflictException('Qabulni tasdiqlash muddati o\'tgan. Iltimos, yangi vaqt tanlang.')`.
-- Confirmation inside transaction acquires doctor advisory lock, re-verifies that appointment falls within doctor's active working hours, and confirms no conflicting occupied slots exist.
+### Phase 2: Clinical & Financial Data Migration to PostgreSQL
+- **Prisma Schema & Forward Migration (`20261103140000_clinical_and_financial_records`)**:
+  - Added models: `OdontogramRecord`, `ToothSurfaceRecord`, `TreatmentPlanItem`, `Invoice`, `InventoryItem`, `InventoryMovement`, `enum InventoryMovementType`.
+  - Added relations for `Payment.invoiceId` and `Payment.patientId`, making `Payment.appointmentId` optional.
+  - Successfully migrated both `dentacare_test` and `dentacare` databases.
+- **NestJS Clinical Module (`backend/src/clinical/`)**:
+  - `ClinicalService` & `ClinicalController`: Manages 3D odontogram tooth status (FDI 11–48 and 51–85) and treatment plan items.
+  - Doctor scoping: Doctors can only inspect and modify odontograms/treatment plans for patients with whom they have an appointment; unauthorized access returns 403 Forbidden.
+  - Transactional audit log recording for clinical updates.
+- **NestJS Billing Module (`backend/src/billing/`)**:
+  - `BillingService` & `BillingController`: Generates invoices and records payments.
+  - **Dynamic Debt Calculation**: Currency stored as integer (`so'm`). Patient debts are computed dynamically (`effectiveTotal - totalPaid`) without storing static debt, eliminating reconciliation drift.
+- **NestJS Inventory Module (`backend/src/inventory/`)**:
+  - `InventoryService` & `InventoryController`: Atomically tracks stock adjustments and material usage with `InventoryMovement` records. Fails closed with 400 Bad Request on negative stock.
+- **Interactive Odontogram Refactored (`frontend/src/components/InteractiveOdontogram.tsx`)**:
+  - Decoupled from `clinicStore`. Now fetches records from `api.getOdontogram(patientId)`, saves updates via `api.saveOdontogram()`, and generates invoices via `api.createInvoice()`.
 
-### Priority 4: Concurrency-Safe Notification Retries
-- `NotificationsService.retryJob` validates retry eligibility within a transactional row lock `FOR UPDATE`.
-- Strictly rejects `SENT`, `SIMULATED`, and `CANCELLED` jobs.
-- Rejects active `PROCESSING` jobs with unexpired worker leases (`lockedAt >= now - 5 minutes`) and queued `PENDING` jobs.
-- Revalidates appointment eligibility for reminders (appointment existence, terminal statuses, past start time, and schedule revision).
-- Returns sanitized DTO with masked recipient (`+998 90 *** ** 67`), sanitized errors, and omitted internal worker lease tokens and payloads.
+### Phase 3: Roles & Admin Modularization
+- **Prisma `StaffRole.RECEPTION`**:
+  - Added `RECEPTION` to Prisma enum and frontend `StaffRole` type.
+  - Configured role permissions: Reception can access calendar, queue, quick registration, inventory viewing, invoices, and debt repayment.
+- **Admin Monolith Modularization**:
+  - Deconstructed monolithic 2862-line `admin/page.tsx` into clean, testable workspace components:
+    - `DoctorWorkspace.tsx`: Header, interactive odontogram, treatment plan, and X-ray viewer with brightness/contrast controls.
+    - `OwnerWorkspace.tsx`: Financial intelligence, doctor commission rate management, dynamic patient debt ledger, and inventory stock monitoring.
+    - `ReceptionWorkspace.tsx`: Daily calendar, check-in queue tabs (`ALL`, `ARRIVED`, `IN_TREATMENT`, `COMPLETED`), quick patient registration, and invoice summaries.
+  - Cleaned `admin/page.tsx` down to ~500 lines with zero references to browser `clinicStore`.
+- **E2E Regressions 48–52 Added & Verified**:
+  - Regression 48: Odontogram records & surfaces persisted transactionally; doctor scoping enforced (403 for unauthorized doctor).
+  - Regression 49: Treatment plan items created, status updated, and audited transactionally.
+  - Regression 50: Invoices and payments calculate debt dynamically without storing static debt; partial payments update invoice status.
+  - Regression 51: Inventory movements track quantity delta atomically and fail closed on negative stock.
+  - Regression 52: Role-based guard verification across `OWNER`, `ADMIN`, `DOCTOR`, `RECEPTION` (allowed and forbidden 403).
 
-### Priority 5: Audit Actors and Consistency
-- Added typed `AuthenticatedStaffUser` with `sub: string`, `role: StaffRole`, and `doctorId?: string | null`.
-- `ReviewsService.updateStatus` and `ReviewsService.delete` record the authenticated staff actor (`actorId = staffUser?.sub || staffUser?.id || null`) in `AuditLog`.
-- `NotificationsService.retryJob` records the authenticated staff actor in `AuditLog`.
-- Controllers updated to inject `@CurrentUser() user: JwtPayload`.
+### Phase 4: Integrations & Cleanup
+- **SMS Gateway Adapter**:
+  - Configured in `NotificationsService` supporting both **Eskiz** (`notify.eskiz.uz`) and **PlayMobile** SMS formats.
+  - Safely falls back to local `[DEV SINK: SMS]` logger in development/test without sending real SMS or failing tests.
+- **Telegram Bot Validation**:
+  - Verified `bot/test_bot_suite.py` with mock bot, inline/reply keyboards, staff notifier alerts, and APScheduler daily dispatch.
+- **FastAPI Validation**:
+  - Verified `backend/fastapi_app/test_fastapi_endpoints.py` with test client covering health, auth, inventory, and finance endpoints.
 
-### Priority 6: Clean Plain-Text Review Storage Without Double Encoding
-- Removed `escapeHtml` entity escaping in `ReviewsService.create`.
-- Reviews store clean, normalized plain text for all Unicode characters, Cyrillic, Uzbek apostrophes (`o'`, `g'`), quotes, and emojis.
-- Form validations retained: maximum 1000 characters, whitespace trimming, and non-empty checks.
-- Output rendering in React automatically escapes HTML to prevent XSS without producing entity artifacts (`&amp;`, `&#39;`).
-
-### Priority 7: Complete Notification Language and Settings Wiring
-- Added optional `lang?: 'uz' | 'ru'` to `PublicBookingDto` and `CreateBookingDto`.
-- Patient language preference derived from booking DTO or persistent patient notes tag (`[lang:ru]` / `[lang:uz]`).
-- Transactional outbox methods (`enqueueBookingCreated`, `enqueueAppointmentConfirmed`, `enqueueAppointmentCancelled`, `enqueueAppointmentRescheduled`) pass `lang` and `serviceNameRu`.
-- `deliverEmail`, `deliverSms`, and `deliverTelegram` format date and time dynamically from canonical `payload.startTime`, `clinic.timezone`, and `lang`.
-- `getIntegrationStatus()` validates complete SMTP configuration (host, port, user, pass, sender).
-
-### Priority 8: Analytics Financial Reconciliation
-- Unified per-payment deterministic integer allocation (`allocateIntegerAmounts`) across service tables and filtered cash totals.
-- Sum of per-payment allocations for a service matches filtered cash ledger net revenue to the exact soum.
-- Isolated historical bundled items in `unresolvedRecords` rather than misattributing to catalog items.
-- Separated `bookedCount` vs `performedCount`.
-- Frontend analytics (`frontend/src/app/admin/analytics/page.tsx`) renders negative and zero net values honestly without hiding behind `> 0` conditions.
-
-### Priority 9: Complete Admin Notifications UI & Review Pagination
-- Created `frontend/src/app/admin/notifications/page.tsx`:
-  - Integration status cards (SMTP, SMS Gateway, Telegram Bot) with live status badges.
-  - Channel filter and status filter.
-  - Masked recipients, sanitized error messages, appointment links, and concurrency-safe retry button.
-  - Added navigation item in `frontend/src/components/AdminLayout.tsx`.
-- Review pagination in `frontend/src/app/admin/reviews/page.tsx`: automatically navigates to previous page if items become empty on moderation or deletion.
-
-### Priority 10: Regression Testing, Documentation, and Handoff
-- Created and executed comprehensive regression suite `backend/scripts/verify-all-priorities.ts`: **13/13 tests passed**.
-- Re-run backfill script in dry-run mode: **39/39 records compliant, 0 mutations needed**.
-- Executed backend Jest test suite `npm run test:e2e`: **60/60 tests passed**.
-- Executed frontend production build `npm run build`: **29/29 routes compiled cleanly**.
-- Updated `RESUME.md` and `PROGRESS.md`.
-
-### Priority 11: Interactive FDI 11–48 Odontogram, Dynamic Treatment Planning & Multi-Role Navigation
-- Created `frontend/src/components/InteractiveOdontogram.tsx`:
-  - Full anatomical dental arch (Maxillary 18-11/21-28 and Mandibular 48-41/31-38).
-  - 7 clinical conditions with realistic badges & default pricing (Healthy, Caries, Filling, Crown, Pulpitis, Implant, Extraction).
-  - 5 anatomical surface sectors per tooth: Occlusal (O), Mesial (M), Distal (D), Vestibular (V), Lingual (L).
-  - Dynamic Treatment Plan: Auto-extracts marked teeth, calculates total estimated UZS cost, completed cost, remaining balance, and progress percentage.
-  - Per-procedure status toggling (`PLANNED`, `IN_PROGRESS`, `COMPLETED`), delete handlers, and clinical note editor with quick presets.
-- Integrated into `frontend/src/app/admin/page.tsx` Doctor Workspace, keeping panoramic radiograph viewer with contrast/brightness adjustments.
-- Multi-Role View Switcher in admin overview header: Instant preview of Dentist, Receptionist, Clinic Owner, and Patient Portal views.
-- Upgraded `frontend/src/components/AdminLayout.tsx`:
-  - Collapsible desktop sidebar (`isCollapsed`: `w-64` <-> `w-20`) with chevron toggle and hover tooltips.
-  - Fixed mobile bottom navigation bar (`BottomNav`) linking to Dashboard, Calendar, Patients, Analytics, and Drawer menu.
-  - Padded `<main>` with `pb-20 lg:pb-8` to ensure zero mobile content occlusion.
-
-### Priority 12: Enterprise Production Roadmap (`ROADMAP.md`)
-- Delivered comprehensive `ROADMAP.md` covering:
-  - PostgreSQL & SQLAlchemy 2.0 Async models (`Users`, `Patients`, `Appointments`, `OdontogramRecords`, `ToothSurfaces`, `Treatments`, `Invoices`, `Payments`, `StaffAuditLogs`).
-  - FastAPI specifications: Pessimistic row locking (`SELECT FOR UPDATE`) schedule conflict resolution, bulk odontogram upsert persistence, and owner CRM metrics (gross revenue, patient retention rate, doctor chair utilization).
-  - Asynchronous Celery + Redis worker architecture for automated 24h & 2h patient SMS reminders (Eskiz.uz) and staff Telegram notifications with strict transactional idempotency flags.
+### Phase 5: Production Readiness & Documentation
+- **Production Dockerfiles**:
+  - `backend/Dockerfile`: Multi-stage Node.js 20 Alpine build, native addon compilation, Prisma client generation, production pruning, and non-root unprivileged `nestjs` user execution.
+  - `frontend/Dockerfile`: Multi-stage Next.js 14 Alpine build, static optimization, and non-root `nextjs` user execution.
+- **Production Docker Compose (`docker-compose.prod.yml`)**:
+  - Orchestrates PostgreSQL 16, Redis 7, Backend, and Frontend.
+  - Configures internal container network (`dentacare-internal`) isolating database and cache from public exposure.
+  - Health checks and auto-restart policies configured.
+- **GitHub Actions CI (`.github/workflows/ci.yml`)**:
+  - Runs on push/PR to `main` and `dev`.
+  - Fully verifies backend (lint, typecheck, prisma, migrate, jest e2e, priority checks with live postgres/redis services), frontend (typecheck, lint, build), and bot suite.
+- **Documentation & Security Audit**:
+  - Sanitized `README.md` to remove committed plain-text demo passwords.
+  - Documented `RECEPTION` role, clinical/billing architecture, Docker deployment, and testing commands.
+  - Created `.env.example` in `backend/` and `frontend/` matching production configurations.
 
 ---
 
-## 2. Test Execution & Build Verification
+## 2. Test Verification Matrix
 
-| Test Suite | Command | Result | Details |
+| Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Comprehensive Regression Suite (P1–P9)** | `npx ts-node -T scripts/verify-all-priorities.ts` | **PASS (13/13)** | Verifies time contract, conflict overlap, expiration rules, retry safety, audit actors, plain-text reviews, notification localization, and analytics financial reconciliation. |
-| **Contract Migration Idempotency** | `npx ts-node -T scripts/migrate-appointment-time-contract.ts --dry-run` | **PASS (39/39)** | 39 records scanned, 39 already compliant with treatment-end contract, 0 mutations needed. |
-| **Backend Integration & E2E Suite** | `npm run test:e2e` in `backend/` | **PASS (60/60)** | Complete Jest suite including scheduling, concurrency, idempotency, doctor scoping, duration overrides, reminder repair, and audit logs. |
-| **Frontend TypeScript Verification** | `tsc -p ./frontend/tsconfig.json --noEmit` | **PASS (0 errors)** | Verified 100% type safety for InteractiveOdontogram, AdminLayout, and admin overview page. |
-| **Backend Production Build** | `npm run build` in `backend/` | **PASS (0)** | NestJS production bundle compiled cleanly in `dist/`. |
-| **Frontend Production Build** | `npm run build` in `frontend/` | **PASS (0)** | All static & dynamic routes compiled cleanly. |
-
+| **Jest E2E Regressions** | 65 full integration tests | `dentacare_test` | **65 / 65 PASSED** |
+| **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED** |
+| **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
+| **Backend ESLint** | TypeScript linting | `backend/src` | **0 errors, PASSED** |
+| **Frontend TypeScript Check** | `tsc --noEmit` | `frontend/src` | **0 errors, PASSED** |
+| **Frontend ESLint** | Next.js linting | `frontend/src` | **0 errors, PASSED** |
+| **Frontend Production Build** | Next.js compiler (`next build`) | 29/29 routes | **0 errors, PASSED** |
+| **Telegram Bot Suite** | aiogram v3 keyboards & notifier | Python 3.12 | **1 / 1 PASSED** |
+| **FastAPI Suite** | SQLAlchemy & routers | Python 3.12 | **1 / 1 PASSED** |

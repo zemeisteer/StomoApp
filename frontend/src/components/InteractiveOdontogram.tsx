@@ -23,13 +23,13 @@ import {
   Activity,
 } from 'lucide-react';
 import {
-  clinicStore,
   ToothCondition,
   ToothSurface,
   DentalChartType,
   ToothRecord,
   CONDITION_METADATA,
 } from '../lib/clinicState';
+import { api } from '../lib/api';
 
 // Tooth Anatomical Names (Uzbek & Russian)
 export const TOOTH_NAMES: Record<number, { uz: string; ru: string }> = {
@@ -132,12 +132,8 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
   // Mobile Zoom & Pan Controls
   const [zoomScale, setZoomScale] = useState<number>(1.0);
 
-  // Load from reactive clinicStore
+  // Load from server API (PostgreSQL database)
   useEffect(() => {
-    const state = clinicStore.getState();
-    const patientOdonto = state.odontograms[patientId] || {};
-    setTeethRecords(patientOdonto);
-
     // If patient is pediatric, default to pediatric chart
     if (patientName.toLowerCase().includes('bola') || patientName.toLowerCase().includes('diyorbek')) {
       setChartType('PEDIATRIC');
@@ -147,26 +143,37 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
       setSelectedTooth(14);
     }
 
-    const unsubscribe = clinicStore.subscribe((newState) => {
-      const updated = newState.odontograms[patientId];
-      if (updated) {
-        setTeethRecords(updated);
-      }
-    });
+    if (!patientId) return;
+    let isMounted = true;
+    api.getOdontogram(patientId)
+      .then((records) => {
+        if (!isMounted || !Array.isArray(records)) return;
+        const mapped: Record<number, ToothRecord> = {};
+        records.forEach((r: any) => {
+          const meta = CONDITION_METADATA[r.condition as ToothCondition] || CONDITION_METADATA.HEALTHY;
+          mapped[r.toothNumber] = {
+            toothNum: r.toothNumber,
+            condition: r.condition,
+            surfaces: r.surfaces || [],
+            note: r.note || '',
+            treatmentNameUz: meta?.treatmentUz || "Profilaktik ko'rik",
+            treatmentNameRu: meta?.treatmentRu || 'Профилактический осмотр',
+            costUzs: meta?.defaultCost || 0,
+            status: 'PLANNED',
+            chartType: r.chartType || 'ADULT',
+            updatedAt: r.updatedAt,
+          };
+        });
+        setTeethRecords(mapped);
+      })
+      .catch((err) => {
+        console.error('Failed to load odontogram from server:', err);
+      });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+    };
   }, [patientId, patientName]);
-
-  // Trigger lucide.createIcons() on DOM render
-  useEffect(() => {
-    if (typeof window !== 'undefined' && (window as any).lucide?.createIcons) {
-      try {
-        (window as any).lucide.createIcons();
-      } catch (e) {
-        // Safe fallback
-      }
-    }
-  });
 
   // Active tooth record
   const currentRecord: ToothRecord = useMemo(() => {
@@ -244,27 +251,43 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
   };
 
   // Update Status of Item in Treatment Plan
-  const handleUpdateStatus = (
+  const handleUpdateStatus = async (
     toothNum: number,
     status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED'
   ) => {
-    setTeethRecords((prev) => {
-      if (!prev[toothNum]) return prev;
-      const updated = {
-        ...prev,
-        [toothNum]: {
-          ...prev[toothNum],
-          status,
-          updatedAt: new Date().toISOString(),
-        },
-      };
+    const prevTooth = teethRecords[toothNum];
+    if (!prevTooth) return;
+
+    const updated = {
+      ...teethRecords,
+      [toothNum]: {
+        ...prevTooth,
+        status,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    setTeethRecords(updated);
+
+    try {
       if (status === 'COMPLETED') {
-        clinicStore.completeProcedureAndGenerateInvoice(patientId, toothNum, updated[toothNum]);
-      } else {
-        clinicStore.savePatientOdontogram(patientId, updated);
+        await api.createInvoice({
+          patientId,
+          totalAmount: prevTooth.costUzs,
+          notes: `${prevTooth.treatmentNameUz} (#${toothNum} tish)`,
+        });
       }
-      return updated;
-    });
+      await api.saveOdontogram(patientId, [
+        {
+          toothNumber: toothNum,
+          condition: prevTooth.condition,
+          chartType: prevTooth.chartType,
+          note: prevTooth.note,
+          surfaces: prevTooth.surfaces,
+        },
+      ]);
+    } catch (err) {
+      console.error('Update status on server failed:', err);
+    }
   };
 
   // Update Custom Cost
@@ -298,18 +321,29 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
     });
   };
 
-  // Save to Centralized Clinic Store
-  const handleSaveTreatmentPlan = () => {
-    clinicStore.savePatientOdontogram(patientId, teethRecords);
-    if (onSavePlan) {
-      onSavePlan(teethRecords);
+  // Save to Server Database via API
+  const handleSaveTreatmentPlan = async () => {
+    try {
+      const teethList = Object.values(teethRecords).map((r) => ({
+        toothNumber: r.toothNum,
+        condition: r.condition,
+        chartType: r.chartType,
+        note: r.note,
+        surfaces: r.surfaces,
+      }));
+      await api.saveOdontogram(patientId, teethList);
+      if (onSavePlan) {
+        onSavePlan(teethRecords);
+      }
+      setSaveSuccessMsg(
+        isUz
+          ? "Davolash rejasi va odontogramma serverda muvaffaqiyatli saqlandi!"
+          : 'План лечения и зубная карта успешно сохранены на сервере!'
+      );
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
+    } catch (err) {
+      console.error('Save plan failed:', err);
     }
-    setSaveSuccessMsg(
-      isUz
-        ? "Davolash rejasi va odontogramma muvaffaqiyatli saqlandi hamda hisob-kitobga yo'naltirildi!"
-        : 'План лечения и зубная карта успешно сохранены и синхронизированы с биллингом!'
-    );
-    setTimeout(() => setSaveSuccessMsg(null), 4000);
   };
 
   // Treatment Plan Summaries

@@ -7,6 +7,7 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
+import pytest
 from aiogram import Bot
 from bot.config import config
 from bot.services.scheduler import setup_scheduler, send_appointment_reminders, dispatch_daily_doctor_schedules
@@ -20,6 +21,7 @@ from bot.keyboards.inline import (
 )
 from bot.keyboards.reply import get_contact_keyboard, get_main_menu_keyboard
 
+@pytest.mark.asyncio
 async def test_bot_flows():
     print("--- RUNNING TELEGRAM BOT UNIT & FLOW TEST SUITE ---")
 

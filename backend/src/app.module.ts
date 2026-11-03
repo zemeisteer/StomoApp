@@ -22,6 +22,9 @@ import { MediaModule } from './media/media.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PublicModule } from './public/public.module';
+import { ClinicalModule } from './clinical/clinical.module';
+import { BillingModule } from './billing/billing.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 const redisImports = process.env.REDIS_ENABLED === 'true'
   ? [
@@ -85,6 +88,9 @@ const redisImports = process.env.REDIS_ENABLED === 'true'
     AnalyticsModule,
     NotificationsModule,
     PublicModule,
+    ClinicalModule,
+    BillingModule,
+    InventoryModule,
   ],
   providers: [
     {

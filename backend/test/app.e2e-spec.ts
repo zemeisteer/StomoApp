@@ -5882,6 +5882,438 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.delete({ where: { id: testPatient.id } });
     }
   });
+
+  // -------------------------------------------------------------
+  // Regression 48: Odontogram records and surfaces are persisted transactionally, doctor scoping enforced
+  // -------------------------------------------------------------
+  it('Regression 48: Odontogram records and tooth surfaces are persisted transactionally, doctor scoping enforced', async () => {
+    const pat = await prisma.patient.create({
+      data: {
+        fullName: `Odonto Pat ${runId}`,
+        phone: `${testPhonePrefix}48`,
+      },
+    });
+
+    const slotTime = getNextWorkingSlot(38, 10, 0);
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `token_odonto_${runId}`,
+        patientId: pat.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        serviceName: 'Konsultatsiya',
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        startTime: slotTime,
+        endTime: new Date(slotTime.getTime() + 30 * 60 * 1000),
+        status: AppointmentStatus.CONFIRMED,
+      },
+    });
+
+    try {
+      // 1. Doctor A saves odontogram for their patient
+      const saveRes = await request(app.getHttpServer())
+        .put(`/api/admin/clinical/odontogram/${pat.id}`)
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .send({
+          teeth: [
+            {
+              toothNumber: 14,
+              condition: 'CARIES',
+              chartType: 'ADULT',
+              note: 'Okluzal karies',
+              surfaces: ['O', 'M'],
+            },
+            {
+              toothNumber: 15,
+              condition: 'PULPITIS',
+              chartType: 'ADULT',
+              surfaces: ['O'],
+            },
+          ],
+          appointmentId: appt.id,
+        })
+        .expect(200);
+
+      expect(saveRes.body.success).toBe(true);
+      expect(saveRes.body.updatedTeethCount).toBe(2);
+
+      // 2. Doctor B (unauthorized, no appointment with patient) gets 403 Forbidden
+      await request(app.getHttpServer())
+        .get(`/api/admin/clinical/odontogram/${pat.id}`)
+        .set('Authorization', `Bearer ${doctorBToken}`)
+        .expect(403);
+
+      // 3. Doctor A gets 200 OK and sees verified persisted records with surfaces
+      const getRes = await request(app.getHttpServer())
+        .get(`/api/admin/clinical/odontogram/${pat.id}`)
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .expect(200);
+
+      expect(getRes.body).toHaveLength(2);
+      const tooth14 = getRes.body.find((t: any) => t.toothNumber === 14);
+      expect(tooth14).toBeDefined();
+      expect(tooth14.condition).toBe('CARIES');
+      expect(tooth14.surfaces).toContain('O');
+      expect(tooth14.surfaces).toContain('M');
+
+      // 4. Verify transactional audit record
+      const audit = await prisma.auditLog.findFirst({
+        where: {
+          action: 'clinical.odontogram_updated',
+          entityId: pat.id,
+        },
+      });
+      expect(audit).toBeDefined();
+    } finally {
+      await prisma.toothSurfaceRecord.deleteMany({
+        where: { odontogramRecord: { patientId: pat.id } },
+      });
+      await prisma.odontogramRecord.deleteMany({ where: { patientId: pat.id } });
+      await prisma.appointment.delete({ where: { id: appt.id } });
+      await prisma.patient.delete({ where: { id: pat.id } });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 49: Treatment plan items created, status updated, and audited transactionally
+  // -------------------------------------------------------------
+  it('Regression 49: Treatment plan items created, status updated, and audited transactionally', async () => {
+    const pat = await prisma.patient.create({
+      data: {
+        fullName: `Plan Pat ${runId}`,
+        phone: `${testPhonePrefix}49`,
+      },
+    });
+
+    const slotTime = getNextWorkingSlot(39, 10, 0);
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `token_plan_${runId}`,
+        patientId: pat.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        serviceName: 'Konsultatsiya',
+        durationMinutes: 30,
+        bufferMinutes: 5,
+        startTime: slotTime,
+        endTime: new Date(slotTime.getTime() + 30 * 60 * 1000),
+        status: AppointmentStatus.CONFIRMED,
+      },
+    });
+
+    let planItemId: string | null = null;
+    try {
+      // 1. Doctor A creates treatment plan item
+      const createRes = await request(app.getHttpServer())
+        .post(`/api/admin/clinical/treatment-plan/${pat.id}`)
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .send({
+          toothNumber: 16,
+          treatmentNameUz: 'Plomba qo\'yish (Filtek Z250)',
+          treatmentNameRu: 'Постановка пломбы',
+          costUzs: 350000,
+          status: 'PLANNED',
+          notes: 'Chuqur karies restavratsiyasi',
+          appointmentId: appt.id,
+        })
+        .expect(201);
+
+      planItemId = createRes.body.id;
+      expect(createRes.body.costUzs).toBe(350000);
+      expect(createRes.body.status).toBe('PLANNED');
+
+      // 2. Doctor B cannot update Doctor A's treatment plan item
+      await request(app.getHttpServer())
+        .patch(`/api/admin/clinical/treatment-plan/${planItemId}/status`)
+        .set('Authorization', `Bearer ${doctorBToken}`)
+        .send({ status: 'COMPLETED' })
+        .expect(403);
+
+      // 3. Doctor A updates status to COMPLETED
+      const updateRes = await request(app.getHttpServer())
+        .patch(`/api/admin/clinical/treatment-plan/${planItemId}/status`)
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .send({ status: 'COMPLETED' })
+        .expect(200);
+
+      expect(updateRes.body.status).toBe('COMPLETED');
+
+      // 4. Verify audit log
+      const audit = await prisma.auditLog.findFirst({
+        where: {
+          action: 'clinical.treatment_plan_status_changed',
+          entityId: planItemId!,
+        },
+      });
+      expect(audit).toBeDefined();
+    } finally {
+      if (planItemId) {
+        await prisma.treatmentPlanItem.deleteMany({ where: { id: planItemId } });
+      }
+      await prisma.appointment.delete({ where: { id: appt.id } });
+      await prisma.patient.delete({ where: { id: pat.id } });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 50: Invoices and payments calculate debt dynamically without storing static debt
+  // -------------------------------------------------------------
+  it('Regression 50: Invoices and payments calculate debt dynamically without storing static debt; partial payment updates status', async () => {
+    const pat = await prisma.patient.create({
+      data: {
+        fullName: `Billing Pat ${runId}`,
+        phone: `${testPhonePrefix}50`,
+      },
+    });
+
+    let invoiceId: string | null = null;
+    try {
+      // 1. Create invoice (total 500,000, discount 50,000 -> net 450,000)
+      const invRes = await request(app.getHttpServer())
+        .post('/api/admin/billing/invoices')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          patientId: pat.id,
+          totalAmount: 500000,
+          discount: 50000,
+          notes: 'Kompleks davolash kursi',
+        })
+        .expect(201);
+
+      invoiceId = invRes.body.id;
+
+      // 2. Check initial invoice status & dynamic debt
+      const listRes1 = await request(app.getHttpServer())
+        .get(`/api/admin/billing/invoices?patientId=${pat.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(listRes1.body).toHaveLength(1);
+      expect(listRes1.body[0].effectiveTotal).toBe(450000);
+      expect(listRes1.body[0].paidAmount).toBe(0);
+      expect(listRes1.body[0].debtAmount).toBe(450000);
+      expect(listRes1.body[0].status).toBe('PENDING');
+
+      // 3. Check debt list
+      const debtsRes1 = await request(app.getHttpServer())
+        .get('/api/admin/billing/debts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const patientDebt1 = debtsRes1.body.find((d: any) => d.id === pat.id);
+      expect(patientDebt1).toBeDefined();
+      expect(patientDebt1.totalDebt).toBe(450000);
+
+      // 4. Record partial payment of 200,000 so'm
+      const pay1Res = await request(app.getHttpServer())
+        .post('/api/admin/billing/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          patientId: pat.id,
+          invoiceId: invoiceId!,
+          amount: 200000,
+          method: 'CASH',
+          note: 'Qisman to\'lov (naqd)',
+        })
+        .expect(201);
+
+      expect(pay1Res.body.amount).toBe(200000);
+
+      // 5. Verify dynamic status is now PARTIALLY_PAID and debt is 250,000
+      const listRes2 = await request(app.getHttpServer())
+        .get(`/api/admin/billing/invoices?patientId=${pat.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(listRes2.body[0].paidAmount).toBe(200000);
+      expect(listRes2.body[0].debtAmount).toBe(250000);
+      expect(listRes2.body[0].status).toBe('PARTIALLY_PAID');
+
+      // 6. Settle remaining 250,000 so'm
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          patientId: pat.id,
+          invoiceId: invoiceId!,
+          amount: 250000,
+          method: 'CARD',
+          note: 'Yakuniy to\'lov (karta)',
+        })
+        .expect(201);
+
+      // 7. Verify invoice is PAID and debt is 0
+      const listRes3 = await request(app.getHttpServer())
+        .get(`/api/admin/billing/invoices?patientId=${pat.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(listRes3.body[0].paidAmount).toBe(450000);
+      expect(listRes3.body[0].debtAmount).toBe(0);
+      expect(listRes3.body[0].status).toBe('PAID');
+
+      // 8. Patient should no longer appear in debts list
+      const debtsRes2 = await request(app.getHttpServer())
+        .get('/api/admin/billing/debts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const patientDebt2 = debtsRes2.body.find((d: any) => d.id === pat.id);
+      expect(patientDebt2).toBeUndefined();
+    } finally {
+      await prisma.payment.deleteMany({ where: { patientId: pat.id } });
+      if (invoiceId) {
+        await prisma.invoice.deleteMany({ where: { id: invoiceId } });
+      }
+      await prisma.patient.delete({ where: { id: pat.id } });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 51: Inventory movements track quantity delta atomically and fail closed on negative stock
+  // -------------------------------------------------------------
+  it('Regression 51: Inventory movements track quantity delta atomically and fail closed on negative stock', async () => {
+    let itemId: string | null = null;
+    try {
+      // 1. Create inventory item
+      const createRes = await request(app.getHttpServer())
+        .post('/api/admin/inventory')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: `Kompozit Filtek ${runId}`,
+          category: 'composite',
+          quantity: 25,
+          unit: 'shpris',
+          minThreshold: 5,
+          unitCost: 120000,
+        })
+        .expect(201);
+
+      itemId = createRes.body.id;
+      expect(createRes.body.quantity).toBe(25);
+
+      // 2. Record usage movement (-5)
+      const useRes = await request(app.getHttpServer())
+        .patch(`/api/admin/inventory/${itemId}/stock`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          changeType: 'USAGE',
+          quantityDelta: -5,
+          reason: 'Bemor davolashida sarflandi',
+        })
+        .expect(200);
+
+      expect(useRes.body.quantity).toBe(20);
+
+      // 3. Fail closed on negative stock: trying to deduct -30 when only 20 left
+      const errRes = await request(app.getHttpServer())
+        .patch(`/api/admin/inventory/${itemId}/stock`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          changeType: 'USAGE',
+          quantityDelta: -30,
+          reason: 'Haddan tashqari hisobdan chiqarish',
+        })
+        .expect(400);
+
+      expect(errRes.body.message).toContain('manfiy');
+
+      // 4. Restock (+15)
+      const restockRes = await request(app.getHttpServer())
+        .patch(`/api/admin/inventory/${itemId}/stock`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          changeType: 'RESTOCK',
+          quantityDelta: 15,
+          reason: 'Yangi partiya qabul qilindi',
+        })
+        .expect(200);
+
+      expect(restockRes.body.quantity).toBe(35);
+
+      // 5. Verify movements in database
+      const movements = await prisma.inventoryMovement.findMany({
+        where: { inventoryItemId: itemId! },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(movements).toHaveLength(3); // Initial (25), Usage (-5), Restock (+15)
+    } finally {
+      if (itemId) {
+        await prisma.inventoryMovement.deleteMany({ where: { inventoryItemId: itemId } });
+        await prisma.inventoryItem.deleteMany({ where: { id: itemId } });
+      }
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 52: Role-based guard verification across OWNER, ADMIN, DOCTOR, RECEPTION
+  // -------------------------------------------------------------
+  it('Regression 52: Role-based guard verification across OWNER, ADMIN, DOCTOR, RECEPTION (allowed and forbidden 403)', async () => {
+    // 1. Create a dedicated RECEPTION user
+    const receptionEmail = `reception_${runId}@dentacare.local`;
+    const recUser = await prisma.staffUser.upsert({
+      where: { email: receptionEmail },
+      update: {
+        role: StaffRole.RECEPTION,
+        isActive: true,
+      },
+      create: {
+        email: receptionEmail,
+        passwordHash: await bcrypt.hash('Reception2026!', 12),
+        fullName: 'Receptionist Test',
+        role: StaffRole.RECEPTION,
+        isActive: true,
+      },
+    });
+
+    try {
+      // 2. Login as RECEPTION (using isolated test IP to avoid global rate limiting)
+      const recLoginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', `198.51.100.${Math.floor(Math.random() * 200) + 20}`)
+        .send({ email: receptionEmail, password: 'Reception2026!' })
+        .expect(200);
+
+      const receptionToken = recLoginRes.body.accessToken;
+
+      // 3. RECEPTION is allowed to view inventory list (200 OK)
+      await request(app.getHttpServer())
+        .get('/api/admin/inventory')
+        .set('Authorization', `Bearer ${receptionToken}`)
+        .expect(200);
+
+      // 4. RECEPTION is allowed to read invoices & debts (200 OK)
+      await request(app.getHttpServer())
+        .get('/api/admin/billing/debts')
+        .set('Authorization', `Bearer ${receptionToken}`)
+        .expect(200);
+
+      // 5. RECEPTION is forbidden from creating inventory catalog items (403 Forbidden)
+      await request(app.getHttpServer())
+        .post('/api/admin/inventory')
+        .set('Authorization', `Bearer ${receptionToken}`)
+        .send({
+          name: 'Forbidden Item',
+          category: 'consumable',
+          quantity: 10,
+          unit: 'dona',
+          minThreshold: 5,
+          unitCost: 1000,
+        })
+        .expect(403);
+
+      // 6. RECEPTION is forbidden from staff management (403 Forbidden)
+      await request(app.getHttpServer())
+        .get('/api/admin/staff')
+        .set('Authorization', `Bearer ${receptionToken}`)
+        .expect(403);
+    } finally {
+      await prisma.staffUser.deleteMany({ where: { id: recUser.id } });
+    }
+  });
 });
 
 

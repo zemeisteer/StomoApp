@@ -92,6 +92,7 @@ enum StaffRole {
   OWNER
   ADMIN
   DOCTOR
+  RECEPTION
   EDITOR
 
   @@map("staff_role")
@@ -118,6 +119,7 @@ model StaffUser {
 
   auditLogs AuditLog[]
   assignedLeads Lead[] @relation("AssignedStaff")
+  inventoryMovements InventoryMovement[]
 
   @@map("staff_users")
 }
@@ -174,6 +176,8 @@ model Doctor {
   schedules    DoctorSchedule[]
   exceptions   ScheduleException[]
   appointments Appointment[]
+  odontogramRecords  OdontogramRecord[]
+  treatmentPlanItems TreatmentPlanItem[]
 
   @@map("doctors")
 }
@@ -354,6 +358,10 @@ model Patient {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   appointments Appointment[]
+  odontogramRecords  OdontogramRecord[]
+  treatmentPlanItems TreatmentPlanItem[]
+  invoices     Invoice[]
+  payments     Payment[]
   reviews      Review[]
 
   @@index([phone])
@@ -448,6 +456,9 @@ model Appointment {
   notifications NotificationJob[]
   payments      Payment[]
   serviceItems  AppointmentServiceItem[]
+  odontogramRecords  OdontogramRecord[]
+  treatmentPlanItems TreatmentPlanItem[]
+  invoices      Invoice[]
 
   // Prevent overlapping appointments for the same doctor
   // Concurrency safety is enforced via DB transaction + advisory lock
@@ -685,10 +696,16 @@ enum PaymentMethod {
 
 model Payment {
   id            String        @id @default(cuid())
-  appointmentId String        @map("appointment_id")
-  appointment   Appointment   @relation(fields: [appointmentId], references: [id])
+  appointmentId String?       @map("appointment_id")
+  appointment   Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   
-  amount        Int           // Minor units (tiyin)
+  invoiceId     String?       @map("invoice_id")
+  invoice       Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  patientId     String?       @map("patient_id")
+  patient       Patient?      @relation(fields: [patientId], references: [id], onDelete: SetNull)
+
+  amount        Int           // Whole integer in so'm
   currency      String        @default("UZS")
   method        PaymentMethod @default(CASH)
   
@@ -698,7 +715,140 @@ model Payment {
   recordedAt    DateTime      @default(now()) @map("recorded_at")
   createdAt     DateTime      @default(now()) @map("created_at")
 
+  @@index([appointmentId])
+  @@index([invoiceId])
+  @@index([patientId])
   @@map("payments")
+}
+
+// ============================================================
+// CLINICAL RECORDS: ODONTOGRAM & TREATMENT PLANS
+// ============================================================
+
+model OdontogramRecord {
+  id            String               @id @default(cuid())
+  patientId     String               @map("patient_id")
+  patient       Patient              @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId      String?              @map("doctor_id")
+  doctor        Doctor?              @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  appointmentId String?              @map("appointment_id")
+  appointment   Appointment?         @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  toothNumber   Int                  @map("tooth_number") // FDI 11-48, 51-85
+  condition     String               @default("HEALTHY") // HEALTHY, CARIES, PULPITIS, etc.
+  chartType     String               @default("ADULT") @map("chart_type") // ADULT, PEDIATRIC
+  note          String?              @db.Text
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+
+  surfaces      ToothSurfaceRecord[]
+
+  @@unique([patientId, toothNumber])
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("odontogram_records")
+}
+
+model ToothSurfaceRecord {
+  id                 String           @id @default(cuid())
+  odontogramRecordId String           @map("odontogram_record_id")
+  odontogramRecord   OdontogramRecord @relation(fields: [odontogramRecordId], references: [id], onDelete: Cascade)
+  surface            String           // O, M, D, V, L
+  condition          String?
+
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  @@unique([odontogramRecordId, surface])
+  @@map("tooth_surface_records")
+}
+
+model TreatmentPlanItem {
+  id              String       @id @default(cuid())
+  patientId       String       @map("patient_id")
+  patient         Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String?      @map("doctor_id")
+  doctor          Doctor?      @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  appointmentId   String?      @map("appointment_id")
+  appointment     Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  toothNumber     Int?         @map("tooth_number")
+  treatmentNameUz String       @map("treatment_name_uz")
+  treatmentNameRu String?      @map("treatment_name_ru")
+  costUzs         Int          @default(0) @map("cost_uzs") // Whole integer in so'm
+  status          String       @default("PLANNED") // PLANNED, IN_PROGRESS, COMPLETED
+  notes           String?      @db.Text
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("treatment_plan_items")
+}
+
+// ============================================================
+// BILLING: INVOICES & FINANCIAL RECORDS
+// ============================================================
+
+model Invoice {
+  id            String       @id @default(cuid())
+  patientId     String       @map("patient_id")
+  patient       Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointmentId String?      @map("appointment_id")
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  totalAmount   Int          @default(0) @map("total_amount") // Whole integer in so'm
+  discount      Int          @default(0) // Whole integer in so'm
+  status        String       @default("PENDING") // PENDING, PARTIALLY_PAID, PAID, CANCELLED
+  notes         String?      @db.Text
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  payments      Payment[]
+
+  @@index([patientId])
+  @@index([appointmentId])
+  @@map("invoices")
+}
+
+// ============================================================
+// INVENTORY & STOCK MOVEMENTS
+// ============================================================
+
+model InventoryItem {
+  id           String              @id @default(cuid())
+  name         String
+  category     String              // anesthetic, composite, implant, endo, consumable
+  quantity     Int                 @default(0)
+  unit         String              @default("dona") // dona, quti, flakon, ampula
+  minThreshold Int                 @default(10) @map("min_threshold")
+  unitCost     Int                 @default(0) @map("unit_cost") // In so'm
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  movements    InventoryMovement[]
+
+  @@map("inventory_items")
+}
+
+enum InventoryMovementType {
+  RESTOCK
+  USAGE
+  ADJUSTMENT
+  RETURN
+
+  @@map("inventory_movement_type")
+}
+
+model InventoryMovement {
+  id              String                @id @default(cuid())
+  inventoryItemId String                @map("inventory_item_id")
+  inventoryItem   InventoryItem         @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  changeType      InventoryMovementType @map("change_type")
+  quantityDelta   Int                   @map("quantity_delta")
+  reason          String?
+  performedById   String?               @map("performed_by_id")
+  performedBy     StaffUser?            @relation(fields: [performedById], references: [id], onDelete: SetNull)
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  @@index([inventoryItemId])
+  @@map("inventory_movements")
 }
 
 // ============================================================

@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dentacare-prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dentacare}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ChangeMeInProductionSecret2026!}
+      POSTGRES_DB: ${POSTGRES_DB:-dentacare}
+    volumes:
+      - prod_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-dentacare}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dentacare-internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: dentacare-prod-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-ChangeMeRedisSecret2026!}
+    volumes:
+      - prod_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-ChangeMeRedisSecret2026!}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dentacare-internal
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dentacare-prod-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      APP_URL: ${APP_URL:-https://api.dentacare.uz}
+      FRONTEND_URL: ${FRONTEND_URL:-https://dentacare.uz}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dentacare}:${POSTGRES_PASSWORD:-ChangeMeInProductionSecret2026!}@postgres:5432/${POSTGRES_DB:-dentacare}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-ChangeMeRedisSecret2026!}@redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-uz}
+      SMS_PROVIDER: ${SMS_PROVIDER:-eskiz}
+      SMS_API_KEY: ${SMS_API_KEY:-}
+      SMS_API_URL: ${SMS_API_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    ports:
+      - '4000:4000'
+    volumes:
+      - prod_backend_uploads:/app/uploads
+    networks:
+      - dentacare-internal
+      - dentacare-public
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dentacare-prod-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:4000}
+    ports:
+      - '3000:3000'
+    networks:
+      - dentacare-internal
+      - dentacare-public
+
+networks:
+  dentacare-internal:
+    internal: true
+  dentacare-public:
+    driver: bridge
+
+volumes:
+  prod_postgres_data:
+  prod_redis_data:
+  prod_backend_uploads:

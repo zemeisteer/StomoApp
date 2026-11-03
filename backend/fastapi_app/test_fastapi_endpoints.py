@@ -1,8 +1,10 @@
 import asyncio
+import pytest
 import httpx
 from datetime import datetime, timedelta
 from app.main import app
 
+@pytest.mark.asyncio
 async def test_suite():
     print("--- RUNNING FASTAPI INTEGRATION TEST SUITE ---")
     transport = httpx.ASGITransport(app=app)
