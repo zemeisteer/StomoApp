@@ -13,6 +13,7 @@ import { NotificationsService } from '../src/notifications/notifications.service
 import { AppointmentsService } from '../src/appointments/appointments.service';
 import { ServicesService } from '../src/services/services.service';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { parseArgs, sanitizeDatabaseUrl, runMaintenanceCli } from '../scripts/repair-reminders';
 
 // Prevent background cron timers from interfering with isolated e2e tests
@@ -68,6 +69,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   let notificationsService: NotificationsService;
   let appointmentsService: AppointmentsService;
   let servicesService: ServicesService;
+  let throttlerStorage: any;
 
   // Run-specific fixture prefix (does NOT delete broad phone prefixes)
   const runId = Date.now().toString().slice(-5);
@@ -109,6 +111,11 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     notificationsService = app.get(NotificationsService);
     appointmentsService = app.get(AppointmentsService);
     servicesService = app.get(ServicesService);
+    try {
+      throttlerStorage = app.get(ThrottlerStorage);
+    } catch {
+      throttlerStorage = app.get(ThrottlerStorageService);
+    }
 
     // Verify connected database identity before mutations
     const [{ current_database }] = await prisma.$queryRaw<[{ current_database: string }]>`SELECT current_database();`;
@@ -234,6 +241,21 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       .post('/api/auth/login')
       .send({ email: 'dr.unlinked@dentacare.local', password: 'Doctor2026!' });
     unlinkedDoctorToken = unlinkedLoginRes.body.accessToken;
+  });
+
+  beforeEach(() => {
+    // Reset throttler storage between tests to isolate rate-limiting without weakening production defaults
+    if (throttlerStorage) {
+      if (typeof throttlerStorage.storage?.clear === 'function') {
+        throttlerStorage.storage.clear();
+      }
+      if (typeof throttlerStorage._storage?.clear === 'function') {
+        throttlerStorage._storage.clear();
+      }
+      if (typeof throttlerStorage.hitExpirations?.clear === 'function') {
+        throttlerStorage.hitExpirations.clear();
+      }
+    }
   });
 
   afterAll(async () => {
