@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus, NotificationChannel } from '@prisma/client';
+import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus, NotificationChannel, PaymentMethod } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/auth/auth.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
@@ -6333,6 +6333,336 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         .expect(403);
     } finally {
       await prisma.staffUser.deleteMany({ where: { id: recUser.id } });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 53: Inventory concurrency safety - parallel deductions fail closed
+  // -------------------------------------------------------------
+  it('Regression 53: Inventory concurrency safety - parallel deductions fail closed on insufficient stock without negative balance or lost updates', async () => {
+    let itemId: string | null = null;
+    try {
+      // 1. Create inventory item with initial stock of 10
+      const createRes = await request(app.getHttpServer())
+        .post('/api/admin/inventory')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: `Anesteziya Artikain Concurrent ${runId}`,
+          category: 'anesthetic',
+          quantity: 10,
+          unit: 'ampula',
+          minThreshold: 2,
+          unitCost: 15000,
+        })
+        .expect(201);
+
+      itemId = createRes.body.id;
+      expect(createRes.body.quantity).toBe(10);
+
+      // 2. Fire two truly simultaneous deduction requests of -7 each (7 + 7 = 14 > 10)
+      const [res1, res2] = await Promise.all([
+        request(app.getHttpServer())
+          .patch(`/api/admin/inventory/${itemId}/stock`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            changeType: 'USAGE',
+            quantityDelta: -7,
+            reason: 'Concurrent deduction branch 1',
+          }),
+        request(app.getHttpServer())
+          .patch(`/api/admin/inventory/${itemId}/stock`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            changeType: 'USAGE',
+            quantityDelta: -7,
+            reason: 'Concurrent deduction branch 2',
+          }),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      // Exactly one request must succeed (200) and the other must fail closed (400)
+      expect(statuses).toEqual([200, 400]);
+
+      const failedRes = res1.status === 400 ? res1 : res2;
+      expect(failedRes.body.message).toContain('manfiy');
+
+      // 3. Verify resulting inventory in database: exactly 10 - 7 = 3 left, never negative or lost update
+      const dbItem = await prisma.inventoryItem.findUnique({ where: { id: itemId! } });
+      expect(dbItem?.quantity).toBe(3);
+
+      // Verify movements: Initial (10) + exactly 1 usage (-7) = 2 records
+      const movements = await prisma.inventoryMovement.findMany({
+        where: { inventoryItemId: itemId! },
+      });
+      expect(movements).toHaveLength(2);
+    } finally {
+      if (itemId) {
+        await prisma.inventoryMovement.deleteMany({ where: { inventoryItemId: itemId } });
+        await prisma.inventoryItem.deleteMany({ where: { id: itemId } });
+      }
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 54: Billing integrity - validates discount <= totalAmount, patient/appointment match, prevents overpayment
+  // -------------------------------------------------------------
+  it('Regression 54: Billing integrity - validates discount <= totalAmount, patient/appointment match, prevents overpayment', async () => {
+    let patientAId: string | null = null;
+    let patientBId: string | null = null;
+    let apptBId: string | null = null;
+    let invoiceId: string | null = null;
+
+    try {
+      const patientA = await prisma.patient.create({
+        data: {
+          fullName: `Billing Integrity Patient A ${runId}`,
+          phone: `+99800${runId}71`,
+        },
+      });
+      patientAId = patientA.id;
+
+      const patientB = await prisma.patient.create({
+        data: {
+          fullName: `Billing Integrity Patient B ${runId}`,
+          phone: `+99800${runId}72`,
+        },
+      });
+      patientBId = patientB.id;
+
+      const apptTime = getNextWorkingSlot(15, 11, 0);
+      const apptB = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_bill_b_${runId}`,
+          patientId: patientB.id,
+          doctorId: testDoctorAId,
+          serviceId: testServiceId,
+          branchId: testBranchId,
+          startTime: apptTime,
+          endTime: new Date(apptTime.getTime() + 30 * 60 * 1000),
+          durationMinutes: 30,
+          status: AppointmentStatus.CONFIRMED,
+          serviceName: 'Maslahat',
+        },
+      });
+      apptBId = apptB.id;
+
+      // 1. Discount exceeding totalAmount must be rejected with 400
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/invoices')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          patientId: patientA.id,
+          totalAmount: 500000,
+          discount: 600000,
+        })
+        .expect(400);
+
+      // 2. Cross-patient appointment mismatch must be rejected with 400
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/invoices')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          patientId: patientA.id,
+          appointmentId: apptB.id, // belongs to patient B
+          totalAmount: 500000,
+          discount: 50000,
+        })
+        .expect(400);
+
+      // 3. Valid invoice creation for Patient A: 500,000 UZS total - 50,000 discount = 450,000 debt
+      const invRes = await request(app.getHttpServer())
+        .post('/api/admin/billing/invoices')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          patientId: patientA.id,
+          totalAmount: 500000,
+          discount: 50000,
+          notes: 'Muolaja hisobi',
+        })
+        .expect(201);
+
+      invoiceId = invRes.body.id;
+
+      // 4. Payment patient mismatch must be rejected with 400
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          invoiceId,
+          patientId: patientB.id, // Does not match invoice's patient A
+          amount: 100000,
+        })
+        .expect(400);
+
+      // 5. Overpayment exceeding remaining debt (450,000) must be rejected with 400
+      const overpayRes = await request(app.getHttpServer())
+        .post('/api/admin/billing/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          invoiceId,
+          amount: 500000, // 500,000 > 450,000
+        })
+        .expect(400);
+
+      expect(overpayRes.body.message).toContain('oshib ketishi mumkin emas');
+
+      // 6. Partial payment of 200,000 succeeds -> invoice status becomes PARTIALLY_PAID
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          invoiceId,
+          amount: 200000,
+          method: PaymentMethod.CASH,
+        })
+        .expect(201);
+
+      const invAfterPartial = await prisma.invoice.findUnique({ where: { id: invoiceId! } });
+      expect(invAfterPartial?.status).toBe('PARTIALLY_PAID');
+
+      // 7. Full remaining payment of 250,000 succeeds -> invoice status becomes PAID
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          invoiceId,
+          amount: 250000,
+          method: PaymentMethod.CARD,
+        })
+        .expect(201);
+
+      const invAfterFull = await prisma.invoice.findUnique({ where: { id: invoiceId! } });
+      expect(invAfterFull?.status).toBe('PAID');
+
+      // 8. Attempting to pay on already fully settled invoice (remaining debt = 0) is rejected
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          invoiceId,
+          amount: 10000,
+        })
+        .expect(400);
+    } finally {
+      if (invoiceId) {
+        await prisma.payment.deleteMany({ where: { invoiceId } });
+        await prisma.invoice.deleteMany({ where: { id: invoiceId } });
+      }
+      if (apptBId) {
+        await prisma.appointment.deleteMany({ where: { id: apptBId } });
+      }
+      if (patientAId) {
+        await prisma.patient.deleteMany({ where: { id: patientAId } });
+      }
+      if (patientBId) {
+        await prisma.patient.deleteMany({ where: { id: patientBId } });
+      }
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 55: Invoice doctor scoping - doctor cannot see or create invoices for other doctors
+  // -------------------------------------------------------------
+  it('Regression 55: Invoice doctor scoping - doctor cannot see or create invoices for treatments performed by other doctors', async () => {
+    let patientId: string | null = null;
+    let apptAId: string | null = null;
+    let apptBId: string | null = null;
+    let invAId: string | null = null;
+    let invBId: string | null = null;
+
+    try {
+      const patient = await prisma.patient.create({
+        data: {
+          fullName: `Doctor Scope Patient ${runId}`,
+          phone: `+99800${runId}73`,
+        },
+      });
+      patientId = patient.id;
+
+      const timeA = getNextWorkingSlot(16, 9, 0);
+      const apptA = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_scope_a_${runId}`,
+          patientId: patient.id,
+          doctorId: testDoctorAId, // Doctor A (dr.rahimov)
+          serviceId: testServiceId,
+          branchId: testBranchId,
+          startTime: timeA,
+          endTime: new Date(timeA.getTime() + 30 * 60 * 1000),
+          durationMinutes: 30,
+          status: AppointmentStatus.CONFIRMED,
+          serviceName: 'Maslahat A',
+        },
+      });
+      apptAId = apptA.id;
+
+      const timeB = getNextWorkingSlot(16, 14, 0);
+      const apptB = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_scope_b_${runId}`,
+          patientId: patient.id,
+          doctorId: testDoctorBId, // Doctor B (dr.karimova)
+          serviceId: testServiceId,
+          branchId: testBranchId,
+          startTime: timeB,
+          endTime: new Date(timeB.getTime() + 30 * 60 * 1000),
+          durationMinutes: 30,
+          status: AppointmentStatus.CONFIRMED,
+          serviceName: 'Maslahat B',
+        },
+      });
+      apptBId = apptB.id;
+
+      // Create invoice for Doctor A's appointment
+      const invA = await prisma.invoice.create({
+        data: {
+          patientId: patient.id,
+          appointmentId: apptA.id,
+          totalAmount: 300000,
+          discount: 0,
+          status: 'PENDING',
+        },
+      });
+      invAId = invA.id;
+
+      // Create invoice for Doctor B's appointment
+      const invB = await prisma.invoice.create({
+        data: {
+          patientId: patient.id,
+          appointmentId: apptB.id,
+          totalAmount: 800000,
+          discount: 0,
+          status: 'PENDING',
+        },
+      });
+      invBId = invB.id;
+
+      // Doctor A (doctorAToken) queries invoices: must ONLY receive Doctor A's invoice
+      const docAList = await request(app.getHttpServer())
+        .get('/api/admin/billing/invoices')
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .expect(200);
+
+      const returnedInvoiceIds = docAList.body.map((inv: any) => inv.id);
+      expect(returnedInvoiceIds).toContain(invA.id);
+      expect(returnedInvoiceIds).not.toContain(invB.id);
+
+      // Doctor A attempts to create invoice for Doctor B's appointment -> strictly 403 Forbidden
+      await request(app.getHttpServer())
+        .post('/api/admin/billing/invoices')
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .send({
+          patientId: patient.id,
+          appointmentId: apptB.id, // Doctor B's treatment
+          totalAmount: 150000,
+        })
+        .expect(403);
+    } finally {
+      if (invAId) await prisma.invoice.deleteMany({ where: { id: invAId } });
+      if (invBId) await prisma.invoice.deleteMany({ where: { id: invBId } });
+      if (apptAId) await prisma.appointment.deleteMany({ where: { id: apptAId } });
+      if (apptBId) await prisma.appointment.deleteMany({ where: { id: apptBId } });
+      if (patientId) await prisma.patient.deleteMany({ where: { id: patientId } });
     }
   });
 });

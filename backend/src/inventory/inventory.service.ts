@@ -56,15 +56,21 @@ export class InventoryService {
   }
 
   async recordStockMovement(id: string, dto: RecordMovementDto, user: JwtPayload) {
-    const item = await this.prisma.inventoryItem.findUnique({ where: { id } });
-    if (!item) throw new NotFoundException('Ombor mahsuloti topilmadi');
-
-    const newQuantity = item.quantity + dto.quantityDelta;
-    if (newQuantity < 0) {
-      throw new BadRequestException('Ombordagi qoldiq manfiy bo\'lishi mumkin emas');
-    }
-
     return await this.prisma.$transaction(async (tx) => {
+      // 1. Row-level pessimistic lock inside transaction to eliminate race conditions
+      const rows = await tx.$queryRaw<Array<{ id: string; quantity: number }>>`
+        SELECT id, quantity FROM "inventory_items" WHERE id = ${id} FOR UPDATE;
+      `;
+      if (!rows || rows.length === 0) {
+        throw new NotFoundException('Ombor mahsuloti topilmadi');
+      }
+
+      const item = rows[0];
+      const newQuantity = item.quantity + dto.quantityDelta;
+      if (newQuantity < 0) {
+        throw new BadRequestException('Ombordagi qoldiq manfiy bo\'lishi mumkin emas');
+      }
+
       const updated = await tx.inventoryItem.update({
         where: { id },
         data: { quantity: newQuantity },
