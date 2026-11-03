@@ -147,3 +147,4 @@ jobs:
         env:
           ENVIRONMENT: test
         run: pytest bot/test_bot_suite.py
+

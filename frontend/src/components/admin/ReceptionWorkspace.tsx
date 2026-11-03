@@ -765,3 +765,4 @@ export function ReceptionWorkspace({
     </div>
   );
 }
+

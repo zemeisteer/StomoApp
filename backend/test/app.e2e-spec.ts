@@ -6270,10 +6270,9 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     });
 
     try {
-      // 2. Login as RECEPTION (using isolated test IP to avoid global rate limiting)
+      // 2. Login as RECEPTION
       const recLoginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .set('X-Forwarded-For', `198.51.100.${Math.floor(Math.random() * 200) + 20}`)
         .send({ email: receptionEmail, password: 'Reception2026!' })
         .expect(200);
 
