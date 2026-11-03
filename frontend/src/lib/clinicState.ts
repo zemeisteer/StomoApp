@@ -770,9 +770,10 @@ class ClinicStateManager {
         this.persist();
       }
       return true;
-    } catch {
-      // Graceful offline fallback: Continue using reactive localStorage state
-      return false;
+    } catch (err: any) {
+      console.error('FastAPI backend sync failed:', err);
+      // Fail-closed: do not mask offline or sync failure with fake state
+      throw new Error(`Klinika serveri bilan sinxronizatsiya amalga oshmadi: ${err?.message || 'Ulanish xatosi'}`);
     }
   }
 

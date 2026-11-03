@@ -1030,8 +1030,8 @@ export default function AdminCalendarPage() {
                   <span>📱</span>
                   <span>
                     {isRu
-                      ? `SMS-уведомление отправлено на номер ${confirmedToast.patientPhone || 'пациента'}: "DentaCare: Ваша запись подтверждена..."`
-                      : `Bemorga (${confirmedToast.patientPhone || 'telefoniga'}) SMS xabarnoma yuborildi: "DentaCare: Qabulingiz tasdiqlandi..."`}
+                      ? `Уведомление поставлено в очередь отправки (Outbox) для номера ${confirmedToast.patientPhone || 'пациента'}`
+                      : `Xabarnoma yuborish navbatiga (Outbox) qo'yildi: ${confirmedToast.patientPhone || 'bemor telefoniga'}`}
                   </span>
                 </div>
               </div>
@@ -1083,8 +1083,8 @@ export default function AdminCalendarPage() {
                   <span>📱</span>
                   <span>
                     {isRu
-                      ? `SMS-уведомление отправлено на номер ${cancelToast.patientPhone || 'пациента'}: "DentaCare: Ваша запись отменена..."`
-                      : `Bemorga (${cancelToast.patientPhone || 'telefoniga'}) SMS xabarnoma yuborildi: "DentaCare: Qabulingiz bekor qilindi..."`}
+                      ? `Уведомление об отмене поставлено в очередь отправки для номера ${cancelToast.patientPhone || 'пациента'}`
+                      : `Bekor qilish xabarnomasi yuborish navbatiga (Outbox) qo'yildi: ${cancelToast.patientPhone || 'bemor telefoniga'}`}
                   </span>
                 </div>
               </div>

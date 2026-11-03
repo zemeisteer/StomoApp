@@ -128,8 +128,8 @@ export default function AdminOverviewPage() {
   const loadReqSeqRef = useRef<number>(0);
   const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Staff Role (Strictly derived from authenticated login credentials)
-  const effectiveRole = user?.role || 'ADMIN';
+  // Staff Role (Strictly derived from authenticated login credentials - fail-closed)
+  const effectiveRole = user?.role;
   const isDoctor = effectiveRole === 'DOCTOR';
   const isOwner = effectiveRole === 'OWNER';
 
@@ -924,6 +924,16 @@ export default function AdminOverviewPage() {
     );
   }
 
+  if (!user || !user.role) {
+    return (
+      <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'DOCTOR']}>
+        <div className="p-16 text-center text-rose-600 text-sm font-semibold">
+          {isUz ? 'Kirish rad etildi: foydalanuvchi roli aniqlanmadi' : 'Доступ запрещен: роль пользователя не определена'}
+        </div>
+      </AdminLayout>
+    );
+  }
+
   return (
     <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'DOCTOR']}>
       <div className="space-y-6">
@@ -1585,7 +1595,7 @@ export default function AdminOverviewPage() {
                 <div>
                   <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Jami tushum (Klinika daromadi)' : 'Общая выручка клиники'}</span>
                   <p className="text-2xl font-black text-[#152f34] mt-0.5">
-                    {clinicState.invoices.reduce((acc, inv) => acc + inv.paidAmount, 0).toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so'm</span>
+                    {clinicState.invoices.reduce((acc, inv) => acc + inv.paidAmount, 0).toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so&apos;m</span>
                   </p>
                   <span className="text-[11px] text-emerald-700 font-medium">{isUz ? "Muolajalar va to'lovlar" : 'Оплаченные процедуры'}</span>
                 </div>
@@ -1599,7 +1609,7 @@ export default function AdminOverviewPage() {
                 <div>
                   <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Bemorlar qarzdorligi (Qarzlar)' : 'Задолженность пациентов'}</span>
                   <p className="text-2xl font-black text-rose-600 mt-0.5">
-                    {clinicState.patients.reduce((acc, p) => acc + p.totalDebt, 0).toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so'm</span>
+                    {clinicState.patients.reduce((acc, p) => acc + p.totalDebt, 0).toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so&apos;m</span>
                   </p>
                   <button
                     type="button"
@@ -1720,25 +1730,25 @@ export default function AdminOverviewPage() {
                             <div className="bg-white p-2 rounded-xl border border-[#e2eeee]">
                               <span className="text-[10px] text-[#52696e] block">{isUz ? 'Jami xizmat:' : 'Валовый сбор:'}</span>
                               <strong className="text-xs text-[#152f34] block mt-0.5">
-                                {earnings.grossClinicalRevenue.toLocaleString()} so'm
+                                {earnings.grossClinicalRevenue.toLocaleString()} so&apos;m
                               </strong>
                             </div>
                             <div className="bg-white p-2 rounded-xl border border-[#e2eeee]">
                               <span className="text-[10px] text-[#52696e] block">{isUz ? 'Material (10%):' : 'Материалы (10%):'}</span>
                               <strong className="text-xs text-amber-700 block mt-0.5">
-                                -{earnings.materialCosts.toLocaleString()} so'm
+                                -{earnings.materialCosts.toLocaleString()} so&apos;m
                               </strong>
                             </div>
                             <div className="bg-[#e0f2ed] p-2 rounded-xl border border-[#167b78]/30">
                               <span className="text-[10px] text-[#167b78] font-bold block">{isUz ? 'Shifokorga to\'lov:' : 'Выплата врачу:'}</span>
                               <strong className="text-xs text-[#116460] block mt-0.5 font-black">
-                                {earnings.doctorPayout.toLocaleString()} so'm
+                                {earnings.doctorPayout.toLocaleString()} so&apos;m
                               </strong>
                             </div>
                             <div className="bg-white p-2 rounded-xl border border-[#e2eeee]">
                               <span className="text-[10px] text-[#52696e] block">{isUz ? 'Klinika foydasi:' : 'Прибыль клиники:'}</span>
                               <strong className="text-xs text-emerald-700 block mt-0.5 font-bold">
-                                {earnings.clinicNetProfit.toLocaleString()} so'm
+                                {earnings.clinicNetProfit.toLocaleString()} so&apos;m
                               </strong>
                             </div>
                           </div>
@@ -1816,7 +1826,7 @@ export default function AdminOverviewPage() {
                                 {item.quantity} {item.unit}
                               </span>
                               <span className="text-[10px] text-[#52696e] block">
-                                {item.costPerUnit.toLocaleString()} so'm/{item.unit}
+                                {item.costPerUnit.toLocaleString()} so&apos;m/{item.unit}
                               </span>
                             </div>
 
@@ -1886,7 +1896,7 @@ export default function AdminOverviewPage() {
                               <p className="font-bold text-xs text-[#152f34] truncate">{patient.fullName}</p>
                               <p className="text-[11px] font-mono text-[#52696e]">{patient.phone}</p>
                               <p className="text-xs font-black text-rose-600 mt-0.5">
-                                {isUz ? 'Qarz:' : 'Долг:'} {patient.totalDebt.toLocaleString()} so'm
+                                {isUz ? 'Qarz:' : 'Долг:'} {patient.totalDebt.toLocaleString()} so&apos;m
                               </p>
                             </div>
 
@@ -1935,7 +1945,7 @@ export default function AdminOverviewPage() {
                           </div>
                           <div className="text-right">
                             <span className="font-bold text-xs text-emerald-700 block">
-                              +{pay.amount.toLocaleString()} so'm
+                              +{pay.amount.toLocaleString()} so&apos;m
                             </span>
                             <span className="text-[10px] text-slate-500">{pay.notes || (isUz ? 'Qabul' : 'Прием')}</span>
                           </div>
@@ -2541,7 +2551,7 @@ export default function AdminOverviewPage() {
                         <span className="text-[10px] text-rose-800 font-bold uppercase block">
                           {isUz ? 'Jami qarzlar:' : 'Общий долг:'}
                         </span>
-                        <span className="text-xs font-black text-rose-900">{totalDebt.toLocaleString()} so'm</span>
+                        <span className="text-xs font-black text-rose-900">{totalDebt.toLocaleString()} so&apos;m</span>
                       </div>
                       <button
                         type="button"
@@ -2711,7 +2721,7 @@ export default function AdminOverviewPage() {
                       .filter((p) => p.totalDebt > 0)
                       .map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.fullName} ({p.phone}) — {isUz ? 'Qarz:' : 'Долг:'} {p.totalDebt.toLocaleString()} so'm
+                          {p.fullName} ({p.phone}) — {isUz ? 'Qarz:' : 'Долг:'} {p.totalDebt.toLocaleString()} so&apos;m
                         </option>
                       ))}
                   </select>
@@ -2727,7 +2737,7 @@ export default function AdminOverviewPage() {
                       const activePat = clinicState.patients.find((p) => p.id === debtPatientId);
                       return activePat ? (
                         <span className="text-[10px] text-rose-600 font-bold">
-                          {isUz ? 'Jami qarz:' : 'Всего долг:'} {activePat.totalDebt.toLocaleString()} so'm
+                          {isUz ? 'Jami qarz:' : 'Всего долг:'} {activePat.totalDebt.toLocaleString()} so&apos;m
                         </span>
                       ) : null;
                     })()}

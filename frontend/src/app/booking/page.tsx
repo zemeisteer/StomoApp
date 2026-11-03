@@ -29,7 +29,6 @@ import { PhoneInput } from '../../components/PhoneInput';
 import { CustomDatePicker } from '../../components/CustomDatePicker';
 import { normalizeUzPhone } from '../../lib/phone';
 import { formatWorkingHours } from '../../lib/dateFormat';
-import { clinicStore } from '../../lib/clinicState';
 
 interface ServerCalculation {
   key: string;
@@ -902,23 +901,6 @@ function BookingContent() {
       setIsSubmitting(true);
       setErrorMessage(null);
 
-      // Collision prevention check (Phase 2 Requirement 3)
-      const hasCollision = clinicStore.checkSlotCollision({
-        doctorId: boundSelection.doctorId,
-        startTime: boundSelection.slotTime,
-        durationMinutes: boundSelection.serverCalc?.durationMinutes || 30,
-      });
-      if (hasCollision) {
-        setErrorMessage(
-          language === 'ru'
-            ? 'Выбранное время пересекается с существующей записью врача. Пожалуйста, выберите другое время.'
-            : 'Tanlangan vaqt shifokorning mavjud qabuli bilan to\'qnashmoqda. Iltimos, boshqa vaqtni tanlang.'
-        );
-        setIsSubmitting(false);
-        setStep(4);
-        return;
-      }
-
       const result = await api.createBooking({
         branchId: boundSelection.branchId,
         serviceId: boundSelection.serviceIds[0],
@@ -993,21 +975,6 @@ function BookingContent() {
         durationMinutes: confirmedDuration,
         bufferMinutes: confirmedBuffer,
         servicePriceFrom: confirmedPrice,
-      });
-
-      // Sync into centralized reactive clinicStore (Phase 2 Cross-Role Sync)
-      clinicStore.bookAppointment({
-        patientName: patientName.trim(),
-        patientPhone: phoneValidation.normalized,
-        doctorId: boundSelection.doctorId,
-        doctorName: confirmedDoctorName,
-        branchId: boundSelection.branchId,
-        branchName: confirmedBranchName,
-        serviceId: boundSelection.serviceIds[0],
-        serviceName: confirmedServiceName,
-        startTime: boundSelection.slotTime,
-        durationMinutes: confirmedDuration,
-        idempotencyKey: currentKey,
       });
 
       setStep(7);

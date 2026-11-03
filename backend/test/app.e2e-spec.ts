@@ -12,7 +12,17 @@ import { AuthService } from '../src/auth/auth.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { AppointmentsService } from '../src/appointments/appointments.service';
 import { ServicesService } from '../src/services/services.service';
+import { SchedulerRegistry } from '@nestjs/schedule';
 import { parseArgs, sanitizeDatabaseUrl, runMaintenanceCli } from '../scripts/repair-reminders';
+
+// Prevent background cron timers from interfering with isolated e2e tests
+const originalAddCronJob = SchedulerRegistry.prototype.addCronJob;
+SchedulerRegistry.prototype.addCronJob = function (name: string, job: any) {
+  if (job && typeof job.stop === 'function') {
+    job.stop();
+  }
+  return originalAddCronJob.call(this, name, job);
+};
 
 function parseAndValidateTestDatabaseUrl(rawUrl: string): string {
   try {
@@ -118,6 +128,18 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     testBranchId = branch!.id;
 
     // Clean up any test appointments and patients from prior test runs
+    await prisma.notificationJob.deleteMany({
+      where: {
+        OR: [
+          { recipient: { startsWith: '+99800' } },
+          { recipient: { contains: 'test.local' } },
+          { recipient: { contains: '@example.com' } },
+          { recipient: { contains: 'outbox_' } },
+          { recipient: { contains: 'idemp_' } },
+          { appointment: { patient: { phone: { startsWith: '+99800' } } } },
+        ],
+      },
+    });
     await prisma.appointmentStatusHistory.deleteMany({
       where: { appointment: { patient: { phone: { startsWith: '+99800' } } } },
     });
@@ -216,6 +238,9 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
 
   afterAll(async () => {
     // Isolated cleanup of ONLY run-specific fixtures
+    await prisma.notificationJob.deleteMany({
+      where: { appointment: { patient: { phone: { startsWith: testPhonePrefix } } } },
+    });
     await prisma.appointmentStatusHistory.deleteMany({
       where: { appointment: { patient: { phone: { startsWith: testPhonePrefix } } } },
     });
@@ -368,6 +393,13 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     const [res1, res2] = await Promise.all([req1, req2]);
     const statuses = [res1.status, res2.status].sort();
     expect(statuses).toEqual([201, 409]);
+
+    const createdId = res1.status === 201 ? (res1.body.id || res1.body.appointmentId) : (res2.body.id || res2.body.appointmentId);
+    if (createdId) {
+      await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: createdId } });
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: createdId } });
+      await prisma.appointment.delete({ where: { id: createdId } }).catch(() => {});
+    }
   });
 
   // -------------------------------------------------------------
@@ -1214,6 +1246,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.clinicSettings.updateMany({
         data: { bufferMinutes: 5 },
       });
+      await prisma.notificationJob.deleteMany({ where: { appointmentId: historicalAppt.id } });
+      await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: historicalAppt.id } });
       await prisma.appointment.delete({ where: { id: historicalAppt.id } }).catch(() => {});
     }
   });
@@ -1223,84 +1257,86 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // -------------------------------------------------------------
   it('Regression 21: Notification intents are persisted transactionally, outbox cancels stale reminders on reschedule/cancel', async () => {
     const patient = await prisma.patient.findFirst();
-    const slotTime = new Date(Date.now() + 140 * 60 * 60 * 1000);
-    slotTime.setUTCHours(6, 0, 0, 0);
-    if (slotTime.getUTCDay() === 0) slotTime.setUTCDate(slotTime.getUTCDate() + 1);
+    const slotTime = getNextWorkingSlot(35, 10, 0);
 
-    const bookingRes = await request(app.getHttpServer())
-      .post('/api/booking')
-      .send({
-        serviceId: testServiceId,
-        doctorId: testDoctorBId,
-        branchId: testBranchId,
-        startTime: slotTime.toISOString(),
-        patientName: `Outbox Patient ${runId}`,
-        patientPhone: `${testPhonePrefix}99`,
-        patientEmail: `outbox_${runId}@example.com`,
-        consentGiven: true,
-      })
-      .expect(201);
+    let apptId: string | undefined;
+    try {
+      const bookingRes = await request(app.getHttpServer())
+        .post('/api/booking')
+        .send({
+          serviceId: testServiceId,
+          doctorId: testDoctorBId,
+          branchId: testBranchId,
+          startTime: slotTime.toISOString(),
+          patientName: `Outbox Patient ${runId}`,
+          patientPhone: `${testPhonePrefix}99`,
+          patientEmail: `outbox_${runId}@example.com`,
+          consentGiven: true,
+        })
+        .expect(201);
 
-    const apptId = bookingRes.body.id || bookingRes.body.appointmentId;
+      apptId = bookingRes.body.id || bookingRes.body.appointmentId;
 
-    // 1. Verify notification job was transactionally created
-    const createdJobs = await prisma.notificationJob.findMany({
-      where: { appointmentId: apptId },
-    });
-    expect(createdJobs.length).toBeGreaterThanOrEqual(1);
-    const bookingJob = createdJobs.find((j) => j.templateKey === 'patient_booking_received' || j.templateKey === 'patient_booking_received_sms');
-    expect(bookingJob).toBeDefined();
-    expect(bookingJob!.status).toBe(NotificationStatus.PENDING);
+      // 1. Verify notification job was transactionally created
+      const createdJobs = await prisma.notificationJob.findMany({
+        where: { appointmentId: apptId },
+      });
+      expect(createdJobs.length).toBeGreaterThanOrEqual(1);
+      const bookingJob = createdJobs.find((j) => j.templateKey === 'patient_booking_received' || j.templateKey === 'patient_booking_received_sms');
+      expect(bookingJob).toBeDefined();
+      expect(bookingJob!.status).toBe(NotificationStatus.PENDING);
 
-    // 2. Confirm appointment -> Verify patient_booking_confirmed enqueued
-    await request(app.getHttpServer())
-      .patch(`/api/admin/appointments/${apptId}/status`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ status: AppointmentStatus.CONFIRMED })
-      .expect(200);
+      // 2. Confirm appointment -> Verify patient_booking_confirmed enqueued
+      await request(app.getHttpServer())
+        .patch(`/api/admin/appointments/${apptId}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: AppointmentStatus.CONFIRMED })
+        .expect(200);
 
-    const confirmedJobs = await prisma.notificationJob.findMany({
-      where: { appointmentId: apptId, templateKey: 'patient_booking_confirmed' },
-    });
-    expect(confirmedJobs.length).toBe(1);
+      const confirmedJobs = await prisma.notificationJob.findMany({
+        where: { appointmentId: apptId, templateKey: 'patient_booking_confirmed' },
+      });
+      expect(confirmedJobs.length).toBe(1);
 
-    // 3. Reschedule appointment -> Verify old reminder cancelled and appointment_rescheduled enqueued with revision 2
-    const newSlotTime = new Date(slotTime.getTime() + 24 * 60 * 60 * 1000);
-    if (newSlotTime.getUTCDay() === 0) newSlotTime.setUTCDate(newSlotTime.getUTCDate() + 1);
+      // 3. Reschedule appointment -> Verify old reminder cancelled and appointment_rescheduled enqueued with revision 2
+      const newSlotTime = getNextWorkingSlot(36, 10, 0);
 
-    await request(app.getHttpServer())
-      .post(`/api/admin/appointments/${apptId}/reschedule`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ startTime: newSlotTime.toISOString() })
-      .expect(200);
+      await request(app.getHttpServer())
+        .post(`/api/admin/appointments/${apptId}/reschedule`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ startTime: newSlotTime.toISOString() })
+        .expect(200);
 
-    const rescheduledJobs = await prisma.notificationJob.findMany({
-      where: { appointmentId: apptId, templateKey: 'appointment_rescheduled' },
-    });
-    expect(rescheduledJobs.length).toBe(1);
-    expect(rescheduledJobs[0].appointmentRevision).toBe(2);
+      const rescheduledJobs = await prisma.notificationJob.findMany({
+        where: { appointmentId: apptId, templateKey: 'appointment_rescheduled' },
+      });
+      expect(rescheduledJobs.length).toBe(1);
+      expect(rescheduledJobs[0].appointmentRevision).toBe(2);
 
-    // 4. Cancel appointment -> Verify appointment_cancellation enqueued and reminders cancelled
-    await request(app.getHttpServer())
-      .patch(`/api/admin/appointments/${apptId}/status`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ status: AppointmentStatus.CANCELLED })
-      .expect(200);
+      // 4. Cancel appointment -> Verify appointment_cancellation enqueued and reminders cancelled
+      await request(app.getHttpServer())
+        .patch(`/api/admin/appointments/${apptId}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: AppointmentStatus.CANCELLED })
+        .expect(200);
 
-    const cancelledJobs = await prisma.notificationJob.findMany({
-      where: { appointmentId: apptId, templateKey: 'appointment_cancellation' },
-    });
-    expect(cancelledJobs.length).toBe(1);
+      const cancelledJobs = await prisma.notificationJob.findMany({
+        where: { appointmentId: apptId, templateKey: 'appointment_cancellation' },
+      });
+      expect(cancelledJobs.length).toBe(1);
 
-    // All reminders must be in CANCELLED status
-    const pendingReminders = await prisma.notificationJob.findMany({
-      where: { appointmentId: apptId, templateKey: 'appointment_reminder', status: NotificationStatus.PENDING },
-    });
-    expect(pendingReminders.length).toBe(0);
-
-    // Cleanup
-    await prisma.notificationJob.deleteMany({ where: { appointmentId: apptId } });
-    await prisma.appointment.delete({ where: { id: apptId } });
+      // All reminders must be in CANCELLED status
+      const pendingReminders = await prisma.notificationJob.findMany({
+        where: { appointmentId: apptId, templateKey: 'appointment_reminder', status: NotificationStatus.PENDING },
+      });
+      expect(pendingReminders.length).toBe(0);
+    } finally {
+      if (apptId) {
+        await prisma.notificationJob.deleteMany({ where: { appointmentId: apptId } });
+        await prisma.appointmentStatusHistory.deleteMany({ where: { appointmentId: apptId } });
+        await prisma.appointment.delete({ where: { id: apptId } }).catch(() => {});
+      }
+    }
   });
 
   it('Regression 22: Two-service booking creates exact duration and price snapshots in AppointmentServiceItem and totals', async () => {
