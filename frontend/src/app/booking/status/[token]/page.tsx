@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -59,7 +59,7 @@ export default function BookingStatusPage() {
   const [cancelReason, setCancelReason] = useState('');
   const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
 
-  const loadAppointment = async () => {
+  const loadAppointment = useCallback(async () => {
     if (!token) return;
     try {
       setIsLoading(true);
@@ -77,11 +77,11 @@ export default function BookingStatusPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [token, currentLang]);
 
   useEffect(() => {
     loadAppointment();
-  }, [token]);
+  }, [loadAppointment]);
 
   useEffect(() => {
     async function loadSlots() {

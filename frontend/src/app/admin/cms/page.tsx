@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import {
   FileText,
   HelpCircle,
@@ -365,9 +366,12 @@ export default function AdminCmsPage() {
                   <div key={art.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-4">
                       {art.coverImageUrl ? (
-                        <img
+                        <Image
                           src={art.coverImageUrl}
                           alt={art.titleUz}
+                          width={64}
+                          height={48}
+                          unoptimized
                           className="w-16 h-12 object-cover rounded-xl border border-slate-200 shrink-0"
                         />
                       ) : (

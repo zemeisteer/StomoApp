@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import {
   Calendar,
@@ -110,7 +111,14 @@ export default function DoctorDetailPage() {
         {/* Photo or Initials */}
         <div className="w-44 h-52 sm:w-56 sm:h-64 rounded-2xl overflow-hidden bg-gradient-to-tr from-[#eaf5f2] to-[#d8e5e2] shrink-0 border border-[#d8e5e2] shadow-inner">
           {doctor.photoUrl ? (
-            <img src={doctor.photoUrl} alt={fullName} className="w-full h-full object-cover object-top" />
+            <Image
+              src={doctor.photoUrl}
+              alt={fullName}
+              width={224}
+              height={256}
+              unoptimized
+              className="w-full h-full object-cover object-top"
+            />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center text-[#167b78] text-3xl font-extrabold p-4">
               <div className="w-20 h-20 rounded-2xl bg-white shadow-sm flex items-center justify-center mb-2">

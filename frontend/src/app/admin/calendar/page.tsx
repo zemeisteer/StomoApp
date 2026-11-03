@@ -283,13 +283,16 @@ export default function AdminCalendarPage() {
         setBranches(branchRes || []);
         setServices(servRes || []);
 
-        if (docsRes && docsRes.length > 0 && !createForm.doctorId) {
-          setCreateForm((prev) => ({
-            ...prev,
-            doctorId: user?.role === 'DOCTOR' && user.doctorId ? user.doctorId : docsRes[0].id,
-            serviceId: servRes && servRes.length > 0 ? servRes[0].id : '',
-            branchId: branchRes && branchRes.length > 0 ? branchRes[0].id : '',
-          }));
+        if (docsRes && docsRes.length > 0) {
+          setCreateForm((prev) => {
+            if (prev.doctorId) return prev;
+            return {
+              ...prev,
+              doctorId: user?.role === 'DOCTOR' && user.doctorId ? user.doctorId : docsRes[0].id,
+              serviceId: servRes && servRes.length > 0 ? servRes[0].id : '',
+              branchId: branchRes && branchRes.length > 0 ? branchRes[0].id : '',
+            };
+          });
         }
       } catch (e) {
         console.error('Failed to load fixtures', e);

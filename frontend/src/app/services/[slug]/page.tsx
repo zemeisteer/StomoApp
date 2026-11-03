@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import {
   Calendar,
@@ -221,7 +222,14 @@ export default function ServiceDetailPage() {
                 >
                   <div className="w-14 h-16 rounded-xl overflow-hidden bg-[#eaf5f2] shrink-0">
                     {doc.photoUrl ? (
-                      <img src={doc.photoUrl} alt={docName} className="w-full h-full object-cover" />
+                      <Image
+                        src={doc.photoUrl}
+                        alt={docName}
+                        width={56}
+                        height={64}
+                        unoptimized
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-[#167b78] font-bold text-sm">
                         {doc.firstNameUz?.[0]}{doc.lastNameUz?.[0]}

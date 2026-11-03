@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Calendar, Clock, Building2, Globe, Stethoscope, ArrowRight, Award } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
@@ -94,9 +95,12 @@ export default function DoctorsPage() {
                       className="w-24 h-28 rounded-2xl overflow-hidden bg-gradient-to-tr from-[#eaf5f2] to-[#d8e5e2] shrink-0 relative block"
                     >
                       {doc.photoUrl ? (
-                        <img
+                        <Image
                           src={doc.photoUrl}
                           alt={`Dr. ${firstName} ${lastName}`}
+                          width={96}
+                          height={112}
+                          unoptimized
                           className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform"
                         />
                       ) : (

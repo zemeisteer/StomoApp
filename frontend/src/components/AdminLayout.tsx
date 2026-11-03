@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -238,9 +239,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
         <div className="h-16 px-4 border-b border-[#1e464d] flex items-center justify-between">
           <Link href="/admin" className="flex items-center gap-3 overflow-hidden">
             {clinicLogo && !logoError ? (
-              <img
+              <Image
                 src={clinicLogo}
                 alt={clinicName}
+                width={140}
+                height={36}
+                unoptimized
                 onError={() => setLogoError(true)}
                 className="clinic-logo max-h-9 max-w-[140px] brightness-110"
               />

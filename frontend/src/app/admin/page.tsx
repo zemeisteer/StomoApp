@@ -145,7 +145,7 @@ export default function AdminOverviewPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isOwner]);
 
   // Main Data Loader
   const loadData = useCallback(async () => {

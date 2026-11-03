@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useId, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useId, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check, Search, Loader2 } from 'lucide-react';
 
@@ -73,8 +73,12 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   const isSearchable = searchable !== undefined ? searchable : options.length > 6;
 
   // Filtered options based on search query
-  const filteredOptions = options.filter((opt) =>
-    opt.label.toLowerCase().includes(searchQuery.toLowerCase().trim())
+  const filteredOptions = useMemo(
+    () =>
+      options.filter((opt) =>
+        opt.label.toLowerCase().includes(searchQuery.toLowerCase().trim())
+      ),
+    [options, searchQuery]
   );
 
   const selectedOption = options.find((opt) => opt.value === value);
@@ -142,7 +146,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
       setSearchQuery('');
       setHighlightedIndex(-1);
     }
-  }, [isOpen, searchQuery, isSearchable, value, filteredOptions.length]);
+  }, [isOpen, searchQuery, isSearchable, value, filteredOptions]);
 
   // Scroll active option into view inside the listbox ONLY, never scrolling the page window
   useEffect(() => {

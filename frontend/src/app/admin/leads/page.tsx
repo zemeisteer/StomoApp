@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PhoneCall, CheckCircle2, Clock, MessageSquare, AlertCircle, RefreshCw, Edit3, Search } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
@@ -20,7 +20,7 @@ export default function AdminLeadsPage() {
 
   const reqIdRef = useRef(0);
 
-  const loadLeads = async () => {
+  const loadLeads = useCallback(async () => {
     const curReq = ++reqIdRef.current;
     try {
       setIsLoading(true);
@@ -37,14 +37,14 @@ export default function AdminLeadsPage() {
         setIsLoading(false);
       }
     }
-  };
+  }, [statusFilter, search]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       loadLeads();
     }, 250);
     return () => clearTimeout(timer);
-  }, [statusFilter, search]);
+  }, [loadLeads]);
 
   const handleUpdateStatus = async (id: string, newStatus: string, notes?: string) => {
     try {

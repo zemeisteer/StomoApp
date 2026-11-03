@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Stethoscope,
   Clock,
@@ -102,7 +102,7 @@ export default function AdminServicesPage() {
   const [reconcileSuccessMsg, setReconcileSuccessMsg] = useState<string | null>(null);
   const [isSubmittingReconcile, setIsSubmittingReconcile] = useState(false);
 
-  const loadServices = async () => {
+  const loadServices = useCallback(async () => {
     try {
       setIsLoading(true);
       const [data, docList] = await Promise.all([
@@ -116,9 +116,9 @@ export default function AdminServicesPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const loadLegacyReview = async (page = legacyPage) => {
+  const loadLegacyReview = useCallback(async (page = 1) => {
     try {
       setLegacyLoading(true);
       setReconcileError(null);
@@ -130,12 +130,12 @@ export default function AdminServicesPage() {
     } finally {
       setLegacyLoading(false);
     }
-  };
+  }, [legacyLimit]);
 
   useEffect(() => {
     loadServices();
     loadLegacyReview(1);
-  }, []);
+  }, [loadServices, loadLegacyReview]);
 
   const openCreateModal = () => {
     setEditingService(null);

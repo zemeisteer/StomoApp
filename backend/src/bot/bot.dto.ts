@@ -38,3 +38,4 @@ export class CreateBotBookingDto {
   @IsString()
   notes?: string;
 }
+

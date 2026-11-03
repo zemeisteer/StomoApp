@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Calendar, ArrowRight, Clock, Award, Stethoscope, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 
@@ -120,9 +121,12 @@ export const DoctorsSection: React.FC<DoctorsSectionProps> = ({
                       className="block w-full aspect-[4/5] rounded-xl overflow-hidden mb-4 bg-gradient-to-tr from-[#eaf5f2] to-[#d8e5e2] relative"
                     >
                       {doc.photoUrl && !hasBrokenImage ? (
-                        <img
+                        <Image
                           src={doc.photoUrl}
                           alt={`Dr. ${firstName} ${lastName}`}
+                          width={320}
+                          height={400}
+                          unoptimized
                           onError={() => handleImageError(doc.id)}
                           className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-300"
                         />

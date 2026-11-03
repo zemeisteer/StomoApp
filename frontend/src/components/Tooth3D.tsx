@@ -471,7 +471,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
       engineRef.current = null;
       modelLoadedRef.current = false;
     };
-  }, []);
+  }, [renderSingleFrame, shouldAnimateContinuous, startAnimationLoop, stopAnimationLoop]);
 
   // Pointer interaction:
   // Designed so mobile vertical page scrolling remains completely smooth (touch-action: pan-y)

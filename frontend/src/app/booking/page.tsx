@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense, useMemo, useRef } from 'react';
+import React, { useState, useEffect, Suspense, useMemo, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -497,7 +497,7 @@ function BookingContent() {
   }, [branches, selectedDoctorObj, doctorAssignedBranchIds]);
 
   // Helper to check if doctor provides all selected services
-  const doctorProvidesSelectedServices = (doc: any) => {
+  const doctorProvidesSelectedServices = useCallback((doc: any) => {
     if (!doc) return false;
     if (selectedServiceIds.length === 0) return true;
     return (
@@ -507,7 +507,7 @@ function BookingContent() {
         doc.services.some((ds: any) => ds.serviceId === srvId)
       )
     );
-  };
+  }, [selectedServiceIds]);
 
   // Doctors categorized for Step 3 (Chosen Date)
   const { doctorsWorkingOnDate, doctorsOtherDays } = useMemo(() => {
@@ -528,7 +528,7 @@ function BookingContent() {
     }
 
     return { doctorsWorkingOnDate: working, doctorsOtherDays: other };
-  }, [doctors, selectedDate, selectedServiceIds, selectedBranchId]);
+  }, [doctors, selectedDate, selectedBranchId, doctorProvidesSelectedServices]);
 
   // Recommended branch calculation: derived from selected slot or doctor schedules
   const recommendedBranchObj = useMemo(() => {
@@ -824,7 +824,7 @@ function BookingContent() {
       slotsRequestIdRef.current++;
       setAvailableSlots([]);
     }
-  }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, fallbackTotalDuration, fallbackTotalPrice, selectedServices, t.booking.noSlots]);
+  }, [step, selectedDoctorId, selectedServiceIds, selectedDate, selectedBranchId, fallbackTotalDuration, fallbackTotalPrice, selectedServices, t.booking.noSlots, t.booking.slotConflictNotice]);
 
   // Real-time phone and email validation
   const isPhoneValid = useMemo(() => {

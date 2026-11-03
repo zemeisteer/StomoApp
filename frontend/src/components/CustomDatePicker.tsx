@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useId, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useId, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Clock } from 'lucide-react';
 
@@ -99,7 +99,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     }
   })();
 
-  const parsedValue = parseYMD(value);
+  const parsedValue = useMemo(() => parseYMD(value), [value]);
   const [viewYear, setViewYear] = useState<number>(parsedValue ? parsedValue.year : todayParts.year);
   const [viewMonth, setViewMonth] = useState<number>(parsedValue ? parsedValue.month : todayParts.month);
 
@@ -126,7 +126,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       setViewMonth(parsedValue.month);
       setFocusedDay(parsedValue.day);
     }
-  }, [value]);
+  }, [parsedValue]);
 
   // Position calculation with viewport clamping and mobile short-viewport handling
   const updatePosition = useCallback(() => {

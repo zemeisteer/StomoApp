@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   UserCheck,
   Clock,
@@ -221,7 +221,7 @@ export default function AdminDoctorsManagePage() {
     return Array.from(branchMap.values());
   }, [selectedDoctor, branches]);
 
-  const loadDoctorsAndBranches = async () => {
+  const loadDoctorsAndBranches = useCallback(async () => {
     try {
       setIsLoading(true);
       const [docs, branchList, serviceList] = await Promise.all([
@@ -232,23 +232,23 @@ export default function AdminDoctorsManagePage() {
       setDoctors(docs || []);
       setBranches(branchList || []);
       setServices(serviceList || []);
-      if (docs && docs.length > 0 && !selectedDoctorId) {
-        setSelectedDoctorId(docs[0].id);
+      if (docs && docs.length > 0) {
+        setSelectedDoctorId((prev) => prev || docs[0].id);
       }
-      if (branchList && branchList.length > 0 && !scheduleForm.branchId) {
-        setScheduleForm((prev) => ({ ...prev, branchId: branchList[0].id }));
-        setBulkForm((prev) => ({ ...prev, branchId: branchList[0].id }));
+      if (branchList && branchList.length > 0) {
+        setScheduleForm((prev) => ({ ...prev, branchId: prev.branchId || branchList[0].id }));
+        setBulkForm((prev) => ({ ...prev, branchId: prev.branchId || branchList[0].id }));
       }
     } catch (e) {
       console.error('Failed to load doctors and branches', e);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadDoctorsAndBranches();
-  }, []);
+  }, [loadDoctorsAndBranches]);
 
   const loadDoctorScheduleData = async (docId: string) => {
     if (!docId) return;

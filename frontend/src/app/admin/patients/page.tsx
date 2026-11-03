@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Users,
   Search,
@@ -34,7 +34,7 @@ export default function AdminPatientsPage() {
   const [patientDetail, setPatientDetail] = useState<any | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
-  const loadPatients = async () => {
+  const loadPatients = useCallback(async () => {
     try {
       setIsLoading(true);
       const res = await api.getAdminPatients(search, 1, 50);
@@ -44,14 +44,14 @@ export default function AdminPatientsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [search]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       loadPatients();
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [loadPatients]);
 
   const handleExportCsv = async () => {
     try {

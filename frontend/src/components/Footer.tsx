@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { MapPin, Phone, Mail, Clock, ShieldCheck, Stethoscope } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
@@ -55,9 +56,12 @@ export const Footer: React.FC = () => {
           <div className="space-y-4">
             <Link href="/" className="inline-flex items-center gap-2.5">
               {clinicLogo && !logoError ? (
-                <img
+                <Image
                   src={clinicLogo}
                   alt={clinicName}
+                  width={190}
+                  height={40}
+                  unoptimized
                   onError={() => setLogoError(true)}
                   className="max-h-10 max-w-[190px] object-contain brightness-110"
                 />

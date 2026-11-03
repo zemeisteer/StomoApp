@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   Phone,
@@ -152,9 +153,12 @@ export const Header: React.FC = () => {
             aria-label={`${clinicName} - ${t.nav.home}`}
           >
             {clinicLogo && !logoError ? (
-              <img
+              <Image
                 src={clinicLogo}
                 alt={clinicName}
+                width={190}
+                height={44}
+                unoptimized
                 onError={() => setLogoError(true)}
                 className="h-10 sm:h-11 max-w-[160px] sm:max-w-[190px] object-contain"
               />

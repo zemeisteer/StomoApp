@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import {
   Calendar,
@@ -119,9 +120,12 @@ export default function ArticleDetailPage() {
 
           {article.coverImageUrl && (
             <div className="w-full h-64 sm:h-96 rounded-2xl overflow-hidden bg-slate-100 border border-[#d8e5e2]">
-              <img
+              <Image
                 src={article.coverImageUrl}
                 alt={title}
+                width={800}
+                height={400}
+                unoptimized
                 className="w-full h-full object-cover"
               />
             </div>

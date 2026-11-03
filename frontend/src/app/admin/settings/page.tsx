@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import {
   Settings as SettingsIcon,
   Building2,
@@ -214,7 +215,7 @@ export default function AdminSettingsPage() {
 
     // 3. Check image dimensions via Image object
     try {
-      const img = new Image();
+      const img = new window.Image();
       const objectUrl = URL.createObjectURL(file);
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
@@ -611,9 +612,12 @@ export default function AdminSettingsPage() {
                 <div className="h-16 px-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {logoUrl ? (
-                      <img
+                      <Image
                         src={logoUrl}
                         alt="Klinika logotipi"
+                        width={160}
+                        height={36}
+                        unoptimized
                         className="h-9 max-w-[160px] object-contain"
                       />
                     ) : (
@@ -652,9 +656,12 @@ export default function AdminSettingsPage() {
                 <div className="h-14 px-3 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between max-w-[320px] mx-auto w-full">
                   <div className="flex items-center gap-2">
                     {logoUrl ? (
-                      <img
+                      <Image
                         src={logoUrl}
                         alt="Mobil logo"
+                        width={120}
+                        height={28}
+                        unoptimized
                         className="h-7 max-w-[120px] object-contain"
                       />
                     ) : (
