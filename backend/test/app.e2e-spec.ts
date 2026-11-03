@@ -6868,6 +6868,74 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       }
     }
   });
+
+  it('Regression 58: NestJS Bot Service Integration (Service Token, Sync, Reminders & Schedules)', async () => {
+    const serviceToken = process.env.SERVICE_TOKEN || process.env.BOT_SERVICE_TOKEN || 'stomo_bot_service_secret_token_2026';
+
+    // 1. Unauthenticated or invalid token rejected
+    await request(app.getHttpServer())
+      .get('/api/bot/doctors')
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .get('/api/bot/doctors')
+      .set('x-service-token', 'invalid_token')
+      .expect(401);
+
+    // 2. Valid token succeeds
+    const doctorsRes = await request(app.getHttpServer())
+      .get('/api/bot/doctors')
+      .set('x-service-token', serviceToken)
+      .expect(200);
+
+    expect(Array.isArray(doctorsRes.body)).toBe(true);
+
+    // 3. Sync patient
+    const testPhone = `+99890${Math.floor(1000000 + Math.random() * 9000000)}`;
+    const syncRes = await request(app.getHttpServer())
+      .post('/api/bot/patient/sync')
+      .set('x-service-token', serviceToken)
+      .send({ phone: testPhone, fullName: 'Telegram Bot Test Patient' })
+      .expect(200);
+
+    expect(syncRes.body).toHaveProperty('id');
+    expect(syncRes.body.phone).toBe(testPhone);
+    expect(syncRes.body.totalDebt).toBe(0);
+
+    const patientId = syncRes.body.id;
+
+    try {
+      // 4. Query treatment plan & debts
+      const planRes = await request(app.getHttpServer())
+        .get(`/api/bot/patient/${patientId}/treatment-plan`)
+        .set('x-service-token', serviceToken)
+        .expect(200);
+      expect(Array.isArray(planRes.body)).toBe(true);
+
+      const debtRes = await request(app.getHttpServer())
+        .get(`/api/bot/patient/${patientId}/debt`)
+        .set('x-service-token', serviceToken)
+        .expect(200);
+      expect(debtRes.body.totalDebt).toBe(0);
+
+      // 5. Query reminders and daily schedules
+      const remindersRes = await request(app.getHttpServer())
+        .get('/api/bot/reminders')
+        .set('x-service-token', serviceToken)
+        .expect(200);
+      expect(Array.isArray(remindersRes.body)).toBe(true);
+
+      const schedulesRes = await request(app.getHttpServer())
+        .get('/api/bot/daily-schedules')
+        .set('x-service-token', serviceToken)
+        .expect(200);
+      expect(Array.isArray(schedulesRes.body)).toBe(true);
+    } finally {
+      await prisma.appointment.deleteMany({ where: { patientId } });
+      await prisma.invoice.deleteMany({ where: { patientId } });
+      await prisma.patient.deleteMany({ where: { id: patientId } });
+    }
+  });
 });
 
 

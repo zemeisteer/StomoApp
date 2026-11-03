@@ -151,7 +151,7 @@ jobs:
       - name: Install Bot Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install aiogram apscheduler httpx pydantic sqlalchemy pytest pytest-asyncio anyio
+          pip install -r bot/requirements.txt pytest pytest-asyncio anyio
 
       - name: Run Bot Suite
         env:

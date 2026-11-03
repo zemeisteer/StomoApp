@@ -1,12 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
-from sqlalchemy import select, and_
-from sqlalchemy.orm import selectinload
 
-from bot.database import AsyncSessionLocal
-from app.models import Appointment, PatientProfile, DoctorProfile, User
+from bot.api_client import api_client
+from bot.handlers.start import user_patient_data
 from bot.keyboards.inline import (
     get_doctors_keyboard,
     get_date_picker_keyboard,
@@ -17,40 +15,23 @@ from bot.services.notifier import notify_staff_new_booking, notify_staff_cancell
 
 router = Router()
 
-# In-memory booking session state per telegram user
 user_booking_sessions: Dict[int, Dict[str, Any]] = {}
 
 @router.message(F.text == "📝 Yangi qabulga yozilish")
 async def start_booking_flow(message: Message):
-    async with AsyncSessionLocal() as db:
-        # Fetch active doctors
-        stmt = (
-            select(DoctorProfile)
-            .options(selectinload(DoctorProfile.user))
-        )
-        res = await db.execute(stmt)
-        docs = res.scalars().all()
+    docs = await api_client.get_doctors()
 
-        if not docs:
-            await message.answer("Hozirda band qilish uchun faol shifokorlar mavjud emas.")
-            return
+    if not docs:
+        await message.answer("Hozirda band qilish uchun faol shifokorlar mavjud emas.")
+        return
 
-        doc_list = [
-            {
-                "id": d.id,
-                "name": d.user.full_name if d.user else "Shifokor",
-                "spec": d.specialization,
-            }
-            for d in docs
-        ]
+    user_booking_sessions[message.from_user.id] = {}
 
-        user_booking_sessions[message.from_user.id] = {}
-
-        await message.answer(
-            "👨‍⚕️ <b>Iltimos, ko'rigiga yozilmoqchi bo'lgan shifokorni tanlang:</b>",
-            reply_markup=get_doctors_keyboard(doc_list),
-            parse_mode="HTML",
-        )
+    await message.answer(
+        "👨‍⚕️ <b>Iltimos, ko'rigiga yozilmoqchi bo'lgan shifokorni tanlang:</b>",
+        reply_markup=get_doctors_keyboard(docs),
+        parse_mode="HTML",
+    )
 
 @router.callback_query(F.data.startswith("select_doc:"))
 async def handle_select_doctor(callback: CallbackQuery):
@@ -75,28 +56,9 @@ async def handle_select_date(callback: CallbackQuery):
         user_booking_sessions[user_id] = {}
     user_booking_sessions[user_id]["date"] = date_str
 
-    # Candidate time slots
-    all_slots = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"]
     doc_id = user_booking_sessions[user_id].get("doctor_id")
 
-    # Filter out slots that conflict in DB
-    available_slots = []
-    async with AsyncSessionLocal() as db:
-        for s in all_slots:
-            slot_start = datetime.strptime(f"{date_str} {s}", "%Y-%m-%d %H:%M")
-            slot_end = slot_start + timedelta(minutes=45)
-
-            conflict_stmt = select(Appointment).where(
-                and_(
-                    Appointment.doctor_id == doc_id,
-                    Appointment.status != "cancelled",
-                    Appointment.start_time < slot_end,
-                    Appointment.end_time > slot_start,
-                )
-            )
-            c_res = await db.execute(conflict_stmt)
-            if not c_res.scalar_one_or_none():
-                available_slots.append(s)
+    available_slots = await api_client.get_slots(date_str, doc_id) if doc_id else []
 
     if not available_slots:
         await callback.message.edit_text(
@@ -127,80 +89,56 @@ async def handle_confirm_slot(callback: CallbackQuery):
         await callback.answer()
         return
 
-    slot_start = datetime.strptime(f"{date_str} {slot_time}", "%Y-%m-%d %H:%M")
-    slot_end = slot_start + timedelta(minutes=45)
+    patient = user_patient_data.get(user_id)
+    if not patient:
+        patient_name = callback.from_user.full_name or "Telegram Bemor"
+        patient_phone = "+998900000000"
+    else:
+        patient_name = patient.get("fullName", callback.from_user.full_name)
+        patient_phone = patient.get("phone", "+998900000000")
 
-    async with AsyncSessionLocal() as db:
-        # Resolve patient
-        p_stmt = select(PatientProfile).options(selectinload(PatientProfile.user)).limit(1)
-        p_res = await db.execute(p_stmt)
-        patient = p_res.scalar_one_or_none()
+    # Construct ISO string for start time: "YYYY-MM-DDTHH:mm:00"
+    start_time_iso = f"{date_str}T{slot_time}:00"
 
-        d_stmt = select(DoctorProfile).options(selectinload(DoctorProfile.user)).where(DoctorProfile.id == doc_id)
-        d_res = await db.execute(d_stmt)
-        doctor = d_res.scalar_one_or_none()
+    booking_res = await api_client.create_booking(
+        doctor_id=doc_id,
+        start_time=start_time_iso,
+        patient_name=patient_name,
+        patient_phone=patient_phone,
+        notes="Telegram Bot orqali band qilingan",
+    )
 
-        if not patient or not doctor:
-            await callback.message.edit_text("Xatolik: Bemor yoki shifokor profili topilmadi.")
-            await callback.answer()
-            return
-
-        # Double check conflict
-        conflict_stmt = select(Appointment).where(
-            and_(
-                Appointment.doctor_id == doc_id,
-                Appointment.status != "cancelled",
-                Appointment.start_time < slot_end,
-                Appointment.end_time > slot_start,
-            )
-        )
-        c_res = await db.execute(conflict_stmt)
-        if c_res.scalar_one_or_none():
-            await callback.message.edit_text(
-                "Kechirasiz, ushbu vaqt hozirgina boshqa bemor tomonidan band qilindi. Iltimos, boshqa vaqt tanlang:",
-                reply_markup=get_date_picker_keyboard(),
-            )
-            await callback.answer()
-            return
-
-        # Create appointment
-        appt = Appointment(
-            patient_id=patient.id,
-            doctor_id=doctor.id,
-            start_time=slot_start,
-            end_time=slot_end,
-            status="scheduled",
-            notes="Telegram Bot orqali band qilingan",
-        )
-        db.add(appt)
-        await db.commit()
-
-        # Notify staff group
-        patient_name = patient.user.full_name
-        patient_phone = patient.user.phone
-        doctor_name = doctor.user.full_name
-
-        await notify_staff_new_booking(
-            bot=callback.bot,
-            patient_name=patient_name,
-            patient_phone=patient_phone,
-            doctor_name=doctor_name,
-            date_str=date_str,
-            time_str=slot_time,
-        )
-
-        user_booking_sessions.pop(user_id, None)
-
+    if not booking_res or not booking_res.get("appointmentId"):
         await callback.message.edit_text(
-            f"✅ <b>QABULINGIZ MUVAFFAQIYATLI BAND QILINDI!</b>\n\n"
-            f"👤 <b>Bemor:</b> {patient_name}\n"
-            f"👨‍⚕️ <b>Shifokor:</b> {doctor_name}\n"
-            f"📅 <b>Sana:</b> {date_str}\n"
-            f"⏰ <b>Vaqt:</b> {slot_time}\n\n"
-            f"<i>Qabul boshlanishidan 24 soat va 2 soat oldin sizga eslatma yuboramiz.</i>",
-            parse_mode="HTML",
+            "Kechirasiz, ushbu vaqt hozirgina boshqa bemor tomonidan band qilindi yoki texnik xatolik yuz berdi. Iltimos, boshqa vaqt tanlang:",
+            reply_markup=get_date_picker_keyboard(),
         )
-        await callback.answer("Qabul tasdiqlandi!")
+        await callback.answer()
+        return
+
+    doctor_name = booking_res.get("doctorName", "Shifokor")
+
+    await notify_staff_new_booking(
+        bot=callback.bot,
+        patient_name=patient_name,
+        patient_phone=patient_phone,
+        doctor_name=doctor_name,
+        date_str=date_str,
+        time_str=slot_time,
+    )
+
+    user_booking_sessions.pop(user_id, None)
+
+    await callback.message.edit_text(
+        f"✅ <b>QABULINGIZ MUVAFFAQIYATLI BAND QILINDI!</b>\n\n"
+        f"👤 <b>Bemor:</b> {patient_name}\n"
+        f"👨‍⚕️ <b>Shifokor:</b> {doctor_name}\n"
+        f"📅 <b>Sana:</b> {date_str}\n"
+        f"⏰ <b>Vaqt:</b> {slot_time}\n\n"
+        f"<i>Qabul boshlanishidan 24 soat va 2 soat oldin sizga eslatma yuboramiz.</i>",
+        parse_mode="HTML",
+    )
+    await callback.answer("Qabul tasdiqlandi!")
 
 # Cancellation Flow
 @router.callback_query(F.data.startswith("cancel_appt:"))
@@ -216,37 +154,26 @@ async def handle_cancel_request(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("confirm_cancel:"))
 async def handle_confirm_cancel(callback: CallbackQuery):
     appt_id = callback.data.split(":")[1]
-    async with AsyncSessionLocal() as db:
-        stmt = (
-            select(Appointment)
-            .options(
-                selectinload(Appointment.patient).selectinload(PatientProfile.user),
-                selectinload(Appointment.doctor).selectinload(DoctorProfile.user),
-            )
-            .where(Appointment.id == appt_id)
+
+    cancel_res = await api_client.cancel_appointment(appt_id)
+
+    if cancel_res and cancel_res.get("success"):
+        p_name = cancel_res.get("patientName", "Bemor")
+        d_name = cancel_res.get("doctorName", "Shifokor")
+        st_raw = cancel_res.get("startTime", "")
+        d_str = st_raw[:10] if len(st_raw) >= 10 else ""
+        t_str = st_raw[11:16] if len(st_raw) >= 16 else ""
+
+        await notify_staff_cancellation(
+            bot=callback.bot,
+            patient_name=p_name,
+            doctor_name=d_name,
+            date_str=d_str,
+            time_str=t_str,
         )
-        res = await db.execute(stmt)
-        appt = res.scalar_one_or_none()
 
-        if appt:
-            appt.status = "cancelled"
-            await db.commit()
-
-            p_name = appt.patient.user.full_name if appt.patient and appt.patient.user else "Bemor"
-            d_name = appt.doctor.user.full_name if appt.doctor and appt.doctor.user else "Shifokor"
-            d_str = appt.start_time.strftime("%d.%m.%Y")
-            t_str = appt.start_time.strftime("%H:%M")
-
-            await notify_staff_cancellation(
-                bot=callback.bot,
-                patient_name=p_name,
-                doctor_name=d_name,
-                date_str=d_str,
-                time_str=t_str,
-            )
-
-        await callback.message.edit_text("❌ <b>Qabulingiz bekor qilindi.</b>", parse_mode="HTML")
-        await callback.answer("Bekor qilindi")
+    await callback.message.edit_text("❌ <b>Qabulingiz bekor qilindi.</b>", parse_mode="HTML")
+    await callback.answer("Bekor qilindi")
 
 @router.callback_query(F.data == "close_cancel")
 async def handle_close_cancel(callback: CallbackQuery):

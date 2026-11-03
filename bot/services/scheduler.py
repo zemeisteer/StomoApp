@@ -1,126 +1,69 @@
 import logging
-from datetime import datetime, timedelta
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import select, and_
-from sqlalchemy.orm import selectinload
 
 from bot.config import config
-from bot.database import AsyncSessionLocal
-from app.models import Appointment, PatientProfile, DoctorProfile, User
+from bot.api_client import api_client
 
 logger = logging.getLogger(__name__)
 
 async def send_appointment_reminders(bot: Bot):
     """
-    Checks appointments in the next 24 hours and next 2 hours,
+    Checks appointments in the next 24 hours and next 2 hours via NestJS API,
     sending localized reminder messages to patients.
     """
-    now = datetime.utcnow()
-    target_24h = now + timedelta(hours=24)
-    target_2h = now + timedelta(hours=2)
+    reminders = await api_client.get_reminders()
+    if not reminders:
+        return
 
-    async with AsyncSessionLocal() as db:
-        # 1. 24-hour reminder window (between 23h50m and 24h10m)
-        stmt_24 = (
-            select(Appointment)
-            .options(
-                selectinload(Appointment.patient).selectinload(PatientProfile.user),
-                selectinload(Appointment.doctor).selectinload(DoctorProfile.user),
-            )
-            .where(
-                and_(
-                    Appointment.status.in_(["scheduled", "confirmed"]),
-                    Appointment.start_time >= target_24h - timedelta(minutes=10),
-                    Appointment.start_time <= target_24h + timedelta(minutes=10),
-                )
-            )
-        )
-        res_24 = await db.execute(stmt_24)
-        appts_24 = res_24.scalars().all()
+    for rem in reminders:
+        patient_name = rem.get("patientName", "Bemor")
+        doctor_name = rem.get("doctorName", "Shifokor")
+        time_str = rem.get("timeStr", "")
+        window = rem.get("window", "2h")
 
-        for appt in appts_24:
-            # We assume telegram chat_id is stored or patient user phone can be contacted
-            logger.info(f"[Reminder 24h] Patient: {appt.patient.user.full_name}, Time: {appt.start_time}")
-
-        # 2. 2-hour reminder window
-        stmt_2 = (
-            select(Appointment)
-            .options(
-                selectinload(Appointment.patient).selectinload(PatientProfile.user),
-                selectinload(Appointment.doctor).selectinload(DoctorProfile.user),
-            )
-            .where(
-                and_(
-                    Appointment.status.in_(["scheduled", "confirmed"]),
-                    Appointment.start_time >= target_2h - timedelta(minutes=10),
-                    Appointment.start_time <= target_2h + timedelta(minutes=10),
-                )
-            )
-        )
-        res_2 = await db.execute(stmt_2)
-        appts_2 = res_2.scalars().all()
-
-        for appt in appts_2:
-            time_str = appt.start_time.strftime("%H:%M")
-            doc_name = appt.doctor.user.full_name if appt.doctor and appt.doctor.user else "Shifokor"
+        if window == "2h":
             msg = (
                 f"⏰ <b>ESLATMA: QABULINGIZGA 2 SOAT QOLDI!</b>\n\n"
-                f"Hurmatli {appt.patient.user.full_name},\n"
-                f"Sizning bugun soat <b>{time_str}</b> da <b>{doc_name}</b> qabuliga yozilishingiz rejalashtirilgan.\n\n"
+                f"Hurmatli {patient_name},\n"
+                f"Sizning bugun soat <b>{time_str}</b> da <b>{doctor_name}</b> qabuliga yozilishingiz rejalashtirilgan.\n\n"
                 f"📍 <b>Klinika manzili:</b> <a href='{config.CLINIC_LOCATION_URL}'>Xaritada ko'rish (Google Maps)</a>\n"
                 f"📞 <b>Telefon:</b> {config.CLINIC_PHONE}\n\n"
                 f"<i>Kechikmasdan kelishingizni so'raymiz!</i>"
             )
-            logger.info(f"[Reminder 2h sent] {appt.id}: {msg}")
+            logger.info(f"[Reminder 2h sent] {rem.get('id')}: {msg}")
+        else:
+            logger.info(f"[Reminder 24h] Patient: {patient_name}, Doctor: {doctor_name}, Time: {time_str}")
 
 async def dispatch_daily_doctor_schedules(bot: Bot):
     """
-    Every day at 08:00 AM, query each doctor's appointments for today
+    Every day at 08:00 AM, query each doctor's appointments for today via NestJS API
     and dispatch their schedule.
     """
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = today_start + timedelta(days=1)
+    schedules = await api_client.get_daily_doctor_schedules()
+    if not schedules:
+        return
 
-    async with AsyncSessionLocal() as db:
-        stmt = (
-            select(DoctorProfile)
-            .options(selectinload(DoctorProfile.user))
-        )
-        res = await db.execute(stmt)
-        doctors = res.scalars().all()
+    for doc in schedules:
+        doc_id = doc.get("doctorId")
+        doc_name = doc.get("doctorName", "Shifokor")
+        appts = doc.get("appointments", [])
 
-        for doc in doctors:
-            appt_stmt = (
-                select(Appointment)
-                .options(selectinload(Appointment.patient).selectinload(PatientProfile.user))
-                .where(
-                    and_(
-                        Appointment.doctor_id == doc.id,
-                        Appointment.status.in_(["scheduled", "confirmed"]),
-                        Appointment.start_time >= today_start,
-                        Appointment.start_time < today_end,
-                    )
-                )
-                .order_by(Appointment.start_time.asc())
+        if appts:
+            schedule_lines = []
+            for idx, a in enumerate(appts, 1):
+                p_name = a.get("patientName", "Bemor")
+                t_str = a.get("time", "")
+                notes = a.get("notes") or "Ko'rik"
+                schedule_lines.append(f"{idx}. ⏰ <b>{t_str}</b> — {p_name} ({notes})")
+
+            text = (
+                f"☀️ <b>XAYRLI TONG, {doc_name}!</b>\n\n"
+                f"📋 <b>Bugungi qabullaringiz jadvali:</b>\n"
+                + "\n".join(schedule_lines)
+                + f"\n\nJami: <b>{len(appts)} ta qabul</b>. Ish kuni unumli o'tsin!"
             )
-            appt_res = await db.execute(appt_stmt)
-            today_appts = appt_res.scalars().all()
-
-            if today_appts:
-                schedule_lines = []
-                for idx, a in enumerate(today_appts, 1):
-                    p_name = a.patient.user.full_name if a.patient and a.patient.user else "Bemor"
-                    t_str = a.start_time.strftime("%H:%M")
-                    schedule_lines.append(f"{idx}. ⏰ <b>{t_str}</b> — {p_name} ({a.notes or 'Ko\'rik'})")
-
-                text = (
-                    f"☀️ <b>XAYRLI TONG, {doc.user.full_name}!</b>\n\n"
-                    f"📋 <b>Bugungi qabullaringiz jadvali:</b>\n"
-                    + "\n".join(schedule_lines) +
-                    f"\n\nJami: <b>{len(today_appts)} ta qabul</b>. Ish kuni unumli o'tsin!"
-                )
-                logger.info(f"[Doctor Daily Schedule 08:00 AM] Doctor {doc.id}:\n{text}")
+            logger.info(f"[Doctor Daily Schedule 08:00 AM] Doctor {doc_id}:\n{text}")
 
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=config.TIMEZONE)
