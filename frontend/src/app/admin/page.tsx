@@ -116,15 +116,23 @@ export default function AdminOverviewPage() {
     let active = true;
     const fetchFixtures = async () => {
       try {
-        const [docs, brs, svcs] = await Promise.all([
+        const [docs, brs, svcs, comms] = await Promise.all([
           api.getDoctors().catch(() => []),
           api.getBranches().catch(() => []),
           api.getServices().catch(() => []),
+          isOwner ? api.getDoctorCommissions().catch(() => []) : Promise.resolve([]),
         ]);
         if (active) {
           setDoctors(Array.isArray(docs) ? docs : []);
           setBranches(Array.isArray(brs) ? brs : []);
           setServices(Array.isArray(svcs) ? svcs : []);
+          if (Array.isArray(comms) && comms.length > 0) {
+            const rateMap: Record<string, number> = {};
+            comms.forEach((c: any) => {
+              rateMap[c.doctorId] = c.percentage;
+            });
+            setDoctorCommissionRates(rateMap);
+          }
           if (Array.isArray(brs) && brs.length === 1) {
             setRegBranchId(brs[0].id);
           }
@@ -820,9 +828,14 @@ export default function AdminOverviewPage() {
               doctors={doctors}
               isUz={isUz}
               doctorCommissionRates={doctorCommissionRates}
-              handleUpdateDoctorCommissionRate={(docId, rate) => {
+              handleUpdateDoctorCommissionRate={async (docId, rate) => {
                 setDoctorCommissionRates((prev) => ({ ...prev, [docId]: rate }));
-                setStatusFeedback(isUz ? "Shifokor komissiya foizi yangilandi" : 'Процент комиссии врача обновлен');
+                try {
+                  await api.updateDoctorCommission(docId, { percentage: rate });
+                  setStatusFeedback(isUz ? "Shifokor komissiya foizi saqlandi" : 'Процент комиссии сохранен');
+                } catch {
+                  setStatusFeedback(isUz ? "Komissiyani saqlashda xatolik yuz berdi" : 'Ошибка сохранения комиссии');
+                }
               }}
               setStatusFeedback={setStatusFeedback}
             />

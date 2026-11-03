@@ -44,8 +44,17 @@ export class BillingController {
 
   @Get('debts')
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
-  async getDebts(@CurrentUser() user: JwtPayload) {
-    return this.service.getPatientDebts(user);
+  async getDebts(
+    @CurrentUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedPage = page !== undefined && page !== '' ? parseInt(page, 10) : undefined;
+    const parsedLimit = limit !== undefined && limit !== '' ? parseInt(limit, 10) : undefined;
+    return this.service.getPatientDebts(user, {
+      page: parsedPage && !Number.isNaN(parsedPage) ? parsedPage : undefined,
+      limit: parsedLimit && !Number.isNaN(parsedLimit) ? parsedLimit : undefined,
+    });
   }
 }
 

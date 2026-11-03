@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { InteractiveOdontogram } from '../InteractiveOdontogram';
 import { formatClinicDate, formatClinicTime } from '../../lib/dateFormat';
+import { api } from '../../lib/api';
 
 export interface DoctorWorkspaceProps {
   filteredToday: any[];
@@ -58,6 +59,13 @@ export function DoctorWorkspace({
   const patientName = activeAppt?.patient?.fullName || activeAppt?.patientName || (isUz ? 'Aziz Rahimov' : 'Азиз Рахимов');
   const patientId = activeAppt ? `#${activeAppt.id.slice(-4).toUpperCase()}` : '#8329';
   const rawPatientId = activeAppt?.patient?.id || activeAppt?.patientId || 'pat-1';
+  const [earnings, setEarnings] = React.useState<any>(null);
+
+  React.useEffect(() => {
+    api.getMyDoctorEarnings()
+      .then((res) => setEarnings(res))
+      .catch(() => {});
+  }, []);
   const serviceName = activeAppt
     ? (isUz ? (activeAppt.serviceName || activeAppt.service?.nameUz) : (activeAppt.service?.nameRu || activeAppt.serviceName))
     : (isUz ? 'Tish davolash / Molyar restavratsiyasi' : 'Лечение зуба / Реставрация моляра');
@@ -237,6 +245,37 @@ export function DoctorWorkspace({
 
       {/* Right 4 Cols: Clinical Protocol, Doctor Quick Notes, Attachments & Doctor Schedule */}
       <div className="lg:col-span-4 space-y-6">
+        {/* Doctor Earnings & Commission Summary */}
+        <div className="ui-card bg-gradient-to-br from-[#167b78]/10 via-[#14bdac]/5 to-transparent border border-[#167b78]/20 p-4 rounded-2xl space-y-3">
+          <div className="flex items-center justify-between border-b border-[#167b78]/20 pb-2">
+            <span className="text-xs font-bold text-[#152f34] uppercase tracking-wide">
+              {isUz ? 'Mening Komissiyam' : 'Моя комиссия'}
+            </span>
+            <span className="text-xs font-extrabold px-2 py-0.5 bg-[#167b78] text-white rounded-full">
+              {earnings ? `${earnings.percentage}%` : '30%'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="p-2.5 bg-white/80 rounded-xl border border-[#d8e5e2]">
+              <span className="text-[10px] text-[#52696e] block">{isUz ? 'Jami tushum' : 'Всего сборов'}</span>
+              <span className="font-bold text-[#152f34] text-sm">
+                {(earnings?.totalCollected || 0).toLocaleString()} {isUz ? "so'm" : 'сум'}
+              </span>
+            </div>
+            <div className="p-2.5 bg-white/80 rounded-xl border border-[#d8e5e2]">
+              <span className="text-[10px] text-[#167b78] font-bold block">{isUz ? 'Hisoblangan daromad' : 'Заработано'}</span>
+              <span className="font-extrabold text-[#167b78] text-sm">
+                {(earnings?.totalEarned || 0).toLocaleString()} {isUz ? "so'm" : 'сум'}
+              </span>
+            </div>
+          </div>
+          {earnings?.fixedBonus > 0 && (
+            <p className="text-[10px] text-[#52696e]">
+              {isUz ? `Qo'shimcha fiks bonus: ${earnings.fixedBonus.toLocaleString()} so'm` : `Фикс бонус: ${earnings.fixedBonus.toLocaleString()} сум`}
+            </p>
+          )}
+        </div>
+
         {/* Doctor Day Schedule */}
         <div className="ui-card space-y-3">
           <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-2.5">

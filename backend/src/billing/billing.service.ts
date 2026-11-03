@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { StaffRole, PaymentMethod } from '@prisma/client';
+import { StaffRole, PaymentMethod, Prisma } from '@prisma/client';
 import { JwtPayload } from '../auth/auth.service';
 import { CreateInvoiceDto } from './dto/invoice.dto';
 import { RecordPaymentDto } from './dto/payment.dto';
@@ -231,50 +231,88 @@ export class BillingService {
     });
   }
 
-  async getPatientDebts(user: JwtPayload) {
-    const where: any = {};
+  async getPatientDebts(user: JwtPayload, query?: { page?: number; limit?: number }) {
+    const hasPage = query?.page !== undefined && !Number.isNaN(query.page);
+    const hasLimit = query?.limit !== undefined && !Number.isNaN(query.limit);
+    const isPaginated = hasPage || hasLimit;
+    const page = Math.max(1, query?.page ? Number(query.page) : 1);
+    const limit = Math.max(1, Math.min(100, query?.limit ? Number(query.limit) : 20));
+    const offset = (page - 1) * limit;
+
+    let doctorFilterSql = Prisma.empty;
     if (user.role === StaffRole.DOCTOR) {
       if (!user.doctorId) throw new ForbiddenException('Shifokor profili biriktirilmagan');
-      where.appointments = { some: { doctorId: user.doctorId } };
+      doctorFilterSql = Prisma.sql`AND EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.doctor_id = ${user.doctorId})`;
     }
 
-    // Dynamic debt calculation: total invoiced minus total payments
-    const patients = await this.prisma.patient.findMany({
-      where,
-      select: {
-        id: true,
-        fullName: true,
-        phone: true,
-        invoices: {
-          select: {
-            totalAmount: true,
-            discount: true,
-          },
-        },
-        payments: {
-          select: {
-            amount: true,
-            isRefund: true,
-          },
-        },
-      },
-    });
+    // Database-level dynamic aggregation: computes net billed vs net paid directly in PostgreSQL
+    const rows = await this.prisma.$queryRaw<Array<{
+      id: string;
+      fullName: string;
+      phone: string;
+      totalBilled: number;
+      totalPaid: number;
+      totalDebt: number;
+    }>>`
+      WITH patient_payments AS (
+        SELECT patient_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) as total_paid
+        FROM payments
+        WHERE patient_id IS NOT NULL
+        GROUP BY patient_id
+      ),
+      patient_invoices AS (
+        SELECT patient_id, SUM(GREATEST(0, total_amount - COALESCE(discount, 0))) as total_billed
+        FROM invoices
+        GROUP BY patient_id
+      )
+      SELECT
+        p.id,
+        p.full_name as "fullName",
+        p.phone,
+        COALESCE(pi.total_billed, 0)::int as "totalBilled",
+        COALESCE(pp.total_paid, 0)::int as "totalPaid",
+        (COALESCE(pi.total_billed, 0) - COALESCE(pp.total_paid, 0))::int as "totalDebt"
+      FROM patients p
+      LEFT JOIN patient_invoices pi ON pi.patient_id = p.id
+      LEFT JOIN patient_payments pp ON pp.patient_id = p.id
+      WHERE (COALESCE(pi.total_billed, 0) - COALESCE(pp.total_paid, 0)) > 0
+      ${doctorFilterSql}
+      ORDER BY "totalDebt" DESC
+      ${isPaginated ? Prisma.sql`LIMIT ${limit} OFFSET ${offset}` : Prisma.empty};
+    `;
 
-    return patients
-      .map((p) => {
-        const totalBilled = p.invoices.reduce((acc, inv) => acc + Math.max(0, inv.totalAmount - (inv.discount || 0)), 0);
-        const totalPaid = p.payments.reduce((acc, pay) => acc + (pay.isRefund ? -pay.amount : pay.amount), 0);
-        const totalDebt = Math.max(0, totalBilled - totalPaid);
-        return {
-          id: p.id,
-          fullName: p.fullName,
-          phone: p.phone,
-          totalBilled,
-          totalPaid,
-          totalDebt,
-        };
-      })
-      .filter((p) => p.totalDebt > 0);
+    if (!isPaginated) {
+      return rows;
+    }
+
+    const countRows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
+      WITH patient_payments AS (
+        SELECT patient_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) as total_paid
+        FROM payments
+        WHERE patient_id IS NOT NULL
+        GROUP BY patient_id
+      ),
+      patient_invoices AS (
+        SELECT patient_id, SUM(GREATEST(0, total_amount - COALESCE(discount, 0))) as total_billed
+        FROM invoices
+        GROUP BY patient_id
+      )
+      SELECT COUNT(*)::bigint as count
+      FROM patients p
+      LEFT JOIN patient_invoices pi ON pi.patient_id = p.id
+      LEFT JOIN patient_payments pp ON pp.patient_id = p.id
+      WHERE (COALESCE(pi.total_billed, 0) - COALESCE(pp.total_paid, 0)) > 0
+      ${doctorFilterSql};
+    `;
+
+    const total = Number(countRows[0]?.count || 0);
+    return {
+      items: rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 }
 

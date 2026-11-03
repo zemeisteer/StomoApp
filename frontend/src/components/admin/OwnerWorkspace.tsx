@@ -59,7 +59,7 @@ export function OwnerWorkspace({
         api.getInventoryItems().catch(() => []),
       ]);
       setInvoices(invRes || []);
-      setDebts(debtRes || []);
+      setDebts(Array.isArray(debtRes) ? debtRes : debtRes?.items || []);
       setInventory(invItemsRes || []);
     } finally {
       setIsLoading(false);

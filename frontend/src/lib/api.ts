@@ -743,7 +743,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  getDebts: () => fetcher<any[]>('/api/admin/billing/debts'),
+  getDebts: (page?: number, limit?: number) => {
+    const q = new URLSearchParams();
+    if (page) q.set('page', String(page));
+    if (limit) q.set('limit', String(limit));
+    const qs = q.toString();
+    return fetcher<any>(`/api/admin/billing/debts${qs ? `?${qs}` : ''}`);
+  },
+
+  // Commissions & Doctor Earnings
+  getDoctorCommissions: () => fetcher<any[]>('/api/admin/commissions'),
+  updateDoctorCommission: (doctorId: string, payload: { percentage: number; fixedBonus?: number; notes?: string }) =>
+    fetcher<any>(`/api/admin/commissions/${doctorId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  getMyDoctorEarnings: (doctorId?: string) => {
+    const q = doctorId ? `?doctorId=${doctorId}` : '';
+    return fetcher<any>(`/api/admin/commissions/my-earnings${q}`);
+  },
 
   // Inventory
   getInventoryItems: () => fetcher<any[]>('/api/admin/inventory'),

@@ -178,6 +178,7 @@ model Doctor {
   appointments Appointment[]
   odontogramRecords  OdontogramRecord[]
   treatmentPlanItems TreatmentPlanItem[]
+  commission         DoctorCommission?
 
   @@map("doctors")
 }
@@ -975,4 +976,21 @@ model ConsentRecord {
   createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("consent_records")
+}
+
+// ============================================================
+// DOCTOR COMMISSIONS
+// ============================================================
+
+model DoctorCommission {
+  id         String   @id @default(cuid())
+  doctorId   String   @unique @map("doctor_id")
+  doctor     Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  percentage Int      @default(30)
+  fixedBonus Int      @default(0) @map("fixed_bonus")
+  notes      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("doctor_commissions")
 }

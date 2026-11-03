@@ -6665,6 +6665,209 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       if (patientId) await prisma.patient.deleteMany({ where: { id: patientId } });
     }
   });
+
+  // -------------------------------------------------------------
+  // Regression 56: Doctor commissions - OWNER can configure doctor commission, non-owner is 403, earnings calculated
+  // -------------------------------------------------------------
+  it('Regression 56: Doctor commissions - OWNER can configure doctor commission, non-owner is 403, earnings calculated', async () => {
+    let patientId: string | null = null;
+    let apptId: string | null = null;
+    let paymentId: string | null = null;
+
+    try {
+      // 1. Non-owner (DOCTOR) attempting to configure commission is strictly rejected with 403
+      await request(app.getHttpServer())
+        .put(`/api/admin/commissions/${testDoctorAId}`)
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .send({ percentage: 50 })
+        .expect(403);
+
+      // Non-owner (DOCTOR) attempting to list all clinic doctor commissions is strictly rejected with 403
+      await request(app.getHttpServer())
+        .get('/api/admin/commissions')
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .expect(403);
+
+      // 2. OWNER configures Doctor A's commission to 35% with 100,000 fixed bonus
+      const updateRes = await request(app.getHttpServer())
+        .put(`/api/admin/commissions/${testDoctorAId}`)
+        .set('Authorization', `Bearer ${adminToken}`) // adminToken belongs to OWNER
+        .send({
+          percentage: 35,
+          fixedBonus: 100000,
+          notes: 'Katta shifokor maxsus tarifi',
+        })
+        .expect(200);
+
+      expect(updateRes.body.percentage).toBe(35);
+      expect(updateRes.body.fixedBonus).toBe(100000);
+
+      // 3. Verify audit log was recorded transactionally
+      const auditLog = await prisma.auditLog.findFirst({
+        where: {
+          action: 'commission.updated',
+          entityId: updateRes.body.id,
+        },
+      });
+      expect(auditLog).toBeDefined();
+
+      // 4. Create an appointment and payment for Doctor A to verify dynamic earnings calculation
+      const patient = await prisma.patient.create({
+        data: {
+          fullName: `Commission Patient ${runId}`,
+          phone: `+99800${runId}81`,
+        },
+      });
+      patientId = patient.id;
+
+      const apptTime = getNextWorkingSlot(17, 10, 0);
+      const appt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_comm_${runId}`,
+          patientId: patient.id,
+          doctorId: testDoctorAId,
+          serviceId: testServiceId,
+          branchId: testBranchId,
+          startTime: apptTime,
+          endTime: new Date(apptTime.getTime() + 30 * 60 * 1000),
+          durationMinutes: 30,
+          status: AppointmentStatus.COMPLETED,
+          serviceName: 'Maslahat',
+        },
+      });
+      apptId = appt.id;
+
+      // Direct payment of 1,000,000 so'm on Doctor A's appointment
+      const payment = await prisma.payment.create({
+        data: {
+          patientId: patient.id,
+          appointmentId: appt.id,
+          amount: 1000000,
+          method: PaymentMethod.CASH,
+          currency: 'UZS',
+        },
+      });
+      paymentId = payment.id;
+
+      // 5. Doctor A checks my-earnings:
+      // totalCollected = 1,000,000 so'm
+      // totalEarned = 1,000,000 * 35% + 100,000 bonus = 450,000 so'm
+      const earningsRes = await request(app.getHttpServer())
+        .get('/api/admin/commissions/my-earnings')
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .expect(200);
+
+      expect(earningsRes.body.percentage).toBe(35);
+      expect(earningsRes.body.fixedBonus).toBe(100000);
+      expect(earningsRes.body.totalCollected).toBeGreaterThanOrEqual(1000000);
+
+      // 6. OWNER lists all commissions and sees aggregated payouts
+      const allComms = await request(app.getHttpServer())
+        .get('/api/admin/commissions')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(Array.isArray(allComms.body)).toBe(true);
+      const docACommission = allComms.body.find((c: any) => c.doctorId === testDoctorAId);
+      expect(docACommission).toBeDefined();
+      expect(docACommission.percentage).toBe(35);
+    } finally {
+      if (paymentId) await prisma.payment.deleteMany({ where: { id: paymentId } });
+      if (apptId) await prisma.appointment.deleteMany({ where: { id: apptId } });
+      if (patientId) await prisma.patient.deleteMany({ where: { id: patientId } });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Regression 57: Paginated debts - getPatientDebts supports page & limit aggregation at DB level
+  // -------------------------------------------------------------
+  it('Regression 57: Paginated debts - getPatientDebts supports page & limit aggregation at DB level', async () => {
+    let patientAId: string | null = null;
+    let patientBId: string | null = null;
+    let invAId: string | null = null;
+    let invBId: string | null = null;
+
+    try {
+      const patientA = await prisma.patient.create({
+        data: { fullName: `Paginated Debt A ${runId}`, phone: `+99800${runId}91` },
+      });
+      patientAId = patientA.id;
+
+      const patientB = await prisma.patient.create({
+        data: { fullName: `Paginated Debt B ${runId}`, phone: `+99800${runId}92` },
+      });
+      patientBId = patientB.id;
+
+      // Invoice A: 600,000 so'm (no payment -> debt 600,000)
+      const invA = await prisma.invoice.create({
+        data: {
+          patientId: patientA.id,
+          totalAmount: 600000,
+          discount: 0,
+          status: 'PENDING',
+        },
+      });
+      invAId = invA.id;
+
+      // Invoice B: 400,000 so'm - 100,000 partial payment = 300,000 debt
+      const invB = await prisma.invoice.create({
+        data: {
+          patientId: patientB.id,
+          totalAmount: 400000,
+          discount: 0,
+          status: 'PARTIALLY_PAID',
+        },
+      });
+      invBId = invB.id;
+
+      await prisma.payment.create({
+        data: {
+          patientId: patientB.id,
+          invoiceId: invB.id,
+          amount: 100000,
+          method: PaymentMethod.CARD,
+          currency: 'UZS',
+        },
+      });
+
+      // 1. Non-paginated call returns direct array (backward compatibility)
+      const legacyRes = await request(app.getHttpServer())
+        .get('/api/admin/billing/debts')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(Array.isArray(legacyRes.body)).toBe(true);
+      const foundA = legacyRes.body.find((p: any) => p.id === patientA.id);
+      const foundB = legacyRes.body.find((p: any) => p.id === patientB.id);
+      expect(foundA?.totalDebt).toBe(600000);
+      expect(foundB?.totalDebt).toBe(300000);
+
+      // 2. Paginated call with limit=1 returns items object with total count and metadata
+      const page1Res = await request(app.getHttpServer())
+        .get('/api/admin/billing/debts?page=1&limit=1')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(page1Res.body).toHaveProperty('items');
+      expect(page1Res.body).toHaveProperty('total');
+      expect(page1Res.body.page).toBe(1);
+      expect(page1Res.body.limit).toBe(1);
+      expect(page1Res.body.items).toHaveLength(1);
+      expect(page1Res.body.total).toBeGreaterThanOrEqual(2);
+      expect(page1Res.body.totalPages).toBeGreaterThanOrEqual(2);
+    } finally {
+      if (patientAId) {
+        await prisma.payment.deleteMany({ where: { patientId: patientAId } });
+        await prisma.invoice.deleteMany({ where: { patientId: patientAId } });
+        await prisma.patient.deleteMany({ where: { id: patientAId } });
+      }
+      if (patientBId) {
+        await prisma.payment.deleteMany({ where: { patientId: patientBId } });
+        await prisma.invoice.deleteMany({ where: { patientId: patientBId } });
+        await prisma.patient.deleteMany({ where: { id: patientBId } });
+      }
+    }
+  });
 });
 
 

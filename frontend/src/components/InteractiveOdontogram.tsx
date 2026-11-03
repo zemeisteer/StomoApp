@@ -28,7 +28,7 @@ import {
   DentalChartType,
   ToothRecord,
   CONDITION_METADATA,
-} from '../lib/clinicState';
+} from '../lib/clinicalTypes';
 import { api } from '../lib/api';
 
 // Tooth Anatomical Names (Uzbek & Russian)

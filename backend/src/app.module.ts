@@ -25,6 +25,7 @@ import { PublicModule } from './public/public.module';
 import { ClinicalModule } from './clinical/clinical.module';
 import { BillingModule } from './billing/billing.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { CommissionsModule } from './commissions/commissions.module';
 
 const redisImports = process.env.REDIS_ENABLED === 'true'
   ? [
@@ -91,6 +92,7 @@ const redisImports = process.env.REDIS_ENABLED === 'true'
     ClinicalModule,
     BillingModule,
     InventoryModule,
+    CommissionsModule,
   ],
   providers: [
     {
