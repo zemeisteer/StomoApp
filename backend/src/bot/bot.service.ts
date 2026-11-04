@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
@@ -97,35 +102,73 @@ export class BotService {
 
   async syncPatient(dto: SyncPatientDto) {
     const normalized = this.normalizePhone(dto.phone);
+    const telegramUserId = (dto.telegramUserId || '').trim();
 
-    let patient = await this.prisma.patient.findFirst({
-      where: { phone: normalized },
+    if (!telegramUserId) {
+      throw new BadRequestException('telegramUserId kiritilishi shart');
+    }
+
+    // 1. Check if patient already exists with this exact telegramUserId
+    let patient = await this.prisma.patient.findUnique({
+      where: { telegramUserId },
     });
 
     if (!patient) {
-      patient = await this.prisma.patient.create({
-        data: {
-          phone: normalized,
-          fullName: dto.fullName.trim() || 'Telegram Bemor',
-          notes: 'Telegram Bot orqali ro\'yxatdan o\'tgan',
-        },
+      // 2. Check if a patient exists with the provided phone
+      patient = await this.prisma.patient.findFirst({
+        where: { phone: normalized },
       });
+
+      if (patient) {
+        // Link telegramUserId to existing patient record
+        patient = await this.prisma.patient.update({
+          where: { id: patient.id },
+          data: { telegramUserId },
+        });
+      } else {
+        // Create new patient record
+        patient = await this.prisma.patient.create({
+          data: {
+            phone: normalized,
+            fullName: dto.fullName.trim() || 'Telegram Bemor',
+            telegramUserId,
+            notes: 'Telegram Bot orqali ro\'yxatdan o\'tgan',
+          },
+        });
+      }
+    } else {
+      // If phone changed, safely update if provided
+      if (dto.fullName && dto.fullName.trim() && patient.fullName !== dto.fullName.trim()) {
+        patient = await this.prisma.patient.update({
+          where: { id: patient.id },
+          data: { fullName: dto.fullName.trim() },
+        });
+      }
     }
 
-    const debtData = await this.getPatientDebt(patient.id);
+    const debtData = await this.getPatientDebt(telegramUserId);
 
     return {
       id: patient.id,
       fullName: patient.fullName,
       phone: patient.phone,
+      telegramUserId: patient.telegramUserId,
       totalDebt: debtData.totalDebt,
     };
   }
 
-  async getPatientAppointments(patientId: string) {
+  async getPatientAppointments(telegramUserId: string) {
+    const patient = await this.prisma.patient.findUnique({
+      where: { telegramUserId },
+    });
+
+    if (!patient) {
+      throw new NotFoundException('Telegram hisobiga bog\'langan bemor topilmadi');
+    }
+
     const appts = await this.prisma.appointment.findMany({
       where: {
-        patientId,
+        patientId: patient.id,
         status: {
           in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN],
         },
@@ -159,10 +202,18 @@ export class BotService {
     });
   }
 
-  async getPatientTreatmentPlan(patientId: string) {
+  async getPatientTreatmentPlan(telegramUserId: string) {
+    const patient = await this.prisma.patient.findUnique({
+      where: { telegramUserId },
+    });
+
+    if (!patient) {
+      throw new NotFoundException('Telegram hisobiga bog\'langan bemor topilmadi');
+    }
+
     const planItems = await this.prisma.treatmentPlanItem.findMany({
       where: {
-        patientId,
+        patientId: patient.id,
         status: { in: ['PLANNED', 'IN_PROGRESS'] },
       },
       orderBy: { toothNumber: 'asc' },
@@ -170,7 +221,7 @@ export class BotService {
 
     const odontogramRecords = await this.prisma.odontogramRecord.findMany({
       where: {
-        patientId,
+        patientId: patient.id,
         condition: { not: 'HEALTHY' },
       },
       orderBy: { toothNumber: 'asc' },
@@ -197,9 +248,9 @@ export class BotService {
     return results;
   }
 
-  async getPatientDebt(patientId: string) {
+  async getPatientDebt(telegramUserId: string) {
     const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
+      where: { telegramUserId },
       include: {
         invoices: { select: { totalAmount: true, discount: true } },
         payments: { select: { amount: true } },
@@ -207,7 +258,7 @@ export class BotService {
     });
 
     if (!patient) {
-      throw new NotFoundException('Bemor topilmadi');
+      throw new NotFoundException('Telegram hisobiga bog\'langan bemor topilmadi');
     }
 
     const totalBilled = patient.invoices.reduce((sum, inv) => sum + (inv.totalAmount - inv.discount), 0);
@@ -217,11 +268,27 @@ export class BotService {
     return {
       patientId: patient.id,
       patientName: patient.fullName,
+      telegramUserId: patient.telegramUserId,
       totalDebt,
     };
   }
 
   async createBooking(dto: CreateBotBookingDto) {
+    const telegramUserId = (dto.telegramUserId || '').trim();
+    if (!telegramUserId) {
+      throw new BadRequestException('telegramUserId kiritilishi shart');
+    }
+
+    const patient = await this.prisma.patient.findUnique({
+      where: { telegramUserId },
+    });
+
+    if (!patient) {
+      throw new NotFoundException(
+        'Telegram hisobiga bog\'langan bemor topilmadi. Avval bot orqali ro\'yxatdan o\'ting.',
+      );
+    }
+
     let branchId = dto.branchId;
     if (!branchId) {
       const docBranch = await this.prisma.doctorBranch.findFirst({
@@ -260,14 +327,14 @@ export class BotService {
       throw new BadRequestException('Faol xizmat topilmadi');
     }
 
-    const normalizedPhone = this.normalizePhone(dto.patientPhone);
+    const normalizedPhone = this.normalizePhone(dto.patientPhone || patient.phone);
 
     const bookingResult = await this.appointmentsService.createBooking({
       doctorId: dto.doctorId,
       branchId,
       serviceId,
       startTime: dto.startTime,
-      patientName: dto.patientName,
+      patientName: patient.fullName || dto.patientName,
       patientPhone: normalizedPhone,
       consentGiven: true,
       source: 'telegram_bot',
@@ -284,7 +351,11 @@ export class BotService {
     };
   }
 
-  async cancelAppointment(appointmentId: string) {
+  async cancelAppointment(appointmentId: string, telegramUserId: string) {
+    if (!telegramUserId || typeof telegramUserId !== 'string') {
+      throw new BadRequestException('telegramUserId kiritilishi shart');
+    }
+
     const appt = await this.prisma.appointment.findFirst({
       where: {
         OR: [{ id: appointmentId }, { publicToken: appointmentId }],
@@ -299,23 +370,32 @@ export class BotService {
       throw new NotFoundException('Qabul topilmadi');
     }
 
-    await this.prisma.appointment.update({
-      where: { id: appt.id },
-      data: { status: AppointmentStatus.CANCELLED },
-    });
+    // Ownership check: Patient linked with this telegramUserId must own the appointment
+    if (!appt.patient || !appt.patient.telegramUserId || appt.patient.telegramUserId !== telegramUserId) {
+      throw new ForbiddenException('Ushbu qabulni bekor qilishga ruxsat berilmagan');
+    }
+
+    // Check terminal states: COMPLETED, CANCELLED, or CHECKED_IN cannot be cancelled by patient
+    if (
+      ([
+        AppointmentStatus.COMPLETED,
+        AppointmentStatus.CANCELLED,
+        AppointmentStatus.CHECKED_IN,
+      ] as AppointmentStatus[]).includes(appt.status)
+    ) {
+      throw new BadRequestException('Bu qabulni bekor qilib bo\'lmaydi');
+    }
+
+    // Reuse complete, transactional AppointmentsService cancellation pipeline
+    // (enforcing advisory locks, row lock FOR UPDATE, status transition, outbox & reminder cancellation)
+    await this.appointmentsService.changeStatus(
+      appt.id,
+      AppointmentStatus.CANCELLED,
+      'telegram_bot',
+      'Bemor Telegram bot orqali bekor qildi',
+    );
 
     const doctorName = appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}`.trim() : 'Shifokor';
-
-    await this.auditService.log({
-      action: 'appointment.cancelled_via_bot',
-      entity: 'Appointment',
-      entityId: appt.id,
-      details: {
-        patientName: appt.patient?.fullName,
-        doctorName,
-        cancelledAt: new Date().toISOString(),
-      },
-    });
 
     return {
       success: true,
@@ -352,40 +432,38 @@ export class BotService {
         ],
       },
       include: {
-        doctor: true,
         patient: true,
+        doctor: true,
       },
     });
 
     return appts.map((a) => {
-      const diffHours = (a.startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-      const windowType = diffHours > 10 ? '24h' : '2h';
-      const timeStr = a.startTime.toISOString().slice(11, 16);
+      const is24h = Math.abs(a.startTime.getTime() - in24h.getTime()) < Math.abs(a.startTime.getTime() - in2h.getTime());
       const doctorName = a.doctor ? `Dr. ${a.doctor.firstNameUz} ${a.doctor.lastNameUz}`.trim() : 'Shifokor';
+      const timeStr = a.startTime.toISOString().slice(11, 16);
       return {
         id: a.id,
         patientName: a.patient?.fullName || 'Bemor',
-        patientPhone: a.patient?.phone || '',
         doctorName,
-        startTime: a.startTime.toISOString(),
         timeStr,
-        window: windowType,
+        window: is24h ? '24h' : '2h',
       };
     });
   }
 
   async getDailyDoctorSchedules() {
     const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
-    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
     const doctors = await this.prisma.doctor.findMany({
       where: { isActive: true },
       include: {
         appointments: {
           where: {
-            status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
-            startTime: { gte: todayStart, lte: todayEnd },
+            status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.PENDING] },
+            startTime: { gte: today, lt: tomorrow },
           },
           include: { patient: true },
           orderBy: { startTime: 'asc' },
@@ -393,15 +471,17 @@ export class BotService {
       },
     });
 
-    return doctors.map((doc) => ({
-      doctorId: doc.id,
-      doctorName: `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`.trim(),
-      appointments: doc.appointments.map((a) => ({
-        id: a.id,
-        patientName: a.patient?.fullName || 'Bemor',
-        time: a.startTime.toISOString().slice(11, 16),
-        notes: a.note || a.serviceName || '',
-      })),
-    }));
+    return doctors
+      .filter((d) => d.appointments.length > 0)
+      .map((d) => ({
+        doctorId: d.id,
+        doctorName: `Dr. ${d.firstNameUz} ${d.lastNameUz}`.trim(),
+        appointments: d.appointments.map((a) => ({
+          id: a.id,
+          patientName: a.patient?.fullName || 'Bemor',
+          time: a.startTime.toISOString().slice(11, 16),
+          notes: a.note || '',
+        })),
+      }));
   }
 }

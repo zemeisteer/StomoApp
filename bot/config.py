@@ -3,12 +3,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 def resolve_bot_token() -> str:
     is_prod = os.getenv("NODE_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
     token = os.getenv("BOT_TOKEN")
     if is_prod and (not token or token == "mock_bot_token_for_tests"):
         raise RuntimeError("FAIL-CLOSED: Production requires valid BOT_TOKEN")
     return token or "mock_bot_token_for_tests"
+
+
+def resolve_service_token() -> str:
+    token = os.getenv("SERVICE_TOKEN") or os.getenv("BOT_SERVICE_TOKEN")
+    if not token or len(token) < 32:
+        raise RuntimeError(
+            "FAIL-CLOSED: SERVICE_TOKEN environment variable is missing or shorter than 32 characters"
+        )
+    return token
 
 
 class BotConfig:
@@ -23,11 +33,7 @@ class BotConfig:
         or "http://localhost:3001/api"
     ).rstrip("/")
 
-    SERVICE_TOKEN: str = (
-        os.getenv("SERVICE_TOKEN")
-        or os.getenv("BOT_SERVICE_TOKEN")
-        or "stomo_bot_service_secret_token_2026"
-    )
+    SERVICE_TOKEN: str = resolve_service_token()
 
     CLINIC_NAME: str = os.getenv("CLINIC_NAME", "DentaCare Stomatologiya Klinikasi")
     CLINIC_PHONE: str = os.getenv("CLINIC_PHONE", "+998 71 200 55 44")

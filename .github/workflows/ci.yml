@@ -86,6 +86,7 @@ jobs:
           JWT_REFRESH_SECRET: test_jwt_refresh_ci_key_2026_dev_secure
           DEFAULT_TIMEZONE: Asia/Tashkent
           DEFAULT_LOCALE: uz
+          SERVICE_TOKEN: ci_service_token_random_secure_32_chars_minimum_length_abcdef
         run: npx jest --config ./test/jest-e2e.json --runInBand
 
       - name: Run Comprehensive Verification Checks
@@ -156,5 +157,6 @@ jobs:
       - name: Run Bot Suite
         env:
           ENVIRONMENT: test
+          SERVICE_TOKEN: ci_service_token_random_secure_32_chars_minimum_length_abcdef
         run: pytest bot/test_bot_suite.py
 

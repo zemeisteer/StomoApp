@@ -8,6 +8,10 @@ export class SyncPatientDto {
   @IsString()
   @IsNotEmpty()
   fullName!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  telegramUserId!: string;
 }
 
 export class CreateBotBookingDto {
@@ -26,6 +30,10 @@ export class CreateBotBookingDto {
   @IsDateString()
   startTime!: string;
 
+  @IsString()
+  @IsNotEmpty()
+  telegramUserId!: string;
+
   @IsOptional()
   @IsString()
   branchId?: string;
@@ -39,3 +47,8 @@ export class CreateBotBookingDto {
   notes?: string;
 }
 
+export class CancelBotAppointmentDto {
+  @IsString()
+  @IsNotEmpty()
+  telegramUserId!: string;
+}

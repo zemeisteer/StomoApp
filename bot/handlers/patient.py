@@ -2,19 +2,22 @@ from aiogram import Router, F
 from aiogram.types import Message
 
 from bot.api_client import api_client
-from bot.handlers.start import user_patient_data
 from bot.keyboards.inline import get_appointment_actions_keyboard
 
 router = Router()
 
+
 @router.message(F.text == "📅 Qabullarim")
 async def show_my_appointments(message: Message):
-    patient = user_patient_data.get(message.from_user.id)
-    if not patient or not patient.get("id"):
-        await message.answer("Bemor hisobi topilmadi. Iltimos, /start buyrug'i orqali raqamingizni yuboring.")
-        return
+    telegram_user_id = str(message.from_user.id)
+    appts = await api_client.get_patient_appointments(telegram_user_id)
 
-    appts = await api_client.get_patient_appointments(patient["id"])
+    if appts is None:
+        await message.answer(
+            "Bemor hisobi topilmadi. Iltimos, /start buyrug'i orqali raqamingizni yuboring.",
+            parse_mode="HTML",
+        )
+        return
 
     if not appts:
         await message.answer(
@@ -49,14 +52,18 @@ async def show_my_appointments(message: Message):
             parse_mode="HTML",
         )
 
+
 @router.message(F.text == "🦷 Davolash rejasi")
 async def show_treatment_plan(message: Message):
-    patient = user_patient_data.get(message.from_user.id)
-    if not patient or not patient.get("id"):
-        await message.answer("Bemor profili topilmadi. Iltimos, /start buyrug'i orqali raqamingizni yuboring.")
-        return
+    telegram_user_id = str(message.from_user.id)
+    records = await api_client.get_patient_treatment_plan(telegram_user_id)
 
-    records = await api_client.get_patient_treatment_plan(patient["id"])
+    if records is None:
+        await message.answer(
+            "Bemor hisobi topilmadi. Iltimos, /start buyrug'i orqali raqamingizni yuboring.",
+            parse_mode="HTML",
+        )
+        return
 
     if not records:
         await message.answer(
@@ -83,16 +90,21 @@ async def show_treatment_plan(message: Message):
 
     await message.answer("\n".join(lines), parse_mode="HTML")
 
+
 @router.message(F.text == "💳 Qarzdorlik holati")
 async def show_debt_status(message: Message):
-    patient = user_patient_data.get(message.from_user.id)
-    if not patient or not patient.get("id"):
-        await message.answer("Bemor hisobi topilmadi. Iltimos, /start buyrug'i orqali raqamingizni yuboring.")
+    telegram_user_id = str(message.from_user.id)
+    debt_info = await api_client.get_patient_debt(telegram_user_id)
+
+    if debt_info is None:
+        await message.answer(
+            "Bemor hisobi topilmadi. Iltimos, /start buyrug'i orqali raqamingizni yuboring.",
+            parse_mode="HTML",
+        )
         return
 
-    debt_info = await api_client.get_patient_debt(patient["id"])
     total_debt = debt_info.get("totalDebt", 0) if debt_info else 0
-    patient_name = patient.get("fullName", "Hurmatli bemor")
+    patient_name = debt_info.get("patientName", "Hurmatli bemor")
 
     if total_debt > 0:
         msg = (

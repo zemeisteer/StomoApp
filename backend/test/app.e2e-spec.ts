@@ -50,6 +50,8 @@ const currentDbUrl = parseAndValidateTestDatabaseUrl(
 
 process.env.DATABASE_URL = currentDbUrl;
 process.env.NODE_ENV = 'test';
+const testServiceToken = `test_service_token_random_${Math.random().toString(36).substring(2)}_${Date.now().toString(36)}_min_32_chars_secure`;
+process.env.SERVICE_TOKEN = testServiceToken;
 
 describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   let app: INestApplication;
@@ -6870,7 +6872,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   });
 
   it('Regression 58: NestJS Bot Service Integration (Service Token, Sync, Reminders & Schedules)', async () => {
-    const serviceToken = process.env.SERVICE_TOKEN || process.env.BOT_SERVICE_TOKEN || 'stomo_bot_service_secret_token_2026';
+    const serviceToken = testServiceToken;
 
     // 1. Unauthenticated or invalid token rejected
     await request(app.getHttpServer())
@@ -6890,30 +6892,32 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
 
     expect(Array.isArray(doctorsRes.body)).toBe(true);
 
-    // 3. Sync patient
+    // 3. Sync patient with telegramUserId
     const testPhone = `+99890${Math.floor(1000000 + Math.random() * 9000000)}`;
+    const tgUserId = `tg_user_reg58_${Date.now()}`;
     const syncRes = await request(app.getHttpServer())
       .post('/api/bot/patient/sync')
       .set('x-service-token', serviceToken)
-      .send({ phone: testPhone, fullName: 'Telegram Bot Test Patient' })
+      .send({ phone: testPhone, fullName: 'Telegram Bot Test Patient', telegramUserId: tgUserId })
       .expect(200);
 
     expect(syncRes.body).toHaveProperty('id');
     expect(syncRes.body.phone).toBe(testPhone);
     expect(syncRes.body.totalDebt).toBe(0);
+    expect(syncRes.body.telegramUserId).toBe(tgUserId);
 
     const patientId = syncRes.body.id;
 
     try {
-      // 4. Query treatment plan & debts
+      // 4. Query treatment plan & debts by telegramUserId
       const planRes = await request(app.getHttpServer())
-        .get(`/api/bot/patient/${patientId}/treatment-plan`)
+        .get(`/api/bot/patient/${tgUserId}/treatment-plan`)
         .set('x-service-token', serviceToken)
         .expect(200);
       expect(Array.isArray(planRes.body)).toBe(true);
 
       const debtRes = await request(app.getHttpServer())
-        .get(`/api/bot/patient/${patientId}/debt`)
+        .get(`/api/bot/patient/${tgUserId}/debt`)
         .set('x-service-token', serviceToken)
         .expect(200);
       expect(debtRes.body.totalDebt).toBe(0);
@@ -6933,6 +6937,185 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     } finally {
       await prisma.appointment.deleteMany({ where: { patientId } });
       await prisma.invoice.deleteMany({ where: { patientId } });
+      await prisma.patient.deleteMany({ where: { id: patientId } });
+    }
+  });
+
+  it('Regression 59a: Bot Service Guard Hardening - Rejects default tokens, requires >= 32 chars and safe comparison', async () => {
+    // 1. Missing header rejected
+    await request(app.getHttpServer())
+      .get('/api/bot/doctors')
+      .expect(401);
+
+    // 2. Legacy hardcoded fallback token MUST be rejected with 401
+    await request(app.getHttpServer())
+      .get('/api/bot/doctors')
+      .set('x-service-token', 'stomo_bot_service_secret_token_2026')
+      .expect(401);
+
+    // 3. Short token (< 32 chars) rejected
+    await request(app.getHttpServer())
+      .get('/api/bot/doctors')
+      .set('x-service-token', 'short_token_12345')
+      .expect(401);
+
+    // 4. Valid random 32+ char token succeeds with 200
+    await request(app.getHttpServer())
+      .get('/api/bot/doctors')
+      .set('x-service-token', testServiceToken)
+      .expect(200);
+  });
+
+  it('Regression 59b: Telegram Identity Binding & Ownership Isolation', async () => {
+    const serviceToken = testServiceToken;
+    const tgA = `tg_user_a_${Date.now()}`;
+    const tgB = `tg_user_b_${Date.now()}`;
+
+    // Sync Patient A
+    const resA = await request(app.getHttpServer())
+      .post('/api/bot/patient/sync')
+      .set('x-service-token', serviceToken)
+      .send({
+        phone: `+99890${Math.floor(1000000 + Math.random() * 9000000)}`,
+        fullName: 'Patient A',
+        telegramUserId: tgA,
+      })
+      .expect(200);
+
+    // Sync Patient B
+    const resB = await request(app.getHttpServer())
+      .post('/api/bot/patient/sync')
+      .set('x-service-token', serviceToken)
+      .send({
+        phone: `+99890${Math.floor(1000000 + Math.random() * 9000000)}`,
+        fullName: 'Patient B',
+        telegramUserId: tgB,
+      })
+      .expect(200);
+
+    // Create appointment for Patient B
+    const apptB = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_b_${Date.now()}`,
+        patientId: resB.body.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        serviceName: 'Test Service',
+        durationMinutes: 30,
+        branchId: testBranchId,
+        startTime: new Date(Date.now() + 48 * 3600 * 1000),
+        endTime: new Date(Date.now() + 48 * 3600 * 1000 + 30 * 60 * 1000),
+        status: AppointmentStatus.CONFIRMED,
+      },
+    });
+
+    try {
+      // 1. Patient A queries appointments -> receives empty list (does not see Patient B's appointment)
+      const apptsA = await request(app.getHttpServer())
+        .get(`/api/bot/patient/${tgA}/appointments`)
+        .set('x-service-token', serviceToken)
+        .expect(200);
+      expect(apptsA.body.length).toBe(0);
+
+      // 2. Patient B queries appointments -> sees their appointment
+      const apptsB = await request(app.getHttpServer())
+        .get(`/api/bot/patient/${tgB}/appointments`)
+        .set('x-service-token', serviceToken)
+        .expect(200);
+      expect(apptsB.body.length).toBe(1);
+      expect(apptsB.body[0].id).toBe(apptB.id);
+
+      // 3. Patient A tries to cancel Patient B's appointment -> 403 Forbidden!
+      await request(app.getHttpServer())
+        .post(`/api/bot/appointments/${apptB.id}/cancel`)
+        .set('x-service-token', serviceToken)
+        .send({ telegramUserId: tgA })
+        .expect(403);
+    } finally {
+      await prisma.appointment.deleteMany({ where: { id: apptB.id } });
+      await prisma.patient.deleteMany({ where: { id: { in: [resA.body.id, resB.body.id] } } });
+    }
+  });
+
+  it('Regression 59c: Safe Bot Cancellation Pipeline (Terminal States, Status History & Reminders)', async () => {
+    const serviceToken = testServiceToken;
+    const tgUser = `tg_user_c_${Date.now()}`;
+
+    const syncRes = await request(app.getHttpServer())
+      .post('/api/bot/patient/sync')
+      .set('x-service-token', serviceToken)
+      .send({
+        phone: `+99890${Math.floor(1000000 + Math.random() * 9000000)}`,
+        fullName: 'Patient C',
+        telegramUserId: tgUser,
+      })
+      .expect(200);
+
+    const patientId = syncRes.body.id;
+
+    // 1. Create a COMPLETED appointment
+    const completedAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_c_comp_${Date.now()}`,
+        patientId,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        serviceName: 'Test Service',
+        durationMinutes: 30,
+        branchId: testBranchId,
+        startTime: new Date(Date.now() - 24 * 3600 * 1000),
+        endTime: new Date(Date.now() - 24 * 3600 * 1000 + 30 * 60 * 1000),
+        status: AppointmentStatus.COMPLETED,
+      },
+    });
+
+    // 2. Create an upcoming CONFIRMED appointment
+    const confirmedAppt = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_c_conf_${Date.now()}`,
+        patientId,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        serviceName: 'Test Service',
+        durationMinutes: 30,
+        branchId: testBranchId,
+        startTime: new Date(Date.now() + 72 * 3600 * 1000),
+        endTime: new Date(Date.now() + 72 * 3600 * 1000 + 30 * 60 * 1000),
+        status: AppointmentStatus.CONFIRMED,
+      },
+    });
+
+    try {
+      // 3. Attempting to cancel COMPLETED appointment must return 400 Bad Request
+      await request(app.getHttpServer())
+        .post(`/api/bot/appointments/${completedAppt.id}/cancel`)
+        .set('x-service-token', serviceToken)
+        .send({ telegramUserId: tgUser })
+        .expect(400);
+
+      // 4. Cancelling CONFIRMED appointment succeeds with 200
+      const cancelRes = await request(app.getHttpServer())
+        .post(`/api/bot/appointments/${confirmedAppt.id}/cancel`)
+        .set('x-service-token', serviceToken)
+        .send({ telegramUserId: tgUser })
+        .expect(200);
+
+      expect(cancelRes.body.success).toBe(true);
+
+      // 5. Verify database state: status changed to CANCELLED and history entry created
+      const dbAppt = await prisma.appointment.findUnique({
+        where: { id: confirmedAppt.id },
+        include: { statusHistory: true },
+      });
+      expect(dbAppt?.status).toBe(AppointmentStatus.CANCELLED);
+      expect(dbAppt?.statusHistory.some((h) => h.toStatus === AppointmentStatus.CANCELLED)).toBe(true);
+    } finally {
+      await prisma.appointmentStatusHistory.deleteMany({
+        where: { appointmentId: { in: [completedAppt.id, confirmedAppt.id] } },
+      });
+      await prisma.appointment.deleteMany({
+        where: { id: { in: [completedAppt.id, confirmedAppt.id] } },
+      });
       await prisma.patient.deleteMany({ where: { id: patientId } });
     }
   });

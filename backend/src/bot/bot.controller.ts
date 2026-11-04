@@ -9,12 +9,14 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { BotService } from './bot.service';
 import { BotServiceGuard } from './bot-service.guard';
-import { SyncPatientDto, CreateBotBookingDto } from './bot.dto';
+import { SyncPatientDto, CreateBotBookingDto, CancelBotAppointmentDto } from './bot.dto';
 
 @Controller('bot')
-@UseGuards(BotServiceGuard)
+@UseGuards(BotServiceGuard, ThrottlerGuard)
+@Throttle({ default: { limit: 120, ttl: 60000 } })
 export class BotController {
   constructor(private readonly botService: BotService) {}
 
@@ -39,19 +41,19 @@ export class BotController {
     return this.botService.syncPatient(dto);
   }
 
-  @Get('patient/:id/appointments')
-  async getPatientAppointments(@Param('id') patientId: string) {
-    return this.botService.getPatientAppointments(patientId);
+  @Get('patient/:telegramUserId/appointments')
+  async getPatientAppointments(@Param('telegramUserId') telegramUserId: string) {
+    return this.botService.getPatientAppointments(telegramUserId);
   }
 
-  @Get('patient/:id/treatment-plan')
-  async getPatientTreatmentPlan(@Param('id') patientId: string) {
-    return this.botService.getPatientTreatmentPlan(patientId);
+  @Get('patient/:telegramUserId/treatment-plan')
+  async getPatientTreatmentPlan(@Param('telegramUserId') telegramUserId: string) {
+    return this.botService.getPatientTreatmentPlan(telegramUserId);
   }
 
-  @Get('patient/:id/debt')
-  async getPatientDebt(@Param('id') patientId: string) {
-    return this.botService.getPatientDebt(patientId);
+  @Get('patient/:telegramUserId/debt')
+  async getPatientDebt(@Param('telegramUserId') telegramUserId: string) {
+    return this.botService.getPatientDebt(telegramUserId);
   }
 
   @Post('booking')
@@ -62,8 +64,11 @@ export class BotController {
 
   @Post('appointments/:id/cancel')
   @HttpCode(HttpStatus.OK)
-  async cancelAppointment(@Param('id') appointmentId: string) {
-    return this.botService.cancelAppointment(appointmentId);
+  async cancelAppointment(
+    @Param('id') appointmentId: string,
+    @Body() dto: CancelBotAppointmentDto,
+  ) {
+    return this.botService.cancelAppointment(appointmentId, dto.telegramUserId);
   }
 
   @Get('reminders')
@@ -76,4 +81,3 @@ export class BotController {
     return this.botService.getDailyDoctorSchedules();
   }
 }
-

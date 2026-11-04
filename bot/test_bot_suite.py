@@ -121,6 +121,40 @@ async def test_bot_flows():
         assert mock_get_schedules.called
         print(" [PASS] dispatch_daily_doctor_schedules executed cleanly via NestJS API contract", flush=True)
 
+    # 6. Test Security: Reject Foreign / Forged Contact
+    from aiogram.types import Contact, User, Message
+    from bot.handlers.start import handle_contact
+
+    forged_contact_msg = MagicMock(spec=Message)
+    forged_contact_msg.from_user = User(id=11111, is_bot=False, first_name="Attacker")
+    forged_contact_msg.contact = Contact(phone_number="+998901234567", first_name="Victim", user_id=99999)
+    forged_contact_msg.answer = AsyncMock()
+
+    with patch.object(api_client, "sync_patient", new_callable=AsyncMock) as mock_sync:
+        mock_sync.return_value = {"id": "victim-id", "fullName": "Victim", "phone": "+998901234567", "totalDebt": 0}
+        await handle_contact(forged_contact_msg)
+        assert not mock_sync.called, "CRITICAL VULNERABILITY: Foreign contact was synced without user_id validation!"
+        print(" [PASS] Foreign contact sharing rejected safely", flush=True)
+
+    # 7. Test Security: Authentic Own-Contact Accepted and Passed with Telegram User ID
+    valid_contact_msg = MagicMock(spec=Message)
+    valid_contact_msg.from_user = User(id=11111, is_bot=False, first_name="RealUser")
+    valid_contact_msg.contact = Contact(phone_number="+998901234567", first_name="RealUser", user_id=11111)
+    valid_contact_msg.answer = AsyncMock()
+
+    with patch.object(api_client, "sync_patient", new_callable=AsyncMock) as mock_sync:
+        mock_sync.return_value = {
+            "id": "real-id",
+            "fullName": "RealUser",
+            "phone": "+998901234567",
+            "telegramUserId": "11111",
+            "totalDebt": 0,
+        }
+        await handle_contact(valid_contact_msg)
+        assert mock_sync.called
+        mock_sync.assert_called_with("+998901234567", "RealUser", "11111")
+        print(" [PASS] Authentic own-contact sharing accepted and synced with telegram_user_id", flush=True)
+
     print("--- ALL TELEGRAM BOT FLOW TESTS PASSED SUCCESSFULLY! ---", flush=True)
 
 

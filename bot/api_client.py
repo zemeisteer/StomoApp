@@ -5,6 +5,7 @@ from bot.config import config
 
 logger = logging.getLogger(__name__)
 
+
 class NestApiClient:
     def __init__(self, base_url: Optional[str] = None, service_token: Optional[str] = None):
         self.base_url = (base_url or config.API_BASE_URL).rstrip("/")
@@ -50,19 +51,28 @@ class NestApiClient:
             return res["slots"]
         return []
 
-    async def sync_patient(self, phone: str, full_name: str) -> Optional[Dict[str, Any]]:
-        return await self._post("/bot/patient/sync", {"phone": phone, "fullName": full_name})
+    async def sync_patient(
+        self, phone: str, full_name: str, telegram_user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        return await self._post(
+            "/bot/patient/sync",
+            {
+                "phone": phone,
+                "fullName": full_name,
+                "telegramUserId": telegram_user_id,
+            },
+        )
 
-    async def get_patient_appointments(self, patient_id: str) -> List[Dict[str, Any]]:
-        res = await self._get(f"/bot/patient/{patient_id}/appointments")
+    async def get_patient_appointments(self, telegram_user_id: str) -> List[Dict[str, Any]]:
+        res = await self._get(f"/bot/patient/{telegram_user_id}/appointments")
         return res if isinstance(res, list) else []
 
-    async def get_patient_treatment_plan(self, patient_id: str) -> List[Dict[str, Any]]:
-        res = await self._get(f"/bot/patient/{patient_id}/treatment-plan")
+    async def get_patient_treatment_plan(self, telegram_user_id: str) -> List[Dict[str, Any]]:
+        res = await self._get(f"/bot/patient/{telegram_user_id}/treatment-plan")
         return res if isinstance(res, list) else []
 
-    async def get_patient_debt(self, patient_id: str) -> Optional[Dict[str, Any]]:
-        return await self._get(f"/bot/patient/{patient_id}/debt")
+    async def get_patient_debt(self, telegram_user_id: str) -> Optional[Dict[str, Any]]:
+        return await self._get(f"/bot/patient/{telegram_user_id}/debt")
 
     async def create_booking(
         self,
@@ -70,6 +80,7 @@ class NestApiClient:
         start_time: str,
         patient_name: str,
         patient_phone: str,
+        telegram_user_id: str,
         notes: str = "Telegram bot orqali band qilindi",
     ) -> Optional[Dict[str, Any]]:
         payload = {
@@ -77,12 +88,18 @@ class NestApiClient:
             "startTime": start_time,
             "patientName": patient_name,
             "patientPhone": patient_phone,
+            "telegramUserId": telegram_user_id,
             "notes": notes,
         }
         return await self._post("/bot/booking", payload)
 
-    async def cancel_appointment(self, appointment_id: str) -> Optional[Dict[str, Any]]:
-        return await self._post(f"/bot/appointments/{appointment_id}/cancel", {})
+    async def cancel_appointment(
+        self, appointment_id: str, telegram_user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        return await self._post(
+            f"/bot/appointments/{appointment_id}/cancel",
+            {"telegramUserId": telegram_user_id},
+        )
 
     async def get_reminders(self) -> List[Dict[str, Any]]:
         res = await self._get("/bot/reminders")
@@ -92,5 +109,5 @@ class NestApiClient:
         res = await self._get("/bot/daily-schedules")
         return res if isinstance(res, list) else []
 
-api_client = NestApiClient()
 
+api_client = NestApiClient()

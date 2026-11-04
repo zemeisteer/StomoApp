@@ -4,7 +4,6 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
 from bot.api_client import api_client
-from bot.handlers.start import user_patient_data
 from bot.keyboards.inline import (
     get_doctors_keyboard,
     get_date_picker_keyboard,
@@ -89,13 +88,8 @@ async def handle_confirm_slot(callback: CallbackQuery):
         await callback.answer()
         return
 
-    patient = user_patient_data.get(user_id)
-    if not patient:
-        patient_name = callback.from_user.full_name or "Telegram Bemor"
-        patient_phone = "+998900000000"
-    else:
-        patient_name = patient.get("fullName", callback.from_user.full_name)
-        patient_phone = patient.get("phone", "+998900000000")
+    patient_name = callback.from_user.full_name or "Telegram Bemor"
+    patient_phone = "+998900000000"
 
     # Construct ISO string for start time: "YYYY-MM-DDTHH:mm:00"
     start_time_iso = f"{date_str}T{slot_time}:00"
@@ -105,6 +99,7 @@ async def handle_confirm_slot(callback: CallbackQuery):
         start_time=start_time_iso,
         patient_name=patient_name,
         patient_phone=patient_phone,
+        telegram_user_id=str(user_id),
         notes="Telegram Bot orqali band qilingan",
     )
 
@@ -155,7 +150,7 @@ async def handle_cancel_request(callback: CallbackQuery):
 async def handle_confirm_cancel(callback: CallbackQuery):
     appt_id = callback.data.split(":")[1]
 
-    cancel_res = await api_client.cancel_appointment(appt_id)
+    cancel_res = await api_client.cancel_appointment(appt_id, str(callback.from_user.id))
 
     if cancel_res and cancel_res.get("success"):
         p_name = cancel_res.get("patientName", "Bemor")
@@ -171,9 +166,14 @@ async def handle_confirm_cancel(callback: CallbackQuery):
             date_str=d_str,
             time_str=t_str,
         )
-
-    await callback.message.edit_text("❌ <b>Qabulingiz bekor qilindi.</b>", parse_mode="HTML")
-    await callback.answer("Bekor qilindi")
+        await callback.message.edit_text("❌ <b>Qabulingiz bekor qilindi.</b>", parse_mode="HTML")
+        await callback.answer("Bekor qilindi")
+    else:
+        await callback.message.edit_text(
+            "⚠️ <b>Xatolik:</b> Ushbu qabulni bekor qilib bo'lmaydi (yakunlangan qabul yoki ruxsat etilmagan).",
+            parse_mode="HTML",
+        )
+        await callback.answer("Bekor qilish rad etildi")
 
 @router.callback_query(F.data == "close_cancel")
 async def handle_close_cancel(callback: CallbackQuery):
