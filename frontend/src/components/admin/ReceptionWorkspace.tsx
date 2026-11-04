@@ -14,7 +14,9 @@ import {
   ChevronRight,
   RefreshCw,
   Wallet,
+  Printer,
 } from 'lucide-react';
+import { PaymentReceiptModal, PaymentReceiptData } from './PaymentReceiptModal';
 import { PhoneInput } from '../PhoneInput';
 import { CustomSelect } from '../CustomSelect';
 import { formatClinicDate, formatClinicTime } from '../../lib/dateFormat';
@@ -117,6 +119,14 @@ export function ReceptionWorkspace({
   invoices = [],
   totalDebt = 0,
 }: ReceptionWorkspaceProps) {
+  const [selectedReceipt, setSelectedReceipt] = React.useState<PaymentReceiptData | null>(null);
+  const [receiptModalOpen, setReceiptModalOpen] = React.useState(false);
+
+  const handleOpenReceipt = (rec: PaymentReceiptData) => {
+    setSelectedReceipt(rec);
+    setReceiptModalOpen(true);
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       {/* Column 1 (5 cols): Daily Appointment Calendar */}
@@ -732,25 +742,43 @@ export function ReceptionWorkspace({
                     {inv.procedures?.[0]?.nameUz || (isUz ? 'Stomatologik muolaja' : 'Стоматологическая процедура')}
                   </span>
                 </div>
-                <div className="text-right shrink-0">
-                  <span
-                    className={`px-2 py-0.5 rounded-full font-bold text-[10px] block mb-0.5 ${
-                      inv.status === 'PAID'
-                        ? 'bg-emerald-100 text-emerald-800'
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="text-right">
+                    <span
+                      className={`px-2 py-0.5 rounded-full font-bold text-[10px] block mb-0.5 ${
+                        inv.status === 'PAID'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : inv.status === 'PARTIALLY_PAID'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {inv.status === 'PAID'
+                        ? (isUz ? "To'langan" : 'Оплачено')
                         : inv.status === 'PARTIALLY_PAID'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}
+                        ? (isUz ? 'Qisman' : 'Частично')
+                        : (isUz ? 'Kutilmoqda' : 'В ожидании')}
+                    </span>
+                    <strong className="text-xs text-[#152f34]">
+                      {(inv.totalAmount || 0).toLocaleString()} {isUz ? "so'm" : 'сум'}
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenReceipt({
+                      patientName: inv.patientName || inv.patient?.fullName || (isUz ? 'Bemor' : 'Пациент'),
+                      amount: inv.paidAmount || inv.totalAmount || 0,
+                      method: inv.payments?.[0]?.method || 'CASH',
+                      date: inv.createdAt || new Date(),
+                      invoiceId: inv.id,
+                      serviceName: inv.procedures?.[0]?.nameUz || (isUz ? 'Stomatologik xizmat' : 'Стоматологическая процедура'),
+                      note: inv.notes,
+                    })}
+                    className="p-1.5 text-slate-400 hover:text-[#167b78] hover:bg-[#e0f2ed] rounded-lg transition-colors cursor-pointer"
+                    title={isUz ? 'Kvitansiyani chop etish' : 'Печать квитанции'}
                   >
-                    {inv.status === 'PAID'
-                      ? (isUz ? "To'langan" : 'Оплачено')
-                      : inv.status === 'PARTIALLY_PAID'
-                      ? (isUz ? 'Qisman' : 'Частично')
-                      : (isUz ? 'Kutilmoqda' : 'В ожидании')}
-                  </span>
-                  <strong className="text-xs text-[#152f34]">
-                    {(inv.totalAmount || 0).toLocaleString()} {isUz ? "so'm" : 'сум'}
-                  </strong>
+                    <Printer className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}

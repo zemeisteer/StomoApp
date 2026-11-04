@@ -2137,15 +2137,37 @@ export class NotificationsService {
     const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
     const formattedTime = payload.startTime
-      ? this.formatAppointmentDateTime(payload.startTime, clinic.timezone, 'uz')
-      : (payload.formattedTime || this.formatAppointmentDateTime(new Date(), clinic.timezone, 'uz'));
+      ? this.formatAppointmentDateTime(payload.startTime, clinic.timezone, payload.lang || 'uz')
+      : (payload.formattedTime || this.formatAppointmentDateTime(new Date(), clinic.timezone, payload.lang || 'uz'));
 
-    const tgHeader = this.escapeTelegramMarkdown(`🔔 ${clinic.nameUz}: Yangi qabul so'rovi!`);
-    const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
-    const tgTime = this.escapeTelegramMarkdown(formattedTime);
-    const tgUrl = payload.adminUrl ? String(payload.adminUrl) : '';
+    const template = job.templateKey;
+    let text = '';
 
-    const text = `${tgHeader}\n\nXizmat: ${tgService}\nVaqti: ${tgTime}\n\n👉 Boshqaruv paneli: ${tgUrl}`;
+    if (template === 'staff_new_booking') {
+      const tgHeader = this.escapeTelegramMarkdown(`🔔 ${clinic.nameUz}: Yangi qabul so'rovi!`);
+      const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
+      const tgTime = this.escapeTelegramMarkdown(formattedTime);
+      const tgUrl = payload.adminUrl ? String(payload.adminUrl) : '';
+      text = `${tgHeader}\n\nXizmat: ${tgService}\nVaqti: ${tgTime}\n\n👉 Boshqaruv paneli: ${tgUrl}`;
+    } else if (template === 'appointment_reminder') {
+      const tgHeader = this.escapeTelegramMarkdown(`⏰ ${clinic.nameUz}: Qabul eslatmasi`);
+      const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
+      const tgTime = this.escapeTelegramMarkdown(formattedTime);
+      text = `${tgHeader}\n\nHurmatli bemor, sizning qabulingiz vaqti:\n🗓 ${tgTime}\n🦷 Xizmat: ${tgService}\n📍 Manzil: Toshkent sh., Navoiy ko'chasi 14\n\nSavollar bo'lsa: +998 71 123 45 67`;
+    } else if (template === 'patient_booking_confirmed') {
+      const tgHeader = this.escapeTelegramMarkdown(`✅ ${clinic.nameUz}: Qabulingiz tasdiqlandi!`);
+      const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
+      const tgTime = this.escapeTelegramMarkdown(formattedTime);
+      text = `${tgHeader}\n\n🗓 Vaqti: ${tgTime}\n🦷 Xizmat: ${tgService}\n\nKlinikamizda kutib qolamiz!`;
+    } else if (template === 'patient_booking_cancelled') {
+      const tgHeader = this.escapeTelegramMarkdown(`❌ ${clinic.nameUz}: Qabul bekor qilindi`);
+      text = `${tgHeader}\n\nSizning qabulingiz bekor qilindi. Yangi vaqtga yozilish uchun bot orqali yoki qo'ng'iroq qilib murojaat qilishingiz mumkin.`;
+    } else {
+      const tgHeader = this.escapeTelegramMarkdown(`ℹ️ ${clinic.nameUz}`);
+      const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
+      const tgTime = this.escapeTelegramMarkdown(formattedTime);
+      text = `${tgHeader}\n\nXizmat: ${tgService}\nVaqti: ${tgTime}`;
+    }
 
     if (botToken) {
       try {

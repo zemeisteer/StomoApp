@@ -15,3 +15,5 @@ __pycache__
 *.db
 *.sqlite
 .pytest_cache
+backups/
+*.dump

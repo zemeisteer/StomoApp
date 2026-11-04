@@ -12,7 +12,9 @@ import {
   CheckCircle2,
   Filter,
   Percent,
+  Printer,
 } from 'lucide-react';
+import { PaymentReceiptModal, PaymentReceiptData } from './PaymentReceiptModal';
 import { api } from '../../lib/api';
 import { formatClinicTime } from '../../lib/dateFormat';
 
@@ -49,6 +51,13 @@ export function OwnerWorkspace({
   const [debtNotes, setDebtNotes] = useState<string>('');
   const [debtSuccessMsg, setDebtSuccessMsg] = useState<string | null>(null);
   const [debtErrorMsg, setDebtErrorMsg] = useState<string | null>(null);
+  const [selectedReceipt, setSelectedReceipt] = useState<PaymentReceiptData | null>(null);
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+
+  const handleOpenReceipt = (receipt: PaymentReceiptData) => {
+    setSelectedReceipt(receipt);
+    setReceiptModalOpen(true);
+  };
 
   const loadData = async () => {
     try {
@@ -549,11 +558,28 @@ export function OwnerWorkspace({
                           {formatClinicTime(pay.createdAt || pay.recordedAt)} • {pay.method}
                         </span>
                       </div>
-                      <div className="text-right">
-                        <span className="font-bold text-xs text-emerald-700 block">
-                          +{pay.amount.toLocaleString()} so&apos;m
-                        </span>
-                        <span className="text-[10px] text-slate-500">{pay.note || (isUz ? 'Qabul' : 'Прием')}</span>
+                      <div className="flex items-center gap-2.5">
+                        <div className="text-right">
+                          <span className="font-bold text-xs text-emerald-700 block">
+                            +{pay.amount.toLocaleString()} so&apos;m
+                          </span>
+                          <span className="text-[10px] text-slate-500">{pay.note || (isUz ? 'Qabul' : 'Прием')}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReceipt({
+                            patientName: pay.patientName || (isUz ? 'Bemor' : 'Пациент'),
+                            amount: pay.amount,
+                            method: pay.method || 'CASH',
+                            date: pay.createdAt || pay.recordedAt || new Date(),
+                            invoiceId: pay.invoiceId,
+                            note: pay.note,
+                          })}
+                          className="p-1.5 text-slate-400 hover:text-[#167b78] hover:bg-[#e0f2ed] rounded-lg transition-colors cursor-pointer"
+                          title={isUz ? 'Kvitansiyani chop etish' : 'Печать квитанции'}
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -562,6 +588,14 @@ export function OwnerWorkspace({
           </div>
         </div>
       </div>
+
+      {/* Payment Receipt Modal */}
+      <PaymentReceiptModal
+        isOpen={receiptModalOpen}
+        onClose={() => setReceiptModalOpen(false)}
+        data={selectedReceipt}
+        isUz={isUz}
+      />
 
       {/* Repay Debt Modal */}
       {debtModalOpen && (

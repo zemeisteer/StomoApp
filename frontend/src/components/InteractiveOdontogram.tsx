@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { PatientMedicalCardModal } from './admin/PatientMedicalCardModal';
 import {
   Check,
   AlertCircle,
@@ -128,6 +129,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
   const [teethRecords, setTeethRecords] = useState<Record<number, ToothRecord>>({});
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [isMedicalCardOpen, setIsMedicalCardOpen] = useState(false);
 
   // Mobile Zoom & Pan Controls
   const [zoomScale, setZoomScale] = useState<number>(1.0);
@@ -780,6 +782,16 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 {completionPercent}% ({completedCost.toLocaleString('uz-UZ')} {isUz ? "so'm" : 'сум'})
               </strong>
             </div>
+            <div className="w-px h-8 bg-[#d8e5e2]" />
+            <button
+              type="button"
+              onClick={() => setIsMedicalCardOpen(true)}
+              className="px-3 py-1.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title={isUz ? "043-shaklli kartani chop etish" : "Печать формы 043"}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>{isUz ? '043-Karta' : 'Форма 043'}</span>
+            </button>
           </div>
         </div>
 
@@ -906,6 +918,18 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
           </div>
         )}
       </div>
+      {/* Official 043 Medical Card Modal */}
+      <PatientMedicalCardModal
+        isOpen={isMedicalCardOpen}
+        onClose={() => setIsMedicalCardOpen(false)}
+        isUz={isUz}
+        data={{
+          patientId,
+          patientName,
+          teethRecords,
+          treatmentItems,
+        }}
+      />
     </div>
   );
 };
