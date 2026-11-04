@@ -6,15 +6,15 @@
 - **Branch**: `dev`
 - **Single Source of Truth**: **NestJS 10 + Prisma ORM 5 + PostgreSQL 16** (`localhost:5432`, dev: `dentacare`, test: `dentacare_test`)
 - **Frontend**: Next.js 14 (App Router) + TailwindCSS + Three.js
-- **Verification Suites**:
-  - Backend Jest E2E Suite: **71 / 71 passed (100%)**
+- **Verification Suites (All passing in current session)**:
+  - Backend Jest E2E Suite: **78 / 78 passed (100%)**
   - Priority Verification (`verify-all-priorities.ts`): **60 / 60 passed (100%)**
   - Backend Build (`nest build`): **0 errors**
   - Backend Lint (`npm run lint`): **0 errors**
   - Frontend Typecheck (`tsc --noEmit`): **0 errors**
   - Frontend Lint (`npm run lint`): **0 warnings, 0 errors**
   - Frontend Build (`next build`): **0 errors (all 29/29 routes generated)**
-  - Telegram Bot Suite (`python bot/test_bot_suite.py`): **7 / 7 passed (100%)**
+  - Telegram Bot Suite (`pytest test_bot_suite.py`): **100% passed, 0 warnings**
 
 ---
 
@@ -114,17 +114,46 @@
   - Converted all 10 unoptimized `<img>` elements to Next.js `<Image />` components.
   - Reached **0 warnings, 0 errors** on `npm run lint`.
 
+### Phase 7: Production Security, Safe Telegram Gateway & Billing/Commission Integrity (Commits `e89518b`, `0e47c14`, `92bdd47`)
+- **Hardcoded Secret Elimination & Timing-Safe Bot Guard (Commit `e89518b`)**:
+  - Removed hardcoded fallback tokens in `BotServiceGuard` and `bot/config.py`. Enforced `SERVICE_TOKEN.length >= 32` fail-closed check.
+  - Implemented constant-time string comparison via `crypto.timingSafeEqual` preventing timing-attack vectors.
+  - Added `@Throttle({ default: { limit: 120, ttl: 60000 } })` rate-limiting to all bot gateway endpoints.
+  - Verified token validation: Missing token -> 401, Invalid token -> 401, Valid >=32 char token -> 200 (Regression 59a).
+- **Telegram Identity Spoofing Guard & Server Mapping (Commit `e89518b`)**:
+  - Added migration `20261104120000_patient_telegram_user_id` (`telegram_user_id String? @unique` on `Patient`).
+  - Added check `if contact.user_id != message.from_user.id: return` in `bot/handlers/start.py` to prevent contact card spoofing.
+  - Eliminated ephemeral in-memory `user_patient_data` cache; all patient lookups bind directly to verified `telegram_user_id`.
+  - Added ownership isolation tests proving Patient A cannot access or cancel Patient B's records (Regression 59b).
+- **Safe Bot Cancellation Pipeline (Commit `e89518b`)**:
+  - Replaced direct `prisma.appointment.update` with `AppointmentsService.changeStatus` enforcing advisory locks, status machine transitions (rejecting `COMPLETED`, `CHECKED_IN`, `CANCELLED`), audit logging, and reminder cancellation (Regression 59c).
+- **Explicit Branch/Service Selection & Shared Family Phone Resolution (Commit `0e47c14`)**:
+  - Replaced silent fallback in `getSlots` and `createBooking` with strict 400 Bad Request if `branchId` or `serviceId` is omitted (Regression 60).
+  - Enforced identity resolution policy on shared family phone numbers: returns `{ ambiguous: true, candidates }` when name mismatches to prevent silent overwrites (Regression 61).
+- **Doctor Debt Scoping & Unified Response (Commit `0e47c14`)**:
+  - Scoped `getPatientDebts` so Doctors only see debts from treatments they conducted.
+  - Unified response shape across paginated and unpaginated calls: `{ items, total, page, limit, totalPages }` (Regression 62).
+- **Accurate Doctor Commission Calculation (Commit `92bdd47`)**:
+  - Removed dead loops and in-memory appointment iterations.
+  - Implemented database-level aggregation query grouping payments and refunds by `doctor_id`.
+  - Handled payments attached via invoices where `appointmentId` was on the invoice, with zero double-counting.
+  - Added clinic timezone (`Asia/Tashkent`) boundary parsing for `from` and `to` date filters.
+  - Corrected UI to show "Sozlanmagan" / "Не настроено" instead of defaulting to a hidden 30% commission.
+  - Verified calculation with concrete numerical tests (Regression 63).
+- **Infrastructure & Test Maintenance**:
+  - Configured `asyncio_default_fixture_loop_scope = function` in `bot/pytest.ini`, eliminating `PytestDeprecationWarning`.
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 71 full integration tests (Regressions 1–58) | `dentacare_test` | **71 / 71 PASSED (100%)** |
+| **Jest E2E Regressions** | 78 full integration tests (Regressions 1–63) | `dentacare_test` | **78 / 78 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
-| **Backend ESLint** | TypeScript linting | `backend/src` | **0 errors, PASSED** |
-| **Frontend TypeScript Check** | `tsc --noEmit` | `frontend/src` | **0 errors, PASSED** |
-| **Frontend ESLint** | Next.js linting | `frontend/src` | **0 warnings, 0 errors, PASSED** |
+| **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |
+| **Frontend TypeScript Check** | Next.js type checker | `frontend/src` | **0 errors, PASSED** |
+| **Frontend ESLint** | Next.js linting (`npm run lint`) | `frontend/src` | **0 warnings, 0 errors, PASSED** |
 | **Frontend Production Build** | Next.js compiler (`next build`) | 29/29 routes | **0 errors, PASSED** |
-| **Telegram Bot Suite** | aiogram v3 API client & keyboard tests | Python 3.12 | **7 / 7 PASSED (100%)** |
+| **Telegram Bot Suite** | aiogram v3 API client & contact auth tests | Python 3.12 | **100% PASSED, 0 warnings** |
