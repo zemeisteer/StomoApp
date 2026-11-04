@@ -6127,7 +6127,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
-      const patientDebt1 = debtsRes1.body.find((d: any) => d.id === pat.id);
+      const debtsList = Array.isArray(debtsRes1.body) ? debtsRes1.body : debtsRes1.body.items;
+      const patientDebt1 = debtsList.find((d: any) => d.id === pat.id);
       expect(patientDebt1).toBeDefined();
       expect(patientDebt1.totalDebt).toBe(450000);
 
@@ -6185,7 +6186,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
-      const patientDebt2 = debtsRes2.body.find((d: any) => d.id === pat.id);
+      const debtsList2 = Array.isArray(debtsRes2.body) ? debtsRes2.body : debtsRes2.body.items;
+      const patientDebt2 = debtsList2.find((d: any) => d.id === pat.id);
       expect(patientDebt2).toBeUndefined();
     } finally {
       await prisma.payment.deleteMany({ where: { patientId: pat.id } });
@@ -6832,15 +6834,16 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         },
       });
 
-      // 1. Non-paginated call returns direct array (backward compatibility)
+      // 1. Non-paginated call returns unified object
       const legacyRes = await request(app.getHttpServer())
         .get('/api/admin/billing/debts')
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
-      expect(Array.isArray(legacyRes.body)).toBe(true);
-      const foundA = legacyRes.body.find((p: any) => p.id === patientA.id);
-      const foundB = legacyRes.body.find((p: any) => p.id === patientB.id);
+      const debtItems = Array.isArray(legacyRes.body) ? legacyRes.body : legacyRes.body.items;
+      expect(Array.isArray(debtItems)).toBe(true);
+      const foundA = debtItems.find((p: any) => p.id === patientA.id);
+      const foundB = debtItems.find((p: any) => p.id === patientB.id);
       expect(foundA?.totalDebt).toBe(600000);
       expect(foundB?.totalDebt).toBe(300000);
 
@@ -7117,6 +7120,177 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         where: { id: { in: [completedAppt.id, confirmedAppt.id] } },
       });
       await prisma.patient.deleteMany({ where: { id: patientId } });
+    }
+  });
+
+  it('Regression 60: Bot Slot & Booking Query Clarity (Rejects Missing Branch or Service)', async () => {
+    const serviceToken = testServiceToken;
+    const tgUser = `tg_user_reg60_${Date.now()}`;
+
+    // 1. GET /api/bot/slots without serviceId or branchId must return 400 Bad Request
+    await request(app.getHttpServer())
+      .get(`/api/bot/slots?date=2026-11-10&doctorId=${testDoctorAId}`)
+      .set('x-service-token', serviceToken)
+      .expect(400);
+
+    // 2. POST /api/bot/booking without serviceId or branchId must return 400 Bad Request
+    await request(app.getHttpServer())
+      .post('/api/bot/booking')
+      .set('x-service-token', serviceToken)
+      .send({
+        doctorId: testDoctorAId,
+        patientPhone: '+998901234567',
+        patientName: 'Test Patient',
+        startTime: '2026-11-10T10:00:00.000Z',
+        telegramUserId: tgUser,
+        // branchId and serviceId intentionally omitted
+      })
+      .expect(400);
+  });
+
+  it('Regression 61: Safe Identity Resolution on Shared Family Phone (No Silent Merging)', async () => {
+    const serviceToken = testServiceToken;
+    const familyPhone = `+99890${Math.floor(1000000 + Math.random() * 9000000)}`;
+
+    // Create 2 existing patients with same family phone
+    const p1 = await prisma.patient.create({
+      data: { fullName: 'Rustam Aliyev', phone: familyPhone },
+    });
+    const p2 = await prisma.patient.create({
+      data: { fullName: 'Shahnoza Aliyeva', phone: familyPhone },
+    });
+
+    try {
+      // 1. Syncing with different name on shared phone must NOT silently bind to first patient; must report ambiguity
+      const ambiguousRes = await request(app.getHttpServer())
+        .post('/api/bot/patient/sync')
+        .set('x-service-token', serviceToken)
+        .send({
+          phone: familyPhone,
+          fullName: 'Boshqa Oila A\'zosi',
+          telegramUserId: `tg_family_${Date.now()}`,
+        })
+        .expect(200);
+
+      expect(ambiguousRes.body.ambiguous).toBe(true);
+      expect(Array.isArray(ambiguousRes.body.candidates)).toBe(true);
+      expect(ambiguousRes.body.candidates.length).toBe(2);
+
+      // 2. Explicitly picking patientId successfully binds that exact patient
+      const pickRes = await request(app.getHttpServer())
+        .post('/api/bot/patient/sync')
+        .set('x-service-token', serviceToken)
+        .send({
+          phone: familyPhone,
+          fullName: 'Shahnoza Aliyeva',
+          patientId: p2.id,
+          telegramUserId: `tg_shahnoza_${Date.now()}`,
+        })
+        .expect(200);
+
+      expect(pickRes.body.id).toBe(p2.id);
+      expect(pickRes.body.fullName).toBe('Shahnoza Aliyeva');
+    } finally {
+      await prisma.patient.deleteMany({ where: { id: { in: [p1.id, p2.id] } } });
+    }
+  });
+
+  it('Regression 62: Patient Debt Calculation Doctor Scoping and Unified Shape', async () => {
+    const uniquePhone = `+99890${Math.floor(1000000 + Math.random() * 9000000)}`;
+    const patient = await prisma.patient.create({
+      data: { fullName: 'Scoping Debt Test Patient', phone: uniquePhone },
+    });
+
+    // 1. Treatment with Doctor A: invoice 100,000 so'm, paid 100,000 so'm (Doctor A debt = 0)
+    const apptA = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_a_${Date.now()}`,
+        patientId: patient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        serviceName: 'Clean Cleaning',
+        durationMinutes: 30,
+        branchId: testBranchId,
+        startTime: new Date(),
+        endTime: new Date(Date.now() + 30 * 60000),
+        status: AppointmentStatus.COMPLETED,
+      },
+    });
+
+    const invoiceA = await prisma.invoice.create({
+      data: {
+        patientId: patient.id,
+        appointmentId: apptA.id,
+        totalAmount: 100000,
+        discount: 0,
+        status: 'PAID',
+      },
+    });
+
+    await prisma.payment.create({
+      data: {
+        patientId: patient.id,
+        invoiceId: invoiceA.id,
+        appointmentId: apptA.id,
+        amount: 100000,
+        method: PaymentMethod.CASH,
+      },
+    });
+
+    // 2. Treatment with Doctor B: invoice 500,000 so'm, unpaid (Doctor B debt = 500,000)
+    const apptB = await prisma.appointment.create({
+      data: {
+        publicToken: `tok_b_${Date.now()}`,
+        patientId: patient.id,
+        doctorId: testDoctorBId,
+        serviceId: testServiceId,
+        serviceName: 'Surgery',
+        durationMinutes: 60,
+        branchId: testBranchId,
+        startTime: new Date(),
+        endTime: new Date(Date.now() + 60 * 60000),
+        status: AppointmentStatus.COMPLETED,
+      },
+    });
+
+    await prisma.invoice.create({
+      data: {
+        patientId: patient.id,
+        appointmentId: apptB.id,
+        totalAmount: 500000,
+        discount: 0,
+        status: 'ISSUED',
+      },
+    });
+
+    try {
+      // 3. Doctor A queries patient debts: MUST NOT see the 500,000 so'm debt incurred from Doctor B!
+      const docARes = await request(app.getHttpServer())
+        .get('/api/admin/billing/debts')
+        .set('Authorization', `Bearer ${doctorAToken}`)
+        .expect(200);
+
+      // Verify unified response shape
+      expect(docARes.body).toHaveProperty('items');
+      expect(docARes.body).toHaveProperty('total');
+      const docADebtForPatient = docARes.body.items.find((i: any) => i.id === patient.id);
+      expect(docADebtForPatient).toBeUndefined(); // Doctor A has 0 debt for this patient
+
+      // 4. Doctor B queries patient debts: sees their 500,000 so'm debt
+      const docBRes = await request(app.getHttpServer())
+        .get('/api/admin/billing/debts')
+        .set('Authorization', `Bearer ${doctorBToken}`)
+        .expect(200);
+
+      expect(docBRes.body).toHaveProperty('items');
+      const docBDebtForPatient = docBRes.body.items.find((i: any) => i.id === patient.id);
+      expect(docBDebtForPatient).toBeDefined();
+      expect(docBDebtForPatient.totalDebt).toBe(500000);
+    } finally {
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.invoice.deleteMany({ where: { patientId: patient.id } });
+      await prisma.appointment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.patient.deleteMany({ where: { id: patient.id } });
     }
   });
 });

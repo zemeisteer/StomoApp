@@ -239,10 +239,15 @@ export class BillingService {
     const limit = Math.max(1, Math.min(100, query?.limit ? Number(query.limit) : 20));
     const offset = (page - 1) * limit;
 
-    let doctorFilterSql = Prisma.empty;
+    let invoiceJoinSql = Prisma.empty;
+    let paymentJoinSql = Prisma.empty;
+    let doctorWhereSql = Prisma.empty;
+
     if (user.role === StaffRole.DOCTOR) {
       if (!user.doctorId) throw new ForbiddenException('Shifokor profili biriktirilmagan');
-      doctorFilterSql = Prisma.sql`AND EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.doctor_id = ${user.doctorId})`;
+      invoiceJoinSql = Prisma.sql`JOIN appointments a_inv ON a_inv.id = i.appointment_id AND a_inv.doctor_id = ${user.doctorId}`;
+      paymentJoinSql = Prisma.sql`JOIN invoices i_pay ON i_pay.id = p.invoice_id JOIN appointments a_pay ON a_pay.id = i_pay.appointment_id AND a_pay.doctor_id = ${user.doctorId}`;
+      doctorWhereSql = Prisma.sql`AND EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.doctor_id = ${user.doctorId})`;
     }
 
     // Database-level dynamic aggregation: computes net billed vs net paid directly in PostgreSQL
@@ -255,15 +260,17 @@ export class BillingService {
       totalDebt: number;
     }>>`
       WITH patient_payments AS (
-        SELECT patient_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) as total_paid
-        FROM payments
-        WHERE patient_id IS NOT NULL
-        GROUP BY patient_id
+        SELECT p.patient_id, SUM(CASE WHEN p.is_refund THEN -p.amount ELSE p.amount END) as total_paid
+        FROM payments p
+        ${paymentJoinSql}
+        WHERE p.patient_id IS NOT NULL
+        GROUP BY p.patient_id
       ),
       patient_invoices AS (
-        SELECT patient_id, SUM(GREATEST(0, total_amount - COALESCE(discount, 0))) as total_billed
-        FROM invoices
-        GROUP BY patient_id
+        SELECT i.patient_id, SUM(GREATEST(0, i.total_amount - COALESCE(i.discount, 0))) as total_billed
+        FROM invoices i
+        ${invoiceJoinSql}
+        GROUP BY i.patient_id
       )
       SELECT
         p.id,
@@ -276,42 +283,42 @@ export class BillingService {
       LEFT JOIN patient_invoices pi ON pi.patient_id = p.id
       LEFT JOIN patient_payments pp ON pp.patient_id = p.id
       WHERE (COALESCE(pi.total_billed, 0) - COALESCE(pp.total_paid, 0)) > 0
-      ${doctorFilterSql}
+      ${doctorWhereSql}
       ORDER BY "totalDebt" DESC
       ${isPaginated ? Prisma.sql`LIMIT ${limit} OFFSET ${offset}` : Prisma.empty};
     `;
 
-    if (!isPaginated) {
-      return rows;
-    }
-
     const countRows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
       WITH patient_payments AS (
-        SELECT patient_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) as total_paid
-        FROM payments
-        WHERE patient_id IS NOT NULL
-        GROUP BY patient_id
+        SELECT p.patient_id, SUM(CASE WHEN p.is_refund THEN -p.amount ELSE p.amount END) as total_paid
+        FROM payments p
+        ${paymentJoinSql}
+        WHERE p.patient_id IS NOT NULL
+        GROUP BY p.patient_id
       ),
       patient_invoices AS (
-        SELECT patient_id, SUM(GREATEST(0, total_amount - COALESCE(discount, 0))) as total_billed
-        FROM invoices
-        GROUP BY patient_id
+        SELECT i.patient_id, SUM(GREATEST(0, i.total_amount - COALESCE(discount, 0))) as total_billed
+        FROM invoices i
+        ${invoiceJoinSql}
+        GROUP BY i.patient_id
       )
       SELECT COUNT(*)::bigint as count
       FROM patients p
       LEFT JOIN patient_invoices pi ON pi.patient_id = p.id
       LEFT JOIN patient_payments pp ON pp.patient_id = p.id
       WHERE (COALESCE(pi.total_billed, 0) - COALESCE(pp.total_paid, 0)) > 0
-      ${doctorFilterSql};
+      ${doctorWhereSql};
     `;
 
     const total = Number(countRows[0]?.count || 0);
+
+    // Unified response contract across all paths (both paginated and full list)
     return {
       items: rows,
       total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
+      page: isPaginated ? page : 1,
+      limit: isPaginated ? limit : (total || 20),
+      totalPages: isPaginated ? Math.ceil(total / limit) : 1,
     };
   }
 }

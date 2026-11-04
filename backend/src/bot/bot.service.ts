@@ -33,7 +33,14 @@ export class BotService {
       where: { isActive: true },
       include: {
         specialties: { include: { specialty: true } },
-        branches: true,
+        branches: {
+          where: { branch: { isActive: true } },
+          include: { branch: true },
+        },
+        services: {
+          where: { service: { isActive: true } },
+          include: { service: true },
+        },
       },
       orderBy: { sortOrder: 'asc' },
     });
@@ -42,45 +49,57 @@ export class BotService {
       id: doc.id,
       name: `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`.trim(),
       spec: doc.specialties?.[0]?.specialty?.nameUz || doc.titleUz || 'Stomatolog',
-      branchId: doc.branches?.[0]?.branchId || null,
+      branches: doc.branches.map((b) => ({
+        id: b.branch.id,
+        name: b.branch.nameUz,
+        address: b.branch.addressUz,
+      })),
+      services: doc.services.map((s) => ({
+        id: s.service.id,
+        name: s.service.nameUz,
+        priceFrom: s.service.priceFrom,
+      })),
     }));
   }
 
   async getSlots(dateStr: string, doctorId: string, serviceId?: string, branchId?: string) {
-    let effectiveServiceId = serviceId;
-    if (!effectiveServiceId) {
-      const docService = await this.prisma.doctorService.findFirst({
-        where: { doctorId },
-        select: { serviceId: true },
-      });
-      effectiveServiceId = docService?.serviceId;
-    }
-    if (!effectiveServiceId) {
-      const firstService = await this.prisma.service.findFirst({
-        where: { isActive: true },
-        select: { id: true },
-      });
-      effectiveServiceId = firstService?.id;
+    if (!serviceId || !serviceId.trim() || !branchId || !branchId.trim()) {
+      throw new BadRequestException('Filial (branchId) va xizmat (serviceId) tanlanishi shart');
     }
 
-    let effectiveBranchId = branchId;
-    if (!effectiveBranchId) {
-      const docBranch = await this.prisma.doctorBranch.findFirst({
-        where: { doctorId },
-        select: { branchId: true },
-      });
-      effectiveBranchId = docBranch?.branchId;
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, isActive: true },
+    });
+    if (!branch) {
+      throw new BadRequestException('Filial topilmadi yoki faol emas');
     }
 
-    if (!effectiveServiceId) {
-      return { date: dateStr, doctorId, slots: [] };
+    const service = await this.prisma.service.findFirst({
+      where: { id: serviceId, isActive: true },
+    });
+    if (!service) {
+      throw new BadRequestException('Xizmat topilmadi yoki faol emas');
+    }
+
+    const docBranch = await this.prisma.doctorBranch.findFirst({
+      where: { doctorId, branchId },
+    });
+    if (!docBranch) {
+      throw new BadRequestException('Shifokor ushbu filialda ishlamaydi');
+    }
+
+    const docService = await this.prisma.doctorService.findFirst({
+      where: { doctorId, serviceId },
+    });
+    if (!docService) {
+      throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatmaydi');
     }
 
     const res = await this.schedulingService.getAvailableSlots(
       doctorId,
       dateStr,
-      effectiveServiceId,
-      effectiveBranchId,
+      serviceId,
+      branchId,
       'Asia/Tashkent',
     );
 
@@ -94,6 +113,8 @@ export class BotService {
     return {
       date: dateStr,
       doctorId,
+      branchId,
+      serviceId,
       durationMinutes: res.durationMinutes,
       slots: availableTimeStrings,
       slotObjects: res.slots,
@@ -102,47 +123,125 @@ export class BotService {
 
   async syncPatient(dto: SyncPatientDto) {
     const normalized = this.normalizePhone(dto.phone);
+    const cleanName = (dto.fullName || '').trim();
     const telegramUserId = (dto.telegramUserId || '').trim();
 
     if (!telegramUserId) {
       throw new BadRequestException('telegramUserId kiritilishi shart');
     }
 
-    // 1. Check if patient already exists with this exact telegramUserId
+    // 1. Explicit patientId provided (user picked from candidate list)
+    if (dto.patientId) {
+      let patient = await this.prisma.patient.findUnique({
+        where: { id: dto.patientId },
+      });
+      if (!patient || patient.phone !== normalized) {
+        throw new NotFoundException('Tanlangan bemor topilmadi yoki telefon raqami mos emas');
+      }
+
+      patient = await this.prisma.patient.update({
+        where: { id: patient.id },
+        data: { telegramUserId },
+      });
+
+      const debtData = await this.getPatientDebt(telegramUserId);
+      return {
+        id: patient.id,
+        fullName: patient.fullName,
+        phone: patient.phone,
+        telegramUserId: patient.telegramUserId,
+        totalDebt: debtData.totalDebt,
+      };
+    }
+
+    // 2. Check if a patient already has this telegramUserId
     let patient = await this.prisma.patient.findUnique({
       where: { telegramUserId },
     });
 
-    if (!patient) {
-      // 2. Check if a patient exists with the provided phone
-      patient = await this.prisma.patient.findFirst({
-        where: { phone: normalized },
-      });
+    if (patient) {
+      const debtData = await this.getPatientDebt(telegramUserId);
+      return {
+        id: patient.id,
+        fullName: patient.fullName,
+        phone: patient.phone,
+        telegramUserId: patient.telegramUserId,
+        totalDebt: debtData.totalDebt,
+      };
+    }
 
-      if (patient) {
-        // Link telegramUserId to existing patient record
-        patient = await this.prisma.patient.update({
-          where: { id: patient.id },
-          data: { telegramUserId },
-        });
-      } else {
-        // Create new patient record
+    // 3. Find all existing patients sharing this phone
+    const existingPatients = await this.prisma.patient.findMany({
+      where: { phone: normalized },
+    });
+
+    if (existingPatients.length === 0) {
+      // No existing patient with this phone: safe to create new
+      patient = await this.prisma.patient.create({
+        data: {
+          phone: normalized,
+          fullName: cleanName || 'Telegram Bemor',
+          telegramUserId,
+          notes: 'Telegram Bot orqali ro\'yxatdan o\'tgan',
+        },
+      });
+    } else if (existingPatients.length === 1) {
+      const single = existingPatients[0];
+      // Check if existing patient belongs to another telegram account or has a completely different name
+      const isNameMatching =
+        cleanName.length > 0 &&
+        single.fullName.trim().toLowerCase() === cleanName.toLowerCase();
+
+      if (single.telegramUserId && single.telegramUserId !== telegramUserId) {
+        // Shared family phone already linked to another family member on Telegram -> create separate patient
         patient = await this.prisma.patient.create({
           data: {
             phone: normalized,
-            fullName: dto.fullName.trim() || 'Telegram Bemor',
+            fullName: cleanName || 'Telegram Bemor',
             telegramUserId,
-            notes: 'Telegram Bot orqali ro\'yxatdan o\'tgan',
+            notes: 'Telegram Bot orqali ro\'yxatdan o\'tgan (oilaviy raqam)',
           },
+        });
+      } else if (!isNameMatching && cleanName.length > 0) {
+        // Different family member on same phone -> return candidates to confirm or create separate
+        return {
+          ambiguous: true,
+          message: 'Ushbu telefon raqamiga boshqa bemor biriktirilgan. Iltimos, o\'zingizni tanlang:',
+          candidates: existingPatients.map((p) => ({
+            id: p.id,
+            fullName: p.fullName,
+            phone: p.phone,
+          })),
+        };
+      } else {
+        // Matching name: link telegramUserId
+        patient = await this.prisma.patient.update({
+          where: { id: single.id },
+          data: { telegramUserId },
         });
       }
     } else {
-      // If phone changed, safely update if provided
-      if (dto.fullName && dto.fullName.trim() && patient.fullName !== dto.fullName.trim()) {
+      // Multiple patients exist with this phone (Shared Family Phone)
+      const exactMatch = existingPatients.find(
+        (p) => p.fullName.trim().toLowerCase() === cleanName.toLowerCase(),
+      );
+
+      if (exactMatch && (!exactMatch.telegramUserId || exactMatch.telegramUserId === telegramUserId)) {
         patient = await this.prisma.patient.update({
-          where: { id: patient.id },
-          data: { fullName: dto.fullName.trim() },
+          where: { id: exactMatch.id },
+          data: { telegramUserId },
         });
+      } else {
+        // Ambiguous: Never silently guess or overwrite family members!
+        return {
+          ambiguous: true,
+          message: 'Ushbu telefon raqamiga bir nechta bemor biriktirilgan. Iltimos, o\'zingizni tanlang:',
+          candidates: existingPatients.map((p) => ({
+            id: p.id,
+            fullName: p.fullName,
+            phone: p.phone,
+          })),
+        };
       }
     }
 
@@ -289,50 +388,47 @@ export class BotService {
       );
     }
 
-    let branchId = dto.branchId;
-    if (!branchId) {
-      const docBranch = await this.prisma.doctorBranch.findFirst({
-        where: { doctorId: dto.doctorId },
-        select: { branchId: true },
-      });
-      branchId = docBranch?.branchId;
+    if (!dto.branchId || !dto.branchId.trim()) {
+      throw new BadRequestException('Filial (branchId) tanlanishi shart');
     }
-    if (!branchId) {
-      const firstBranch = await this.prisma.branch.findFirst({
-        where: { isActive: true },
-        select: { id: true },
-      });
-      branchId = firstBranch?.id;
-    }
-    if (!branchId) {
-      throw new BadRequestException('Faol filial topilmadi');
+    if (!dto.serviceId || !dto.serviceId.trim()) {
+      throw new BadRequestException('Xizmat (serviceId) tanlanishi shart');
     }
 
-    let serviceId = dto.serviceId;
-    if (!serviceId) {
-      const docService = await this.prisma.doctorService.findFirst({
-        where: { doctorId: dto.doctorId },
-        select: { serviceId: true },
-      });
-      serviceId = docService?.serviceId;
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: dto.branchId, isActive: true },
+    });
+    if (!branch) {
+      throw new BadRequestException('Filial topilmadi yoki faol emas');
     }
-    if (!serviceId) {
-      const firstService = await this.prisma.service.findFirst({
-        where: { isActive: true },
-        select: { id: true },
-      });
-      serviceId = firstService?.id;
+
+    const service = await this.prisma.service.findFirst({
+      where: { id: dto.serviceId, isActive: true },
+    });
+    if (!service) {
+      throw new BadRequestException('Xizmat topilmadi yoki faol emas');
     }
-    if (!serviceId) {
-      throw new BadRequestException('Faol xizmat topilmadi');
+
+    const docBranch = await this.prisma.doctorBranch.findFirst({
+      where: { doctorId: dto.doctorId, branchId: dto.branchId },
+    });
+    if (!docBranch) {
+      throw new BadRequestException('Shifokor ushbu filialda ishlamaydi');
+    }
+
+    const docService = await this.prisma.doctorService.findFirst({
+      where: { doctorId: dto.doctorId, serviceId: dto.serviceId },
+    });
+    if (!docService) {
+      throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatmaydi');
     }
 
     const normalizedPhone = this.normalizePhone(dto.patientPhone || patient.phone);
 
     const bookingResult = await this.appointmentsService.createBooking({
       doctorId: dto.doctorId,
-      branchId,
-      serviceId,
+      branchId: dto.branchId,
+      serviceId: dto.serviceId,
       startTime: dto.startTime,
       patientName: patient.fullName || dto.patientName,
       patientPhone: normalizedPhone,

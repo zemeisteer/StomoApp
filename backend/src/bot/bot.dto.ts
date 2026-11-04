@@ -12,12 +12,24 @@ export class SyncPatientDto {
   @IsString()
   @IsNotEmpty()
   telegramUserId!: string;
+
+  @IsOptional()
+  @IsString()
+  patientId?: string;
 }
 
 export class CreateBotBookingDto {
   @IsString()
   @IsNotEmpty()
   doctorId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  branchId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  serviceId!: string;
 
   @IsString()
   @IsNotEmpty()
@@ -33,14 +45,6 @@ export class CreateBotBookingDto {
   @IsString()
   @IsNotEmpty()
   telegramUserId!: string;
-
-  @IsOptional()
-  @IsString()
-  branchId?: string;
-
-  @IsOptional()
-  @IsString()
-  serviceId?: string;
 
   @IsOptional()
   @IsString()

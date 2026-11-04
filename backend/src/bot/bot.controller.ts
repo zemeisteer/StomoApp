@@ -8,6 +8,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { BotService } from './bot.service';
@@ -32,6 +33,9 @@ export class BotController {
     @Query('serviceId') serviceId?: string,
     @Query('branchId') branchId?: string,
   ) {
+    if (!serviceId || !serviceId.trim() || !branchId || !branchId.trim()) {
+      throw new BadRequestException('Filial (branchId) va xizmat (serviceId) tanlanishi shart');
+    }
     return this.botService.getSlots(date, doctorId, serviceId, branchId);
   }
 

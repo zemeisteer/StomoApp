@@ -189,7 +189,7 @@ export default function AdminOverviewPage() {
       setTodayAppointments(todayList);
       setUpcomingAppointments(upcomingRes.data || []);
       setServerInvoices(Array.isArray(invRes) ? invRes : []);
-      setServerDebts(Array.isArray(debtRes) ? debtRes : []);
+      setServerDebts(Array.isArray(debtRes) ? debtRes : debtRes?.items || []);
 
       if (isDoctor && user?.doctorId) {
         const docCompleted = todayList.filter(
