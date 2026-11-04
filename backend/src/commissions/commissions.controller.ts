@@ -24,13 +24,21 @@ export class CommissionsController {
 
   @Get()
   @Roles(StaffRole.OWNER)
-  async listAllCommissions() {
-    return await this.commissionsService.listAllCommissions();
+  async listAllCommissions(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return await this.commissionsService.listAllCommissions(from, to);
   }
 
   @Get('my-earnings')
   @Roles(StaffRole.DOCTOR, StaffRole.OWNER)
-  async getMyEarnings(@CurrentUser() user: JwtPayload, @Query('doctorId') queryDoctorId?: string) {
+  async getMyEarnings(
+    @CurrentUser() user: JwtPayload,
+    @Query('doctorId') queryDoctorId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
     let targetDoctorId = user.doctorId;
     if (user.role === StaffRole.OWNER && queryDoctorId) {
       targetDoctorId = queryDoctorId;
@@ -38,7 +46,7 @@ export class CommissionsController {
     if (!targetDoctorId) {
       throw new ForbiddenException('Shifokor profili topilmadi');
     }
-    return await this.commissionsService.getDoctorEarnings(targetDoctorId);
+    return await this.commissionsService.getDoctorEarnings(targetDoctorId, from, to);
   }
 
   @Put(':doctorId')

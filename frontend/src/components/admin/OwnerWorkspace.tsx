@@ -297,7 +297,7 @@ export function OwnerWorkspace({
             <div className="space-y-3">
               {doctors.map((doc) => {
                 const docId = doc.id;
-                const currentRate = doctorCommissionRates[docId] ?? 40;
+                const currentRate = doctorCommissionRates[docId];
                 const docName = isUz
                   ? `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`
                   : `Др. ${doc.firstNameRu || doc.firstNameUz} ${doc.lastNameRu || doc.lastNameUz}`;
@@ -323,10 +323,21 @@ export function OwnerWorkspace({
                       <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-[#d8e5e2]">
                         <span className="text-xs text-[#52696e] font-semibold">{isUz ? 'Ulush:' : 'Ставка:'}</span>
                         <select
-                          value={currentRate}
-                          onChange={(e) => handleUpdateDoctorCommissionRate(docId, Number(e.target.value))}
-                          className="text-xs font-bold text-[#167b78] bg-transparent focus:outline-none cursor-pointer"
+                          value={currentRate !== undefined && currentRate !== null ? currentRate : ''}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleUpdateDoctorCommissionRate(docId, Number(e.target.value));
+                            }
+                          }}
+                          className={`text-xs font-bold bg-transparent focus:outline-none cursor-pointer ${
+                            currentRate !== undefined && currentRate !== null ? 'text-[#167b78]' : 'text-amber-600'
+                          }`}
                         >
+                          {(currentRate === undefined || currentRate === null) && (
+                            <option value="" disabled>
+                              {isUz ? 'Sozlanmagan' : 'Не настроено'}
+                            </option>
+                          )}
                           <option value={30}>30%</option>
                           <option value={35}>35%</option>
                           <option value={40}>40%</option>

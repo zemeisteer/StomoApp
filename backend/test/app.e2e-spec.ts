@@ -7293,6 +7293,164 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.deleteMany({ where: { id: patient.id } });
     }
   });
+
+  // -------------------------------------------------------------
+  // Regression 63: Accurate Doctor Commission Calculation
+  // (DB Aggregation, Date Filters, Refunds, Unlinked Invoices, Unconfigured State)
+  // -------------------------------------------------------------
+  it('Regression 63: Accurate Doctor Commission Calculation (DB Aggregation, Date Filters, Refunds, Unlinked Invoices, Unconfigured State)', async () => {
+    // Clean up any existing commission for Doctor B before starting
+    await prisma.doctorCommission.deleteMany({ where: { doctorId: testDoctorBId } });
+
+    // 1. Unconfigured doctor returns isConfigured: false, percentage: null, totalEarned: 0 (no hidden 30%)
+    const unconfiguredRes = await request(app.getHttpServer())
+      .get('/api/admin/commissions')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    const docBUnconfigured = unconfiguredRes.body.find((c: any) => c.doctorId === testDoctorBId);
+    expect(docBUnconfigured).toBeDefined();
+    expect(docBUnconfigured.isConfigured).toBe(false);
+    expect(docBUnconfigured.percentage).toBeNull();
+    expect(docBUnconfigured.totalEarned).toBe(0);
+
+    // 2. Configure 40% commission with 50,000 so'm fixedBonus for Doctor B
+    await request(app.getHttpServer())
+      .put(`/api/admin/commissions/${testDoctorBId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ percentage: 40, fixedBonus: 50000, notes: 'Per-period bonus policy' })
+      .expect(200);
+
+    const patient = await prisma.patient.create({
+      data: {
+        fullName: `Commission Test Patient ${runId}`,
+        phone: `+99899${runId}88`,
+      },
+    });
+
+    let apptId: string | null = null;
+    let invId: string | null = null;
+
+    try {
+      const appt = await prisma.appointment.create({
+        data: {
+          publicToken: `tok_comm_${Date.now()}`,
+          patientId: patient.id,
+          doctorId: testDoctorBId,
+          serviceId: testServiceId,
+          serviceName: 'Commission Test Service',
+          durationMinutes: 30,
+          branchId: testBranchId,
+          startTime: new Date('2026-11-15T10:00:00.000Z'),
+          endTime: new Date('2026-11-15T10:30:00.000Z'),
+          status: AppointmentStatus.COMPLETED,
+        },
+      });
+      apptId = appt.id;
+
+      const invoice = await prisma.invoice.create({
+        data: {
+          patientId: patient.id,
+          appointmentId: appt.id,
+          totalAmount: 1500000,
+          discount: 0,
+          status: 'PARTIALLY_PAID',
+        },
+      });
+      invId = invoice.id;
+
+      // Payment 1: Direct on appointment, 1,000,000 so'm on 2026-11-15
+      await prisma.payment.create({
+        data: {
+          patientId: patient.id,
+          appointmentId: appt.id,
+          amount: 1000000,
+          isRefund: false,
+          recordedAt: new Date('2026-11-15T10:30:00.000Z'),
+        },
+      });
+
+      // Payment 2 (Refund): Direct on appointment, 200,000 so'm refund on 2026-11-16
+      await prisma.payment.create({
+        data: {
+          patientId: patient.id,
+          appointmentId: appt.id,
+          amount: 200000,
+          isRefund: true,
+          recordedAt: new Date('2026-11-16T11:00:00.000Z'),
+        },
+      });
+
+      // Payment 3: Unlinked from appt directly, but linked via Invoice on 2026-11-17, 500,000 so'm
+      await prisma.payment.create({
+        data: {
+          patientId: patient.id,
+          invoiceId: invoice.id,
+          appointmentId: null,
+          amount: 500000,
+          isRefund: false,
+          recordedAt: new Date('2026-11-17T12:00:00.000Z'),
+        },
+      });
+
+      // Payment 4: Out-of-period payment on 2026-05-15 (May 2026), 400,000 so'm
+      await prisma.payment.create({
+        data: {
+          patientId: patient.id,
+          appointmentId: appt.id,
+          amount: 400000,
+          isRefund: false,
+          recordedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      });
+
+      // 3. Query filtered range November 2026 (2026-11-01 to 2026-11-30)
+      // Expected totalCollected for Doctor B:
+      // + 1,000,000 (Payment 1)
+      // -   200,000 (Payment 2 refund)
+      // +   500,000 (Payment 3 via invoice)
+      // = 1,300,000 so'm. (May payment of 400,000 is excluded!)
+      // Expected totalEarned:
+      // 1,300,000 * 40% + 50,000 (fixedBonus for period) = 520,000 + 50,000 = 570,000 so'm.
+
+      const listPeriodRes = await request(app.getHttpServer())
+        .get('/api/admin/commissions?from=2026-11-01&to=2026-11-30')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const docBPeriod = listPeriodRes.body.find((c: any) => c.doctorId === testDoctorBId);
+      expect(docBPeriod).toBeDefined();
+      expect(docBPeriod.isConfigured).toBe(true);
+      expect(docBPeriod.percentage).toBe(40);
+      expect(docBPeriod.fixedBonus).toBe(50000);
+      expect(docBPeriod.totalCollected).toBe(1300000);
+      expect(docBPeriod.totalEarned).toBe(570000);
+
+      // 4. Doctor B queries /my-earnings with date filter
+      const earningsPeriodRes = await request(app.getHttpServer())
+        .get('/api/admin/commissions/my-earnings?from=2026-11-01&to=2026-11-30')
+        .set('Authorization', `Bearer ${doctorBToken}`)
+        .expect(200);
+
+      expect(earningsPeriodRes.body.isConfigured).toBe(true);
+      expect(earningsPeriodRes.body.percentage).toBe(40);
+      expect(earningsPeriodRes.body.fixedBonus).toBe(50000);
+      expect(earningsPeriodRes.body.totalCollected).toBe(1300000);
+      expect(earningsPeriodRes.body.totalEarned).toBe(570000);
+      expect(earningsPeriodRes.body.appointments).toBeDefined();
+      expect(earningsPeriodRes.body.appointments.length).toBeGreaterThanOrEqual(1);
+
+      const apptInBreakdown = earningsPeriodRes.body.appointments.find((a: any) => a.appointmentId === appt.id);
+      expect(apptInBreakdown).toBeDefined();
+      expect(apptInBreakdown.collected).toBe(1300000);
+    } finally {
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      if (invId) await prisma.invoice.deleteMany({ where: { id: invId } });
+      if (apptId) await prisma.appointment.deleteMany({ where: { id: apptId } });
+      await prisma.patient.deleteMany({ where: { id: patient.id } });
+      await prisma.doctorCommission.deleteMany({ where: { doctorId: testDoctorBId } });
+    }
+  });
 });
 
 
