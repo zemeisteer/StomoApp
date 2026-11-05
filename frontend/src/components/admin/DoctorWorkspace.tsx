@@ -15,6 +15,12 @@ import {
   ZoomOut,
   Maximize2,
   RotateCcw,
+  Upload,
+  RotateCw,
+  RefreshCw,
+  Image as ImageIcon,
+  AlertCircle,
+  Eye,
 } from 'lucide-react';
 import { InteractiveOdontogram } from '../InteractiveOdontogram';
 import { formatClinicDate, formatClinicTime } from '../../lib/dateFormat';
@@ -60,6 +66,70 @@ export function DoctorWorkspace({
   const patientId = activeAppt ? `#${activeAppt.id.slice(-4).toUpperCase()}` : '#8329';
   const rawPatientId = activeAppt?.patient?.id || activeAppt?.patientId || 'pat-1';
   const [earnings, setEarnings] = React.useState<any>(null);
+  const [zoomLevel, setZoomLevel] = React.useState<number>(1);
+  const [rotationDeg, setRotationDeg] = React.useState<number>(0);
+  const [isInverted, setIsInverted] = React.useState<boolean>(false);
+  const [xrays, setXrays] = React.useState<Array<{ id: string; url: string; name: string; date?: string }>>([]);
+  const [selectedXrayIndex, setSelectedXrayIndex] = React.useState<number>(0);
+  const [isUploading, setIsUploading] = React.useState<boolean>(false);
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    api.getMediaList('xray')
+      .then((res) => {
+        if (res?.data && res.data.length > 0) {
+          setXrays(
+            res.data.map((item: any) => ({
+              id: item.id,
+              url: item.url,
+              name: item.originalName || item.fileName,
+              date: item.createdAt,
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleXrayUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError(isUz ? 'Fayl hajmi 5MB dan oshmasligi kerak' : 'Размер файла не должен превышать 5МБ');
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const res = await api.uploadMedia(file, 'xray');
+      const newXray = {
+        id: res.id,
+        url: res.url,
+        name: res.originalName || file.name,
+        date: new Date().toISOString(),
+      };
+      setXrays((prev) => [newXray, ...prev]);
+      setSelectedXrayIndex(0);
+      setZoomLevel(1);
+      setRotationDeg(0);
+    } catch (err: any) {
+      setUploadError(err?.message || (isUz ? 'Yuklashda xatolik yuz berdi' : 'Ошибка при загрузке'));
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleResetControls = () => {
+    setXrayBrightness(100);
+    setXrayContrast(100);
+    setZoomLevel(1);
+    setRotationDeg(0);
+    setIsInverted(false);
+  };
 
   React.useEffect(() => {
     api.getMyDoctorEarnings()
@@ -134,112 +204,268 @@ export function DoctorWorkspace({
 
         {/* X-Ray Radiography Viewer Module */}
         <div className="ui-card space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-3">
+          {/* Hidden File Input for Doctor X-Ray Upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={handleXrayUpload}
+          />
+
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-3">
             <div>
-              <h3 className="text-sm font-bold text-[#152f34] flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-[#167b78]" />
-                <span>{isUz ? 'Rentgen va Tomografiya tahlili (DICOM/OPG)' : 'Рентгенодиагностика и Томография (DICOM/OPG)'}</span>
-              </h3>
+                <h3 className="text-sm font-bold text-[#152f34]">
+                  {isUz ? 'Rentgen va Tomografiya tahlili (DICOM/OPG)' : 'Рентгенодиагностика и Томография (DICOM/OPG)'}
+                </h3>
+                {xrays.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {xrays.length} {isUz ? 'ta rasm' : 'снимков'}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-[#52696e] mt-0.5">
                 {isUz
-                  ? "Rentgen tasviri yorug'ligi va kontrastini sozlash orqali ildiz kanallarini aniq ko'rish"
-                  : 'Настройка яркости и контрастности для детального осмотра корневых каналов'}
+                  ? "Ildiz kanallari va suyak to'qimasini tahlil qilish: yorug'lik, kontrast, kattalashtirish va negativ/pozitiv filtrlar"
+                  : 'Анализ корневых каналов и костной ткани: яркость, контраст, масштабирование и негатив'}
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-[#52696e]">
-                {isUz ? 'Yorug\'lik:' : 'Яркость:'} {xrayBrightness}%
-              </span>
-              <input
-                type="range"
-                min="50"
-                max="180"
-                value={xrayBrightness}
-                onChange={(e) => setXrayBrightness(Number(e.target.value))}
-                className="w-24 accent-[#167b78] cursor-pointer"
-              />
-              <span className="text-xs font-semibold text-[#52696e] ml-2">
-                {isUz ? 'Kontrast:' : 'Контраст:'} {xrayContrast}%
-              </span>
-              <input
-                type="range"
-                min="50"
-                max="200"
-                value={xrayContrast}
-                onChange={(e) => setXrayContrast(Number(e.target.value))}
-                className="w-24 accent-[#167b78] cursor-pointer"
-              />
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  setXrayBrightness(100);
-                  setXrayContrast(100);
-                }}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
-                title={isUz ? 'Asliga qaytarish' : 'Сброс'}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="px-3 py-1.5 bg-[#167b78] hover:bg-[#126361] disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                title={isUz ? 'Kompyuterdan rentgen rasmini yuklash' : 'Загрузить рентген снимок'}
               >
-                <RotateCcw className="w-4 h-4" />
+                {isUploading ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Upload className="w-3.5 h-3.5" />
+                )}
+                <span>{isUploading ? (isUz ? 'Yuklanmoqda...' : 'Загрузка...') : (isUz ? 'Rentgen yuklash' : 'Загрузить снимок')}</span>
               </button>
+
+              <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+
+              <div className="flex items-center gap-1.5 text-xs text-[#52696e] bg-slate-50 px-2 py-1 rounded-xl border border-slate-200">
+                <span className="font-medium text-[11px]">{isUz ? 'Yorug\':' : 'Ярк:'} {xrayBrightness}%</span>
+                <input
+                  type="range"
+                  min="40"
+                  max="180"
+                  value={xrayBrightness}
+                  onChange={(e) => setXrayBrightness(Number(e.target.value))}
+                  className="w-16 accent-[#167b78] cursor-pointer"
+                  title={isUz ? 'Yorug\'lik' : 'Яркость'}
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs text-[#52696e] bg-slate-50 px-2 py-1 rounded-xl border border-slate-200">
+                <span className="font-medium text-[11px]">{isUz ? 'Kontrast:' : 'Контр:'} {xrayContrast}%</span>
+                <input
+                  type="range"
+                  min="50"
+                  max="200"
+                  value={xrayContrast}
+                  onChange={(e) => setXrayContrast(Number(e.target.value))}
+                  className="w-16 accent-[#167b78] cursor-pointer"
+                  title={isUz ? 'Kontrast' : 'Контраст'}
+                />
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsInverted((prev) => !prev)}
+                  className={`px-2 py-1 rounded-xl text-xs font-semibold border transition-colors ${
+                    isInverted
+                      ? 'bg-purple-600 text-white border-purple-600'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                  title={isUz ? 'Negativ / Pozitiv rentgen rejimi' : 'Режим негатива / позитива'}
+                >
+                  {isUz ? 'Negativ' : 'Негатив'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRotationDeg((deg) => (deg + 90) % 360)}
+                  className="p-1.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-xs"
+                  title={isUz ? '90° ga burish' : 'Повернуть на 90°'}
+                >
+                  <RotateCw className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel((z) => Math.min(3, +(z + 0.25).toFixed(2)))}
+                  className="p-1.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-xs"
+                  title={isUz ? 'Kattalashtirish' : 'Увеличить'}
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
+                  className="p-1.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-xs"
+                  title={isUz ? 'Kichiklashtirish' : 'Уменьшить'}
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResetControls}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors"
+                  title={isUz ? 'Asliga qaytarish' : 'Сброс всех настроек'}
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Interactive Simulated X-Ray Canvas */}
-          <div className="relative w-full h-80 rounded-2xl bg-black border border-slate-800 overflow-hidden flex items-center justify-center select-none">
-            <div
-              className="absolute inset-0 bg-cover bg-center transition-all duration-75"
-              style={{
-                filter: `brightness(${xrayBrightness}%) contrast(${xrayContrast}%) grayscale(100%)`,
-                backgroundImage: `radial-gradient(circle at center, #2a2a2a 0%, #050505 100%)`,
-              }}
-            >
-              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3">
-                <div className="w-48 h-32 border border-dashed border-teal-500/40 rounded-xl flex items-center justify-center bg-teal-950/20 backdrop-blur-xs">
-                  <div className="text-center space-y-1">
-                    <span className="text-xs font-mono font-bold text-teal-400 block">
-                      [DICOM DENTAL CT #14]
-                    </span>
-                    <span className="text-[11px] text-teal-200/70 font-mono block">
-                      Apikal soha: Patologiyasiz
-                    </span>
-                    <span className="text-[10px] text-teal-200/50 block">
-                      {isUz ? 'Ildiz kanallari uzunligi: 21mm' : 'Длина корневого канала: 21мм'}
-                    </span>
-                  </div>
+          {/* Upload Error Banner */}
+          {uploadError && (
+            <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{uploadError}</span>
+            </div>
+          )}
+
+          {/* Interactive Dental X-Ray Canvas */}
+          <div className="relative w-full h-96 rounded-2xl bg-black border border-slate-800 overflow-hidden flex items-center justify-center select-none">
+            {xrays.length > 0 && xrays[selectedXrayIndex] ? (
+              <div className="w-full h-full flex items-center justify-center overflow-hidden p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={xrays[selectedXrayIndex].url}
+                  alt={xrays[selectedXrayIndex].name}
+                  style={{
+                    transform: `scale(${zoomLevel}) rotate(${rotationDeg}deg)`,
+                    filter: `brightness(${xrayBrightness}%) contrast(${xrayContrast}%) grayscale(100%) ${
+                      isInverted ? 'invert(100%)' : ''
+                    }`,
+                    transition: 'transform 0.15s ease-out, filter 0.05s linear',
+                    maxHeight: '100%',
+                    maxWidth: '100%',
+                    objectFit: 'contain',
+                    pointerEvents: 'none',
+                  }}
+                  className="rounded-lg shadow-2xl"
+                />
+              </div>
+            ) : (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-3 cursor-pointer hover:bg-white/5 transition-colors"
+                style={{
+                  filter: `brightness(${xrayBrightness}%) contrast(${xrayContrast}%) grayscale(100%) ${
+                    isInverted ? 'invert(100%)' : ''
+                  }`,
+                  backgroundImage: `radial-gradient(circle at center, #232d30 0%, #050505 100%)`,
+                }}
+              >
+                <div className="w-56 h-36 border-2 border-dashed border-teal-500/40 rounded-2xl flex flex-col items-center justify-center bg-teal-950/20 backdrop-blur-xs p-4 space-y-2 hover:border-teal-400 transition-colors">
+                  <ImageIcon className="w-8 h-8 text-teal-400/80" />
+                  <span className="text-xs font-mono font-bold text-teal-300 block">
+                    [DICOM / OPG DENTAL CT]
+                  </span>
+                  <span className="text-[11px] text-teal-100/70 block">
+                    {isUz
+                      ? 'Rentgen rasmini yuklash uchun bosing'
+                      : 'Нажмите для загрузки рентген снимка'}
+                  </span>
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-3 py-1 rounded-lg text-white font-mono text-[11px] border border-white/10 flex items-center gap-2">
+            {/* Canvas Status & Patient Overlay */}
+            <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl text-white font-mono text-[11px] border border-white/10 flex items-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>{isUz ? 'Bemor' : 'Пациент'}: {patientName} (OPG HD 2026)</span>
+              <span>{isUz ? 'Bemor' : 'Пациент'}: {patientName}</span>
+              <span className="text-slate-400">|</span>
+              <span className="text-teal-300">{Math.round(zoomLevel * 100)}%</span>
+              {rotationDeg > 0 && <span className="text-amber-300">{rotationDeg}°</span>}
+              {isInverted && <span className="text-purple-300 font-bold">INV</span>}
             </div>
 
-            <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10">
+            {/* Quick Canvas Controls */}
+            <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-black/70 backdrop-blur-md p-1.5 rounded-xl border border-white/10">
               <button
                 type="button"
-                onClick={() => {
-                  setXrayBrightness((b) => Math.min(180, b + 10));
-                  setXrayContrast((c) => Math.min(200, c + 10));
-                }}
-                className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-lg text-xs"
+                onClick={() => setZoomLevel((z) => Math.min(3, +(z + 0.25).toFixed(2)))}
+                className="p-1 text-white/80 hover:text-white hover:bg-white/10 rounded-lg text-xs"
                 title={isUz ? 'Kattalashtirish' : 'Увеличить'}
               >
                 <ZoomIn className="w-4 h-4" />
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setXrayBrightness((b) => Math.max(50, b - 10));
-                  setXrayContrast((c) => Math.max(50, c - 10));
-                }}
-                className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-lg text-xs"
+                onClick={() => setZoomLevel((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
+                className="p-1 text-white/80 hover:text-white hover:bg-white/10 rounded-lg text-xs"
                 title={isUz ? 'Kichiklashtirish' : 'Уменьшить'}
               >
                 <ZoomOut className="w-4 h-4" />
               </button>
+              <button
+                type="button"
+                onClick={() => setIsInverted((prev) => !prev)}
+                className="p-1 text-white/80 hover:text-white hover:bg-white/10 rounded-lg text-xs"
+                title={isUz ? 'Negativ rejim' : 'Режим негатива'}
+              >
+                <Eye className="w-4 h-4" />
+              </button>
             </div>
           </div>
+
+          {/* Thumbnails Gallery Strip */}
+          {xrays.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1">
+              {xrays.map((item, idx) => (
+                <button
+                  key={item.id || idx}
+                  type="button"
+                  onClick={() => {
+                    setSelectedXrayIndex(idx);
+                    setZoomLevel(1);
+                    setRotationDeg(0);
+                  }}
+                  className={`relative shrink-0 w-20 h-16 rounded-xl overflow-hidden border-2 transition-all ${
+                    selectedXrayIndex === idx
+                      ? 'border-[#167b78] ring-2 ring-[#167b78]/30 scale-105'
+                      : 'border-slate-200 opacity-70 hover:opacity-100 hover:border-slate-300'
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.url}
+                    alt={item.name}
+                    className="w-full h-full object-cover grayscale"
+                  />
+                  <div className="absolute inset-x-0 bottom-0 bg-black/70 text-[9px] text-white truncate px-1 py-0.5 text-center font-mono">
+                    #{idx + 1}
+                  </div>
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="shrink-0 w-20 h-16 rounded-xl border-2 border-dashed border-slate-300 hover:border-[#167b78] flex flex-col items-center justify-center text-slate-400 hover:text-[#167b78] transition-colors bg-slate-50"
+                title={isUz ? 'Yangi rasm qo\'shish' : 'Добавить снимок'}
+              >
+                <Upload className="w-4 h-4" />
+                <span className="text-[10px] font-semibold mt-1">{isUz ? '+ Yuklash' : '+ Загрузить'}</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

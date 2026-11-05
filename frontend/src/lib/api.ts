@@ -646,9 +646,10 @@ export const api = {
     }>(`/api/clinic/branches/${id}/lifecycle-preview`),
 
   // Media Management
-  uploadMedia: (file: File) => {
+  uploadMedia: (file: File, category?: string) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (category) formData.append('category', category);
     return fetcher<any>('/api/admin/media/upload', {
       method: 'POST',
       body: formData,

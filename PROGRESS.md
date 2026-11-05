@@ -13,8 +13,8 @@
   - Backend Lint (`npm run lint`): **0 errors**
   - Frontend Typecheck (`tsc --noEmit`): **0 errors**
   - Frontend Lint (`npm run lint`): **0 warnings, 0 errors**
-  - Frontend Build (`next build`): **0 errors (all 29/29 routes generated)**
-  - Telegram Bot Suite (`pytest test_bot_suite.py`): **100% passed, 0 warnings**
+  - Frontend Build (`next build`): **0 errors (all 29/29 routes generated, 0 warnings)**
+  - Telegram Bot Suite (`pytest test_bot_suite.py`): **100% passed (10/10 flows), 0 warnings**
 
 ---
 
@@ -142,6 +142,19 @@
   - Verified calculation with concrete numerical tests (Regression 63).
 - **Infrastructure & Test Maintenance**:
   - Configured `asyncio_default_fixture_loop_scope = function` in `bot/pytest.ini`, eliminating `PytestDeprecationWarning`.
+
+### Phase 8: Clinical Radiography (X-Ray / OPG), Bot Patient Portal & Production Nginx Gateway
+- **Clinical Radiography & OPG Interactive Viewer (`DoctorWorkspace.tsx`)**:
+  - Expanded `MediaController` permissions (`@Roles`) allowing `StaffRole.DOCTOR` to upload and inspect radiography assets.
+  - Implemented radiography media gallery, upload handler, and real-time interactive canvas with Zoom (50%–300%), 90° Rotation, Invert (Negative/Positive radiography view), Brightness, and Contrast controls.
+  - Retained strict zero Next.js compilation warnings and errors.
+- **Telegram Bot Patient Portal Flow**:
+  - Added unit and flow tests in `test_bot_suite.py` covering `show_my_appointments`, `show_debt_status`, and `handle_confirm_cancel` using verified `telegram_user_id` scoping and staff cancellation alert notifications.
+  - Verified 10/10 assertions in `test_bot_suite.py` (100% pass, 0 warnings).
+- **Production Nginx Gateway & Docker Deployment Architecture**:
+  - Created `nginx/nginx.conf` (Gzip, rate limiting, 15MB file upload limit for DICOM/OPG images) and `nginx/conf.d/dentacare.conf` (reverse proxy for frontend and backend, static media caching, security headers).
+  - Updated `docker-compose.prod.yml` to route ingress through Nginx container (ports 80 & 443), isolating backend and frontend on internal network.
+  - Created `.env.production.example` template with production security guidelines.
 
 ---
 

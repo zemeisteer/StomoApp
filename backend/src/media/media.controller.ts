@@ -26,7 +26,7 @@ export class MediaController {
 
   @Post('upload')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.EDITOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.EDITOR)
   @UseInterceptors(
     FileInterceptor('file', {
       limits: {
@@ -46,7 +46,7 @@ export class MediaController {
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.EDITOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.EDITOR)
   async findAll(
     @Query('category') category?: string,
     @Query('page') page?: number,

@@ -155,6 +155,78 @@ async def test_bot_flows():
         mock_sync.assert_called_with("+998901234567", "RealUser", "11111")
         print(" [PASS] Authentic own-contact sharing accepted and synced with telegram_user_id", flush=True)
 
+    # 8. Test Patient Portal: View Appointments
+    from bot.handlers.patient import show_my_appointments, show_debt_status
+    from bot.handlers.booking import handle_confirm_cancel
+    from aiogram.types import CallbackQuery
+
+    appt_msg = MagicMock(spec=Message)
+    appt_msg.from_user = User(id=11111, is_bot=False, first_name="RealUser")
+    appt_msg.answer = AsyncMock()
+
+    with patch.object(api_client, "get_patient_appointments", new_callable=AsyncMock) as mock_get_appts:
+        mock_get_appts.return_value = [
+            {
+                "id": "appt-xyz",
+                "doctorName": "Dr. Jasur Mansurov",
+                "specialization": "Stomatolog",
+                "date": "2026-11-10",
+                "time": "14:00",
+                "status": "CONFIRMED",
+                "notes": "Davolash",
+            }
+        ]
+        await show_my_appointments(appt_msg)
+        assert mock_get_appts.called
+        mock_get_appts.assert_called_with("11111")
+        assert appt_msg.answer.called
+        call_text = appt_msg.answer.call_args[0][0]
+        assert "Dr. Jasur Mansurov" in call_text
+        assert "2026-11-10" in call_text
+        print(" [PASS] Patient appointments portal flow verified with telegram_user_id scoping", flush=True)
+
+    # 9. Test Patient Portal: View Debts
+    debt_msg = MagicMock(spec=Message)
+    debt_msg.from_user = User(id=11111, is_bot=False, first_name="RealUser")
+    debt_msg.answer = AsyncMock()
+
+    with patch.object(api_client, "get_patient_debt", new_callable=AsyncMock) as mock_get_debt:
+        mock_get_debt.return_value = {
+            "patientName": "RealUser",
+            "totalDebt": 250000,
+        }
+        await show_debt_status(debt_msg)
+        assert mock_get_debt.called
+        mock_get_debt.assert_called_with("11111")
+        assert debt_msg.answer.called
+        debt_text = debt_msg.answer.call_args[0][0]
+        assert "250,000 so'm" in debt_text
+        print(" [PASS] Patient debt portal flow verified with telegram_user_id scoping", flush=True)
+
+    # 10. Test Patient Portal: Cancel Appointment with Ownership Validation
+    cancel_cb = MagicMock(spec=CallbackQuery)
+    cancel_cb.data = "confirm_cancel:appt-xyz"
+    cancel_cb.from_user = User(id=11111, is_bot=False, first_name="RealUser")
+    cancel_cb.message = MagicMock()
+    cancel_cb.message.edit_text = AsyncMock()
+    cancel_cb.answer = AsyncMock()
+    cancel_cb.bot = mock_bot
+
+    with patch.object(api_client, "cancel_appointment", new_callable=AsyncMock) as mock_cancel_api, \
+         patch("bot.handlers.booking.notify_staff_cancellation", new_callable=AsyncMock) as mock_notify_cancel:
+        mock_cancel_api.return_value = {
+            "success": True,
+            "patientName": "RealUser",
+            "doctorName": "Dr. Jasur Mansurov",
+            "startTime": "2026-11-10T14:00:00Z",
+        }
+        await handle_confirm_cancel(cancel_cb)
+        assert mock_cancel_api.called
+        mock_cancel_api.assert_called_with("appt-xyz", "11111")
+        assert cancel_cb.message.edit_text.called
+        assert mock_notify_cancel.called
+        print(" [PASS] Patient cancel flow verified with ownership & staff alert", flush=True)
+
     print("--- ALL TELEGRAM BOT FLOW TESTS PASSED SUCCESSFULLY! ---", flush=True)
 
 
