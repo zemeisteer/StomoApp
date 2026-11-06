@@ -14,7 +14,7 @@
 - **Single Source of Truth**: **NestJS 10 + Prisma ORM 5 + PostgreSQL 16** (`localhost:5432`, dev: `dentacare`, test: `dentacare_test`)
 - **Frontend**: Next.js 14 (App Router) + TailwindCSS + Three.js
 - **Verification Suites (All passing in current session)**:
-  - Backend Jest E2E Suite: **83 / 83 passed (100%)** (local and CI)
+  - Backend Jest E2E Suite: **85 / 85 passed (100%)** (local and CI)
   - Priority Verification (`verify-all-priorities.ts`): **60 / 60 passed (100%)**
   - Backend Build (`nest build`): **0 errors**
   - Backend Lint (`npm run lint`): **0 errors**
@@ -184,13 +184,21 @@ A new CI job builds the production images and runs the stack; it found the image
 - **Staff self-service Telegram linking** (`186ecf4`): signed single-use 10-minute deep links from the admin sidebar (Regression 67).
 - **Bot** (`d7d624c`, `0c760b8`): Uzbek/Russian UI with persisted language (reminders in the patient's language), clinic/branch info from the DB, `/start link_...` for staff. Treatment plan no longer invents 150 000 so'm items for patients (Regression 68).
 
+### Phase 11: Pre-Deploy Hardening & Browser QA (2026-11-07)
+- **Ops scripts** (`b00f755`): `generate-env.sh` (fresh secrets, mode 600), read-only `preflight.sh` (secrets, provider tokens, DNS → this server, Docker, ports, disk/RAM, compose), `deploy.sh [--pull]` (preflight, pre-deploy backup, rebuild, wait healthy). CI runs generate-env + preflight.
+- **Database timezone** (`e97ac7a`): stored UTC timestamps were compared with `NOW()` under the server's default zone; on an Asia/Tashkent database every scheduled job became due 5 h early (2 h SMS reminder sent ~7 h before). DB default pinned to UTC by migration; Postgres started with `timezone=UTC` (Regression 70).
+- **Ops alerts** (`e97ac7a`, `b115626`): failed notifications summarized every 30 min to `OPS_TELEGRAM_CHAT_ID`/`TELEGRAM_CHAT_ID`, once per window, no recipient data (Regression 69).
+- **Security** (`9608636`): the admin login page shipped the demo OWNER/doctor passwords and quick-fill buttons in production builds; now development-only, CI greps the production bundle. Demo seed refuses `NODE_ENV=production`.
+- **Service categories** (`3d548df`): patients saw raw enum values (OTHER, DIAGNOSTICS…); admin offered a non-existent HYGIENE category and lacked four real ones.
+- **Browser QA (local)**: public site, full web booking (date → service → doctor → time → branch → details → confirmation; stored 05:30Z for 10:30 Tashkent, reminder at 03:30Z), admin login and the Telegram link dialog end to end. Note: the local dev DB contains leftover fixtures from earlier verification scripts (e.g. "Konsultatsiya conc_…"); production starts empty.
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 83 full integration tests (Regressions 1–68) | `dentacare_test` | **83 / 83 PASSED (100%)** |
+| **Jest E2E Regressions** | 85 full integration tests (Regressions 1–70) | `dentacare_test` | **85 / 85 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |
