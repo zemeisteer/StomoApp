@@ -199,12 +199,15 @@ jobs:
           docker run --rm \
             --add-host frontend:127.0.0.1 --add-host backend:127.0.0.1 \
             -e DOMAIN=example.test -e EXTRA_DOMAINS=www.example.test \
-            -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/sites \
+            -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/sites --tmpfs /etc/nginx/sites \
             -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$PWD/nginx/templates:/etc/nginx/templates:ro" \
             -v "$PWD/nginx/snippets:/etc/nginx/snippets:ro" \
             -v /tmp/le:/etc/letsencrypt:ro \
-            nginx:1.25-alpine nginx -t
+            nginx:1.25-alpine nginx -T > /tmp/nginx-T.txt
+          # nginx -t passes even with zero server blocks: assert the site was rendered
+          grep -q "server_name example.test www.example.test" /tmp/nginx-T.txt
+          grep -q "listen 443 ssl" /tmp/nginx-T.txt
 
   production-stack-smoke:
     name: Production Stack Smoke Test (backend image, migrations, health)
