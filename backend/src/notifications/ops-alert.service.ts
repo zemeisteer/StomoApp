@@ -45,7 +45,7 @@ export class OpsAlertService {
         _count: { _all: true },
       }),
       this.prisma.notificationJob.findFirst({
-        where,
+        where: { ...where, lastError: { not: null } },
         orderBy: { updatedAt: 'desc' },
         select: { lastError: true },
       }),
