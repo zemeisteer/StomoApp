@@ -2153,7 +2153,21 @@ export class NotificationsService {
       const tgHeader = this.escapeTelegramMarkdown(`⏰ ${clinic.nameUz}: Qabul eslatmasi`);
       const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
       const tgTime = this.escapeTelegramMarkdown(formattedTime);
-      text = `${tgHeader}\n\nHurmatli bemor, sizning qabulingiz vaqti:\n🗓 ${tgTime}\n🦷 Xizmat: ${tgService}\n📍 Manzil: Toshkent sh., Navoiy ko'chasi 14\n\nSavollar bo'lsa: +998 71 123 45 67`;
+      // Address and phone come from the appointment's branch, falling back to clinic settings
+      const appointmentId = job.appointmentId || payload.appointmentId;
+      const branch = appointmentId
+        ? (
+            await this.prisma.appointment.findUnique({
+              where: { id: appointmentId },
+              select: { branch: { select: { addressUz: true, phone: true } } },
+            })
+          )?.branch
+        : null;
+      const address = branch?.addressUz || '';
+      const phone = branch?.phone || clinic.phone || '';
+      const addressLine = address ? `\n📍 Manzil: ${this.escapeTelegramMarkdown(address)}` : '';
+      const phoneLine = phone ? `\n\nSavollar bo'lsa: ${this.escapeTelegramMarkdown(phone)}` : '';
+      text = `${tgHeader}\n\nHurmatli bemor, sizning qabulingiz vaqti:\n🗓 ${tgTime}\n🦷 Xizmat: ${tgService}${addressLine}${phoneLine}`;
     } else if (template === 'patient_booking_confirmed') {
       const tgHeader = this.escapeTelegramMarkdown(`✅ ${clinic.nameUz}: Qabulingiz tasdiqlandi!`);
       const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');
