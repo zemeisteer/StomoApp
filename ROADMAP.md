@@ -39,17 +39,19 @@ Phases 0–8 and the 2026-11-06 production pass are summarised in
 ## Next
 
 ### Blocking for launch
-1. **First production deploy.** DNS for `DOMAIN`, `.env.production`,
-   `STAGING=1 ./scripts/init-letsencrypt.sh`, then a real certificate; smoke test
-   login over HTTPS, booking, SMS, bot and reminders against real providers.
+1. **First production deploy.** DNS for `DOMAIN`, fill `.env.production`, then:
+   `STAGING=1 ./scripts/init-letsencrypt.sh` → `FORCE=1 ./scripts/init-letsencrypt.sh`
+   → `create-owner.js` (see README) → configure clinic settings, branches,
+   services and doctors in the admin panel. Then check with real providers:
+   Eskiz SMS, Telegram bot (`TELEGRAM_BOT_USERNAME` for staff deep links),
+   a booking from the bot and the website, and the next-day reminder.
+   CI's full-stack smoke test already covers the same images, migrations,
+   HTTPS gateway, owner login and backups with dummy credentials.
 2. **First release.** Merge `dev` into `main` once the deploy is verified.
 
 ### After launch
-- Doctor self-service Telegram linking (today the OWNER enters the ID that the
-  doctor gets from `/myid`).
-- Bot replies in Russian for Russian-speaking patients (bot is Uzbek-only).
-- Bot address/hours should come from clinic settings / branches via the API
-  instead of bot env vars, so admin edits apply everywhere.
-- Offsite, scheduled database backups (scripts exist in `backend/scripts`, but
-  nothing runs them on a schedule yet).
-- Monitoring and alerting (uptime, error rate, failed `notification_jobs`).
+- Offsite copy of `./backups` (host cron with rclone/rsync; the backup
+  service only writes locally).
+- External uptime monitoring of `https://DOMAIN/api/health` and alerting on
+  failed `notification_jobs`.
+- Doctor schedule messages are Uzbek-only (staff UI language is not stored).

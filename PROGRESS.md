@@ -14,7 +14,7 @@
 - **Single Source of Truth**: **NestJS 10 + Prisma ORM 5 + PostgreSQL 16** (`localhost:5432`, dev: `dentacare`, test: `dentacare_test`)
 - **Frontend**: Next.js 14 (App Router) + TailwindCSS + Three.js
 - **Verification Suites (All passing in current session)**:
-  - Backend Jest E2E Suite: **81 / 81 passed (100%)** (local and CI)
+  - Backend Jest E2E Suite: **83 / 83 passed (100%)** (local and CI)
   - Priority Verification (`verify-all-priorities.ts`): **60 / 60 passed (100%)**
   - Backend Build (`nest build`): **0 errors**
   - Backend Lint (`npm run lint`): **0 errors**
@@ -174,13 +174,23 @@
 - **Doctor personal schedule** (`0e32675`): `StaffUser.telegramUserId` (private, never on public doctor endpoints), editable by OWNER in Admin > Xodimlar; `/myid` bot command; per-doctor daily schedule (Regression 65). Bot contact details configurable (website was hardcoded to localhost).
 - **Bot booking works again**: it never sent `branchId`/`serviceId` (required since Regression 60), so every bot booking failed. Added branch and service steps (auto-skipped when there is one option), slot buttons by index (the `HH:mm` label broke callback parsing), clinic-local slot labels with the exact UTC instant sent back for booking, the patient's verified phone instead of a hardcoded `+998900000000`, handlers for the Back/Cancel buttons, and clinic-local times in "Qabullarim" (Regression 66).
 
+### Phase 10: Production Images Actually Run, Backups, Bot i18n & Staff Self-Linking (2026-11-06)
+A new CI job builds the production images and runs the stack; it found the images had never been able to start:
+- **Backend image** (`0060b63`, `52c5fd4`, `f26e9bd`, `458159d`): never applied migrations and pruned the Prisma CLI; Prisma engines mismatched OpenSSL between stages; the entrypoint pointed at `dist/src/main.js` (build emits `dist/main.js`); production required `STORAGE_DRIVER`; uploads dir not writable. All fixed: `prisma migrate deploy` on start, OpenSSL in every stage, `.dockerignore` (images were copying host `node_modules` and `.env`).
+- **Backend had no internet egress** (internal-only network) so SMS and Telegram could never be sent; now also on the public network. Healthchecks for backend/frontend/nginx with health-gated startup.
+- **Owner bootstrap** without the demo seed: `scripts/create-owner.js`.
+- **Backups** (`8fae6b0`): `backup` service, verified DB dump + uploads archive every 24h with retention.
+- **Full-stack smoke test in CI** (`bed51a0`): images, migrations, health, owner bootstrap, backups, frontend, nginx HTTPS + redirect + HSTS, owner login with Secure cookies.
+- **Staff self-service Telegram linking** (`186ecf4`): signed single-use 10-minute deep links from the admin sidebar (Regression 67).
+- **Bot** (`d7d624c`, `0c760b8`): Uzbek/Russian UI with persisted language (reminders in the patient's language), clinic/branch info from the DB, `/start link_...` for staff. Treatment plan no longer invents 150 000 so'm items for patients (Regression 68).
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 81 full integration tests (Regressions 1–66) | `dentacare_test` | **81 / 81 PASSED (100%)** |
+| **Jest E2E Regressions** | 83 full integration tests (Regressions 1–68) | `dentacare_test` | **83 / 83 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |
