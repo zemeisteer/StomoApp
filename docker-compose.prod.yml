@@ -67,8 +67,17 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-1}
     volumes:
       - prod_backend_uploads:/app/uploads
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:4000/api/health | grep -q "\"status\":\"ok\""']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Migrations run before the server starts
+      start_period: 90s
     networks:
       - dentacare-internal
+      # Outbound access for SMS gateway and Telegram API (internal network has no egress)
+      - dentacare-public
 
   frontend:
     build:
@@ -77,11 +86,18 @@ services:
     container_name: dentacare-prod-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q --spider http://127.0.0.1:3000/ || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - dentacare-internal
 
@@ -92,7 +108,8 @@ services:
     container_name: dentacare-prod-bot
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       ENVIRONMENT: production
       # Same bot can serve patients and receive backend staff alerts (backend only calls sendMessage)
@@ -135,8 +152,15 @@ services:
     # Overrides CMD only; the image ENTRYPOINT still renders the templates.
     command: /bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g "daemon off;"'
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1/nginx-health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
     networks:
       - dentacare-internal
       - dentacare-public

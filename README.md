@@ -119,10 +119,14 @@ cp .env.production.example .env.production
 #    (STAGING=1 first to test without hitting Let's Encrypt rate limits)
 ./scripts/init-letsencrypt.sh
 
-# 3. Later deploys
+# 3. First deploy only: create the clinic owner account (password >= 12 chars),
+#    then configure clinic settings, branches, services and doctors in the admin panel
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm   -e OWNER_EMAIL=owner@example.uz -e OWNER_NAME="Ism Familiya" -e OWNER_PASSWORD='change-me-please'   backend node scripts/create-owner.js
+
+# 4. Later deploys (migrations are applied automatically when the backend starts)
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
 
-# 4. Check container health
+# 5. Check container health
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
 ```
 

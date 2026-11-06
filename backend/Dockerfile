@@ -36,6 +36,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=4000
 
+# Prisma engines need OpenSSL on Alpine; wget is used by the compose healthcheck
+RUN apk add --no-cache openssl
+
 # Create unprivileged application user
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nestjs
@@ -50,5 +53,6 @@ USER nestjs
 
 EXPOSE 4000
 
-CMD ["node", "dist/src/main.js"]
+# Apply pending migrations, then start. Safe to run on every start (idempotent).
+CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/src/main.js"]
 
