@@ -27,6 +27,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Send,
+  Wallet,
 } from 'lucide-react';
 import { useAuth, StaffRole } from '../lib/auth';
 import { TelegramLinkModal } from './admin/TelegramLinkModal';
@@ -152,6 +153,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       roles: ['OWNER', 'ADMIN', 'DOCTOR'],
     },
     {
+      href: '/admin/cashier',
+      label: language === 'ru' ? 'Касса' : 'Kassa',
+      icon: Wallet,
+      roles: ['OWNER', 'ADMIN', 'RECEPTION'],
+    },
+    {
       href: '/admin/leads',
       label: t.admin.leads,
       icon: PhoneCall,
@@ -227,7 +234,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
 
   const isRu = language === 'ru';
   const NAV_GROUPS: Array<{ key: string; label: string; hrefs: string[] }> = [
-    { key: 'work', label: isRu ? 'Работа' : 'Ish', hrefs: ['/admin', '/admin/calendar', '/admin/patients', '/admin/leads'] },
+    { key: 'work', label: isRu ? 'Работа' : 'Ish', hrefs: ['/admin', '/admin/calendar', '/admin/patients', '/admin/cashier', '/admin/leads'] },
     { key: 'clinic', label: isRu ? 'Клиника' : 'Klinika', hrefs: ['/admin/doctors', '/admin/services', '/admin/reviews', '/admin/cms'] },
     { key: 'manage', label: isRu ? 'Управление' : 'Boshqaruv', hrefs: ['/admin/analytics', '/admin/audit', '/admin/notifications', '/admin/staff', '/admin/settings'] },
   ];

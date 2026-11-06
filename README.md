@@ -145,6 +145,17 @@ Services exposed:
 
 HTTPS is required in production: auth cookies are issued with the `Secure` flag, so admin login does not work over plain HTTP.
 
+### Online payments (Payme / Click, optional)
+
+Set the keys in `.env.production` and redeploy; a provider stays disabled while any of its keys is empty.
+
+| Provider | Keys | Configure in the provider cabinet |
+|---|---|---|
+| Payme | `PAYME_MERCHANT_ID`, `PAYME_KEY`, `PAYME_TEST_MODE` | Endpoint `https://DOMAIN/api/payments/payme`, account field `invoice_id` |
+| Click | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | Prepare `https://DOMAIN/api/payments/click/prepare`, Complete `https://DOMAIN/api/payments/click/complete` |
+
+Staff then open a patient's **To'lovlar** tab and use **Payme / Click havola** to send the checkout link for the remaining balance. Use `PAYME_TEST_MODE=true` with the Payme sandbox key first.
+
 ---
 
 ## 🔗 Application URLs

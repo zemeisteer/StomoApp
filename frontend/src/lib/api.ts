@@ -770,6 +770,20 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  // Cash desk, refunds, online payment links, plan invoicing
+  getCashierSummary: (date?: string) => fetcher<any>(`/api/admin/cashier/summary${date ? `?date=${date}` : ''}`),
+  getCashShifts: (limit = 10) => fetcher<any[]>(`/api/admin/cashier/shifts?limit=${limit}`),
+  openCashShift: (openingCash: number) =>
+    fetcher<any>('/api/admin/cashier/shifts/open', { method: 'POST', body: JSON.stringify({ openingCash }) }),
+  closeCashShift: (id: string, countedCash: number, note?: string) =>
+    fetcher<any>(`/api/admin/cashier/shifts/${id}/close`, { method: 'POST', body: JSON.stringify({ countedCash, note }) }),
+  refundPayment: (paymentId: string, payload: { amount?: number; reason: string }) =>
+    fetcher<any>(`/api/admin/cashier/payments/${paymentId}/refund`, { method: 'POST', body: JSON.stringify(payload) }),
+  getInvoicePaymentLinks: (invoiceId: string) =>
+    fetcher<{ amountUzs: number; payme: string | null; click: string | null }>(`/api/admin/billing/invoices/${invoiceId}/payment-links`),
+  invoiceTreatmentPlan: (planId: string, scope: 'COMPLETED' | 'ALL') =>
+    fetcher<{ invoice: any; plan: any }>(`/api/admin/clinical/plans/${planId}/invoice`, { method: 'POST', body: JSON.stringify({ scope }) }),
+
   // Billing & Invoices & Debts
   getInvoices: (params?: { patientId?: string; appointmentId?: string }) => {
     const q = new URLSearchParams();

@@ -8032,4 +8032,150 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.delete({ where: { id: patient.id } });
     }
   });
+  it('Regression 73: Cash desk, plan invoicing, refunds and Payme/Click callbacks never double-charge an invoice', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const saved = { ...process.env };
+    Object.assign(process.env, {
+      PAYME_MERCHANT_ID: 'reg73merchant',
+      PAYME_KEY: 'reg73-payme-key',
+      PAYME_TEST_MODE: 'true',
+      CLICK_SERVICE_ID: '7373',
+      CLICK_MERCHANT_ID: '737',
+      CLICK_SECRET_KEY: 'reg73-click-secret',
+    });
+    const payme = (method: string, params: any, key = 'reg73-payme-key') =>
+      http()
+        .post('/api/payments/payme')
+        .set('Authorization', `Basic ${Buffer.from(`Paycom:${key}`).toString('base64')}`)
+        .send({ jsonrpc: '2.0', id: 1, method, params });
+    const md5 = (s: string) => require('crypto').createHash('md5').update(s).digest('hex');
+    const clickBody = (o: any) => {
+      const b: any = { service_id: '7373', sign_time: '2026-11-07 10:00:00', error: '0', error_note: 'ok', click_paydoc_id: '1', ...o };
+      b.sign_string = md5(
+        `${b.click_trans_id}${b.service_id}reg73-click-secret${b.merchant_trans_id}${b.merchant_prepare_id ?? ''}${b.amount}${b.action}${b.sign_time}`,
+      );
+      return b;
+    };
+    const click = (path: string, body: any) => http().post(`/api/payments/click/${path}`).type('form').send(body);
+
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg73 Kassa', phone: '+998900007373' } });
+    try {
+      // --- Plan -> invoice: only accepted plans, completed scope, discount spread, never billed twice
+      const plan = (await http().post(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(adminToken)).send({ title: 'Reg73 reja' }).expect(201)).body;
+      await http().post(`/api/admin/clinical/plans/${plan.id}/items`).set(auth(adminToken)).send({ treatmentNameUz: 'A', unitPriceUzs: 300000 }).expect(201);
+      const p = (await http().post(`/api/admin/clinical/plans/${plan.id}/items`).set(auth(adminToken)).send({ treatmentNameUz: 'B', unitPriceUzs: 200000 }).expect(201)).body;
+      await http().patch(`/api/admin/clinical/plans/${plan.id}`).set(auth(adminToken)).send({ discountUzs: 100000 }).expect(200);
+      await http().post(`/api/admin/clinical/plans/${plan.id}/invoice`).set(auth(adminToken)).send({ scope: 'ALL' }).expect(400);
+      await http().post(`/api/admin/clinical/plans/${plan.id}/accept`).set(auth(adminToken)).send({ method: 'VERBAL', acceptedByName: 'Reg73' }).expect(201);
+      const itemA = p.items.find((i: any) => i.treatmentNameUz === 'A');
+      await http().post(`/api/admin/clinical/plans/${plan.id}/invoice`).set(auth(adminToken)).send({ scope: 'COMPLETED' }).expect(400);
+      await http().patch(`/api/admin/clinical/plan-items/${itemA.id}`).set(auth(adminToken)).send({ status: 'COMPLETED' }).expect(200);
+      const inv1 = (await http().post(`/api/admin/clinical/plans/${plan.id}/invoice`).set(auth(adminToken)).send({ scope: 'COMPLETED' }).expect(201)).body;
+      expect(inv1.invoice).toMatchObject({ totalAmount: 300000, discount: 100000 });
+      expect(inv1.plan.totals.uninvoicedUzs).toBe(200000);
+      const inv2 = (await http().post(`/api/admin/clinical/plans/${plan.id}/invoice`).set(auth(adminToken)).send({ scope: 'ALL' }).expect(201)).body;
+      expect(inv2.invoice).toMatchObject({ totalAmount: 200000, discount: 0 });
+      await http().post(`/api/admin/clinical/plans/${plan.id}/invoice`).set(auth(adminToken)).send({ scope: 'ALL' }).expect(400);
+      const invoiceA = inv1.invoice.id; // balance 200 000
+      const invoiceB = inv2.invoice.id; // balance 200 000
+
+      // --- Payme
+      expect((await payme('CheckPerformTransaction', { amount: 20000000, account: { invoice_id: invoiceA } }, 'wrong')).body.error.code).toBe(-32504);
+      expect((await payme('CheckPerformTransaction', { amount: 100, account: { invoice_id: invoiceA } })).body.error.code).toBe(-31001);
+      expect((await payme('CheckPerformTransaction', { amount: 20000000, account: { invoice_id: 'nope' } })).body.error.code).toBe(-31050);
+      expect((await payme('CheckPerformTransaction', { amount: 20000000, account: { invoice_id: invoiceA } })).body.result).toEqual({ allow: true });
+
+      const created = (await payme('CreateTransaction', { id: 'pm-reg73-1', time: Date.now(), amount: 20000000, account: { invoice_id: invoiceA } })).body.result;
+      expect(created.state).toBe(1);
+      // Idempotent create; a second transaction for the same invoice is refused while one is pending
+      expect((await payme('CreateTransaction', { id: 'pm-reg73-1', time: Date.now(), amount: 20000000, account: { invoice_id: invoiceA } })).body.result.transaction).toBe(created.transaction);
+      expect((await payme('CreateTransaction', { id: 'pm-reg73-2', time: Date.now(), amount: 20000000, account: { invoice_id: invoiceA } })).body.error.code).toBe(-31052);
+
+      const performed = (await payme('PerformTransaction', { id: 'pm-reg73-1' })).body.result;
+      expect(performed.state).toBe(2);
+      expect((await payme('PerformTransaction', { id: 'pm-reg73-1' })).body.result.perform_time).toBe(performed.perform_time);
+      expect((await prisma.invoice.findUnique({ where: { id: invoiceA } }))!.status).toBe('PAID');
+      expect(await prisma.payment.count({ where: { invoiceId: invoiceA, method: 'PAYME', isRefund: false } })).toBe(1);
+      expect((await payme('CheckPerformTransaction', { amount: 20000000, account: { invoice_id: invoiceA } })).body.error.code).toBe(-31051);
+      expect((await payme('CheckTransaction', { id: 'pm-reg73-1' })).body.result).toMatchObject({ state: 2, cancel_time: 0 });
+      expect((await payme('CheckTransaction', { id: 'missing' })).body.error.code).toBe(-31003);
+
+      // Cancel after perform -> refund recorded, invoice open again; repeat cancel is idempotent
+      const cancelled = (await payme('CancelTransaction', { id: 'pm-reg73-1', reason: 5 })).body.result;
+      expect(cancelled.state).toBe(-2);
+      expect((await prisma.invoice.findUnique({ where: { id: invoiceA } }))!.status).toBe('PENDING');
+      expect((await payme('CancelTransaction', { id: 'pm-reg73-1', reason: 5 })).body.result.cancel_time).toBe(cancelled.cancel_time);
+      const stmt = (await payme('GetStatement', { from: Date.now() - 60000, to: Date.now() + 60000 })).body.result.transactions;
+      expect(stmt.find((t: any) => t.id === 'pm-reg73-1')).toMatchObject({ state: -2, amount: 20000000, account: { invoice_id: invoiceA } });
+
+      // A created transaction older than 12h is cancelled with reason 4 (and that cancellation is persisted)
+      await payme('CreateTransaction', { id: 'pm-reg73-3', time: Date.now(), amount: 20000000, account: { invoice_id: invoiceA } }).expect(200);
+      await prisma.onlinePayment.update({
+        where: { provider_providerTransactionId: { provider: 'PAYME', providerTransactionId: 'pm-reg73-3' } },
+        data: { createTime: BigInt(Date.now() - 13 * 60 * 60 * 1000) },
+      });
+      expect((await payme('PerformTransaction', { id: 'pm-reg73-3' })).body.error.code).toBe(-31008);
+      expect((await payme('CheckTransaction', { id: 'pm-reg73-3' })).body.result).toMatchObject({ state: -1, reason: 4 });
+
+      // --- Click on invoice B
+      const badSign = { ...clickBody({ click_trans_id: '9001', merchant_trans_id: invoiceB, amount: '200000.00', action: '0' }), sign_string: 'bad' };
+      expect((await click('prepare', badSign)).body.error).toBe(-1);
+      expect((await click('prepare', clickBody({ click_trans_id: '9001', merchant_trans_id: invoiceB, amount: '1000', action: '0' }))).body.error).toBe(-2);
+      expect((await click('prepare', clickBody({ click_trans_id: '9001', merchant_trans_id: 'nope', amount: '200000', action: '0' }))).body.error).toBe(-5);
+      const prep = (await click('prepare', clickBody({ click_trans_id: '9001', merchant_trans_id: invoiceB, amount: '200000.00', action: '0' }))).body;
+      expect(prep.error).toBe(0);
+      expect(prep.merchant_prepare_id).toEqual(expect.any(Number));
+      const wrongPrepare = clickBody({ click_trans_id: '9001', merchant_trans_id: invoiceB, merchant_prepare_id: '1', amount: '200000.00', action: '1' });
+      expect((await click('complete', wrongPrepare)).body.error).toBe(-6);
+      const completeBody = clickBody({
+        click_trans_id: '9001', merchant_trans_id: invoiceB, merchant_prepare_id: String(prep.merchant_prepare_id), amount: '200000.00', action: '1',
+      });
+      expect((await click('complete', completeBody)).body.error).toBe(0);
+      expect((await click('complete', completeBody)).body.error).toBe(-4);
+      expect(await prisma.payment.count({ where: { invoiceId: invoiceB, method: 'CLICK' } })).toBe(1);
+      expect((await prisma.invoice.findUnique({ where: { id: invoiceB } }))!.status).toBe('PAID');
+
+      // --- Payment links only while there is a balance
+      const linksA = (await http().get(`/api/admin/billing/invoices/${invoiceA}/payment-links`).set(auth(adminToken)).expect(200)).body;
+      expect(linksA.amountUzs).toBe(200000);
+      expect(linksA.payme.startsWith('https://checkout.test.paycom.uz/')).toBe(true);
+      expect(Buffer.from(linksA.payme.split('/').pop(), 'base64').toString()).toContain(`m=reg73merchant;ac.invoice_id=${invoiceA};a=20000000`);
+      expect(linksA.click).toContain(`transaction_param=${invoiceA}`);
+      const linksB = (await http().get(`/api/admin/billing/invoices/${invoiceB}/payment-links`).set(auth(adminToken)).expect(200)).body;
+      expect(linksB).toMatchObject({ amountUzs: 0, payme: null, click: null });
+
+      // --- Cash desk shift: expected = opening + cash in - cash refunds
+      const open = await http().post('/api/admin/cashier/shifts/open').set(auth(adminToken)).send({ openingCash: 50000 });
+      let shiftId: string;
+      if (open.status === 409) {
+        shiftId = (await http().get('/api/admin/cashier/summary').set(auth(adminToken)).expect(200)).body.openShift.id;
+      } else {
+        expect(open.status).toBe(201);
+        shiftId = open.body.id;
+        await http().post('/api/admin/cashier/shifts/open').set(auth(adminToken)).send({ openingCash: 1 }).expect(409);
+      }
+      const before = (await http().get('/api/admin/cashier/summary').set(auth(adminToken)).expect(200)).body.openShift.expectedCashUzs;
+      const cash = (await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: invoiceA, amount: 150000, method: 'CASH' }).expect(201)).body;
+      expect(cash.recordedById).toBeTruthy();
+      // Refunds: owner/admin only, within the paid amount; online payments go through the provider
+      await http().post(`/api/admin/cashier/payments/${cash.id}/refund`).set(auth(doctorBToken)).send({ amount: 1000, reason: 'test' }).expect(403);
+      await http().post(`/api/admin/cashier/payments/${cash.id}/refund`).set(auth(adminToken)).send({ amount: 150001, reason: 'too much' }).expect(400);
+      await http().post(`/api/admin/cashier/payments/${cash.id}/refund`).set(auth(adminToken)).send({ amount: 50000, reason: 'qisman qaytarish' }).expect(201);
+      const clickPayment = await prisma.payment.findFirst({ where: { invoiceId: invoiceB, method: 'CLICK' } });
+      await http().post(`/api/admin/cashier/payments/${clickPayment!.id}/refund`).set(auth(adminToken)).send({ reason: 'online' }).expect(400);
+
+      const summary = (await http().get('/api/admin/cashier/summary').set(auth(adminToken)).expect(200)).body;
+      expect(summary.openShift.expectedCashUzs - before).toBe(100000);
+      expect(summary.payments.find((x: any) => x.id === cash.id).recordedBy).toBeTruthy();
+      const expected = summary.openShift.expectedCashUzs;
+      const closed = (await http().post(`/api/admin/cashier/shifts/${shiftId}/close`).set(auth(adminToken)).send({ countedCash: expected - 5000, note: 'kam' }).expect(201)).body;
+      expect(closed).toMatchObject({ expectedCash: expected, countedCash: expected - 5000, differenceUzs: -5000 });
+      await http().post(`/api/admin/cashier/shifts/${shiftId}/close`).set(auth(adminToken)).send({ countedCash: 0 }).expect(400);
+      expect((await prisma.invoice.findUnique({ where: { id: invoiceA } }))!.status).toBe('PARTIALLY_PAID');
+    } finally {
+      process.env = saved;
+      await prisma.patient.delete({ where: { id: patient.id } });
+    }
+  });
 });

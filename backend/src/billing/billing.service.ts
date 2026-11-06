@@ -195,6 +195,7 @@ export class BillingService {
           patientId: targetPatientId || null,
           appointmentId: targetAppointmentId || null,
           note: dto.note || null,
+          recordedById: user.sub,
           currency: 'UZS',
         },
       });

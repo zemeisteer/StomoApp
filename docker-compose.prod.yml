@@ -78,6 +78,14 @@ services:
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
       # Optional separate chat for technical alerts (failed notifications); defaults to TELEGRAM_CHAT_ID
       OPS_TELEGRAM_CHAT_ID: ${OPS_TELEGRAM_CHAT_ID:-}
+      # Online payments (enabled only when all keys of a provider are set)
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://${DOMAIN}}
+      PAYME_MERCHANT_ID: ${PAYME_MERCHANT_ID:-}
+      PAYME_KEY: ${PAYME_KEY:-}
+      PAYME_TEST_MODE: ${PAYME_TEST_MODE:-false}
+      CLICK_SERVICE_ID: ${CLICK_SERVICE_ID:-}
+      CLICK_MERCHANT_ID: ${CLICK_MERCHANT_ID:-}
+      CLICK_SECRET_KEY: ${CLICK_SECRET_KEY:-}
       # Exactly one reverse proxy (nginx) sits in front of the backend;
       # without this every client shares nginx's IP for rate limiting.
       TRUST_PROXY: ${TRUST_PROXY:-1}

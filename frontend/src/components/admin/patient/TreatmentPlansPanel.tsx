@@ -15,6 +15,7 @@ import {
   ClipboardList,
   AlertCircle,
   CheckCircle2,
+  Receipt,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { ModalDialog } from '../../ModalDialog';
@@ -52,6 +53,7 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
   const [acceptMethod, setAcceptMethod] = useState<'IN_CLINIC_SIGNATURE' | 'VERBAL'>('IN_CLINIC_SIGNATURE');
   const [acceptName, setAcceptName] = useState(patientName);
   const [signature, setSignature] = useState<string | null>(null);
+  const [invoiceNote, setInvoiceNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -124,6 +126,20 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
     }
   };
 
+  const invoice = async (scope: 'COMPLETED' | 'ALL') => {
+    if (!active) return;
+    const res = await run(() => api.invoiceTreatmentPlan(active.id, scope));
+    if (res?.plan) {
+      replacePlan(res.plan);
+      setInvoiceNote(
+        L(
+          `Hisob-faktura yaratildi: ${formatUzs(res.invoice.totalAmount - res.invoice.discount, lang)}. To'lovni "To'lovlar" bo'limida qabul qiling.`,
+          `Счёт создан: ${formatUzs(res.invoice.totalAmount - res.invoice.discount, lang)}. Оплату примите во вкладке «Оплаты».`,
+        ),
+      );
+    }
+  };
+
   const accept = async () => {
     if (!active) return;
     const res = await run(() =>
@@ -188,6 +204,7 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
             onClick={() => {
               setActiveId(p.id);
               setLinkInfo(null);
+              setInvoiceNote(null);
             }}
             className={`w-full rounded-xl border p-3 text-left transition-colors ${
               p.id === activeId ? 'border-brand-600 bg-white shadow-soft ring-2 ring-brand-600/10' : 'border-line bg-white hover:border-line-strong'
@@ -234,6 +251,30 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
               >
                 <Printer className="h-4 w-4" /> {L('Smeta', 'Смета')}
               </button>
+              {canEdit && ['ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(active.status) && (
+                <>
+                  {active.totals.uninvoicedCompletedUzs > 0 && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => invoice('COMPLETED')}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-600 px-3 text-[13px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      <Receipt className="h-4 w-4" /> {L('Bajarilganiga hisob', 'Счёт за выполненное')} · {formatUzs(active.totals.uninvoicedCompletedUzs, lang)}
+                    </button>
+                  )}
+                  {active.totals.uninvoicedUzs > active.totals.uninvoicedCompletedUzs && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => invoice('ALL')}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand-200 px-3 text-[13px] font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                    >
+                      <Receipt className="h-4 w-4" /> {L("To'liq hisob (oldindan)", 'Счёт на весь план')}
+                    </button>
+                  )}
+                </>
+              )}
               {editable && (
                 <>
                   <button
@@ -263,6 +304,12 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
           {error && (
             <div role="alert" className="mx-5 mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 print:hidden">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
+            </div>
+          )}
+
+          {invoiceNote && (
+            <div className="mx-5 mt-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 print:hidden">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {invoiceNote}
             </div>
           )}
 
@@ -347,6 +394,11 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
                               <td className="px-3 py-2.5">
                                 <span className="font-medium text-ink">{isRu ? item.treatmentNameRu || item.treatmentNameUz : item.treatmentNameUz}</span>
                                 {item.notes && <span className="block text-xs text-ink-muted">{item.notes}</span>}
+                                {item.invoiceId && (
+                                  <span className="mt-0.5 inline-block rounded bg-emerald-50 px-1.5 text-[10px] font-semibold text-emerald-700 print:hidden">
+                                    {L('Hisoblangan', 'Выставлен счёт')}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2.5 tabular-nums text-ink-muted">{item.toothNumber ?? '—'}</td>
                               <td className="px-3 py-2.5 text-right tabular-nums">

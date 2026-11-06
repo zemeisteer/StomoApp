@@ -24,6 +24,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PublicModule } from './public/public.module';
 import { ClinicalModule } from './clinical/clinical.module';
 import { BillingModule } from './billing/billing.module';
+import { PaymentsModule } from './payments/payments.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { CommissionsModule } from './commissions/commissions.module';
 import { BotModule } from './bot/bot.module';
@@ -92,6 +93,7 @@ const redisImports = process.env.REDIS_ENABLED === 'true'
     PublicModule,
     ClinicalModule,
     BillingModule,
+    PaymentsModule,
     InventoryModule,
     CommissionsModule,
     BotModule,

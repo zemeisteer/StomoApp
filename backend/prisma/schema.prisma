@@ -701,6 +701,8 @@ enum PaymentMethod {
   CARD
   TRANSFER
   OTHER
+  PAYME
+  CLICK
 
   @@map("payment_method")
 }
@@ -722,7 +724,11 @@ model Payment {
   
   isRefund      Boolean       @default(false) @map("is_refund")
   note          String?
-  
+  // Staff member who took the money (null for online provider payments)
+  recordedById  String?       @map("recorded_by_id")
+  // Refunds point at the payment they reverse
+  refundOfId    String?       @map("refund_of_id")
+
   recordedAt    DateTime      @default(now()) @map("recorded_at")
   createdAt     DateTime      @default(now()) @map("created_at")
 
@@ -796,6 +802,9 @@ model TreatmentPlanItem {
   unitPriceUzs Int            @default(0) @map("unit_price_uzs") // so'm; costUzs = unitPriceUzs * quantity
   phase        Int            @default(1) // treatment stage (1 = first visit block, ...)
   sortOrder    Int            @default(0) @map("sort_order")
+  // Set once the item has been billed, so it is never invoiced twice
+  invoiceId    String?        @map("invoice_id")
+  invoice      Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -837,11 +846,56 @@ model TreatmentPlan {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  items TreatmentPlanItem[]
+  items    TreatmentPlanItem[]
+  invoices Invoice[]
 
   @@index([patientId])
   @@index([doctorId])
   @@map("treatment_plans")
+}
+
+/// Payme / Click transaction mirror. Provider callbacks are idempotent on (provider, providerTransactionId).
+model OnlinePayment {
+  id                    String   @id @default(cuid())
+  provider              String // PAYME, CLICK
+  providerTransactionId String   @map("provider_transaction_id")
+  invoiceId             String   @map("invoice_id")
+  invoice               Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amountUzs             Int      @map("amount_uzs")
+  // Payme states: 1 created, 2 performed, -1 cancelled before perform, -2 cancelled after perform
+  state                 Int      @default(1)
+  reason                Int?
+  providerTime          BigInt?  @map("provider_time") // ms timestamp sent by the provider
+  createTime            BigInt   @map("create_time") // ms
+  performTime           BigInt?  @map("perform_time")
+  cancelTime            BigInt?  @map("cancel_time")
+  paymentId             String?  @unique @map("payment_id")
+  refundPaymentId       String?  @unique @map("refund_payment_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, providerTransactionId])
+  @@index([invoiceId])
+  @@index([provider, createTime])
+  @@map("online_payments")
+}
+
+/// Cash drawer shift: opening float, cash taken in, counted cash at close.
+model CashShift {
+  id           String    @id @default(cuid())
+  openedById   String    @map("opened_by_id")
+  openedAt     DateTime  @default(now()) @map("opened_at")
+  openingCash  Int       @default(0) @map("opening_cash")
+  closedById   String?   @map("closed_by_id")
+  closedAt     DateTime? @map("closed_at")
+  expectedCash Int?      @map("expected_cash")
+  countedCash  Int?      @map("counted_cash")
+  note         String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([openedAt])
+  @@map("cash_shifts")
 }
 
 // ============================================================
@@ -863,8 +917,15 @@ model Invoice {
 
   payments      Payment[]
 
+  // Invoice generated from a treatment plan (items point back via invoiceId)
+  planId         String?             @map("plan_id")
+  plan           TreatmentPlan?      @relation(fields: [planId], references: [id], onDelete: SetNull)
+  planItems      TreatmentPlanItem[]
+  onlinePayments OnlinePayment[]
+
   @@index([patientId])
   @@index([appointmentId])
+  @@index([planId])
   @@map("invoices")
 }
 

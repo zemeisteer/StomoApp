@@ -15,6 +15,7 @@ import {
   CreatePlanDto,
   CreatePlanItemDto,
   DeclinePlanDto,
+  InvoicePlanDto,
   PublicAcceptPlanDto,
   UpdatePlanDto,
   UpdatePlanItemDto,
@@ -95,6 +96,12 @@ export class TreatmentPlansController {
   @Roles(...CLINICAL_READ)
   decline(@Param('planId') planId: string, @Body() dto: DeclinePlanDto, @CurrentUser() user: JwtPayload) {
     return this.plans.decline(planId, dto, user);
+  }
+
+  @Post('plans/:planId/invoice')
+  @Roles(...CLINICAL_READ)
+  invoice(@Param('planId') planId: string, @Body() dto: InvoicePlanDto, @CurrentUser() user: JwtPayload) {
+    return this.plans.createInvoiceFromPlan(planId, dto.scope, user);
   }
 
   @Post('plans/:planId/cancel')

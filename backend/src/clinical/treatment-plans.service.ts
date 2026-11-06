@@ -94,7 +94,13 @@ export class TreatmentPlansService {
       ...rest,
       hasApprovalLink: Boolean(approvalTokenHash),
       hasSignature: Boolean(acceptanceSignature),
-      totals: planTotals(plan),
+      totals: {
+        ...planTotals(plan),
+        uninvoicedUzs: plan.items.filter((i) => i.status !== 'CANCELLED' && !i.invoiceId).reduce((sum, i) => sum + i.costUzs, 0),
+        uninvoicedCompletedUzs: plan.items
+          .filter((i) => i.status === 'COMPLETED' && !i.invoiceId)
+          .reduce((sum, i) => sum + i.costUzs, 0),
+      },
     };
   }
 
@@ -424,6 +430,75 @@ export class TreatmentPlansService {
       });
     });
     return this.getPlan(planId, user);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Billing
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Bills accepted plan items that have not been invoiced yet: either only completed work
+   * or everything still to do (prepayment). The plan discount is spread over invoices
+   * until it is used up, so the patient never pays more than the accepted total.
+   */
+  async createInvoiceFromPlan(planId: string, scope: 'COMPLETED' | 'ALL', user: JwtPayload) {
+    const plan = await this.loadPlan(planId, user);
+    if (!['ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(plan.status)) {
+      throw new BadRequestException("Hisob chiqarish uchun bemor rejaga rozilik bergan bo'lishi kerak");
+    }
+
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      // Serialize invoicing per plan
+      await tx.$queryRaw`SELECT id FROM "treatment_plans" WHERE id = ${planId} FOR UPDATE`;
+      const items = await tx.treatmentPlanItem.findMany({
+        where: {
+          planId,
+          invoiceId: null,
+          status: scope === 'COMPLETED' ? 'COMPLETED' : { not: 'CANCELLED' },
+        },
+        orderBy: [{ phase: 'asc' }, { sortOrder: 'asc' }],
+      });
+      if (items.length === 0) {
+        throw new BadRequestException(
+          scope === 'COMPLETED' ? "Hisoblanmagan bajarilgan muolaja yo'q" : "Hisoblanmagan muolaja yo'q",
+        );
+      }
+      const total = items.reduce((sum, i) => sum + i.costUzs, 0);
+      const usedDiscount = await tx.invoice.aggregate({
+        where: { planId, status: { not: 'CANCELLED' } },
+        _sum: { discount: true },
+      });
+      const discount = Math.max(0, Math.min(plan.discountUzs - (usedDiscount._sum.discount || 0), total));
+
+      const created = await tx.invoice.create({
+        data: {
+          patientId: plan.patientId,
+          planId,
+          totalAmount: total,
+          discount,
+          status: total - discount === 0 ? 'PAID' : 'PENDING',
+          notes: `${plan.title}: ${items
+            .map((i) => i.treatmentNameUz + (i.toothNumber ? ` (#${i.toothNumber})` : ''))
+            .join(', ')}`.slice(0, 1000),
+        },
+      });
+      const linked = await tx.treatmentPlanItem.updateMany({
+        where: { id: { in: items.map((i) => i.id) }, invoiceId: null },
+        data: { invoiceId: created.id },
+      });
+      if (linked.count !== items.length) throw new BadRequestException('Reja bandlari allaqachon hisoblangan');
+
+      await this.audit.logTransactional({
+        tx,
+        userId: user.sub,
+        action: 'billing.invoice_created',
+        entity: 'Invoice',
+        entityId: created.id,
+        details: { planId, scope, items: items.length, totalAmount: total, discount },
+      });
+      return created;
+    });
+    return { invoice, plan: await this.getPlan(planId, user) };
   }
 
   // ---------------------------------------------------------------------------

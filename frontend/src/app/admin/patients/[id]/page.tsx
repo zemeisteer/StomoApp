@@ -20,6 +20,7 @@ import { AdminLayout } from '../../../../components/AdminLayout';
 import { InteractiveOdontogram } from '../../../../components/InteractiveOdontogram';
 import { TreatmentPlansPanel } from '../../../../components/admin/patient/TreatmentPlansPanel';
 import { StatusBadge } from '../../../../components/ui/StatusBadge';
+import { OnlinePayDialog, RefundDialog, TakePaymentDialog } from '../../../../components/admin/billing/BillingDialogs';
 import { api } from '../../../../lib/api';
 import { useAuth } from '../../../../lib/auth';
 import { useI18n } from '../../../../lib/i18n';
@@ -170,7 +171,16 @@ export default function PatientCardPage() {
 
             {tab === 'visits' && <Visits appointments={card.appointments} lang={lang} />}
 
-            {tab === 'payments' && card.finance && <Payments finance={card.finance} lang={lang} />}
+            {tab === 'payments' && card.finance && (
+              <Payments
+                finance={card.finance}
+                lang={lang}
+                clinicName={brand.clinicName(lang)}
+                canCollect={Boolean(user && ['OWNER', 'ADMIN', 'RECEPTION'].includes(user.role))}
+                canRefund={Boolean(user && ['OWNER', 'ADMIN'].includes(user.role))}
+                onChanged={load}
+              />
+            )}
           </>
         )}
       </div>
@@ -332,11 +342,32 @@ function Visits({ appointments, lang }: { appointments: any[]; lang: 'uz' | 'ru'
   );
 }
 
-function Payments({ finance, lang }: { finance: any; lang: 'uz' | 'ru' }) {
+function Payments({
+  finance,
+  lang,
+  clinicName,
+  canCollect,
+  canRefund,
+  onChanged,
+}: {
+  finance: any;
+  lang: 'uz' | 'ru';
+  clinicName: string;
+  canCollect: boolean;
+  canRefund: boolean;
+  onChanged: () => void;
+}) {
   const isRu = lang === 'ru';
   const L = (uz: string, ru: string) => (isRu ? ru : uz);
+  const [paying, setPaying] = useState<any>(null);
+  const [online, setOnline] = useState<string | null>(null);
+  const [refund, setRefund] = useState<any>(null);
+  const methodName = (m: string) => (m === 'PAYME' ? 'Payme' : m === 'CLICK' ? 'Click' : isRu ? PAYMENT_METHOD[m]?.ru : PAYMENT_METHOD[m]?.uz);
   return (
     <div className="space-y-4">
+      <TakePaymentDialog invoice={paying} lang={lang} onClose={() => setPaying(null)} onDone={onChanged} />
+      <OnlinePayDialog invoiceId={online} lang={lang} clinicName={clinicName} onClose={() => setOnline(null)} />
+      <RefundDialog payment={refund} lang={lang} onClose={() => setRefund(null)} onDone={onChanged} />
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label={L('Hisoblangan', 'Начислено')} value={formatUzs(finance.billedUzs, lang)} />
         <Stat label={L("To'langan", 'Оплачено')} value={formatUzs(finance.paidUzs, lang)} />
@@ -360,17 +391,42 @@ function Payments({ finance, lang }: { finance: any; lang: 'uz' | 'ru' }) {
                   </p>
                 </div>
               </div>
+              {canCollect && inv.debtAmount > 0 && (
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOnline(inv.id)}
+                    className="h-8 rounded-lg border border-line px-3 text-xs font-semibold text-ink hover:bg-canvas"
+                  >
+                    {L('Payme / Click havola', 'Ссылка Payme / Click')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaying(inv)}
+                    className="h-8 rounded-lg bg-brand-600 px-3 text-xs font-semibold text-white hover:bg-brand-700"
+                  >
+                    {L("To'lov qabul qilish", 'Принять оплату')}
+                  </button>
+                </div>
+              )}
               {inv.payments.length > 0 && (
                 <ul className="mt-3 space-y-1 border-t border-line pt-3 text-xs text-ink-muted">
                   {inv.payments.map((p: any) => (
                     <li key={p.id} className="flex justify-between gap-2">
                       <span>
-                        {formatClinicDate(p.recordedAt, lang)} · {isRu ? PAYMENT_METHOD[p.method]?.ru : PAYMENT_METHOD[p.method]?.uz}
+                        {formatClinicDate(p.recordedAt, lang)} · {methodName(p.method)}
                         {p.isRefund ? ` · ${L('qaytarildi', 'возврат')}` : ''}
                       </span>
-                      <span className={`tabular-nums ${p.isRefund ? 'text-rose-600' : 'text-ink'}`}>
-                        {p.isRefund ? '−' : ''}
-                        {formatUzs(p.amount, lang)}
+                      <span className="flex items-center gap-2">
+                        {canRefund && !p.isRefund && !['PAYME', 'CLICK'].includes(p.method) && (
+                          <button type="button" onClick={() => setRefund(p)} className="font-semibold text-ink-subtle hover:text-rose-600">
+                            {L('Qaytarish', 'Возврат')}
+                          </button>
+                        )}
+                        <span className={`tabular-nums ${p.isRefund ? 'text-rose-600' : 'text-ink'}`}>
+                          {p.isRefund ? '−' : ''}
+                          {formatUzs(p.amount, lang)}
+                        </span>
                       </span>
                     </li>
                   ))}

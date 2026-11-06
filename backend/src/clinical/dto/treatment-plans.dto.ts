@@ -169,3 +169,8 @@ export class PublicAcceptPlanDto {
   @Equals(true)
   agree!: boolean;
 }
+
+export class InvoicePlanDto {
+  @IsIn(['COMPLETED', 'ALL'])
+  scope!: 'COMPLETED' | 'ALL';
+}
