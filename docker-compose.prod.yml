@@ -85,6 +85,30 @@ services:
     networks:
       - dentacare-internal
 
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: dentacare-prod-bot
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      ENVIRONMENT: production
+      # Same bot can serve patients and receive backend staff alerts (backend only calls sendMessage)
+      BOT_TOKEN: ${BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:?BOT_TOKEN or TELEGRAM_BOT_TOKEN must be set}}
+      STAFF_GROUP_CHAT_ID: ${STAFF_GROUP_CHAT_ID:-${TELEGRAM_CHAT_ID:?STAFF_GROUP_CHAT_ID or TELEGRAM_CHAT_ID must be set}}
+      BACKEND_API_URL: http://backend:4000/api
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      CLINIC_NAME: ${CLINIC_NAME:-DentaCare Stomatologiya Klinikasi}
+      CLINIC_PHONE: ${CLINIC_PHONE:-+998 71 200 55 44}
+      CLINIC_LOCATION_URL: ${CLINIC_LOCATION_URL:-https://maps.google.com/?q=41.311081,69.240562}
+      CLINIC_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
+    networks:
+      # internal: reach the backend; public: reach api.telegram.org
+      - dentacare-internal
+      - dentacare-public
+
   nginx:
     image: nginx:1.25-alpine
     container_name: dentacare-prod-nginx

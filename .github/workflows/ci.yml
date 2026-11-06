@@ -166,7 +166,16 @@ jobs:
       - name: Validate Production Compose File
         env:
           DOMAIN: example.test
+          TELEGRAM_BOT_TOKEN: ci_dummy_token
+          TELEGRAM_CHAT_ID: '-1000000000000'
         run: docker compose -f docker-compose.prod.yml config --quiet
+
+      - name: Build Bot Image & Import Smoke Test
+        run: |
+          docker build -t stomo-bot:ci ./bot
+          docker run --rm \
+            -e SERVICE_TOKEN=ci_service_token_random_secure_32_chars_minimum_length_abcdef \
+            stomo-bot:ci python -c "import bot.main; print('bot image OK')"
 
       - name: Validate Bootstrap Script Syntax
         run: bash -n scripts/init-letsencrypt.sh

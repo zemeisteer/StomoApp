@@ -131,6 +131,7 @@ Services exposed:
 - **Frontend / Backend API**: behind nginx (`/` and `/api/`), not published directly
 - **Database & Cache**: Internal container network only (`dentacare-internal`)
 - **Certificates**: renewed automatically by the `certbot` service; nginx reloads every 6 hours to pick them up
+- **Telegram bot**: `bot` service (long polling, no published port), talks to the backend at `http://backend:4000/api` with `SERVICE_TOKEN`
 
 HTTPS is required in production: auth cookies are issued with the `Secure` flag, so admin login does not work over plain HTTP.
 

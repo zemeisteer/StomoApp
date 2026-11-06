@@ -60,7 +60,7 @@ compose run --rm --no-deps --entrypoint "sh -c '\
   touch $LIVE/.dummy'" certbot
 
 echo "==> Starting the stack (nginx needs backend and frontend to resolve)"
-compose up -d --build nginx certbot
+compose up -d --build nginx certbot bot
 
 echo "==> Removing temporary certificate"
 compose run --rm --no-deps --entrypoint "rm -rf $LIVE /etc/letsencrypt/archive/$DOMAIN /etc/letsencrypt/renewal/$DOMAIN.conf" certbot
