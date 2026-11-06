@@ -83,3 +83,15 @@ export class ClaimDailyDigestDto {
   @MaxLength(64)
   recipient!: string;
 }
+
+export class LinkStaffTelegramDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  token!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20)
+  telegramUserId!: string;
+}

@@ -611,6 +611,16 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  // Own Telegram link (any signed-in staff member)
+  getMyTelegramStatus: () =>
+    fetcher<{ linked: boolean; telegramUserId: string | null; botUsername: string | null }>('/api/admin/me/telegram'),
+  createMyTelegramLink: () =>
+    fetcher<{ token: string; expiresAt: string; deepLink: string | null; command: string }>(
+      '/api/admin/me/telegram/link',
+      { method: 'POST' },
+    ),
+  unlinkMyTelegram: () => fetcher<{ linked: boolean }>('/api/admin/me/telegram', { method: 'DELETE' }),
+
   // Clinic Settings & Branches (OWNER / ADMIN)
   getClinicSettingsAdmin: () => fetcher<any>('/api/clinic/settings'),
   updateClinicSettingsAdmin: (payload: any) =>

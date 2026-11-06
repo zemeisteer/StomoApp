@@ -26,8 +26,10 @@ import {
   Bell,
   ChevronLeft,
   ChevronRight,
+  Send,
 } from 'lucide-react';
 import { useAuth, StaffRole } from '../lib/auth';
+import { TelegramLinkModal } from './admin/TelegramLinkModal';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
 
@@ -43,6 +45,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [telegramOpen, setTelegramOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [clinicLogo, setClinicLogo] = useState<string | null>(null);
   const [logoError, setLogoError] = useState(false);
@@ -349,6 +352,18 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
 
           <button
             type="button"
+            onClick={() => setTelegramOpen(true)}
+            className={`w-full flex items-center text-xs font-semibold text-[#b2c9ca] hover:bg-[#1a434a] hover:text-white rounded-xl transition-colors ${
+              isCollapsed ? 'justify-center p-2' : 'gap-3 px-3.5 py-2'
+            }`}
+            title="Telegram"
+          >
+            <Send className="w-4 h-4" />
+            {!isCollapsed && <span>Telegram</span>}
+          </button>
+
+          <button
+            type="button"
             onClick={logout}
             className={`w-full flex items-center text-xs font-semibold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 rounded-xl transition-colors ${
               isCollapsed ? 'justify-center p-2' : 'gap-3 px-3.5 py-2'
@@ -360,6 +375,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
           </button>
         </div>
       </aside>
+
+      <TelegramLinkModal
+        isOpen={telegramOpen}
+        onClose={() => setTelegramOpen(false)}
+        language={language === 'ru' ? 'ru' : 'uz'}
+      />
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen overflow-x-hidden">

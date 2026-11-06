@@ -20,13 +20,25 @@ import {
   ReportBotJobFailureDto,
   ClaimDailyDigestDto,
   SetBotLanguageDto,
+  LinkStaffTelegramDto,
 } from './bot.dto';
+import { StaffTelegramService } from '../staff/staff-telegram.service';
 
 @Controller('bot')
 @UseGuards(BotServiceGuard, ThrottlerGuard)
 @Throttle({ default: { limit: 120, ttl: 60000 } })
 export class BotController {
-  constructor(private readonly botService: BotService) {}
+  constructor(
+    private readonly botService: BotService,
+    private readonly staffTelegram: StaffTelegramService,
+  ) {}
+
+  /** Staff self-service Telegram linking via deep link (`/start link_...`). */
+  @Post('staff/link')
+  @HttpCode(HttpStatus.OK)
+  async linkStaffTelegram(@Body() dto: LinkStaffTelegramDto) {
+    return this.staffTelegram.linkFromBot(dto.token, dto.telegramUserId);
+  }
 
   @Get('doctors')
   async getDoctors() {
