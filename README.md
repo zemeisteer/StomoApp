@@ -109,21 +109,30 @@ cd frontend && npm run dev
 
 The repository includes multi-stage production Dockerfiles and an orchestration profile:
 
+Prerequisites: DNS A/AAAA records for `DOMAIN` (and every `EXTRA_DOMAINS` entry) point to the server, and ports 80/443 are open.
+
 ```bash
-# 1. Create production environment file
-cp .env.example .env.prod
+# 1. Create the production environment file and fill in secrets, DOMAIN, EXTRA_DOMAINS, LETSENCRYPT_EMAIL
+cp .env.production.example .env.production
 
-# 2. Build and launch all production services
-docker compose -f docker-compose.prod.yml up -d --build
+# 2. First deploy only: obtain the Let's Encrypt certificate and start the stack
+#    (STAGING=1 first to test without hitting Let's Encrypt rate limits)
+./scripts/init-letsencrypt.sh
 
-# 3. Check container health
-docker compose -f docker-compose.prod.yml ps
+# 3. Later deploys
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+
+# 4. Check container health
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
 ```
 
 Services exposed:
-- **Frontend**: `http://localhost:3000`
-- **Backend API**: `http://localhost:4000`
+- **Public entrypoint**: nginx on `https://DOMAIN` (port 80 only serves ACME challenges and redirects to HTTPS)
+- **Frontend / Backend API**: behind nginx (`/` and `/api/`), not published directly
 - **Database & Cache**: Internal container network only (`dentacare-internal`)
+- **Certificates**: renewed automatically by the `certbot` service; nginx reloads every 6 hours to pick them up
+
+HTTPS is required in production: auth cookies are issued with the `Secure` flag, so admin login does not work over plain HTTP.
 
 ---
 

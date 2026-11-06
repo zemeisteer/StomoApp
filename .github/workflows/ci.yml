@@ -154,3 +154,35 @@ jobs:
           SERVICE_TOKEN: ci_service_token_random_secure_32_chars_minimum_length_abcdef
         run: pytest bot/test_bot_suite.py
 
+
+  gateway-verification:
+    name: Nginx Gateway & Compose Config Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Production Compose File
+        env:
+          DOMAIN: example.test
+        run: docker compose -f docker-compose.prod.yml config --quiet
+
+      - name: Validate Bootstrap Script Syntax
+        run: bash -n scripts/init-letsencrypt.sh
+
+      - name: Render Templates & Run nginx -t
+        run: |
+          mkdir -p /tmp/le/live/example.test
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout /tmp/le/live/example.test/privkey.pem \
+            -out /tmp/le/live/example.test/fullchain.pem -subj /CN=example.test
+          docker run --rm \
+            --add-host frontend:127.0.0.1 --add-host backend:127.0.0.1 \
+            -e DOMAIN=example.test -e EXTRA_DOMAINS=www.example.test \
+            -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/sites \
+            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/nginx/templates:/etc/nginx/templates:ro" \
+            -v "$PWD/nginx/snippets:/etc/nginx/snippets:ro" \
+            -v /tmp/le:/etc/letsencrypt:ro \
+            nginx:1.25-alpine nginx -t

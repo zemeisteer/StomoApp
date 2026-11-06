@@ -1,0 +1,113 @@
+# Rendered by the nginx image entrypoint (envsubst) into /etc/nginx/sites/.
+# Only variables defined in the container environment are substituted
+# (${DOMAIN}, ${EXTRA_DOMAINS}); nginx runtime variables like $host are kept.
+
+upstream frontend_upstream {
+    server frontend:3000;
+    keepalive 32;
+}
+
+upstream backend_upstream {
+    server backend:4000;
+    keepalive 32;
+}
+
+# ---------------------------------------------------------------------------
+# HTTP: Let's Encrypt challenges only, everything else redirects to HTTPS
+# ---------------------------------------------------------------------------
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name ${DOMAIN} ${EXTRA_DOMAINS};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location /nginx-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "healthy\n";
+    }
+
+    location / {
+        return 301 https://${DOMAIN}$request_uri;
+    }
+}
+
+# ---------------------------------------------------------------------------
+# HTTPS
+# ---------------------------------------------------------------------------
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    http2 on;
+    server_name ${DOMAIN} ${EXTRA_DOMAINS};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include /etc/nginx/snippets/ssl.conf;
+
+    include /etc/nginx/snippets/security-headers.conf;
+
+    # Canonical host: www and other aliases redirect to ${DOMAIN}
+    if ($host != "${DOMAIN}") {
+        return 301 https://${DOMAIN}$request_uri;
+    }
+
+    # Brute-force protection on authentication endpoints
+    location /api/auth/ {
+        limit_req zone=api_auth burst=10 nodelay;
+        proxy_pass http://backend_upstream;
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_set_header Connection "";
+    }
+
+    # Backend API routing
+    location /api/ {
+        limit_req zone=one burst=60 nodelay;
+        proxy_pass http://backend_upstream;
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 90s;
+        proxy_connect_timeout 90s;
+        proxy_send_timeout 90s;
+    }
+
+    # Static media files served via backend with caching
+    location /api/admin/media/file/ {
+        proxy_pass http://backend_upstream;
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_set_header Connection "";
+        expires 30d;
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=2592000, immutable";
+    }
+
+    # Next.js static assets & chunk caching
+    location /_next/static/ {
+        proxy_pass http://frontend_upstream;
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_set_header Connection "";
+        expires 365d;
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Frontend Next.js web app
+    location / {
+        proxy_pass http://frontend_upstream;
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    location /nginx-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "healthy\n";
+    }
+}

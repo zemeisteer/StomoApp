@@ -48,8 +48,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      APP_URL: ${APP_URL:-https://api.dentacare.uz}
-      FRONTEND_URL: ${FRONTEND_URL:-https://dentacare.uz}
+      APP_URL: ${APP_URL:-https://${DOMAIN}}
+      FRONTEND_URL: ${FRONTEND_URL:-https://${DOMAIN}}
       DATABASE_URL: postgresql://${POSTGRES_USER:-dentacare}:${POSTGRES_PASSWORD:-ChangeMeInProductionSecret2026!}@postgres:5432/${POSTGRES_DB:-dentacare}?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD:-ChangeMeRedisSecret2026!}@redis:6379
       JWT_SECRET: ${JWT_SECRET}
@@ -62,6 +62,9 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       SERVICE_TOKEN: ${SERVICE_TOKEN}
+      # Exactly one reverse proxy (nginx) sits in front of the backend;
+      # without this every client shares nginx's IP for rate limiting.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
     volumes:
       - prod_backend_uploads:/app/uploads
     networks:
@@ -89,14 +92,36 @@ services:
     ports:
       - '80:80'
       - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set, e.g. dentacare.uz}
+      EXTRA_DOMAINS: ${EXTRA_DOMAINS:-}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/sites
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    # Reload every 6h so renewed certificates are picked up without downtime.
+    # Overrides CMD only; the image ENTRYPOINT still renders the templates.
+    command: /bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g "daemon off;"'
     depends_on:
       - backend
       - frontend
     networks:
       - dentacare-internal
+      - dentacare-public
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: dentacare-prod-certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Try renewal twice a day; certbot only renews within 30 days of expiry.
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    networks:
       - dentacare-public
 
 networks:
@@ -109,3 +134,5 @@ volumes:
   prod_postgres_data:
   prod_redis_data:
   prod_backend_uploads:
+  certbot_conf:
+  certbot_www:
