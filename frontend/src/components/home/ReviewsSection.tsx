@@ -27,18 +27,18 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10 text-center sm:text-left">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider mb-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider mb-2">
             <MessageSquare className="w-3.5 h-3.5" />
             <span>{t.reviews.title}</span>
           </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#152f34]">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink">
             {isRu ? 'Отзывы наших пациентов' : 'Bemorlarimiz bildirgan fikrlar'}
           </h2>
         </div>
 
         <Link
           href="/reviews"
-          className="inline-flex items-center gap-2 text-sm font-bold text-[#167b78] hover:text-[#116460] group transition-colors"
+          className="inline-flex items-center gap-2 text-sm font-bold text-brand-600 hover:text-brand-700 group transition-colors"
         >
           <span>{t.reviews.writeReview}</span>
           <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -51,7 +51,7 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
           {[1, 2, 3].map((n) => (
             <div
               key={n}
-              className="bg-white rounded-2xl p-6 sm:p-7 border border-[#d8e5e2] animate-pulse space-y-4 shadow-sm"
+              className="bg-white rounded-2xl p-6 sm:p-7 border border-line animate-pulse space-y-4 shadow-sm"
             >
               <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map((s) => (
@@ -63,7 +63,7 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
                 <div className="h-4 bg-slate-100 rounded w-5/6" />
                 <div className="h-4 bg-slate-100 rounded w-2/3" />
               </div>
-              <div className="pt-4 border-t border-[#d8e5e2] flex justify-between items-center">
+              <div className="pt-4 border-t border-line flex justify-between items-center">
                 <div className="h-4 w-28 bg-slate-100 rounded" />
                 <div className="h-3 w-16 bg-slate-100 rounded" />
               </div>
@@ -81,7 +81,7 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
             <button
               type="button"
               onClick={onRetry}
-              className="px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+              className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
               {t.common.retry}
             </button>
@@ -91,13 +91,13 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
 
       {/* Empty State */}
       {!isLoading && !error && reviews.length === 0 && (
-        <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-[#d8e5e2] p-8">
-          <p className="text-[#52696e] text-sm mb-3">
+        <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-line p-8">
+          <p className="text-ink-muted text-sm mb-3">
             {isRu ? 'Отзывы пока отсутствуют. Будьте первыми!' : 'Hozircha sharhlar mavjud emas. Birinchi bo\'lib fikringizni qoldiring!'}
           </p>
           <Link
             href="/reviews"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] text-white rounded-xl text-xs font-bold"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold"
           >
             {t.reviews.writeReview}
           </Link>
@@ -116,7 +116,7 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
             return (
               <div
                 key={r.id}
-                className="bg-white rounded-2xl p-6 sm:p-7 border border-[#d8e5e2] shadow-[0_2px_8px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-[#167b78]/40 transition-all flex flex-col justify-between"
+                className="bg-white rounded-2xl p-6 sm:p-7 border border-line shadow-[0_2px_8px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-brand-600/40 transition-all flex flex-col justify-between"
               >
                 <div>
                   {/* Restrained Star Rating */}
@@ -127,15 +127,15 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
                   </div>
 
                   {/* Feedback text */}
-                  <p className="text-sm text-[#152f34] leading-relaxed mb-6 italic">
+                  <p className="text-sm text-ink leading-relaxed mb-6 italic">
                     &ldquo;{r.text}&rdquo;
                   </p>
                 </div>
 
                 {/* Author footer */}
-                <div className="pt-4 border-t border-[#d8e5e2] flex items-center justify-between text-xs text-[#52696e]">
-                  <div className="flex items-center gap-2 font-bold text-[#152f34]">
-                    <div className="w-6 h-6 rounded-full bg-[#eaf5f2] flex items-center justify-center text-[#167b78] text-[10px]">
+                <div className="pt-4 border-t border-line flex items-center justify-between text-xs text-ink-muted">
+                  <div className="flex items-center gap-2 font-bold text-ink">
+                    <div className="w-6 h-6 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 text-[10px]">
                       <User className="w-3 h-3" />
                     </div>
                     <span>{author}</span>

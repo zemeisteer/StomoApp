@@ -30,17 +30,17 @@ export default function ArticlesPage() {
   const isRu = language === 'ru';
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#f3f8f7] via-white to-[#f3f8f7] py-12 sm:py-16">
+    <div className="min-h-screen bg-gradient-to-b from-canvas via-white to-canvas py-12 sm:py-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
         <div className="text-center max-w-2xl mx-auto">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#eaf5f2] text-[#167b78] border border-[#d8e5e2]">
-            <Sparkles className="w-3.5 h-3.5 text-[#167b78]" />
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-600 border border-line">
+            <Sparkles className="w-3.5 h-3.5 text-brand-600" />
             {t.nav.articles}
           </span>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-[#152f34] mt-3 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-ink mt-3 tracking-tight">
             {isRu ? 'Полезные статьи и советы' : 'Foydali maqolalar va maslahatlar'}
           </h1>
-          <p className="text-sm text-[#52696e] mt-2 leading-relaxed">
+          <p className="text-sm text-ink-muted mt-2 leading-relaxed">
             {isRu
               ? 'Советы врачей об уходе за зубами, профилактике кариеса и современных технологиях'
               : 'Tish parvarishi, karies profilaktikasi va zamonaviy stomatologiya haqida shifokorlarimiz tavsiyalari'}
@@ -48,11 +48,11 @@ export default function ArticlesPage() {
         </div>
 
         {isLoading ? (
-          <div className="p-16 text-center text-[#52696e] text-sm bg-white rounded-3xl border border-[#d8e5e2]">
+          <div className="p-16 text-center text-ink-muted text-sm bg-white rounded-3xl border border-line">
             {t.common.loading}
           </div>
         ) : articles.length === 0 ? (
-          <div className="p-16 text-center text-[#52696e] text-sm bg-white rounded-3xl border border-dashed border-[#d8e5e2]">
+          <div className="p-16 text-center text-ink-muted text-sm bg-white rounded-3xl border border-dashed border-line">
             {isRu ? 'Статьи скоро будут опубликованы.' : "Maqolalar tez orada e'lon qilinadi."}
           </div>
         ) : (
@@ -65,29 +65,29 @@ export default function ArticlesPage() {
                 <Link
                   key={article.id}
                   href={`/articles/${article.slug}`}
-                  className="bg-white rounded-3xl p-6 shadow-sm border border-[#d8e5e2] hover:border-[#167b78]/50 hover:shadow-lg hover:shadow-[#167b78]/5 transition-all flex flex-col justify-between group block"
+                  className="bg-white rounded-3xl p-6 shadow-sm border border-line hover:border-brand-600/50 hover:shadow-lg hover:shadow-brand-600/5 transition-all flex flex-col justify-between group block"
                 >
                   <div>
-                    <div className="flex items-center gap-2 text-[11px] text-[#52696e] font-semibold mb-3">
-                      <span className="px-2.5 py-0.5 rounded-full bg-[#eaf5f2] text-[#167b78] font-bold border border-[#d8e5e2]">
+                    <div className="flex items-center gap-2 text-[11px] text-ink-muted font-semibold mb-3">
+                      <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-600 font-bold border border-line">
                         {article.category || (isRu ? 'Профилактика' : 'Profilaktika')}
                       </span>
                       <span>•</span>
                       <span>{formatClinicDate(article.publishedAt || article.createdAt, isRu ? 'ru' : 'uz')}</span>
                     </div>
 
-                    <h2 className="text-base font-bold text-[#152f34] group-hover:text-[#167b78] transition-colors mb-2 leading-snug">
+                    <h2 className="text-base font-bold text-ink group-hover:text-brand-600 transition-colors mb-2 leading-snug">
                       {title}
                     </h2>
 
-                    <p className="text-xs text-[#52696e] line-clamp-3 leading-relaxed mb-6">
+                    <p className="text-xs text-ink-muted line-clamp-3 leading-relaxed mb-6">
                       {excerpt}
                     </p>
                   </div>
 
-                  <div className="pt-4 border-t border-[#d8e5e2]/60 flex items-center justify-between text-xs font-bold text-[#167b78]">
-                    <span className="flex items-center gap-1.5 text-[#52696e] font-medium">
-                      <User className="w-3.5 h-3.5 text-[#167b78]" />
+                  <div className="pt-4 border-t border-line/60 flex items-center justify-between text-xs font-bold text-brand-600">
+                    <span className="flex items-center gap-1.5 text-ink-muted font-medium">
+                      <User className="w-3.5 h-3.5 text-brand-600" />
                       <span>{isRu ? 'Специалист DentaCare' : 'DentaCare mutaxassisi'}</span>
                     </span>
                     <span className="inline-flex items-center gap-1 group-hover:translate-x-1 transition-transform">

@@ -84,7 +84,7 @@ export function PatientMedicalCardModal({
       <div className="bg-white w-full max-w-4xl rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-6 animate-scale-up print:shadow-none print:border-none print:p-0 print:max-w-none">
         {/* Modal Action Header (hidden on print) */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4 print:hidden">
-          <div className="flex items-center gap-2 text-[#167b78] font-bold text-sm">
+          <div className="flex items-center gap-2 text-brand-600 font-bold text-sm">
             <FileText className="w-5 h-5" />
             <span>{isUz ? '043/h shaklli stomatologik ambulatoriya kartasi' : 'Стоматологическая медицинская карта (Форма 043/у)'}</span>
           </div>
@@ -92,7 +92,7 @@ export function PatientMedicalCardModal({
             <button
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+              className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
             >
               <Printer className="w-4 h-4" />
               <span>{isUz ? 'Chop etish (A4)' : 'Печать (А4)'}</span>
@@ -108,7 +108,7 @@ export function PatientMedicalCardModal({
         </div>
 
         {/* Printable Official Medical Form (A4 standard) */}
-        <div className="space-y-6 text-[#152f34] p-2 print:p-0">
+        <div className="space-y-6 text-ink p-2 print:p-0">
           {/* Official Document Header */}
           <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row justify-between items-start gap-4">
             <div>
@@ -118,7 +118,7 @@ export function PatientMedicalCardModal({
               <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 mt-0.5">
                 043/h-SHAKLLI STOMATOLOGIK AMBULATORIYA KARTASI
               </h1>
-              <p className="text-xs font-semibold text-[#167b78]">
+              <p className="text-xs font-semibold text-brand-600">
                 &quot;DentaCare&quot; Zamonaviy Stomatologiya Markazi • Litsenziya № D-9821
               </p>
             </div>
@@ -256,7 +256,7 @@ export function PatientMedicalCardModal({
                     {data.treatmentItems.map((item, idx) => (
                       <tr key={idx} className="hover:bg-slate-50">
                         <td className="p-2 text-center text-slate-400">{idx + 1}</td>
-                        <td className="p-2 font-mono font-bold text-[#167b78]">#{item.toothNum}</td>
+                        <td className="p-2 font-mono font-bold text-brand-600">#{item.toothNum}</td>
                         <td className="p-2">
                           <strong className="text-slate-900">{isUz ? item.treatmentNameUz : item.treatmentNameRu}</strong>
                           {item.surfaces.length > 0 && (
@@ -283,7 +283,7 @@ export function PatientMedicalCardModal({
                     <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
                       <tr>
                         <td colSpan={4} className="p-2 text-right uppercase text-slate-700">Jami hisoblangan qiymat:</td>
-                        <td className="p-2 text-right font-mono text-sm text-[#167b78]">{totalCost.toLocaleString()} so&apos;m</td>
+                        <td className="p-2 text-right font-mono text-sm text-brand-600">{totalCost.toLocaleString()} so&apos;m</td>
                       </tr>
                     </tfoot>
                   )}

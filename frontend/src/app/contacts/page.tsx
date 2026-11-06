@@ -82,14 +82,14 @@ export default function ContactsPage() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-12">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
           <Phone className="w-3.5 h-3.5" />
           <span>{t.nav.contacts}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-[#152f34] tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
           {isRu ? 'Контакты и филиалы клиники' : 'Klinikamiz bilan bog\'lanish'}
         </h1>
-        <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
+        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
           {isRu
             ? 'Есть вопросы или хотите записаться на прием? Свяжитесь с нами удобным способом.'
             : 'Savollaringiz bormi yoki qabulga yozilmoqchimisiz? Bizga qo\'ng\'iroq qiling yoki qayta qo\'ng\'iroq qoldiring.'}
@@ -110,8 +110,8 @@ export default function ContactsPage() {
                 onClick={() => setActiveBranchId(b.id)}
                 className={`px-6 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition-all ${
                   isActive
-                    ? 'bg-[#167b78] text-white shadow-md shadow-[#167b78]/25'
-                    : 'bg-white text-[#152f34] border border-[#d8e5e2] hover:bg-[#f0f7f5]'
+                    ? 'bg-brand-600 text-white shadow-md shadow-brand-600/25'
+                    : 'bg-white text-ink border border-line hover:bg-brand-50'
                 }`}
               >
                 {name}
@@ -125,24 +125,24 @@ export default function ContactsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left: Branch Details Card */}
         {activeBranch && (
-          <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 shadow-[0_4px_20px_rgba(21,47,52,0.03)] border border-[#d8e5e2] space-y-6">
+          <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 shadow-[0_4px_20px_rgba(21,47,52,0.03)] border border-line space-y-6">
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#167b78] bg-[#eaf5f2] px-3 py-1 rounded-full border border-[#d8e5e2]">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-brand-600 bg-brand-50 px-3 py-1 rounded-full border border-line">
                 {isRu ? 'Филиал и график работы' : 'Filial manzili va ish vaqti'}
               </span>
-              <h2 className="text-2xl font-extrabold text-[#152f34] mt-2.5">
+              <h2 className="text-2xl font-extrabold text-ink mt-2.5">
                 {isRu && activeBranch.nameRu ? activeBranch.nameRu : activeBranch.nameUz}
               </h2>
             </div>
 
-            <div className="space-y-4 text-sm text-[#52696e]">
-              <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
-                <MapPin className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+            <div className="space-y-4 text-sm text-ink-muted">
+              <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
+                <MapPin className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
+                  <strong className="text-ink block text-xs uppercase tracking-wider">
                     {t.common.address}
                   </strong>
-                  <p className="mt-0.5 text-xs sm:text-sm text-[#152f34]">
+                  <p className="mt-0.5 text-xs sm:text-sm text-ink">
                     {isRu && activeBranch.addressRu ? activeBranch.addressRu : activeBranch.addressUz}
                   </p>
                   {activeBranch.mapUrl && (
@@ -150,7 +150,7 @@ export default function ContactsPage() {
                       href={activeBranch.mapUrl.startsWith('http://') || activeBranch.mapUrl.startsWith('https://') ? activeBranch.mapUrl : `https://${activeBranch.mapUrl}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 mt-2 text-xs font-bold text-[#167b78] hover:underline"
+                      className="inline-flex items-center gap-1.5 mt-2 text-xs font-bold text-brand-600 hover:underline"
                     >
                       <MapPin className="w-3.5 h-3.5" />
                       <span>{isRu ? 'Посмотреть на карте' : 'Xaritada ko\'rish'}</span>
@@ -159,33 +159,33 @@ export default function ContactsPage() {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
-                <Phone className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+              <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
+                <Phone className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
+                  <strong className="text-ink block text-xs uppercase tracking-wider">
                     {t.common.phone}
                   </strong>
                   {activeBranch.phone ? (
                     <a
                       href={`tel:${activeBranch.phone.replace(/\s+/g, '')}`}
-                      className="mt-0.5 block text-xs sm:text-sm text-[#152f34] font-bold hover:text-[#167b78] transition-colors"
+                      className="mt-0.5 block text-xs sm:text-sm text-ink font-bold hover:text-brand-600 transition-colors"
                     >
                       {activeBranch.phone}
                     </a>
                   ) : (
-                    <span className="mt-0.5 block text-xs sm:text-sm text-[#52696e]">—</span>
+                    <span className="mt-0.5 block text-xs sm:text-sm text-ink-muted">—</span>
                   )}
                 </div>
               </div>
 
               {formatWorkingHours(activeBranch.workingHours, language) && (
-                <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
-                  <Clock className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+                <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
+                  <Clock className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
+                    <strong className="text-ink block text-xs uppercase tracking-wider">
                       {t.common.workingHours}
                     </strong>
-                    <p className="mt-0.5 text-xs sm:text-sm text-[#152f34]">
+                    <p className="mt-0.5 text-xs sm:text-sm text-ink">
                       {formatWorkingHours(activeBranch.workingHours, language)}
                     </p>
                   </div>
@@ -193,15 +193,15 @@ export default function ContactsPage() {
               )}
 
               {activeBranch.email && (
-                <div className="flex items-start gap-3.5 p-4 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
-                  <Mail className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+                <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
+                  <Mail className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-[#152f34] block text-xs uppercase tracking-wider">
+                    <strong className="text-ink block text-xs uppercase tracking-wider">
                       {isRu ? 'Электронная почта' : 'Elektron pochta'}
                     </strong>
                     <a
                       href={`mailto:${activeBranch.email}`}
-                      className="mt-0.5 block text-xs sm:text-sm text-[#152f34] font-semibold hover:text-[#167b78] transition-colors"
+                      className="mt-0.5 block text-xs sm:text-sm text-ink font-semibold hover:text-brand-600 transition-colors"
                     >
                       {activeBranch.email}
                     </a>
@@ -213,9 +213,9 @@ export default function ContactsPage() {
         )}
 
         {/* Right: Callback / Contact Form */}
-        <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 shadow-[0_4px_20px_rgba(21,47,52,0.03)] border border-[#d8e5e2]">
-          <h2 className="text-xl font-extrabold text-[#152f34] mb-1">{t.callback.title}</h2>
-          <p className="text-xs text-[#52696e] mb-6">{t.callback.subtitle}</p>
+        <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 shadow-[0_4px_20px_rgba(21,47,52,0.03)] border border-line">
+          <h2 className="text-xl font-extrabold text-ink mb-1">{t.callback.title}</h2>
+          <p className="text-xs text-ink-muted mb-6">{t.callback.subtitle}</p>
 
           {success && (
             <div className="mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 flex items-center gap-2 animate-fade-in">
@@ -233,7 +233,7 @@ export default function ContactsPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-[#152f34] mb-1.5">
+              <label className="block text-xs font-semibold text-ink mb-1.5">
                 {t.common.name} *
               </label>
               <input
@@ -242,7 +242,7 @@ export default function ContactsPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder={t.callback.namePlaceholder}
-                className="w-full px-4 py-2.5 rounded-xl border border-[#d8e5e2] text-sm focus:outline-none focus:ring-2 focus:ring-[#167b78] bg-white text-[#152f34]"
+                className="w-full px-4 py-2.5 rounded-xl border border-line text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
               />
             </div>
 
@@ -257,7 +257,7 @@ export default function ContactsPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#152f34] mb-1.5">
+              <label className="block text-xs font-semibold text-ink mb-1.5">
                 {isRu ? 'Дополнительный вопрос или пожелание (необязательно)' : 'Qo\'shimcha savol yoki istak (ixtiyoriy)'}
               </label>
               <textarea
@@ -265,14 +265,14 @@ export default function ContactsPage() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder={isRu ? 'Ваш вопрос или удобное время для звонка...' : 'Savolingiz yoki sizga qulay vaqt...'}
-                className="w-full px-4 py-2.5 rounded-xl border border-[#d8e5e2] text-sm focus:outline-none focus:ring-2 focus:ring-[#167b78] bg-white text-[#152f34]"
+                className="w-full px-4 py-2.5 rounded-xl border border-line text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
               />
             </div>
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3.5 bg-[#167b78] hover:bg-[#116460] disabled:opacity-50 text-white font-bold rounded-2xl shadow-md shadow-[#167b78]/25 text-sm transition-all flex items-center justify-center gap-2 transform active:scale-95"
+              className="w-full py-3.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-bold rounded-2xl shadow-md shadow-brand-600/25 text-sm transition-all flex items-center justify-center gap-2 transform active:scale-95"
             >
               <Send className="w-4 h-4" />
               <span>{isSubmitting ? t.common.loading : t.callback.submit}</span>

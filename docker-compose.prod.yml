@@ -108,6 +108,8 @@ services:
       NODE_ENV: production
       PORT: 3000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+      # Server-side rendering fetches clinic branding directly from the backend container
+      INTERNAL_API_URL: http://backend:4000
     healthcheck:
       test: ['CMD-SHELL', 'wget -q --spider http://127.0.0.1:3000/ || exit 1']
       interval: 30s

@@ -1583,7 +1583,7 @@ export default function AdminCalendarPage() {
                                   onClick={() => openAppointment(appt)}
                                   className={`p-3 bg-white hover:bg-slate-50 border rounded-2xl shadow-sm cursor-pointer transition-all space-y-1.5 ${
                                     highlightedApptId === appt.id
-                                      ? 'ring-4 ring-[#167b78] border-[#167b78] bg-[#e0f2ed]/40 shadow-md'
+                                      ? 'ring-4 ring-brand-600 border-brand-600 bg-brand-100/40 shadow-md'
                                       : 'border-slate-200 hover:border-teal-500'
                                   }`}
                                 >
@@ -1650,7 +1650,7 @@ export default function AdminCalendarPage() {
                     onClick={() => openAppointment(appt)}
                     className={`py-4 px-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer transition-colors ${
                       highlightedApptId === appt.id
-                        ? 'ring-4 ring-[#167b78] border border-[#167b78] bg-[#e0f2ed]/40 shadow-md'
+                        ? 'ring-4 ring-brand-600 border border-brand-600 bg-brand-100/40 shadow-md'
                         : 'hover:bg-slate-50'
                     }`}
                   >

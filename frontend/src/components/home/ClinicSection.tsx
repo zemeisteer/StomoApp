@@ -64,28 +64,28 @@ export const ClinicSection: React.FC<ClinicSectionProps> = ({ sectionData }) => 
 
   return (
     <section id="clinic" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-[#d8e5e2] shadow-[0_4px_24px_rgba(21,47,52,0.04)]">
+      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-line shadow-[0_4px_24px_rgba(21,47,52,0.04)]">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
           
           {/* Left Summary */}
           <div className="lg:col-span-5 space-y-5">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>{isRu ? 'О клинике' : 'Klinikamiz haqida'}</span>
             </div>
 
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#152f34] leading-tight">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-ink leading-tight">
               {heading}
             </h2>
 
-            <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
+            <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
               {description}
             </p>
 
             <div className="pt-2">
               <Link
                 href="/about"
-                className="inline-flex items-center gap-2 text-sm font-bold text-[#167b78] hover:text-[#116460] group transition-colors"
+                className="inline-flex items-center gap-2 text-sm font-bold text-brand-600 hover:text-brand-700 group transition-colors"
               >
                 <span>{isRu ? 'Подробнее о стандартах клиники' : 'Klinika standartlari haqida batafsil'}</span>
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -100,15 +100,15 @@ export const ClinicSection: React.FC<ClinicSectionProps> = ({ sectionData }) => 
               return (
                 <div
                   key={idx}
-                  className="bg-[#f4f9f7] rounded-2xl p-6 border border-[#d8e5e2] space-y-3 hover:border-[#167b78]/40 transition-all"
+                  className="bg-canvas rounded-2xl p-6 border border-line space-y-3 hover:border-brand-600/40 transition-all"
                 >
-                  <div className="w-10 h-10 rounded-xl bg-white shadow-sm border border-[#d8e5e2] flex items-center justify-center text-[#167b78] shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-white shadow-sm border border-line flex items-center justify-center text-brand-600 shrink-0">
                     <IconComp className="w-5 h-5" />
                   </div>
-                  <h3 className="text-base font-bold text-[#152f34] leading-snug">
+                  <h3 className="text-base font-bold text-ink leading-snug">
                     {item.title}
                   </h3>
-                  <p className="text-xs text-[#52696e] leading-relaxed">
+                  <p className="text-xs text-ink-muted leading-relaxed">
                     {item.desc}
                   </p>
                 </div>

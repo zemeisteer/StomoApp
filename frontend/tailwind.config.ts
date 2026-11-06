@@ -1,5 +1,9 @@
 import type { Config } from 'tailwindcss';
 
+const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+const scale = (name: string) =>
+  Object.fromEntries(SHADES.map((shade) => [shade, `rgb(var(--${name}-${shade}) / <alpha-value>)`]));
+
 const config: Config = {
   content: [
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
@@ -9,44 +13,48 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        teal: {
-          50: '#f0fdfa',
-          100: '#ccfbf1',
-          200: '#99f6e4',
-          300: '#5eead4',
-          400: '#2dd4bf',
-          500: '#14b8a6',
-          600: '#0d9488',
-          700: '#0f766e',
-          800: '#115e59',
-          900: '#134e4a',
-          950: '#042f2e',
+        // White-label palettes: values come from CSS variables generated per clinic
+        // (src/lib/brandTheme.ts). `teal` is kept as an alias so existing classes follow the brand.
+        brand: scale('brand'),
+        teal: scale('brand'),
+        secondary: scale('secondary'),
+        accent: scale('accent'),
+        // Brand-neutral base (text, borders, backgrounds) so any clinic color fits on top.
+        ink: {
+          DEFAULT: 'rgb(var(--ink) / <alpha-value>)',
+          muted: 'rgb(var(--ink-muted) / <alpha-value>)',
+          subtle: 'rgb(var(--ink-subtle) / <alpha-value>)',
         },
+        line: {
+          DEFAULT: 'rgb(var(--line) / <alpha-value>)',
+          strong: 'rgb(var(--line-strong) / <alpha-value>)',
+        },
+        canvas: 'rgb(var(--canvas) / <alpha-value>)',
         clinic: {
-          teal: '#0e4d58',
-          'teal-dark': '#09363e',
-          'teal-light': '#176b7b',
-          mint: '#e6f7f3',
-          'mint-dark': '#2bb49c',
+          teal: 'rgb(var(--brand-800) / <alpha-value>)',
+          'teal-dark': 'rgb(var(--brand-900) / <alpha-value>)',
+          'teal-light': 'rgb(var(--brand-700) / <alpha-value>)',
+          mint: 'rgb(var(--brand-50) / <alpha-value>)',
+          'mint-dark': 'rgb(var(--secondary-600) / <alpha-value>)',
           cream: '#faf9f5',
           gold: '#c29d59',
         },
         stomo: {
-          bg: '#f3f8f7',
+          bg: 'rgb(var(--canvas) / <alpha-value>)',
           surface: '#ffffff',
-          'surface-soft': '#eaf5f2',
-          'surface-hover': '#f0f7f5',
-          text: '#152f34',
-          'text-muted': '#52696e',
-          primary: '#167b78',
-          'primary-hover': '#116460',
-          'primary-soft': '#e0f2ed',
-          sidebar: '#12353b',
-          'sidebar-active': '#245158',
-          'sidebar-text': '#e8f3f2',
-          'sidebar-muted': '#b2c9ca',
-          border: '#d8e5e2',
-          focus: '#147d88',
+          'surface-soft': 'rgb(var(--brand-50) / <alpha-value>)',
+          'surface-hover': 'rgb(var(--brand-50) / <alpha-value>)',
+          text: 'rgb(var(--ink) / <alpha-value>)',
+          'text-muted': 'rgb(var(--ink-muted) / <alpha-value>)',
+          primary: 'rgb(var(--brand-600) / <alpha-value>)',
+          'primary-hover': 'rgb(var(--brand-700) / <alpha-value>)',
+          'primary-soft': 'rgb(var(--brand-100) / <alpha-value>)',
+          sidebar: 'rgb(var(--brand-950) / <alpha-value>)',
+          'sidebar-active': 'rgb(var(--brand-800) / <alpha-value>)',
+          'sidebar-text': '#f1f5f5',
+          'sidebar-muted': 'rgb(var(--brand-200) / <alpha-value>)',
+          border: 'rgb(var(--line) / <alpha-value>)',
+          focus: 'rgb(var(--brand-600) / <alpha-value>)',
           danger: '#b42338',
         },
       },
@@ -56,11 +64,12 @@ const config: Config = {
         panel: '24px',
       },
       boxShadow: {
-        card: '0 4px 20px rgba(18, 53, 59, 0.05)',
-        popover: '0 12px 36px rgba(18, 53, 59, 0.14)',
+        card: '0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px rgb(16 24 40 / 0.05)',
+        soft: '0 1px 2px rgb(16 24 40 / 0.05)',
+        popover: '0 12px 36px rgb(16 24 40 / 0.14)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
       },
       gridTemplateColumns: {
         '16': 'repeat(16, minmax(0, 1fr))',

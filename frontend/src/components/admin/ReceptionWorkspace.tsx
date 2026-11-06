@@ -132,31 +132,31 @@ export function ReceptionWorkspace({
       {/* Column 1 (5 cols): Daily Appointment Calendar */}
       <div className="lg:col-span-5 space-y-4">
         <div className="ui-card space-y-4">
-          <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+          <div className="flex items-center justify-between border-b border-line pb-3">
             <div>
-              <h2 className="text-base font-extrabold text-[#152f34]">
+              <h2 className="text-base font-extrabold text-ink">
                 {isUz ? 'Kunlik qabullar taqvimi' : 'Ежедневный календарь приемов'}
               </h2>
-              <p suppressHydrationWarning className="text-xs text-[#52696e]">
+              <p suppressHydrationWarning className="text-xs text-ink-muted">
                 {formatClinicDate(new Date().toISOString(), language, { includeWeekday: false })}
               </p>
             </div>
             <div className="flex items-center gap-1.5">
-              <button type="button" className="p-1 hover:bg-[#f3f8f7] rounded-lg text-[#52696e]">
+              <button type="button" className="p-1 hover:bg-canvas rounded-lg text-ink-muted">
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-xs font-bold text-[#167b78] bg-[#e0f2ed] px-2 py-0.5 rounded-md">
+              <span className="text-xs font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-md">
                 {isUz ? 'Bugun' : 'Сегодня'}
               </span>
-              <button type="button" className="p-1 hover:bg-[#f3f8f7] rounded-lg text-[#52696e]">
+              <button type="button" className="p-1 hover:bg-canvas rounded-lg text-ink-muted">
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
 
           {filteredToday.length === 0 ? (
-            <div className="p-12 text-center text-[#52696e] space-y-2 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
-              <Calendar className="w-8 h-8 mx-auto text-[#b2c9ca]" />
+            <div className="p-12 text-center text-ink-muted space-y-2 bg-canvas rounded-xl border border-dashed border-line">
+              <Calendar className="w-8 h-8 mx-auto text-brand-200" />
               <p className="text-xs font-semibold">
                 {isUz ? 'Bugungi kunga qabullar topilmadi' : 'На сегодня приемов не найдено'}
               </p>
@@ -174,7 +174,7 @@ export function ReceptionWorkspace({
                     key={appt.id}
                     className={`p-3.5 rounded-2xl border transition-all ${
                       isTeal
-                        ? 'bg-[#167b78] text-white border-[#116460] shadow-xs'
+                        ? 'bg-brand-600 text-white border-brand-700 shadow-xs'
                         : 'bg-[#2563eb] text-white border-blue-700 shadow-xs'
                     }`}
                   >
@@ -198,7 +198,7 @@ export function ReceptionWorkspace({
                             type="button"
                             disabled={isMutating}
                             onClick={() => handleStatusChange(appt.id, 'CHECKED_IN')}
-                            className="px-2.5 py-1 bg-white text-[#167b78] rounded-lg text-[11px] font-bold shadow-xs hover:bg-slate-100"
+                            className="px-2.5 py-1 bg-white text-brand-600 rounded-lg text-[11px] font-bold shadow-xs hover:bg-slate-100"
                           >
                             {isUz ? 'Keldi' : 'Прибыл'}
                           </button>
@@ -250,27 +250,27 @@ export function ReceptionWorkspace({
       {/* Column 2 (4 cols): Check-In Queue */}
       <div className="lg:col-span-4 space-y-4">
         <div className="ui-card space-y-4">
-          <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+          <div className="flex items-center justify-between border-b border-line pb-3">
             <div>
-              <h2 className="text-base font-extrabold text-[#152f34]">
+              <h2 className="text-base font-extrabold text-ink">
                 {isUz ? 'Bemorlar navbati' : 'Очередь пациентов'}
               </h2>
-              <p className="text-xs text-[#52696e]">
+              <p className="text-xs text-ink-muted">
                 {isUz ? 'Klinikada navbatdagi bemorlar' : 'Пациенты в очереди клиники'}
               </p>
             </div>
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-[#e0f2ed] text-[#167b78]">
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-600">
               {queueItems.length} {isUz ? 'nafar' : 'чел.'}
             </span>
           </div>
 
           {/* Queue Tabs */}
-          <div className="flex items-center gap-1 bg-[#f3f8f7] p-1 rounded-xl text-xs overflow-x-auto">
+          <div className="flex items-center gap-1 bg-canvas p-1 rounded-xl text-xs overflow-x-auto">
             <button
               type="button"
               onClick={() => setQueueTab('ALL')}
               className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                queueTab === 'ALL' ? 'bg-white text-[#152f34] shadow-xs' : 'text-[#52696e]'
+                queueTab === 'ALL' ? 'bg-white text-ink shadow-xs' : 'text-ink-muted'
               }`}
             >
               {isUz ? 'Barchasi' : 'Все'} ({filteredToday.length})
@@ -279,7 +279,7 @@ export function ReceptionWorkspace({
               type="button"
               onClick={() => setQueueTab('ARRIVED')}
               className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                queueTab === 'ARRIVED' ? 'bg-white text-[#152f34] shadow-xs' : 'text-[#52696e]'
+                queueTab === 'ARRIVED' ? 'bg-white text-ink shadow-xs' : 'text-ink-muted'
               }`}
             >
               {isUz ? 'Kutmoqda' : 'Ожидают'} ({arrivedCount})
@@ -288,7 +288,7 @@ export function ReceptionWorkspace({
               type="button"
               onClick={() => setQueueTab('IN_TREATMENT')}
               className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                queueTab === 'IN_TREATMENT' ? 'bg-white text-[#152f34] shadow-xs' : 'text-[#52696e]'
+                queueTab === 'IN_TREATMENT' ? 'bg-white text-ink shadow-xs' : 'text-ink-muted'
               }`}
             >
               {isUz ? 'Kresloda' : 'В кресле'} ({inTreatmentCount})
@@ -297,7 +297,7 @@ export function ReceptionWorkspace({
               type="button"
               onClick={() => setQueueTab('COMPLETED')}
               className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${
-                queueTab === 'COMPLETED' ? 'bg-white text-[#152f34] shadow-xs' : 'text-[#52696e]'
+                queueTab === 'COMPLETED' ? 'bg-white text-ink shadow-xs' : 'text-ink-muted'
               }`}
             >
               {isUz ? 'Tugallanganlar' : 'Завершенные'} ({completedTodayCount})
@@ -305,7 +305,7 @@ export function ReceptionWorkspace({
           </div>
 
           {queueItems.length === 0 ? (
-            <p className="text-xs text-[#52696e] text-center p-6 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
+            <p className="text-xs text-ink-muted text-center p-6 bg-canvas rounded-xl border border-dashed border-line">
               {isUz ? 'Hozirda navbatda bemorlar yo\'q' : 'Сейчас в очереди нет пациентов'}
             </p>
           ) : (
@@ -318,17 +318,17 @@ export function ReceptionWorkspace({
                 return (
                   <div
                     key={item.id}
-                    className="p-3 bg-white hover:bg-[#f8fbfa] rounded-2xl border border-[#d8e5e2] flex items-center justify-between gap-3 shadow-2xs transition-all"
+                    className="p-3 bg-white hover:bg-canvas rounded-2xl border border-line flex items-center justify-between gap-3 shadow-2xs transition-all"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-full bg-[#e0f2ed] text-[#167b78] flex items-center justify-center font-bold text-sm shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-sm shrink-0">
                         {(item.patient?.fullName || item.patientName || 'B').charAt(0)}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-bold text-xs text-[#152f34] truncate">
+                        <p className="font-bold text-xs text-ink truncate">
                           {item.patient?.fullName || item.patientName}
                         </p>
-                        <p className="text-[11px] text-[#52696e] truncate">
+                        <p className="text-[11px] text-ink-muted truncate">
                           {isUz
                             ? (item.serviceName || item.service?.nameUz || 'Ko\'rik')
                             : (item.service?.nameRu || item.serviceName || 'Осмотр')}
@@ -373,12 +373,12 @@ export function ReceptionWorkspace({
       <div className="lg:col-span-3 space-y-6">
         {/* Card 1: Quick Patient Registration */}
         <div className="ui-card space-y-3.5">
-          <div className="border-b border-[#d8e5e2] pb-2.5 flex items-center justify-between">
+          <div className="border-b border-line pb-2.5 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-[#152f34]">
+              <h2 className="text-sm font-bold text-ink">
                 {isUz ? 'Tezkor bemor ro\'yxatga olish' : 'Быстрая регистрация пациента'}
               </h2>
-              <p className="text-[11px] text-[#52696e]">
+              <p className="text-[11px] text-ink-muted">
                 {isUz ? 'Bemor kelganda navbatga qo\'shish' : 'Добавить пациента в очередь при визите'}
               </p>
             </div>
@@ -412,38 +412,38 @@ export function ReceptionWorkspace({
 
           {savedAppointmentSummary ? (
             <div className="space-y-3 text-xs">
-              <div className="p-3 bg-[#e0f2ed]/60 rounded-xl border border-[#167b78]/30 space-y-2">
+              <div className="p-3 bg-brand-100/60 rounded-xl border border-brand-600/30 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-[#152f34]">
+                  <span className="font-bold text-ink">
                     {savedAppointmentSummary.patient?.fullName || savedAppointmentSummary.patientName}
                   </span>
-                  <span className="text-[10px] font-mono text-[#52696e]">
+                  <span className="text-[10px] font-mono text-ink-muted">
                     {savedAppointmentSummary.patient?.phone || savedAppointmentSummary.patientPhone}
                   </span>
                 </div>
 
-                <div className="text-[11px] text-[#52696e] space-y-1 pt-1 border-t border-black/5">
+                <div className="text-[11px] text-ink-muted space-y-1 pt-1 border-t border-black/5">
                   <p>
-                    <strong className="text-[#152f34]">{isUz ? 'Vaqt:' : 'Время:'}</strong>{' '}
+                    <strong className="text-ink">{isUz ? 'Vaqt:' : 'Время:'}</strong>{' '}
                     {formatClinicDate(savedAppointmentSummary.startTime, language, { includeWeekday: false })}{' '}
-                    <span className="font-mono font-bold text-[#167b78]">
+                    <span className="font-mono font-bold text-brand-600">
                       {formatClinicTime(savedAppointmentSummary.startTime)} — {formatClinicTime(savedAppointmentSummary.endTime)}
                     </span>
                   </p>
                   <p>
-                    <strong className="text-[#152f34]">{isUz ? 'Shifokor:' : 'Врач:'}</strong>{' '}
+                    <strong className="text-ink">{isUz ? 'Shifokor:' : 'Врач:'}</strong>{' '}
                     {savedAppointmentSummary.doctorName ||
                       (selectedDoctorObjForReg
                         ? `${isUz ? 'Dr.' : 'Др.'} ${isUz ? `${selectedDoctorObjForReg.firstNameUz} ${selectedDoctorObjForReg.lastNameUz}` : `${selectedDoctorObjForReg.firstNameRu || selectedDoctorObjForReg.firstNameUz} ${selectedDoctorObjForReg.lastNameRu || selectedDoctorObjForReg.lastNameUz}`}`
                         : '')}
                   </p>
                   <p>
-                    <strong className="text-[#152f34]">{isUz ? 'Xizmat:' : 'Услуга:'}</strong>{' '}
+                    <strong className="text-ink">{isUz ? 'Xizmat:' : 'Услуга:'}</strong>{' '}
                     {savedAppointmentSummary.serviceName ||
                       (selectedServiceObj ? (isUz ? selectedServiceObj.nameUz : (selectedServiceObj.nameRu || selectedServiceObj.nameUz)) : '')}
                   </p>
                   <p>
-                    <strong className="text-[#152f34]">{isUz ? 'Filial:' : 'Филиал:'}</strong>{' '}
+                    <strong className="text-ink">{isUz ? 'Filial:' : 'Филиал:'}</strong>{' '}
                     {savedAppointmentSummary.branchName ||
                       (selectedBranchObjForReg ? (isUz ? selectedBranchObjForReg.nameUz : (selectedBranchObjForReg.nameRu || selectedBranchObjForReg.nameUz)) : '')}
                   </p>
@@ -461,7 +461,7 @@ export function ReceptionWorkspace({
                 <button
                   type="button"
                   onClick={handleResetQuickReg}
-                  className="px-3 py-2 bg-[#f3f8f7] hover:bg-[#eaf5f2] text-[#152f34] border border-[#d8e5e2] rounded-xl text-xs font-bold"
+                  className="px-3 py-2 bg-canvas hover:bg-brand-50 text-ink border border-line rounded-xl text-xs font-bold"
                 >
                   {isUz ? 'Yangi bemor' : 'Новый'}
                 </button>
@@ -470,7 +470,7 @@ export function ReceptionWorkspace({
           ) : (
             <form onSubmit={handleQuickRegister} className="space-y-2.5 text-xs">
               <div>
-                <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                <label className="text-[11px] font-bold text-ink-muted block mb-1">
                   {isUz ? 'F.I.Sh.' : 'Ф.И.О. пациента'}
                 </label>
                 <input
@@ -484,7 +484,7 @@ export function ReceptionWorkspace({
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                <label className="text-[11px] font-bold text-ink-muted block mb-1">
                   {isUz ? 'Telefon raqami' : 'Номер телефона'}
                 </label>
                 <PhoneInput
@@ -497,7 +497,7 @@ export function ReceptionWorkspace({
 
               {branches.length > 1 ? (
                 <div>
-                  <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                  <label className="text-[11px] font-bold text-ink-muted block mb-1">
                     {isUz ? 'Filial' : 'Филиал'} <span className="text-red-500">*</span>
                   </label>
                   <CustomSelect
@@ -513,16 +513,16 @@ export function ReceptionWorkspace({
                   />
                 </div>
               ) : branches.length === 1 ? (
-                <div className="p-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl flex items-center justify-between text-xs">
-                  <span className="text-[#52696e] text-[11px] font-medium">{isUz ? 'Filial:' : 'Филиал:'}</span>
-                  <span className="font-bold text-[#152f34] text-[11px]">
+                <div className="p-2 bg-canvas border border-line rounded-xl flex items-center justify-between text-xs">
+                  <span className="text-ink-muted text-[11px] font-medium">{isUz ? 'Filial:' : 'Филиал:'}</span>
+                  <span className="font-bold text-ink text-[11px]">
                     {isUz ? branches[0].nameUz : (branches[0].nameRu || branches[0].nameUz)}
                   </span>
                 </div>
               ) : null}
 
               <div>
-                <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                <label className="text-[11px] font-bold text-ink-muted block mb-1">
                   {isUz ? 'Shifokor' : 'Врач'} <span className="text-red-500">*</span>
                 </label>
                 <CustomSelect
@@ -539,7 +539,7 @@ export function ReceptionWorkspace({
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                <label className="text-[11px] font-bold text-ink-muted block mb-1">
                   {isUz ? 'Xizmat' : 'Услуга'} <span className="text-red-500">*</span>
                 </label>
                 <CustomSelect
@@ -564,15 +564,15 @@ export function ReceptionWorkspace({
 
               {/* Duration, Buffer & Price Estimate */}
               {selectedServiceObj && (
-                <div className="p-2 bg-[#f8fbfa] border border-[#d8e5e2] rounded-xl text-[11px] text-[#52696e] flex items-center justify-between">
+                <div className="p-2 bg-canvas border border-line rounded-xl text-[11px] text-ink-muted flex items-center justify-between">
                   <span className="flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-[#167b78]" />
+                    <Clock className="w-3.5 h-3.5 text-brand-600" />
                     <span>
                       ~{regSlotQuote?.durationMinutes ?? selectedServiceObj.durationMinutes} {isUz ? 'daq' : 'мин'}
                       {' '}(+{regSlotQuote?.bufferMinutes ?? selectedServiceObj.bufferMinutes ?? 5} {isUz ? 'oraliq' : 'буфер'})
                     </span>
                   </span>
-                  <span className="font-bold text-[#152f34]">
+                  <span className="font-bold text-ink">
                     {((regSlotQuote?.priceFrom ?? selectedServiceObj.priceFrom) || 0).toLocaleString()} {isUz ? "so'm" : 'сум'}
                   </span>
                 </div>
@@ -582,14 +582,14 @@ export function ReceptionWorkspace({
               {regDoctorId && regServiceId && regBranchId && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold text-[#52696e]">
+                    <label className="text-[11px] font-bold text-ink-muted">
                       {isUz ? 'Bugungi bo\'sh vaqt' : 'Свободное время на сегодня'}
                     </label>
                     {!isLoadingSlots && (
                       <button
                         type="button"
                         onClick={() => setSlotRefreshSeq((s) => s + 1)}
-                        className="text-[10px] text-[#167b78] hover:underline flex items-center gap-1 font-bold"
+                        className="text-[10px] text-brand-600 hover:underline flex items-center gap-1 font-bold"
                         title={isUz ? 'Vaqtlarni yangilash' : 'Обновить слоты'}
                       >
                         <RefreshCw className="w-2.5 h-2.5" />
@@ -599,8 +599,8 @@ export function ReceptionWorkspace({
                   </div>
 
                   {isLoadingSlots ? (
-                    <div className="p-2.5 bg-[#f3f8f7] rounded-xl text-[11px] text-[#52696e] flex items-center gap-2">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#167b78]" />
+                    <div className="p-2.5 bg-canvas rounded-xl text-[11px] text-ink-muted flex items-center gap-2">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand-600" />
                       <span>{isUz ? 'Bo\'sh vaqtlar tekshirilmoqda...' : 'Проверка свободных слотов...'}</span>
                     </div>
                   ) : slotFetchError ? (
@@ -623,7 +623,7 @@ export function ReceptionWorkspace({
                       </p>
                       <Link
                         href="/admin/calendar"
-                        className="inline-flex items-center gap-1 font-bold text-[#167b78] hover:underline text-[11px]"
+                        className="inline-flex items-center gap-1 font-bold text-brand-600 hover:underline text-[11px]"
                       >
                         <Calendar className="w-3.5 h-3.5" />
                         <span>{isUz ? 'Taqvimda boshqa kunlarni ko\'rish' : 'Смотреть другие даты в календаре'}</span>
@@ -655,10 +655,10 @@ export function ReceptionWorkspace({
                   type="checkbox"
                   checked={regConsentGiven}
                   onChange={(e) => setRegConsentGiven(e.target.checked)}
-                  className="mt-0.5 rounded text-[#167b78] focus:ring-[#167b78]"
+                  className="mt-0.5 rounded text-brand-600 focus:ring-brand-600"
                   required
                 />
-                <span className="text-[11px] text-[#52696e] font-medium leading-tight">
+                <span className="text-[11px] text-ink-muted font-medium leading-tight">
                   {isUz
                     ? 'Bemor roziligi og\'zaki olindi (xodim tomonidan tasdiqlangan)'
                     : 'Согласие пациента получено устно (подтверждено сотрудником)'}
@@ -690,12 +690,12 @@ export function ReceptionWorkspace({
 
         {/* Card 2: Billing Status & Invoices Summary */}
         <div className="ui-card space-y-3.5">
-          <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-2.5">
+          <div className="flex items-center justify-between border-b border-line pb-2.5">
             <div>
-              <h2 className="text-sm font-bold text-[#152f34]">
+              <h2 className="text-sm font-bold text-ink">
                 {isUz ? 'Hisob-kitob va Qarzlar' : 'Статус оплаты и долги'}
               </h2>
-              <span className="text-[11px] text-[#52696e]">
+              <span className="text-[11px] text-ink-muted">
                 {isUz ? 'Bemorlar hisob-fakturalari' : 'Счета пациентов'}
               </span>
             </div>
@@ -735,10 +735,10 @@ export function ReceptionWorkspace({
           {/* Live Invoices list */}
           <div className="space-y-2 text-xs">
             {invoices.slice(0, 3).map((inv) => (
-              <div key={inv.id} className="p-2.5 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] flex items-center justify-between">
+              <div key={inv.id} className="p-2.5 bg-canvas rounded-xl border border-line flex items-center justify-between">
                 <div className="min-w-0 pr-2">
-                  <p className="font-bold text-[#152f34] truncate">{inv.patientName || inv.patient?.fullName}</p>
-                  <span className="text-[10px] text-[#52696e] block truncate">
+                  <p className="font-bold text-ink truncate">{inv.patientName || inv.patient?.fullName}</p>
+                  <span className="text-[10px] text-ink-muted block truncate">
                     {inv.procedures?.[0]?.nameUz || (isUz ? 'Stomatologik muolaja' : 'Стоматологическая процедура')}
                   </span>
                 </div>
@@ -759,7 +759,7 @@ export function ReceptionWorkspace({
                         ? (isUz ? 'Qisman' : 'Частично')
                         : (isUz ? 'Kutilmoqda' : 'В ожидании')}
                     </span>
-                    <strong className="text-xs text-[#152f34]">
+                    <strong className="text-xs text-ink">
                       {(inv.totalAmount || 0).toLocaleString()} {isUz ? "so'm" : 'сум'}
                     </strong>
                   </div>
@@ -774,7 +774,7 @@ export function ReceptionWorkspace({
                       serviceName: inv.procedures?.[0]?.nameUz || (isUz ? 'Stomatologik xizmat' : 'Стоматологическая процедура'),
                       note: inv.notes,
                     })}
-                    className="p-1.5 text-slate-400 hover:text-[#167b78] hover:bg-[#e0f2ed] rounded-lg transition-colors cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-100 rounded-lg transition-colors cursor-pointer"
                     title={isUz ? 'Kvitansiyani chop etish' : 'Печать квитанции'}
                   >
                     <Printer className="w-3.5 h-3.5" />
@@ -783,7 +783,7 @@ export function ReceptionWorkspace({
               </div>
             ))}
             {invoices.length === 0 && (
-              <p className="text-center text-[11px] text-[#52696e] py-3">
+              <p className="text-center text-[11px] text-ink-muted py-3">
                 {isUz ? 'Hozircha hisob-fakturalar yo\'q' : 'Счетов пока нет'}
               </p>
             )}

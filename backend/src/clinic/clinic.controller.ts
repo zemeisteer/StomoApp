@@ -16,7 +16,10 @@ import {
   Max,
   IsBoolean,
   IsNumber,
+  Matches,
 } from 'class-validator';
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 export class UpdateClinicSettingsDto {
   @IsOptional()
@@ -47,15 +50,15 @@ export class UpdateClinicSettingsDto {
   website?: string;
 
   @IsOptional()
-  @IsString()
+  @Matches(HEX_COLOR, { message: 'primaryColor must be a #RRGGBB hex color' })
   primaryColor?: string;
 
   @IsOptional()
-  @IsString()
+  @Matches(HEX_COLOR, { message: 'secondaryColor must be a #RRGGBB hex color' })
   secondaryColor?: string;
 
   @IsOptional()
-  @IsString()
+  @Matches(HEX_COLOR, { message: 'accentColor must be a #RRGGBB hex color' })
   accentColor?: string;
 
   @IsOptional()

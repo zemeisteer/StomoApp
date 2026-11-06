@@ -82,26 +82,26 @@ export default function ArticleDetailPage() {
     : '';
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#f3f8f7] via-white to-[#f3f8f7] py-10 sm:py-16">
+    <div className="min-h-screen bg-gradient-to-b from-canvas via-white to-canvas py-10 sm:py-16">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 w-full space-y-8">
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-xs text-[#52696e]">
-          <Link href="/" className="hover:text-[#167b78] transition-colors">
+        <nav className="flex items-center gap-2 text-xs text-ink-muted">
+          <Link href="/" className="hover:text-brand-600 transition-colors">
             {t.nav.home}
           </Link>
-          <ChevronRight className="w-3.5 h-3.5 text-[#52696e]" />
-          <Link href="/articles" className="hover:text-[#167b78] transition-colors">
+          <ChevronRight className="w-3.5 h-3.5 text-ink-muted" />
+          <Link href="/articles" className="hover:text-brand-600 transition-colors">
             {t.nav.articles}
           </Link>
-          <ChevronRight className="w-3.5 h-3.5 text-[#52696e]" />
-          <span className="font-semibold text-[#152f34] line-clamp-1">{title}</span>
+          <ChevronRight className="w-3.5 h-3.5 text-ink-muted" />
+          <span className="font-semibold text-ink line-clamp-1">{title}</span>
         </nav>
 
         {/* Article Body */}
-        <article className="bg-white rounded-3xl border border-[#d8e5e2] p-6 sm:p-12 shadow-sm space-y-6">
+        <article className="bg-white rounded-3xl border border-line p-6 sm:p-12 shadow-sm space-y-6">
           <div className="space-y-3">
-            <div className="flex items-center gap-3 text-xs text-[#52696e]">
-              <span className="flex items-center gap-1.5 font-medium text-[#167b78] bg-[#eaf5f2] px-2.5 py-0.5 rounded-full border border-[#d8e5e2]">
+            <div className="flex items-center gap-3 text-xs text-ink-muted">
+              <span className="flex items-center gap-1.5 font-medium text-brand-600 bg-brand-50 px-2.5 py-0.5 rounded-full border border-line">
                 <User className="w-3.5 h-3.5" />
                 {article.authorName}
               </span>
@@ -113,13 +113,13 @@ export default function ArticleDetailPage() {
               )}
             </div>
 
-            <h1 className="text-2xl sm:text-4xl font-extrabold text-[#152f34] leading-tight tracking-tight">
+            <h1 className="text-2xl sm:text-4xl font-extrabold text-ink leading-tight tracking-tight">
               {title}
             </h1>
           </div>
 
           {article.coverImageUrl && (
-            <div className="w-full h-64 sm:h-96 rounded-2xl overflow-hidden bg-slate-100 border border-[#d8e5e2]">
+            <div className="w-full h-64 sm:h-96 rounded-2xl overflow-hidden bg-slate-100 border border-line">
               <Image
                 src={article.coverImageUrl}
                 alt={title}
@@ -132,17 +132,17 @@ export default function ArticleDetailPage() {
           )}
 
           {/* Formatted Content */}
-          <div className="prose prose-slate max-w-none text-[#152f34] text-sm sm:text-base leading-relaxed space-y-4 whitespace-pre-line pt-2">
+          <div className="prose prose-slate max-w-none text-ink text-sm sm:text-base leading-relaxed space-y-4 whitespace-pre-line pt-2">
             {content}
           </div>
 
           {/* CTA Box */}
-          <div className="p-6 bg-[#eaf5f2] border border-[#d8e5e2] rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-8">
+          <div className="p-6 bg-brand-50 border border-line rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-8">
             <div>
-              <h3 className="text-sm font-bold text-[#152f34]">
+              <h3 className="text-sm font-bold text-ink">
                 {language === 'uz' ? 'Tish salomatligingiz haqida qayg\'uryapsizmi?' : 'Беспокоит здоровье зубов?'}
               </h3>
-              <p className="text-xs text-[#52696e] mt-0.5 leading-relaxed">
+              <p className="text-xs text-ink-muted mt-0.5 leading-relaxed">
                 {language === 'uz'
                   ? 'Bizning tajribali mutaxassislarimiz ko\'rigiga yoziling va aniq tashxis oling.'
                   : 'Запишитесь на прием к нашим опытным врачам и получите точный диагноз.'}
@@ -150,7 +150,7 @@ export default function ArticleDetailPage() {
             </div>
             <Link
               href="/booking"
-              className="px-6 py-3 bg-[#167b78] hover:bg-[#126462] text-white text-xs font-bold rounded-2xl shadow-md shadow-[#167b78]/20 shrink-0 text-center transition-all cursor-pointer"
+              className="px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold rounded-2xl shadow-md shadow-brand-600/20 shrink-0 text-center transition-all cursor-pointer"
             >
               {language === 'uz' ? 'Qabulga yozilish' : 'Записаться'}
             </Link>

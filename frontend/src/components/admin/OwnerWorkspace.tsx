@@ -166,13 +166,13 @@ export function OwnerWorkspace({
   return (
     <div className="space-y-6">
       {/* Owner CRM Date Filter Bar */}
-      <div className="bg-white p-3.5 rounded-2xl border border-[#d8e5e2] flex flex-wrap items-center justify-between gap-3 shadow-xs">
+      <div className="bg-white p-3.5 rounded-2xl border border-line flex flex-wrap items-center justify-between gap-3 shadow-xs">
         <div className="flex flex-wrap items-center gap-2">
-          <Filter className="w-4 h-4 text-[#167b78]" />
-          <span className="text-xs font-bold text-[#152f34]">
+          <Filter className="w-4 h-4 text-brand-600" />
+          <span className="text-xs font-bold text-ink">
             {isUz ? 'Davr bo\'yicha tahlil:' : 'Период анализа:'}
           </span>
-          <div className="flex items-center bg-[#f3f8f7] p-1 rounded-xl border border-[#d8e5e2] text-xs">
+          <div className="flex items-center bg-canvas p-1 rounded-xl border border-line text-xs">
             {(['today', 'week', 'month', 'custom'] as const).map((filterKey) => (
               <button
                 key={filterKey}
@@ -180,8 +180,8 @@ export function OwnerWorkspace({
                 onClick={() => setOwnerDateFilter(filterKey)}
                 className={`px-3 py-1 rounded-lg font-bold text-xs transition-all ${
                   ownerDateFilter === filterKey
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
+                    ? 'bg-brand-600 text-white shadow-xs'
+                    : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 {filterKey === 'today'
@@ -202,14 +202,14 @@ export function OwnerWorkspace({
               type="date"
               value={ownerCustomStart}
               onChange={(e) => setOwnerCustomStart(e.target.value)}
-              className="px-2.5 py-1 bg-[#f3f8f7] border border-[#d8e5e2] rounded-lg text-[#152f34] text-xs"
+              className="px-2.5 py-1 bg-canvas border border-line rounded-lg text-ink text-xs"
             />
             <span>—</span>
             <input
               type="date"
               value={ownerCustomEnd}
               onChange={(e) => setOwnerCustomEnd(e.target.value)}
-              className="px-2.5 py-1 bg-[#f3f8f7] border border-[#d8e5e2] rounded-lg text-[#152f34] text-xs"
+              className="px-2.5 py-1 bg-canvas border border-line rounded-lg text-ink text-xs"
             />
           </div>
         )}
@@ -220,9 +220,9 @@ export function OwnerWorkspace({
         {/* KPI 1: Gross Clinic Revenue */}
         <div className="ui-card flex items-center justify-between">
           <div>
-            <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Jami tushum (Klinika daromadi)' : 'Общая выручка клиники'}</span>
-            <p className="text-2xl font-black text-[#152f34] mt-0.5">
-              {totalRevenue.toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so&apos;m</span>
+            <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Jami tushum (Klinika daromadi)' : 'Общая выручка клиники'}</span>
+            <p className="text-2xl font-black text-ink mt-0.5">
+              {totalRevenue.toLocaleString()} <span className="text-xs font-bold text-ink-muted">so&apos;m</span>
             </p>
             <span className="text-[11px] text-emerald-700 font-medium">{isUz ? "Muolajalar va to'lovlar" : 'Оплаченные процедуры'}</span>
           </div>
@@ -234,14 +234,14 @@ export function OwnerWorkspace({
         {/* KPI 2: Total Debt (Qarzlar) */}
         <div className="ui-card flex items-center justify-between">
           <div>
-            <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Bemorlar qarzdorligi (Qarzlar)' : 'Задолженность пациентов'}</span>
+            <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Bemorlar qarzdorligi (Qarzlar)' : 'Задолженность пациентов'}</span>
             <p className="text-2xl font-black text-rose-600 mt-0.5">
-              {totalDebt.toLocaleString()} <span className="text-xs font-bold text-[#52696e]">so&apos;m</span>
+              {totalDebt.toLocaleString()} <span className="text-xs font-bold text-ink-muted">so&apos;m</span>
             </p>
             <button
               type="button"
               onClick={() => handleOpenDebtModal()}
-              className="text-[11px] text-[#167b78] hover:underline font-bold flex items-center gap-1"
+              className="text-[11px] text-brand-600 hover:underline font-bold flex items-center gap-1"
             >
               <Wallet className="w-3 h-3" />
               <span>{isUz ? "Qarzni to'lash" : 'Погасить долг'}</span>
@@ -255,13 +255,13 @@ export function OwnerWorkspace({
         {/* KPI 3: Debtors Count */}
         <div className="ui-card flex items-center justify-between">
           <div>
-            <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Qarzdor bemorlar soni' : 'Пациентов с долгом'}</span>
-            <p className="text-2xl font-black text-[#152f34] mt-0.5">
-              {debts.length} <span className="text-xs font-bold text-[#52696e]">{isUz ? 'nafar' : 'чел.'}</span>
+            <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Qarzdor bemorlar soni' : 'Пациентов с долгом'}</span>
+            <p className="text-2xl font-black text-ink mt-0.5">
+              {debts.length} <span className="text-xs font-bold text-ink-muted">{isUz ? 'nafar' : 'чел.'}</span>
             </p>
             <span className="text-[11px] text-teal-700 font-medium">{isUz ? 'Dinamic hisoblangan' : 'Динамический расчет'}</span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-[#e0f2ed] text-[#167b78] flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-brand-100 text-brand-600 flex items-center justify-center">
             <Users className="w-5 h-5" />
           </div>
         </div>
@@ -269,11 +269,11 @@ export function OwnerWorkspace({
         {/* KPI 4: Consumables Health */}
         <div className="ui-card flex items-center justify-between">
           <div>
-            <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Sarf materiallari zaxirasi' : 'Состояние склада расходников'}</span>
+            <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Sarf materiallari zaxirasi' : 'Состояние склада расходников'}</span>
             <p className={`text-2xl font-black mt-0.5 ${lowStockCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
               {lowStockCount > 0 ? `${lowStockCount} ${isUz ? 'ta kam qoldi' : 'в дефиците'}` : (isUz ? 'Normada' : 'В норме')}
             </p>
-            <span className="text-[11px] text-[#52696e] font-medium">
+            <span className="text-[11px] text-ink-muted font-medium">
               {lowStockCount > 0 ? (isUz ? "Zaxirani to'ldirish zarur" : 'Требуется пополнение') : (isUz ? "Barcha mahsulotlar yetarli" : 'Все позиции в достатке')}
             </span>
           </div>
@@ -289,13 +289,13 @@ export function OwnerWorkspace({
         <div className="lg:col-span-7 space-y-6">
           {/* Card 1: Doctor Commission & Payout Calculator */}
           <div className="ui-card space-y-4">
-            <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
-                  <Percent className="w-4 h-4 text-[#167b78]" />
+                <h2 className="text-base font-bold text-ink flex items-center gap-2">
+                  <Percent className="w-4 h-4 text-brand-600" />
                   <span>{isUz ? 'Shifokorlar komissiyasi va oylik daromadi' : 'Калькулятор комиссии и выплат врачам'}</span>
                 </h2>
-                <p className="text-xs text-[#52696e]">
+                <p className="text-xs text-ink-muted">
                   {isUz
                     ? 'Bajarilgan muolajalar summasidan materiallar harajati (10%) chegirilib, shifokor ulushi (30%-50%) hisoblanadi'
                     : 'Расчет выплат врачам (30%-50%) от стоимости завершенных процедур за вычетом материалов (10%)'}
@@ -314,23 +314,23 @@ export function OwnerWorkspace({
                 return (
                   <div
                     key={docId}
-                    className="p-3.5 bg-[#f8fbfa] hover:bg-[#eef7f5] rounded-2xl border border-[#d8e5e2] space-y-3 transition-colors"
+                    className="p-3.5 bg-canvas hover:bg-brand-50 rounded-2xl border border-line space-y-3 transition-colors"
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-[#167b78] text-white font-bold flex items-center justify-center text-sm shadow-xs">
+                        <div className="w-10 h-10 rounded-full bg-brand-600 text-white font-bold flex items-center justify-center text-sm shadow-xs">
                           {doc.firstNameUz?.charAt(0) || 'D'}
                         </div>
                         <div>
-                          <h3 className="font-bold text-sm text-[#152f34]">{docName}</h3>
-                          <p className="text-xs text-[#52696e]">
+                          <h3 className="font-bold text-sm text-ink">{docName}</h3>
+                          <p className="text-xs text-ink-muted">
                             {isUz ? (doc.specializationUz || 'Stomatolog-terapevt') : (doc.specializationRu || 'Стоматолог-терапевт')}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-[#d8e5e2]">
-                        <span className="text-xs text-[#52696e] font-semibold">{isUz ? 'Ulush:' : 'Ставка:'}</span>
+                      <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-line">
+                        <span className="text-xs text-ink-muted font-semibold">{isUz ? 'Ulush:' : 'Ставка:'}</span>
                         <select
                           value={currentRate !== undefined && currentRate !== null ? currentRate : ''}
                           onChange={(e) => {
@@ -339,7 +339,7 @@ export function OwnerWorkspace({
                             }
                           }}
                           className={`text-xs font-bold bg-transparent focus:outline-none cursor-pointer ${
-                            currentRate !== undefined && currentRate !== null ? 'text-[#167b78]' : 'text-amber-600'
+                            currentRate !== undefined && currentRate !== null ? 'text-brand-600' : 'text-amber-600'
                           }`}
                         >
                           {(currentRate === undefined || currentRate === null) && (
@@ -363,25 +363,25 @@ export function OwnerWorkspace({
 
           {/* Card 2: Consumables Inventory Tracker */}
           <div className="ui-card space-y-4">
-            <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
-                  <Package className="w-4 h-4 text-[#167b78]" />
+                <h2 className="text-base font-bold text-ink flex items-center gap-2">
+                  <Package className="w-4 h-4 text-brand-600" />
                   <span>{isUz ? 'Sarf materiallari va qoldiq monitoringi' : 'Склад расходных материалов и мониторинг'}</span>
                 </h2>
-                <p className="text-xs text-[#52696e]">
+                <p className="text-xs text-ink-muted">
                   {isUz
                     ? 'Minimal me\'yordan past bo\'lgan materiallar avtomatik qizil ogohlantirish beradi'
                     : 'Позиции ниже минимального порога автоматически подсвечиваются предупреждением'}
                 </p>
               </div>
-              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#e0f2ed] text-[#167b78]">
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-brand-100 text-brand-600">
                 {inventory.length} {isUz ? 'ta tovar' : 'позиций'}
               </span>
             </div>
 
             {inventory.length === 0 ? (
-              <div className="p-8 text-center text-[#52696e] bg-[#f8fbfa] rounded-2xl border border-dashed border-[#d8e5e2]">
+              <div className="p-8 text-center text-ink-muted bg-canvas rounded-2xl border border-dashed border-line">
                 <p className="text-xs font-semibold">
                   {isUz ? 'Omborda mahsulotlar mavjud emas' : 'На складе нет товаров'}
                 </p>
@@ -398,12 +398,12 @@ export function OwnerWorkspace({
                       className={`p-3 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                         isLow
                           ? 'bg-rose-50/70 border-rose-300'
-                          : 'bg-white border-[#d8e5e2] hover:bg-[#f8fbfa]'
+                          : 'bg-white border-line hover:bg-canvas'
                       }`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-xs sm:text-sm text-[#152f34] truncate">
+                          <h3 className="font-bold text-xs sm:text-sm text-ink truncate">
                             {item.name}
                           </h3>
                           {isLow ? (
@@ -416,14 +416,14 @@ export function OwnerWorkspace({
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-[#52696e] mt-0.5">
+                        <p className="text-[11px] text-ink-muted mt-0.5">
                           {isUz ? 'Kategoriya:' : 'Категория:'} <span className="font-semibold">{item.category}</span> • {isUz ? 'Minimal chegara:' : 'Мин. порог:'}{' '}
                           <strong>{item.minThreshold} {item.unit}</strong>
                         </p>
 
                         <div className="w-full h-1.5 bg-black/5 rounded-full overflow-hidden mt-2 max-w-xs">
                           <div
-                            className={`h-full rounded-full ${isLow ? 'bg-rose-600' : 'bg-[#167b78]'}`}
+                            className={`h-full rounded-full ${isLow ? 'bg-rose-600' : 'bg-brand-600'}`}
                             style={{ width: `${pct}%` }}
                           />
                         </div>
@@ -431,10 +431,10 @@ export function OwnerWorkspace({
 
                       <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
                         <div className="text-right">
-                          <span className="text-xs font-black text-[#152f34]">
+                          <span className="text-xs font-black text-ink">
                             {item.quantity} {item.unit}
                           </span>
-                          <span className="text-[10px] text-[#52696e] block">
+                          <span className="text-[10px] text-ink-muted block">
                             {item.unitCost.toLocaleString()} so&apos;m/{item.unit}
                           </span>
                         </div>
@@ -451,7 +451,7 @@ export function OwnerWorkspace({
                           <button
                             type="button"
                             onClick={() => handleRestockInventory(item.id, 10)}
-                            className="px-3 py-1.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1 transition-colors cursor-pointer"
+                            className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1 transition-colors cursor-pointer"
                             title={isUz ? "10 ta qo'shish" : 'Добавить 10'}
                           >
                             <Plus className="w-3.5 h-3.5" />
@@ -471,13 +471,13 @@ export function OwnerWorkspace({
         <div className="lg:col-span-5 space-y-6">
           {/* Card 3: Debt Registry ("Qarz Daftari") */}
           <div className="ui-card space-y-4">
-            <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
+                <h2 className="text-base font-bold text-ink flex items-center gap-2">
                   <Wallet className="w-4 h-4 text-rose-600" />
                   <span>{isUz ? 'Qarz daftari ("Qarzlar")' : 'Книга задолженностей'}</span>
                 </h2>
-                <p className="text-xs text-[#52696e]">
+                <p className="text-xs text-ink-muted">
                   {isUz ? 'Klinikadan qarzi bor bemorlar ro\'yxati va to\'lov qabul qilish' : 'Список пациентов с долгом и прием оплат'}
                 </p>
               </div>
@@ -487,7 +487,7 @@ export function OwnerWorkspace({
             </div>
 
             {debts.length === 0 ? (
-              <div className="p-8 text-center text-[#52696e] space-y-2 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
+              <div className="p-8 text-center text-ink-muted space-y-2 bg-canvas rounded-xl border border-dashed border-line">
                 <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-600" />
                 <p className="text-xs font-semibold">
                   {isUz ? 'Klinikada muddati o\'tgan qarzlar yo\'q!' : 'У клиники нет задолженностей!'}
@@ -501,8 +501,8 @@ export function OwnerWorkspace({
                     className="p-3 bg-white hover:bg-rose-50/40 rounded-2xl border border-rose-200 flex items-center justify-between gap-3 shadow-2xs transition-all"
                   >
                     <div className="min-w-0">
-                      <p className="font-bold text-xs text-[#152f34] truncate">{patient.fullName}</p>
-                      <p className="text-[11px] font-mono text-[#52696e]">{patient.phone}</p>
+                      <p className="font-bold text-xs text-ink truncate">{patient.fullName}</p>
+                      <p className="text-[11px] font-mono text-ink-muted">{patient.phone}</p>
                       <p className="text-xs font-black text-rose-600 mt-0.5">
                         {isUz ? 'Qarz:' : 'Долг:'} {patient.totalDebt.toLocaleString()} so&apos;m
                       </p>
@@ -524,20 +524,20 @@ export function OwnerWorkspace({
 
           {/* Card 4: Recent Payments Stream */}
           <div className="ui-card space-y-4">
-            <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h2 className="text-base font-bold text-[#152f34] flex items-center gap-2">
+                <h2 className="text-base font-bold text-ink flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   <span>{isUz ? 'So\'nggi to\'lovlar va kassa' : 'Недавние платежи и касса'}</span>
                 </h2>
-                <p className="text-xs text-[#52696e]">
+                <p className="text-xs text-ink-muted">
                   {isUz ? 'Naqd, Karta va o\'tkazma orqali tushumlar' : 'Поступления через Наличные, Карты и Переводы'}
                 </p>
               </div>
             </div>
 
             {invoices.flatMap((inv) => (inv.payments || []).map((p: any) => ({ ...p, patientName: inv.patientName }))).length === 0 ? (
-              <div className="p-6 text-center text-[#52696e] bg-[#f8fbfa] rounded-xl border border-dashed border-[#d8e5e2]">
+              <div className="p-6 text-center text-ink-muted bg-canvas rounded-xl border border-dashed border-line">
                 <p className="text-xs font-semibold">
                   {isUz ? 'Hozircha to\'lovlar mavjud emas' : 'Платежей пока нет'}
                 </p>
@@ -550,11 +550,11 @@ export function OwnerWorkspace({
                   .map((pay: any) => (
                     <div
                       key={pay.id}
-                      className="p-2.5 bg-[#f8fbfa] rounded-xl border border-[#d8e5e2] flex items-center justify-between text-xs"
+                      className="p-2.5 bg-canvas rounded-xl border border-line flex items-center justify-between text-xs"
                     >
                       <div>
-                        <p className="font-bold text-[#152f34]">{pay.patientName}</p>
-                        <span className="text-[10px] text-[#52696e]">
+                        <p className="font-bold text-ink">{pay.patientName}</p>
+                        <span className="text-[10px] text-ink-muted">
                           {formatClinicTime(pay.createdAt || pay.recordedAt)} • {pay.method}
                         </span>
                       </div>
@@ -575,7 +575,7 @@ export function OwnerWorkspace({
                             invoiceId: pay.invoiceId,
                             note: pay.note,
                           })}
-                          className="p-1.5 text-slate-400 hover:text-[#167b78] hover:bg-[#e0f2ed] rounded-lg transition-colors cursor-pointer"
+                          className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-100 rounded-lg transition-colors cursor-pointer"
                           title={isUz ? 'Kvitansiyani chop etish' : 'Печать квитанции'}
                         >
                           <Printer className="w-3.5 h-3.5" />
@@ -600,9 +600,9 @@ export function OwnerWorkspace({
       {/* Repay Debt Modal */}
       {debtModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-[#d8e5e2] space-y-4 animate-scale-up">
-            <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
-              <h3 className="text-base font-extrabold text-[#152f34] flex items-center gap-2">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-line space-y-4 animate-scale-up">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="text-base font-extrabold text-ink flex items-center gap-2">
                 <Wallet className="w-5 h-5 text-rose-600" />
                 <span>{isUz ? "Qarzni to'lash (Kassa)" : 'Погашение долга (Касса)'}</span>
               </h3>
@@ -628,7 +628,7 @@ export function OwnerWorkspace({
 
             <form onSubmit={handleRepayDebtSubmit} className="space-y-4">
               <div>
-                <label className="text-xs font-bold text-[#152f34] block mb-1">
+                <label className="text-xs font-bold text-ink block mb-1">
                   {isUz ? 'Qarzdor bemor:' : 'Пациент с долгом:'}
                 </label>
                 <select
@@ -639,7 +639,7 @@ export function OwnerWorkspace({
                     const selected = debts.find((d) => d.id === patId);
                     if (selected) setDebtAmount(selected.totalDebt);
                   }}
-                  className="w-full px-3 py-2 text-xs bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] font-medium focus:outline-none focus:border-[#167b78]"
+                  className="w-full px-3 py-2 text-xs bg-canvas border border-line rounded-xl text-ink font-medium focus:outline-none focus:border-brand-600"
                 >
                   <option value="">{isUz ? '— Bemorni tanlang —' : '— Выберите пациента —'}</option>
                   {debts.map((p) => (
@@ -651,7 +651,7 @@ export function OwnerWorkspace({
               </div>
 
               <div>
-                <label className="text-xs font-bold text-[#152f34] block mb-1">
+                <label className="text-xs font-bold text-ink block mb-1">
                   {isUz ? "To'lov summasi (so'm):" : 'Сумма оплаты (сум):'}
                 </label>
                 <input
@@ -659,12 +659,12 @@ export function OwnerWorkspace({
                   min="1"
                   value={debtAmount}
                   onChange={(e) => setDebtAmount(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm font-black bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] focus:outline-none focus:border-[#167b78]"
+                  className="w-full px-3 py-2 text-sm font-black bg-canvas border border-line rounded-xl text-ink focus:outline-none focus:border-brand-600"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-[#152f34] block mb-1">
+                <label className="text-xs font-bold text-ink block mb-1">
                   {isUz ? "To'lov usuli:" : 'Способ оплаты:'}
                 </label>
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -675,8 +675,8 @@ export function OwnerWorkspace({
                       onClick={() => setDebtMethod(method)}
                       className={`p-2 rounded-xl border font-bold text-center transition-all ${
                         debtMethod === method
-                          ? 'bg-[#167b78] text-white border-[#116460]'
-                          : 'bg-[#f3f8f7] text-[#52696e] border-[#d8e5e2] hover:bg-slate-100'
+                          ? 'bg-brand-600 text-white border-brand-700'
+                          : 'bg-canvas text-ink-muted border-line hover:bg-slate-100'
                       }`}
                     >
                       {method}
@@ -686,7 +686,7 @@ export function OwnerWorkspace({
               </div>
 
               <div>
-                <label className="text-xs font-bold text-[#152f34] block mb-1">
+                <label className="text-xs font-bold text-ink block mb-1">
                   {isUz ? 'Izoh (kvitansiya raqami yoki eslatma):' : 'Примечание:'}
                 </label>
                 <input
@@ -694,11 +694,11 @@ export function OwnerWorkspace({
                   placeholder={isUz ? "Masalan: Qarz to'lovi" : 'Например: Погашение долга'}
                   value={debtNotes}
                   onChange={(e) => setDebtNotes(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] focus:outline-none focus:border-[#167b78]"
+                  className="w-full px-3 py-2 text-xs bg-canvas border border-line rounded-xl text-ink focus:outline-none focus:border-brand-600"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#d8e5e2]">
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setDebtModalOpen(false)}
@@ -708,7 +708,7 @@ export function OwnerWorkspace({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold shadow-sm"
+                  className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-sm"
                 >
                   {isUz ? "To'lovni tasdiqlash" : 'Подтвердить оплату'}
                 </button>

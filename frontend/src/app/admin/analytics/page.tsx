@@ -218,17 +218,17 @@ export default function AdminAnalyticsPage() {
     <AdminLayout allowedRoles={['OWNER', 'ADMIN']}>
       <div className="space-y-6">
         {/* Executive Header (Image 4 Style) */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-[#d8e5e2] shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-line shadow-xs">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#167b78] bg-[#e0f2ed] px-2.5 py-0.5 rounded-md">
+              <span className="text-xs font-bold uppercase tracking-wider text-brand-600 bg-brand-100 px-2.5 py-0.5 rounded-md">
                 {isUz ? 'Klinika egasi & Boshqaruv' : 'Руководство клиники'}
               </span>
-              <span className="text-xs text-[#52696e]">
+              <span className="text-xs text-ink-muted">
                 {startDate && endDate ? `${startDate} — ${endDate}` : (isUz ? 'Barcha davr' : 'За все время')}
               </span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-[#152f34] mt-1">
+            <h1 className="text-xl sm:text-2xl font-black text-ink mt-1">
               {isUz ? 'Statistika va hisobotlar — Ijroiya tahlillari' : 'Статистика и отчеты — Исполнительная аналитика'}
             </h1>
           </div>
@@ -238,28 +238,28 @@ export default function AdminAnalyticsPage() {
             disabled={isLoading}
             className="ui-button ui-button--secondary text-xs self-start sm:self-center"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-[#167b78]' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-brand-600' : ''}`} />
             <span>{isUz ? 'Yangilash' : 'Обновить'}</span>
           </button>
         </div>
 
         {/* Date & Filter Toolbar */}
         <div className="ui-card space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#d8e5e2] pb-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-[#152f34]">
-              <Filter className="w-4 h-4 text-[#167b78]" />
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-ink">
+              <Filter className="w-4 h-4 text-brand-600" />
               <span>{isUz ? 'Filtrlash parametrlari:' : 'Параметры фильтрации:'}</span>
             </div>
 
             {/* Presets */}
-            <div className="flex items-center gap-1 bg-[#f3f8f7] p-1 rounded-xl text-xs">
+            <div className="flex items-center gap-1 bg-canvas p-1 rounded-xl text-xs">
               <button
                 type="button"
                 onClick={() => applyPreset('today')}
                 className={`px-3 py-1 rounded-lg font-bold transition-all ${
                   activePreset === 'today'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:bg-white'
+                    ? 'bg-brand-600 text-white shadow-xs'
+                    : 'text-ink-muted hover:bg-white'
                 }`}
               >
                 {isUz ? 'Bugun' : 'Сегодня'}
@@ -269,8 +269,8 @@ export default function AdminAnalyticsPage() {
                 onClick={() => applyPreset('week')}
                 className={`px-3 py-1 rounded-lg font-bold transition-all ${
                   activePreset === 'week'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:bg-white'
+                    ? 'bg-brand-600 text-white shadow-xs'
+                    : 'text-ink-muted hover:bg-white'
                 }`}
               >
                 {isUz ? 'Shu hafta' : 'Эта неделя'}
@@ -280,8 +280,8 @@ export default function AdminAnalyticsPage() {
                 onClick={() => applyPreset('month')}
                 className={`px-3 py-1 rounded-lg font-bold transition-all ${
                   activePreset === 'month'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:bg-white'
+                    ? 'bg-brand-600 text-white shadow-xs'
+                    : 'text-ink-muted hover:bg-white'
                 }`}
               >
                 {isUz ? 'Shu oy' : 'Этот месяц'}
@@ -305,7 +305,7 @@ export default function AdminAnalyticsPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
-              <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+              <label className="text-[11px] font-bold text-ink-muted block mb-1">
                 {isUz ? 'Boshlanish sanasi' : 'Дата начала'}
               </label>
               <CustomDatePicker
@@ -321,7 +321,7 @@ export default function AdminAnalyticsPage() {
             </div>
 
             <div>
-              <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+              <label className="text-[11px] font-bold text-ink-muted block mb-1">
                 {isUz ? 'Tugash sanasi' : 'Дата окончания'}
               </label>
               <CustomDatePicker
@@ -337,7 +337,7 @@ export default function AdminAnalyticsPage() {
             </div>
 
             <div>
-              <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+              <label className="text-[11px] font-bold text-ink-muted block mb-1">
                 {isUz ? 'Shifokor' : 'Врач'}
               </label>
               <CustomSelect
@@ -349,7 +349,7 @@ export default function AdminAnalyticsPage() {
             </div>
 
             <div>
-              <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+              <label className="text-[11px] font-bold text-ink-muted block mb-1">
                 {isUz ? 'Filial' : 'Филиал'}
               </label>
               <CustomSelect
@@ -361,7 +361,7 @@ export default function AdminAnalyticsPage() {
             </div>
 
             <div>
-              <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+              <label className="text-[11px] font-bold text-ink-muted block mb-1">
                 {isUz ? 'Xizmat' : 'Услуга'}
               </label>
               <CustomSelect
@@ -391,19 +391,19 @@ export default function AdminAnalyticsPage() {
           {/* Card 1: Monthly Revenue (from actual payment ledger) */}
           <div className="ui-card relative overflow-hidden">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-[#52696e] uppercase tracking-wider">
+              <span className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
                 {isUz ? 'Kassa Tushumi (Sof)' : 'Чистый доход кассы'}
               </span>
-              <div className="w-8 h-8 rounded-xl bg-[#e0f2ed] text-[#167b78] flex items-center justify-center">
+              <div className="w-8 h-8 rounded-xl bg-brand-100 text-brand-600 flex items-center justify-center">
                 <DollarSign className="w-4 h-4" />
               </div>
             </div>
-            <p className="text-2xl font-black text-[#152f34]">
+            <p className="text-2xl font-black text-ink">
               {revenue.hasRecordedPayments
                 ? `${revenue.netRevenueMinor.toLocaleString(isUz ? 'uz-UZ' : 'ru-RU')} ${isUz ? "so'm" : "сум"}`
                 : `0 ${isUz ? "so'm" : "сум"}`}
             </p>
-            <span className="text-[11px] text-[#52696e] mt-1 block">
+            <span className="text-[11px] text-ink-muted mt-1 block">
               {revenue.hasRecordedPayments
                 ? (isUz
                     ? `Kassa: +${revenue.totalIncomeMinor.toLocaleString('uz-UZ')} (Qaytarilgan: ${revenue.totalRefundsMinor.toLocaleString('uz-UZ')})`
@@ -415,16 +415,16 @@ export default function AdminAnalyticsPage() {
           {/* Card 2: Patient Flow (Appointments) */}
           <div className="ui-card relative overflow-hidden">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-[#52696e] uppercase tracking-wider">
+              <span className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
                 {isUz ? 'Jami qabullar (Bemorlar oqimi)' : 'Всего приемов (Поток пациентов)'}
               </span>
               <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center">
                 <Users className="w-4 h-4" />
               </div>
             </div>
-            <p className="text-2xl font-black text-[#152f34]">
+            <p className="text-2xl font-black text-ink">
               {summary.totalAppointments}{' '}
-              <span className="text-sm font-normal text-[#52696e]">
+              <span className="text-sm font-normal text-ink-muted">
                 {isUz ? 'jami qabullar' : 'всего приемов'}
               </span>
             </p>
@@ -437,7 +437,7 @@ export default function AdminAnalyticsPage() {
           {/* Card 3: Completion Rate */}
           <div className="ui-card relative overflow-hidden">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-[#52696e] uppercase tracking-wider">
+              <span className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
                 {isUz ? 'Yakunlangan qabullar ulushi' : 'Доля завершенных приемов'}
               </span>
               <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
@@ -446,11 +446,11 @@ export default function AdminAnalyticsPage() {
             </div>
             <div className="flex items-baseline gap-2">
               <p className="text-2xl font-black text-emerald-700">{summary.completionRate}%</p>
-              <span className="text-xs text-[#52696e]">
+              <span className="text-xs text-ink-muted">
                 ({summary.completed} {isUz ? 'ta yakunlangan' : 'завершено'})
               </span>
             </div>
-            <span className="text-[11px] text-[#52696e] mt-1 block">
+            <span className="text-[11px] text-ink-muted mt-1 block">
               {isUz ? 'Bekor qilingan:' : 'Отменено:'} {summary.cancelled} ({summary.cancellationRate}%)
             </span>
           </div>
@@ -458,7 +458,7 @@ export default function AdminAnalyticsPage() {
           {/* Card 4: Lead to Booking Conversion */}
           <div className="ui-card relative overflow-hidden">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-[#52696e] uppercase tracking-wider">
+              <span className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
                 {isUz ? 'Murojaatlar konversiyasi' : 'Конверсия обращений'}
               </span>
               <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center">
@@ -467,9 +467,9 @@ export default function AdminAnalyticsPage() {
             </div>
             <div className="flex items-baseline gap-2">
               <p className="text-2xl font-black text-purple-700">{leads.conversionRate}%</p>
-              <span className="text-xs text-[#52696e]">({leads.converted}/{leads.totalLeads})</span>
+              <span className="text-xs text-ink-muted">({leads.converted}/{leads.totalLeads})</span>
             </div>
-            <span className="text-[11px] text-[#52696e] mt-1 block">
+            <span className="text-[11px] text-ink-muted mt-1 block">
               {isUz ? 'Sayt va telefon orqali yozilganlar' : 'Записи через сайт и телефон'}
             </span>
           </div>
@@ -480,29 +480,29 @@ export default function AdminAnalyticsPage() {
           {/* Left 7 Cols: Financial & Status Visual */}
           <div className="lg:col-span-7 space-y-6">
             {/* Financial Overview (Image 4 Dark Teal Style Card) */}
-            <div className="p-6 rounded-2xl bg-[#12353b] text-white shadow-card space-y-4">
-              <div className="flex items-center justify-between border-b border-[#245158] pb-3">
+            <div className="p-6 rounded-2xl bg-brand-950 text-white shadow-card space-y-4">
+              <div className="flex items-center justify-between border-b border-brand-800 pb-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#167b78] flex items-center justify-center text-white">
+                  <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white">
                     <DollarSign className="w-4 h-4" />
                   </div>
                   <div>
                     <h2 className="text-base font-bold text-white">
                       {isUz ? 'Moliyaviy tushumlar va kassa holati' : 'Финансовые поступления и статус кассы'}
                     </h2>
-                    <span className="text-xs text-[#b2c9ca]">
+                    <span className="text-xs text-brand-200">
                       {isUz ? "Rasmiy tasdiqlangan to'lovlar yozuvlari" : 'Официально подтвержденные записи платежей'}
                     </span>
                   </div>
                 </div>
-                <span className="text-xs px-2.5 py-1 rounded-full bg-[#245158] text-[#86efac] font-bold">
+                <span className="text-xs px-2.5 py-1 rounded-full bg-brand-800 text-[#86efac] font-bold">
                   {isUz ? 'Kassa kitobi' : 'Кассовая книга'}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                <div className="p-3 bg-[#18424a] rounded-xl border border-[#23535d]">
-                  <span className="text-xs text-[#b2c9ca] block">
+                <div className="p-3 bg-brand-900 rounded-xl border border-brand-900">
+                  <span className="text-xs text-brand-200 block">
                     {isUz ? 'Jami tushum' : 'Общий доход'}
                   </span>
                   <strong className="text-lg font-black text-white mt-1 block">
@@ -512,8 +512,8 @@ export default function AdminAnalyticsPage() {
                   </strong>
                 </div>
 
-                <div className="p-3 bg-[#18424a] rounded-xl border border-[#23535d]">
-                  <span className="text-xs text-[#b2c9ca] block">
+                <div className="p-3 bg-brand-900 rounded-xl border border-brand-900">
+                  <span className="text-xs text-brand-200 block">
                     {isUz ? 'Qaytarilgan mablag‘lar' : 'Возвраты'}
                   </span>
                   <strong className="text-lg font-black text-rose-300 mt-1 block">
@@ -523,8 +523,8 @@ export default function AdminAnalyticsPage() {
                   </strong>
                 </div>
 
-                <div className="p-3 bg-[#18424a] rounded-xl border border-[#23535d]">
-                  <span className="text-xs text-[#b2c9ca] block">
+                <div className="p-3 bg-brand-900 rounded-xl border border-brand-900">
+                  <span className="text-xs text-brand-200 block">
                     {isUz ? 'Sof kassa tushumi' : 'Чистая выручка'}
                   </span>
                   <strong className="text-lg font-black text-[#86efac] mt-1 block">
@@ -535,7 +535,7 @@ export default function AdminAnalyticsPage() {
                 </div>
               </div>
 
-              <p className="text-[11px] text-[#b2c9ca]/80 pt-1">
+              <p className="text-[11px] text-brand-200/80 pt-1">
                 {isUz
                   ? "* Eslatma: Ushbu ko'rsatkich faqat kassaga rasmiy kiritilgan haqiqiy to'lovlar asosida shakllantirilgan bo'lib, taxminiy xizmat narxlaridan alohida yuritiladi."
                   : '* Примечание: Данный показатель формируется только на основе фактически внесенных платежей в кассу и ведется отдельно от предварительных цен услуг.'}
@@ -544,11 +544,11 @@ export default function AdminAnalyticsPage() {
 
             {/* Status Breakdown Bar Chart */}
             <div className="ui-card space-y-4">
-              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
-                <h2 className="text-sm font-bold text-[#152f34]">
+              <div className="flex items-center justify-between border-b border-line pb-3">
+                <h2 className="text-sm font-bold text-ink">
                   {isUz ? 'Qabullar holati taqsimoti' : 'Распределение статусов приемов'}
                 </h2>
-                <span className="text-xs text-[#52696e] font-semibold">
+                <span className="text-xs text-ink-muted font-semibold">
                   {isUz ? 'Jami:' : 'Всего:'} {summary.totalAppointments} {isUz ? 'ta' : ''}
                 </span>
               </div>
@@ -558,7 +558,7 @@ export default function AdminAnalyticsPage() {
                   {
                     label: isUz ? 'Tasdiqlangan' : 'Подтверждён',
                     count: statusMap.CONFIRMED || 0,
-                    color: 'bg-[#167b78]',
+                    color: 'bg-brand-600',
                   },
                   {
                     label: isUz ? 'Yakunlangan' : 'Завершён',
@@ -592,12 +592,12 @@ export default function AdminAnalyticsPage() {
                   return (
                     <div key={idx} className="space-y-1">
                       <div className="flex justify-between text-xs">
-                        <span className="font-semibold text-[#152f34]">{item.label}</span>
-                        <span className="font-bold text-[#152f34]">
+                        <span className="font-semibold text-ink">{item.label}</span>
+                        <span className="font-bold text-ink">
                           {item.count} {isUz ? 'ta' : ''} ({pct}%)
                         </span>
                       </div>
-                      <div className="w-full h-2.5 bg-[#f3f8f7] rounded-full overflow-hidden border border-[#d8e5e2]">
+                      <div className="w-full h-2.5 bg-canvas rounded-full overflow-hidden border border-line">
                         <div
                           className={`h-full ${item.color} rounded-full transition-all duration-500`}
                           style={{ width: `${pct}%` }}
@@ -611,37 +611,37 @@ export default function AdminAnalyticsPage() {
 
             {/* Retention & Patient Loyalty Card (Placed in Left Column to fill empty space) */}
             <div className="ui-card space-y-3">
-              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-2">
-                <h2 className="text-sm font-bold text-[#152f34]">
+              <div className="flex items-center justify-between border-b border-line pb-2">
+                <h2 className="text-sm font-bold text-ink">
                   {isUz ? 'Bemorlar sadoqati va tahlili' : 'Лояльность и аналитика пациентов'}
                 </h2>
-                <span className="text-xs text-[#167b78] font-bold bg-[#e0f2ed] px-2.5 py-0.5 rounded-md">
+                <span className="text-xs text-brand-600 font-bold bg-brand-100 px-2.5 py-0.5 rounded-md">
                   {isUz ? 'Mijozlar bazasi' : 'База клиентов'}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2]">
-                  <span className="text-[11px] text-[#52696e] block">{isUz ? 'Yangi bemorlar:' : 'Новые пациенты:'}</span>
-                  <strong className="text-base font-black text-[#152f34] mt-0.5 block">
+                <div className="p-3 bg-canvas rounded-xl border border-line">
+                  <span className="text-[11px] text-ink-muted block">{isUz ? 'Yangi bemorlar:' : 'Новые пациенты:'}</span>
+                  <strong className="text-base font-black text-ink mt-0.5 block">
                     {summary.newPatients} {isUz ? 'ta' : ''}
                   </strong>
                 </div>
-                <div className="p-3 bg-[#eaf5f2] rounded-xl border border-[#b8ded5]">
-                  <span className="text-[11px] text-[#167b78] block">{isUz ? 'Qayta murojaat:' : 'Повторные:'}</span>
-                  <strong className="text-base font-black text-[#167b78] mt-0.5 block">
+                <div className="p-3 bg-brand-50 rounded-xl border border-brand-200">
+                  <span className="text-[11px] text-brand-600 block">{isUz ? 'Qayta murojaat:' : 'Повторные:'}</span>
+                  <strong className="text-base font-black text-brand-600 mt-0.5 block">
                     {summary.returningPatients} {isUz ? 'ta' : ''}
                   </strong>
                 </div>
-                <div className="p-3 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2]">
-                  <span className="text-[11px] text-[#52696e] block">{isUz ? 'Jami bemorlar:' : 'Всего пациентов:'}</span>
-                  <strong className="text-base font-black text-[#152f34] mt-0.5 block">
+                <div className="p-3 bg-canvas rounded-xl border border-line">
+                  <span className="text-[11px] text-ink-muted block">{isUz ? 'Jami bemorlar:' : 'Всего пациентов:'}</span>
+                  <strong className="text-base font-black text-ink mt-0.5 block">
                     {summary.uniquePatientsCount} {isUz ? 'nafar' : 'чел.'}
                   </strong>
                 </div>
               </div>
 
-              <p className="text-[11px] text-[#52696e] italic pt-1">
+              <p className="text-[11px] text-ink-muted italic pt-1">
                 {isUz
                   ? "* Qayta murojaat qilganlar — klinikada ilgari kamida bitta yakunlangan qabulga ega bo'lgan bemorlar."
                   : '* Повторные пациенты — пациенты, имеющие как минимум один завершенный прием в клинике ранее.'}
@@ -650,40 +650,40 @@ export default function AdminAnalyticsPage() {
 
             {/* Popular Services & Service-Specific Revenue Card */}
             <div className="ui-card space-y-4">
-              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+              <div className="flex items-center justify-between border-b border-line pb-3">
                 <div>
-                  <h2 className="text-sm font-bold text-[#152f34]">
+                  <h2 className="text-sm font-bold text-ink">
                     {isUz ? 'Xizmatlar tahlili va ko‘rsatkichlari' : 'Аналитика услуг и показатели'}
                   </h2>
-                  <span className="text-[11px] text-[#52696e]">
+                  <span className="text-[11px] text-ink-muted">
                     {isUz
                       ? `Jami ${data?.totalServiceUsage ?? 0} ta muolaja bajarildi (${summary.servicesPerCompletedAppointment ?? summary.servicesPerAppointment ?? 0} xizmat/qabul)`
                       : `Всего выполнено ${data?.totalServiceUsage ?? 0} процедур (${summary.servicesPerCompletedAppointment ?? summary.servicesPerAppointment ?? 0} услуг/прием)`}
                   </span>
                 </div>
-                <Layers className="w-4 h-4 text-[#167b78]" />
+                <Layers className="w-4 h-4 text-brand-600" />
               </div>
 
               {popularServices.length === 0 ? (
-                <p className="text-xs text-[#52696e] text-center p-6 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
+                <p className="text-xs text-ink-muted text-center p-6 bg-canvas rounded-xl border border-dashed border-line">
                   {isUz ? "Xizmatlar bo'yicha ma'lumot yo'q" : 'Нет данных по услугам'}
                 </p>
               ) : (
                 <div className="space-y-3">
                   {popularServices.map((srv: any, idx) => (
-                    <div key={idx} className="space-y-1.5 p-3 bg-[#f8fbfb] rounded-xl border border-[#e2eeee]">
+                    <div key={idx} className="space-y-1.5 p-3 bg-canvas rounded-xl border border-line">
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="w-5 h-5 rounded-md bg-[#e0f2ed] text-[#167b78] font-bold text-[11px] flex items-center justify-center shrink-0">
+                          <span className="w-5 h-5 rounded-md bg-brand-100 text-brand-600 font-bold text-[11px] flex items-center justify-center shrink-0">
                             {idx + 1}
                           </span>
-                          <span className="font-bold text-[#152f34] truncate">{srv.name}</span>
+                          <span className="font-bold text-ink truncate">{srv.name}</span>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[11px] text-[#52696e]">
+                          <span className="text-[11px] text-ink-muted">
                             {srv.performedCount ?? srv.count} {isUz ? 'bajarilgan' : 'выполнено'}
                             {srv.bookedCount !== undefined && srv.bookedCount !== (srv.performedCount ?? srv.count) && (
-                              <span className="text-[10px] text-[#718e95] ml-1">
+                              <span className="text-[10px] text-ink-subtle ml-1">
                                 ({srv.bookedCount} {isUz ? 'buyurtma' : 'заказ'})
                               </span>
                             )}
@@ -693,7 +693,7 @@ export default function AdminAnalyticsPage() {
                               className={`font-bold text-xs px-2 py-0.5 rounded-md ${
                                 srv.revenueMinor < 0
                                   ? 'text-rose-700 bg-rose-50 border border-rose-200'
-                                  : 'text-[#167b78] bg-[#e0f2ed]'
+                                  : 'text-brand-600 bg-brand-100'
                               }`}
                             >
                               {srv.revenueMinor.toLocaleString(isUz ? 'uz-UZ' : 'ru-RU')} {isUz ? "so'm" : "сум"}
@@ -701,9 +701,9 @@ export default function AdminAnalyticsPage() {
                           )}
                         </div>
                       </div>
-                      <div className="w-full h-2 bg-white rounded-full overflow-hidden border border-[#d8e5e2]">
+                      <div className="w-full h-2 bg-white rounded-full overflow-hidden border border-line">
                         <div
-                          className="h-full bg-[#167b78] rounded-full transition-all duration-500"
+                          className="h-full bg-brand-600 rounded-full transition-all duration-500"
                           style={{ width: `${Math.min(srv.percentage, 100)}%` }}
                         />
                       </div>
@@ -718,20 +718,20 @@ export default function AdminAnalyticsPage() {
           <div className="lg:col-span-5 space-y-6">
             {/* Doctor Utilization & Workload Card */}
             <div className="ui-card space-y-4">
-              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+              <div className="flex items-center justify-between border-b border-line pb-3">
                 <div>
-                  <h2 className="text-sm font-bold text-[#152f34]">
+                  <h2 className="text-sm font-bold text-ink">
                     {isUz ? 'Shifokorlar bandligi va yuklamasi' : 'Занятость и нагрузка врачей'}
                   </h2>
-                  <span className="text-[11px] text-[#52696e]">
+                  <span className="text-[11px] text-ink-muted">
                     {isUz ? 'Ish soatlari va muolaja vaqti nisbati' : 'Соотношение рабочих часов и времени процедур'}
                   </span>
                 </div>
-                <Stethoscope className="w-4 h-4 text-[#167b78]" />
+                <Stethoscope className="w-4 h-4 text-brand-600" />
               </div>
 
               {doctorUtilization.length === 0 ? (
-                <p className="text-xs text-[#52696e] text-center p-6 bg-[#f3f8f7] rounded-xl border border-dashed border-[#d8e5e2]">
+                <p className="text-xs text-ink-muted text-center p-6 bg-canvas rounded-xl border border-dashed border-line">
                   {isUz ? "Shifokorlar bandligi ma'lumoti yo'q" : 'Нет данных о занятости врачей'}
                 </p>
               ) : (
@@ -739,30 +739,30 @@ export default function AdminAnalyticsPage() {
                   {doctorUtilization.map((doc, idx) => (
                     <div
                       key={idx}
-                      className="p-3 bg-[#f3f8f7] hover:bg-[#eaf5f2]/50 rounded-xl border border-[#d8e5e2] space-y-1.5 text-xs transition-colors"
+                      className="p-3 bg-canvas hover:bg-brand-50/50 rounded-xl border border-line space-y-1.5 text-xs transition-colors"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-7 h-7 rounded-full bg-[#e0f2ed] text-[#167b78] font-bold flex items-center justify-center text-xs shrink-0">
+                          <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-600 font-bold flex items-center justify-center text-xs shrink-0">
                             {doc.doctorName.charAt(0)}
                           </div>
                           <div className="min-w-0">
-                            <span className="font-bold text-[#152f34] block truncate">{doc.doctorName}</span>
-                            <span className="text-[10px] text-[#52696e]">
+                            <span className="font-bold text-ink block truncate">{doc.doctorName}</span>
+                            <span className="text-[10px] text-ink-muted">
                               {doc.appointmentsCount} {isUz ? 'ta qabul' : 'приемов'}
                             </span>
                           </div>
                         </div>
 
-                        <span className="font-black text-xs text-[#167b78] bg-[#e0f2ed] px-2.5 py-0.5 rounded-lg shrink-0">
+                        <span className="font-black text-xs text-brand-600 bg-brand-100 px-2.5 py-0.5 rounded-lg shrink-0">
                           {doc.utilizationRate}%
                         </span>
                       </div>
 
                       {/* Progress bar */}
-                      <div className="w-full h-1.5 bg-white rounded-full overflow-hidden border border-[#d8e5e2]">
+                      <div className="w-full h-1.5 bg-white rounded-full overflow-hidden border border-line">
                         <div
-                          className="h-full bg-[#167b78] rounded-full transition-all duration-500"
+                          className="h-full bg-brand-600 rounded-full transition-all duration-500"
                           style={{ width: `${Math.min(doc.utilizationRate, 100)}%` }}
                         />
                       </div>

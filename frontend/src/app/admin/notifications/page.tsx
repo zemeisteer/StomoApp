@@ -279,11 +279,11 @@ export default function AdminNotificationsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-[#152f34] flex items-center gap-2">
-              <Bell className="w-6 h-6 text-[#167b78]" />
+            <h1 className="text-2xl font-extrabold text-ink flex items-center gap-2">
+              <Bell className="w-6 h-6 text-brand-600" />
               {isUz ? 'Xabarnomalar va Yetkazish Holati' : 'Уведомления и статус доставки'}
             </h1>
-            <p className="text-xs text-[#52696e] mt-1">
+            <p className="text-xs text-ink-muted mt-1">
               {isUz
                 ? 'Bemorlarga yuborilgan SMS, Email va Telegram xabarlari, integratsiya holati va xavfsiz qayta yuborish'
                 : 'Отправка SMS, Email и Telegram уведомлений пациентам, статус шлюзов и безопасный повтор'}
@@ -296,25 +296,25 @@ export default function AdminNotificationsPage() {
               loadNotifications();
             }}
             disabled={isLoading}
-            className="p-2.5 bg-white border border-[#d8e5e2] text-[#152f34] rounded-xl hover:bg-[#f3f8f7] shadow-sm transition-all self-start sm:self-auto"
+            className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm transition-all self-start sm:self-auto"
             title={isUz ? 'Yangilash' : 'Обновить'}
           >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#167b78]' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-brand-600' : ''}`} />
           </button>
         </div>
 
         {/* Integration Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Email Integration */}
-          <div className="bg-white rounded-2xl border border-[#d8e5e2] p-4 shadow-sm space-y-2">
+          <div className="bg-white rounded-2xl border border-line p-4 shadow-sm space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
                   <Mail className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-[#152f34]">Email (SMTP)</h3>
-                  <span className="text-[10px] text-[#52696e]">
+                  <h3 className="text-xs font-bold text-ink">Email (SMTP)</h3>
+                  <span className="text-[10px] text-ink-muted">
                     {integrations?.email.host ? `${integrations.email.host}:${integrations.email.port || 587}` : 'Nodemailer'}
                   </span>
                 </div>
@@ -331,7 +331,7 @@ export default function AdminNotificationsPage() {
                   : isUz ? 'Simulyatsiya (Dev)' : 'Симуляция (Dev)'}
               </span>
             </div>
-            <p className="text-[11px] text-[#52696e]">
+            <p className="text-[11px] text-ink-muted">
               {integrations?.email.configured
                 ? isUz ? 'SMTP server orqali real xatlar yetkazilmoqda.' : 'Реальная отправка через SMTP сервер.'
                 : isUz ? 'SMTP sozlamalari to‘liq emas, xatlar logda simulyatsiya qilinadi.' : 'SMTP не настроен, письма логируются в dev sink.'}
@@ -339,15 +339,15 @@ export default function AdminNotificationsPage() {
           </div>
 
           {/* SMS Integration */}
-          <div className="bg-white rounded-2xl border border-[#d8e5e2] p-4 shadow-sm space-y-2">
+          <div className="bg-white rounded-2xl border border-line p-4 shadow-sm space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
                   <Smartphone className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-[#152f34]">SMS Gateway</h3>
-                  <span className="text-[10px] text-[#52696e]">Eskiz / Provider</span>
+                  <h3 className="text-xs font-bold text-ink">SMS Gateway</h3>
+                  <span className="text-[10px] text-ink-muted">Eskiz / Provider</span>
                 </div>
               </div>
               <span
@@ -362,7 +362,7 @@ export default function AdminNotificationsPage() {
                   : isUz ? 'Simulyatsiya (Dev)' : 'Симуляция (Dev)'}
               </span>
             </div>
-            <p className="text-[11px] text-[#52696e]">
+            <p className="text-[11px] text-ink-muted">
               {integrations?.sms.configured
                 ? isUz ? 'SMS provayder orqali real SMS jo‘natilmoqda.' : 'Реальная отправка через SMS провайдер.'
                 : isUz ? 'SMS_API_KEY sozlanmagan, SMS logda simulyatsiya qilinadi.' : 'SMS ключ не настроен, отправка симулируется.'}
@@ -370,15 +370,15 @@ export default function AdminNotificationsPage() {
           </div>
 
           {/* Telegram Integration */}
-          <div className="bg-white rounded-2xl border border-[#d8e5e2] p-4 shadow-sm space-y-2">
+          <div className="bg-white rounded-2xl border border-line p-4 shadow-sm space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
                   <Bot className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-[#152f34]">Telegram Bot</h3>
-                  <span className="text-[10px] text-[#52696e]">Staff Alerts</span>
+                  <h3 className="text-xs font-bold text-ink">Telegram Bot</h3>
+                  <span className="text-[10px] text-ink-muted">Staff Alerts</span>
                 </div>
               </div>
               <span
@@ -393,7 +393,7 @@ export default function AdminNotificationsPage() {
                   : isUz ? 'Simulyatsiya (Dev)' : 'Симуляция (Dev)'}
               </span>
             </div>
-            <p className="text-[11px] text-[#52696e]">
+            <p className="text-[11px] text-ink-muted">
               {integrations?.telegram.configured
                 ? isUz ? 'Xodimlar uchun yangi buyurtma bildirishnomalari faol.' : 'Оповещения для персонала активны.'
                 : isUz ? 'TELEGRAM_BOT_TOKEN kiritilmagan, bildirishnomalar simulyatsiya qilinadi.' : 'Токен бота не настроен, уведомления симулируются.'}
@@ -433,7 +433,7 @@ export default function AdminNotificationsPage() {
         )}
 
         {/* Filters Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-[#d8e5e2] shadow-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-line shadow-sm">
           {/* Channel Filters */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             {[
@@ -450,8 +450,8 @@ export default function AdminNotificationsPage() {
                 }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                   channelFilter === tab.id
-                    ? 'bg-[#167b78] text-white shadow-sm'
-                    : 'bg-[#f3f8f7] text-[#52696e] hover:bg-[#e2eeee]'
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'bg-canvas text-ink-muted hover:bg-line'
                 }`}
               >
                 {tab.label}
@@ -461,7 +461,7 @@ export default function AdminNotificationsPage() {
 
           {/* Status Filter Dropdown */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-[#52696e] font-medium whitespace-nowrap">
+            <span className="text-xs text-ink-muted font-medium whitespace-nowrap">
               {isUz ? 'Holat:' : 'Статус:'}
             </span>
             <select
@@ -470,7 +470,7 @@ export default function AdminNotificationsPage() {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="text-xs font-semibold bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl px-3 py-1.5 text-[#152f34] focus:outline-none focus:ring-2 focus:ring-[#167b78]"
+              className="text-xs font-semibold bg-canvas border border-line rounded-xl px-3 py-1.5 text-ink focus:outline-none focus:ring-2 focus:ring-brand-600"
             >
               <option value="">{isUz ? 'Barchasi' : 'Все'}</option>
               <option value="PENDING">{isUz ? 'Navbatda (Pending)' : 'В очереди'}</option>
@@ -483,20 +483,20 @@ export default function AdminNotificationsPage() {
         </div>
 
         {/* Notifications Table Card */}
-        <div className="bg-white rounded-3xl border border-[#d8e5e2] shadow-sm overflow-hidden">
+        <div className="bg-white rounded-3xl border border-line shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="p-16 text-center text-[#52696e] text-xs flex flex-col items-center justify-center gap-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-[#167b78]" />
+            <div className="p-16 text-center text-ink-muted text-xs flex flex-col items-center justify-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin text-brand-600" />
               <span>{isUz ? 'Xabarnomalar yuklanmoqda...' : 'Загрузка уведомлений...'}</span>
             </div>
           ) : notifications.length === 0 ? (
-            <div className="p-16 text-center text-[#52696e] text-xs bg-[#f8fbfb]">
+            <div className="p-16 text-center text-ink-muted text-xs bg-canvas">
               {isUz ? 'Mos keluvchi xabarnomalar topilmadi.' : 'Нет уведомлений по выбранным фильтрам.'}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-[#f3f8f7] border-b border-[#d8e5e2] text-[#52696e] font-bold uppercase tracking-wider text-[11px]">
+                <thead className="bg-canvas border-b border-line text-ink-muted font-bold uppercase tracking-wider text-[11px]">
                   <tr>
                     <th className="py-3.5 px-4">{isUz ? 'Kanal va Qabul qiluvchi' : 'Канал и получатель'}</th>
                     <th className="py-3.5 px-4">{isUz ? 'Shablon va Qabul' : 'Шаблон и прием'}</th>
@@ -506,18 +506,18 @@ export default function AdminNotificationsPage() {
                     <th className="py-3.5 px-4 text-right">{isUz ? 'Amallar' : 'Действия'}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#e2eeee]">
+                <tbody className="divide-y divide-line">
                   {notifications.map((job) => {
                     const retryAllowed = isRetryAllowed(job);
                     const isRetrying = retryingId === job.id;
 
                     return (
-                      <tr key={job.id} className="hover:bg-[#f8fbfb] transition-colors">
+                      <tr key={job.id} className="hover:bg-canvas transition-colors">
                         {/* Channel & Masked Recipient */}
                         <td className="py-3.5 px-4">
                           <div className="space-y-1">
                             <div>{channelBadge(job.channel)}</div>
-                            <div className="font-mono text-xs font-bold text-[#152f34]">
+                            <div className="font-mono text-xs font-bold text-ink">
                               {job.recipient}
                             </div>
                           </div>
@@ -526,19 +526,19 @@ export default function AdminNotificationsPage() {
                         {/* Template & Appointment */}
                         <td className="py-3.5 px-4">
                           <div className="space-y-1">
-                            <span className="font-mono text-[11px] font-semibold text-[#167b78] bg-[#e0f2ed] px-2 py-0.5 rounded-md inline-block">
+                            <span className="font-mono text-[11px] font-semibold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-md inline-block">
                               {job.templateKey}
                             </span>
                             {job.appointment ? (
-                              <div className="text-[11px] text-[#52696e]">
+                              <div className="text-[11px] text-ink-muted">
                                 <Link
                                   href={`/admin/calendar?appointmentId=${job.appointment.id}`}
-                                  className="text-[#167b78] hover:underline font-medium inline-flex items-center gap-1"
+                                  className="text-brand-600 hover:underline font-medium inline-flex items-center gap-1"
                                 >
                                   {job.appointment.patientName || job.appointment.serviceName}
                                   <ExternalLink className="w-3 h-3" />
                                 </Link>
-                                <div className="text-[10px] text-[#718e95]">
+                                <div className="text-[10px] text-ink-subtle">
                                   {new Date(job.appointment.startTime).toLocaleString(
                                     isUz ? 'uz-UZ' : 'ru-RU',
                                     { dateStyle: 'short', timeStyle: 'short' },
@@ -547,7 +547,7 @@ export default function AdminNotificationsPage() {
                                 </div>
                               </div>
                             ) : (
-                              <span className="text-[11px] text-[#718e95]">—</span>
+                              <span className="text-[11px] text-ink-subtle">—</span>
                             )}
                           </div>
                         </td>
@@ -559,7 +559,7 @@ export default function AdminNotificationsPage() {
 
                         {/* Schedule & Attempts */}
                         <td className="py-3.5 px-4">
-                          <div className="text-[11px] text-[#152f34] space-y-0.5">
+                          <div className="text-[11px] text-ink space-y-0.5">
                             <div>
                               {job.scheduledFor
                                 ? new Date(job.scheduledFor).toLocaleString(isUz ? 'uz-UZ' : 'ru-RU', {
@@ -568,9 +568,9 @@ export default function AdminNotificationsPage() {
                                   })
                                 : '—'}
                             </div>
-                            <div className="text-[10px] text-[#52696e]">
+                            <div className="text-[10px] text-ink-muted">
                               {isUz ? 'Urinishlar:' : 'Попытки:'}{' '}
-                              <span className="font-bold text-[#152f34]">
+                              <span className="font-bold text-ink">
                                 {job.attempts} / {job.maxAttempts}
                               </span>
                             </div>
@@ -591,7 +591,7 @@ export default function AdminNotificationsPage() {
                               {isUz ? 'Sinov muhitida simulyatsiya qilindi' : 'Симуляция в sink'}
                             </span>
                           ) : (
-                            <span className="text-[11px] text-[#718e95]">—</span>
+                            <span className="text-[11px] text-ink-subtle">—</span>
                           )}
                         </td>
 
@@ -602,8 +602,8 @@ export default function AdminNotificationsPage() {
                             disabled={!retryAllowed || isRetrying}
                             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                               retryAllowed && !isRetrying
-                                ? 'bg-[#167b78] hover:bg-[#116460] text-white shadow-sm'
-                                : 'bg-[#f3f8f7] text-[#a4b8bb] cursor-not-allowed border border-[#d8e5e2]'
+                                ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-sm'
+                                : 'bg-canvas text-ink-subtle cursor-not-allowed border border-line'
                             }`}
                             title={
                               retryAllowed
@@ -625,9 +625,9 @@ export default function AdminNotificationsPage() {
 
           {/* Pagination */}
           {total > limit && (
-            <div className="p-4 border-t border-[#d8e5e2] flex items-center justify-between bg-white text-xs text-[#52696e]">
+            <div className="p-4 border-t border-line flex items-center justify-between bg-white text-xs text-ink-muted">
               <div>
-                {isUz ? 'Jami:' : 'Всего:'} <span className="font-bold text-[#152f34]">{total}</span>{' '}
+                {isUz ? 'Jami:' : 'Всего:'} <span className="font-bold text-ink">{total}</span>{' '}
                 {isUz ? 'ta xabarnoma' : 'уведомлений'} ({isUz ? 'Sahifa:' : 'Страница:'} {page} /{' '}
                 {totalPages})
               </div>
@@ -635,15 +635,15 @@ export default function AdminNotificationsPage() {
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="p-1.5 rounded-lg border border-[#d8e5e2] disabled:opacity-40 hover:bg-[#f3f8f7]"
+                  className="p-1.5 rounded-lg border border-line disabled:opacity-40 hover:bg-canvas"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="font-semibold text-[#152f34] px-2">{page}</span>
+                <span className="font-semibold text-ink px-2">{page}</span>
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="p-1.5 rounded-lg border border-[#d8e5e2] disabled:opacity-40 hover:bg-[#f3f8f7]"
+                  className="p-1.5 rounded-lg border border-line disabled:opacity-40 hover:bg-canvas"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>

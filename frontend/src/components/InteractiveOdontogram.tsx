@@ -376,17 +376,17 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
     <div className="space-y-6">
       {/* ODONTOGRAM HEADER & CONTROLS */}
       <div className="ui-card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-3">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-extrabold text-[#152f34]">
+              <h2 className="text-base font-extrabold text-ink">
                 {isUz ? 'Interaktiv FDI Odontogramma' : 'Интерактивная FDI Одонтограмма'}
               </h2>
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#167b78] text-white">
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-brand-600 text-white">
                 {chartType === 'ADULT' ? (isUz ? "Kattalar (32 ta tish)" : "Взрослые (32 зуба)") : (isUz ? "Bolalar (20 ta tish)" : "Детские (20 зубов)")}
               </span>
             </div>
-            <p className="text-xs text-[#52696e] mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               {isUz
                 ? `Bemor: ${patientName} • Tishni yoki sirtini bosing va tashxis tanlang`
                 : `Пациент: ${patientName} • Выберите зуб или поверхность для назначения лечения`}
@@ -395,7 +395,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
 
           <div className="flex flex-wrap items-center gap-2">
             {/* Adult vs Pediatric Chart Switcher */}
-            <div className="flex items-center bg-[#f3f8f7] p-1 rounded-xl border border-[#d8e5e2] text-xs">
+            <div className="flex items-center bg-canvas p-1 rounded-xl border border-line text-xs">
               <button
                 type="button"
                 onClick={() => {
@@ -404,8 +404,8 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 }}
                 className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${
                   chartType === 'ADULT'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
+                    ? 'bg-brand-600 text-white shadow-xs'
+                    : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 <Smile className="w-3.5 h-3.5" />
@@ -419,8 +419,8 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 }}
                 className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${
                   chartType === 'PEDIATRIC'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
+                    ? 'bg-brand-600 text-white shadow-xs'
+                    : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 <Baby className="w-3.5 h-3.5" />
@@ -429,22 +429,22 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
             </div>
 
             {/* Zoom / Scale Controls for Mobile / Tablet */}
-            <div className="flex items-center bg-[#f3f8f7] p-1 rounded-xl border border-[#d8e5e2] text-xs">
+            <div className="flex items-center bg-canvas p-1 rounded-xl border border-line text-xs">
               <button
                 type="button"
                 onClick={() => setZoomScale((s) => Math.max(0.75, s - 0.1))}
-                className="p-1.5 text-[#52696e] hover:text-[#152f34] rounded-lg"
+                className="p-1.5 text-ink-muted hover:text-ink rounded-lg"
                 title={isUz ? 'Kichraytirish' : 'Уменьшить'}
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
-              <span className="text-[10px] font-mono font-bold px-1.5 text-[#152f34]">
+              <span className="text-[10px] font-mono font-bold px-1.5 text-ink">
                 {Math.round(zoomScale * 100)}%
               </span>
               <button
                 type="button"
                 onClick={() => setZoomScale((s) => Math.min(1.4, s + 0.1))}
-                className="p-1.5 text-[#52696e] hover:text-[#152f34] rounded-lg"
+                className="p-1.5 text-ink-muted hover:text-ink rounded-lg"
                 title={isUz ? 'Kattalashtirish' : 'Увеличить'}
               >
                 <ZoomIn className="w-3.5 h-3.5" />
@@ -452,7 +452,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
               <button
                 type="button"
                 onClick={() => setZoomScale(1.0)}
-                className="p-1.5 text-[#52696e] hover:text-[#152f34] rounded-lg"
+                className="p-1.5 text-ink-muted hover:text-ink rounded-lg"
                 title={isUz ? 'Asl holat' : 'Сброс масштаба'}
               >
                 <RotateCcw className="w-3 h-3" />
@@ -463,7 +463,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
             <button
               type="button"
               onClick={handleSaveTreatmentPlan}
-              className="px-3.5 py-1.5 bg-[#167b78] hover:bg-[#116460] text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all"
+              className="px-3.5 py-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all"
             >
               <Save className="w-3.5 h-3.5" />
               <span>{isUz ? 'Rejani saqlash' : 'Сохранить план'}</span>
@@ -473,9 +473,9 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
 
         {/* Save Success Toast */}
         {saveSuccessMsg && (
-          <div className="p-3 bg-[#e0f2ed] border border-[#167b78]/40 text-[#116460] rounded-xl text-xs font-bold flex items-center justify-between animate-fade-in">
+          <div className="p-3 bg-brand-100 border border-brand-600/40 text-brand-700 rounded-xl text-xs font-bold flex items-center justify-between animate-fade-in">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[#167b78] shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-brand-600 shrink-0" />
               <span>{saveSuccessMsg}</span>
             </div>
             <button onClick={() => setSaveSuccessMsg(null)}>✕</button>
@@ -485,12 +485,12 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
         {/* TEETH ARCH DISPLAY (Touch scrollable & zoomable) */}
         <div className="overflow-x-auto pb-2 scrollbar-thin">
           <div
-            className="min-w-[620px] p-4 bg-[#f8fbfa] rounded-2xl border border-[#d8e5e2] space-y-6 transition-transform origin-top-left"
+            className="min-w-[620px] p-4 bg-canvas rounded-2xl border border-line space-y-6 transition-transform origin-top-left"
             style={{ transform: `scale(${zoomScale})` }}
           >
             {/* Upper Jaw (Maxillary) */}
             <div>
-              <div className="flex justify-between items-center text-[11px] font-bold text-[#52696e] mb-2 px-2">
+              <div className="flex justify-between items-center text-[11px] font-bold text-ink-muted mb-2 px-2">
                 <span>{isUz ? "Yuqori jag' (Maxillary) • O'ng" : 'Верхняя челюсть • Справа'}</span>
                 <span className="text-[10px] bg-slate-200/70 text-slate-700 px-2 py-0.5 rounded-full uppercase">
                   {chartType}
@@ -516,7 +516,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                       type="button"
                       onClick={() => setSelectedTooth(toothNum)}
                       className={`flex flex-col items-center justify-between p-1.5 rounded-xl border transition-all duration-150 ${meta.bgClass} ${meta.textClass} ${meta.borderClass} ${
-                        isSelected ? 'ring-3 ring-[#167b78] ring-offset-2 scale-105 shadow-md z-10' : 'hover:scale-102 shadow-2xs'
+                        isSelected ? 'ring-3 ring-brand-600 ring-offset-2 scale-105 shadow-md z-10' : 'hover:scale-102 shadow-2xs'
                       }`}
                       title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum} - ${isUz ? meta.nameUz : meta.nameRu}`}
                     >
@@ -554,7 +554,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                       type="button"
                       onClick={() => setSelectedTooth(toothNum)}
                       className={`flex flex-col items-center justify-between p-1.5 rounded-xl border transition-all duration-150 ${meta.bgClass} ${meta.textClass} ${meta.borderClass} ${
-                        isSelected ? 'ring-3 ring-[#167b78] ring-offset-2 scale-105 shadow-md z-10' : 'hover:scale-102 shadow-2xs'
+                        isSelected ? 'ring-3 ring-brand-600 ring-offset-2 scale-105 shadow-md z-10' : 'hover:scale-102 shadow-2xs'
                       }`}
                       title={`${isUz ? 'Tish' : 'Зуб'} #${toothNum} - ${isUz ? meta.nameUz : meta.nameRu}`}
                     >
@@ -569,7 +569,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                   );
                 })}
               </div>
-              <div className="flex justify-between items-center text-[11px] font-bold text-[#52696e] mt-2 px-2">
+              <div className="flex justify-between items-center text-[11px] font-bold text-ink-muted mt-2 px-2">
                 <span>{isUz ? "Pastki jag' (Mandibular) • O'ng" : 'Нижняя челюсть • Справа'}</span>
                 <span>{isUz ? 'Chap' : 'Слева'}</span>
               </div>
@@ -578,8 +578,8 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
         </div>
 
         {/* CONDITION STATUS PALETTE (Clickable Quick Set) */}
-        <div className="space-y-2 pt-2 border-t border-[#d8e5e2]">
-          <span className="text-xs font-bold text-[#52696e] block">
+        <div className="space-y-2 pt-2 border-t border-line">
+          <span className="text-xs font-bold text-ink-muted block">
             {isUz
               ? `Tashxis tanlash (#${selectedTooth}-tish uchun):`
               : `Выберите статус для зуба #${selectedTooth}:`}
@@ -597,7 +597,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                   className={`p-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 border transition-all ${
                     isCurrent
                       ? 'ring-2 ring-slate-900 border-transparent shadow-sm scale-102'
-                      : 'bg-white hover:bg-slate-50 border-slate-200 text-[#152f34]'
+                      : 'bg-white hover:bg-slate-50 border-slate-200 text-ink'
                   }`}
                   style={{
                     backgroundColor: isCurrent ? meta.hexColor : undefined,
@@ -615,10 +615,10 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
         </div>
 
         {/* TOOTH DETAIL & SURFACE SELECTOR PANEL */}
-        <div className="p-4 bg-[#f8fbfa] rounded-2xl border border-[#d8e5e2] grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+        <div className="p-4 bg-canvas rounded-2xl border border-line grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
           {/* Surface Sector Clicker (5 Sectors) */}
           <div className="md:col-span-5 flex flex-col items-center justify-center space-y-2">
-            <span className="text-xs font-bold text-[#152f34]">
+            <span className="text-xs font-bold text-ink">
               {isUz ? `Anatomik sirtlar (#${selectedTooth})` : `Поверхности зуба (#${selectedTooth})`}
             </span>
             <div className="relative w-28 h-28">
@@ -628,7 +628,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 onClick={() => handleToggleSurface('V')}
                 className={`absolute top-0 left-6 right-6 h-8 rounded-t-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('V')
-                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    ? 'bg-brand-600 text-white border-brand-700'
                     : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
                 }`}
                 title={isUz ? 'Vestibulyar (Daxliz) sirt' : 'Вестибулярная поверхность'}
@@ -642,7 +642,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 onClick={() => handleToggleSurface('M')}
                 className={`absolute top-6 bottom-6 left-0 w-8 rounded-l-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('M')
-                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    ? 'bg-brand-600 text-white border-brand-700'
                     : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
                 }`}
                 title={isUz ? 'Mezial (Oldingi) sirt' : 'Медиальная поверхность'}
@@ -656,7 +656,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 onClick={() => handleToggleSurface('O')}
                 className={`absolute top-8 bottom-8 left-8 right-8 rounded-lg text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('O')
-                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    ? 'bg-brand-600 text-white border-brand-700'
                     : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
                 }`}
                 title={isUz ? 'Okluzal (Chaynash) sirt' : 'Окклюзионная поверхность'}
@@ -670,7 +670,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 onClick={() => handleToggleSurface('D')}
                 className={`absolute top-6 bottom-6 right-0 w-8 rounded-r-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('D')
-                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    ? 'bg-brand-600 text-white border-brand-700'
                     : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
                 }`}
                 title={isUz ? 'Distal (Orqa) sirt' : 'Дистальная поверхность'}
@@ -684,7 +684,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 onClick={() => handleToggleSurface('L')}
                 className={`absolute bottom-0 left-6 right-6 h-8 rounded-b-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('L')
-                    ? 'bg-[#167b78] text-white border-[#116460]'
+                    ? 'bg-brand-600 text-white border-brand-700'
                     : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
                 }`}
                 title={isUz ? 'Lingval (Til tomoni) sirt' : 'Язычная поверхность'}
@@ -692,7 +692,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 L
               </button>
             </div>
-            <p className="text-[10px] text-[#52696e] text-center">
+            <p className="text-[10px] text-ink-muted text-center">
               {currentRecord.surfaces.length > 0
                 ? `${isUz ? 'Tanlangan sirtlar:' : 'Выбранные поверхности:'} [${currentRecord.surfaces.join(', ')}]`
                 : (isUz ? 'To‘liq tish tanlangan' : 'Выбран весь зуб целиком')}
@@ -701,9 +701,9 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
 
           {/* Quick Doctor Note Field */}
           <div className="md:col-span-7 space-y-2">
-            <label className="text-xs font-bold text-[#152f34] flex items-center justify-between">
+            <label className="text-xs font-bold text-ink flex items-center justify-between">
               <span>{isUz ? 'Klinik izoh va tavsiyalar:' : 'Клинические заметки врача:'}</span>
-              <span className="text-[11px] text-[#52696e] font-normal">
+              <span className="text-[11px] text-ink-muted font-normal">
                 {TOOTH_NAMES[selectedTooth]?.[language] || `#${selectedTooth}-tish`}
               </span>
             </label>
@@ -716,7 +716,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
               }
               value={currentRecord.note || ''}
               onChange={(e) => handleUpdateNote(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:border-[#167b78] focus:ring-1 focus:ring-[#167b78] bg-white text-[#152f34]"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:border-brand-600 focus:ring-1 focus:ring-brand-600 bg-white text-ink"
             />
             {/* Quick Note Presets */}
             <div className="flex flex-wrap gap-1.5 pt-1">
@@ -746,17 +746,17 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
 
       {/* DYNAMIC TREATMENT PLAN & REAL-TIME COST BREAKDOWN */}
       <div className="ui-card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-3">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-extrabold text-[#152f34]">
+              <h2 className="text-base font-extrabold text-ink">
                 {isUz ? 'Bemorning umumiy davolash rejasi' : 'Общий план лечения пациента'}
               </h2>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-[#167b78] text-white">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-brand-600 text-white">
                 {treatmentItems.length} {isUz ? 'ta muolaja' : 'процедур'}
               </span>
             </div>
-            <p className="text-xs text-[#52696e] mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               {isUz
                 ? 'Odontogramma asosida avtomatik shakllantirilgan davolash bosqichlari va narxlar'
                 : 'Этапы лечения и калькуляция стоимости, сформированные на основе зубной карты'}
@@ -764,29 +764,29 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
           </div>
 
           {/* Real-time Financial Summary */}
-          <div className="flex items-center gap-3 bg-[#f8fbfa] px-4 py-2 rounded-xl border border-[#d8e5e2]">
+          <div className="flex items-center gap-3 bg-canvas px-4 py-2 rounded-xl border border-line">
             <div>
-              <span className="text-[10px] text-[#52696e] block">
+              <span className="text-[10px] text-ink-muted block">
                 {isUz ? 'Jami hisob:' : 'Итоговая стоимость:'}
               </span>
-              <strong className="text-sm sm:text-base font-extrabold text-[#167b78]">
+              <strong className="text-sm sm:text-base font-extrabold text-brand-600">
                 {totalCost.toLocaleString('uz-UZ')} {isUz ? "so'm" : 'сум'}
               </strong>
             </div>
-            <div className="w-px h-8 bg-[#d8e5e2]" />
+            <div className="w-px h-8 bg-line" />
             <div>
-              <span className="text-[10px] text-[#52696e] block">
+              <span className="text-[10px] text-ink-muted block">
                 {isUz ? 'Tugallangan:' : 'Выполнено:'}
               </span>
               <strong className="text-xs sm:text-sm font-bold text-emerald-700">
                 {completionPercent}% ({completedCost.toLocaleString('uz-UZ')} {isUz ? "so'm" : 'сум'})
               </strong>
             </div>
-            <div className="w-px h-8 bg-[#d8e5e2]" />
+            <div className="w-px h-8 bg-line" />
             <button
               type="button"
               onClick={() => setIsMedicalCardOpen(true)}
-              className="px-3 py-1.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
               title={isUz ? "043-shaklli kartani chop etish" : "Печать формы 043"}
             >
               <FileText className="w-3.5 h-3.5" />
@@ -797,13 +797,13 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
 
         {/* Progress Bar */}
         <div className="space-y-1">
-          <div className="flex justify-between text-xs font-bold text-[#152f34]">
+          <div className="flex justify-between text-xs font-bold text-ink">
             <span>{isUz ? 'Muolajalar bajarilish darajasi' : 'Прогресс выполнения плана лечения'}</span>
-            <span className="text-[#167b78]">{completionPercent}%</span>
+            <span className="text-brand-600">{completionPercent}%</span>
           </div>
-          <div className="w-full h-2.5 bg-[#e0f2ed] rounded-full overflow-hidden">
+          <div className="w-full h-2.5 bg-brand-100 rounded-full overflow-hidden">
             <div
-              className="h-full bg-[#14bdac] rounded-full transition-all duration-500"
+              className="h-full bg-secondary-600 rounded-full transition-all duration-500"
               style={{ width: `${completionPercent}%` }}
             />
           </div>
@@ -811,7 +811,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
 
         {/* Treatment Items List */}
         {treatmentItems.length === 0 ? (
-          <div className="p-8 text-center bg-[#f8fbfa] rounded-2xl border border-dashed border-[#d8e5e2] text-[#52696e] text-xs">
+          <div className="p-8 text-center bg-canvas rounded-2xl border border-dashed border-line text-ink-muted text-xs">
             <p className="font-semibold">
               {isUz
                 ? "Bemor tishlarida muolaja talab holatlar belgilanmagan (Barcha tishlar sog'lom)."
@@ -835,7 +835,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                   onClick={() => setSelectedTooth(item.toothNum)}
                   className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-[#e0f2ed]/70 border-[#167b78] ring-1 ring-[#167b78]/30 shadow-xs'
+                      ? 'bg-brand-100/70 border-brand-600 ring-1 ring-brand-600/30 shadow-xs'
                       : 'bg-white hover:bg-slate-50 border-slate-200'
                   }`}
                 >
@@ -848,14 +848,14 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                     </span>
                     <div>
                       <div className="flex items-center gap-2">
-                        <strong className="text-xs font-bold text-[#152f34]">
+                        <strong className="text-xs font-bold text-ink">
                           {isUz ? item.treatmentNameUz : item.treatmentNameRu}
                         </strong>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${meta.badgeBg} ${meta.badgeText}`}>
                           {isUz ? meta.nameUz : meta.nameRu}
                         </span>
                       </div>
-                      <p className="text-[11px] text-[#52696e] mt-0.5">
+                      <p className="text-[11px] text-ink-muted mt-0.5">
                         {TOOTH_NAMES[item.toothNum]?.[language]}
                         {item.surfaces.length > 0 && ` • Sirtlar: [${item.surfaces.join(', ')}]`}
                         {item.note && ` • Izoh: ${item.note}`}
@@ -871,9 +871,9 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                         value={item.costUzs}
                         onChange={(e) => handleUpdateCost(item.toothNum, Number(e.target.value))}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-24 text-right px-2 py-1 text-xs font-bold rounded-lg border border-slate-200 focus:border-[#167b78] bg-white text-[#152f34]"
+                        className="w-24 text-right px-2 py-1 text-xs font-bold rounded-lg border border-slate-200 focus:border-brand-600 bg-white text-ink"
                       />
-                      <span className="text-[10px] text-[#52696e] font-semibold">{isUz ? "so'm" : 'сум'}</span>
+                      <span className="text-[10px] text-ink-muted font-semibold">{isUz ? "so'm" : 'сум'}</span>
                     </div>
 
                     {/* Procedure Status Selector */}

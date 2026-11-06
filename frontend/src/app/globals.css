@@ -5,38 +5,83 @@
 @layer base {
   :root {
     color-scheme: light;
+    --font-sans: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 
-    --background: #f3f8f7;
-    --foreground: #152f34;
+    /* Brand palettes (default clinic theme). The root layout overrides these per clinic
+       with values generated from ClinicSettings colors - see src/lib/brandTheme.ts. */
+    --brand-50:241 247 247;
+    --brand-100:225 238 237;
+    --brand-200:194 221 220;
+    --brand-300:152 197 196;
+    --brand-400:97 165 163;
+    --brand-500:50 139 136;
+    --brand-600:22 123 120;
+    --brand-700:18 103 101;
+    --brand-800:15 84 82;
+    --brand-900:11 64 62;
+    --brand-950:17 53 58;
+    --secondary-50:242 251 249;
+    --secondary-100:227 245 242;
+    --secondary-200:200 236 229;
+    --secondary-300:162 222 211;
+    --secondary-400:111 204 188;
+    --secondary-500:68 189 168;
+    --secondary-600:43 180 156;
+    --secondary-700:36 151 131;
+    --secondary-800:29 122 106;
+    --secondary-900:22 94 81;
+    --secondary-950:23 70 69;
+    --accent-50:251 249 245;
+    --accent-100:247 242 233;
+    --accent-200:239 230 212;
+    --accent-300:228 212 182;
+    --accent-400:214 188 142;
+    --accent-500:201 169 109;
+    --accent-600:194 157 89;
+    --accent-700:163 132 75;
+    --accent-800:132 107 61;
+    --accent-900:101 82 46;
+    --accent-950:69 63 49;
 
-    --app-bg: #f3f8f7;
+    /* Brand-neutral base tokens (RGB channels) */
+    --ink: 22 31 41;
+    --ink-muted: 84 96 109;
+    --ink-subtle: 132 143 155;
+    --line: 226 230 235;
+    --line-strong: 205 211 219;
+    --canvas: 246 247 249;
+
+    --background: rgb(var(--canvas));
+    --foreground: rgb(var(--ink));
+
+    --app-bg: rgb(var(--canvas));
     --surface: #ffffff;
-    --surface-soft: #eaf5f2;
-    --surface-hover: #f0f7f5;
+    --surface-soft: rgb(var(--brand-50));
+    --surface-hover: rgb(var(--brand-50));
 
-    --text: #152f34;
-    --text-muted: #52696e;
+    --text: rgb(var(--ink));
+    --text-muted: rgb(var(--ink-muted));
 
-    --primary: #167b78;
-    --primary-hover: #116460;
-    --primary-soft: #e0f2ed;
+    --primary: rgb(var(--brand-600));
+    --primary-hover: rgb(var(--brand-700));
+    --primary-soft: rgb(var(--brand-100));
     --on-primary: #ffffff;
 
-    --sidebar-bg: #12353b;
-    --sidebar-text: #e8f3f2;
-    --sidebar-muted: #b2c9ca;
-    --sidebar-active: #245158;
+    --sidebar-bg: rgb(var(--brand-950));
+    --sidebar-text: #f1f5f5;
+    --sidebar-muted: rgb(var(--brand-200));
+    --sidebar-active: rgb(var(--brand-800));
 
-    --border: #d8e5e2;
-    --focus: #147d88;
+    --border: rgb(var(--line));
+    --focus: rgb(var(--brand-600));
     --danger: #b42338;
 
     --radius-control: 12px;
     --radius-card: 18px;
     --radius-panel: 24px;
 
-    --shadow-card: 0 4px 20px rgba(18, 53, 59, 0.05);
-    --shadow-popover: 0 12px 36px rgba(18, 53, 59, 0.14);
+    --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px rgb(16 24 40 / 0.05);
+    --shadow-popover: 0 12px 36px rgb(16 24 40 / 0.14);
 
     --space-1: 4px;
     --space-2: 8px;
@@ -60,7 +105,7 @@
     margin: 0;
     background-color: var(--app-bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-sans);
     font-size: 16px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;

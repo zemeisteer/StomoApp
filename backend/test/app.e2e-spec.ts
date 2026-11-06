@@ -7918,4 +7918,32 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.notificationJob.delete({ where: { id: job.id } });
     }
   });
+  it('Regression 71: Clinic brand colors are validated as #RRGGBB and exposed on the public clinic profile', async () => {
+    const before = await prisma.clinicSettings.findFirst();
+    try {
+      for (const bad of ['red', '#12345', '#GGGGGG', 'javascript:alert(1)', '#123456;}body{display:none']) {
+        const res = await request(app.getHttpServer())
+          .put('/api/clinic/settings')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ primaryColor: bad });
+        expect(res.status).toBe(400);
+      }
+
+      const ok = await request(app.getHttpServer())
+        .put('/api/clinic/settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ primaryColor: '#4F46E5', secondaryColor: '#A78BFA', accentColor: '#F472B6' });
+      expect(ok.status).toBe(200);
+
+      const pub = await request(app.getHttpServer()).get('/api/public/clinic').expect(200);
+      expect(pub.body).toMatchObject({ primaryColor: '#4F46E5', secondaryColor: '#A78BFA', accentColor: '#F472B6' });
+    } finally {
+      if (before) {
+        await prisma.clinicSettings.update({
+          where: { id: before.id },
+          data: { primaryColor: before.primaryColor, secondaryColor: before.secondaryColor, accentColor: before.accentColor },
+        });
+      }
+    }
+  });
 });

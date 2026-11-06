@@ -192,13 +192,20 @@ A new CI job builds the production images and runs the stack; it found the image
 - **Service categories** (`3d548df`): patients saw raw enum values (OTHER, DIAGNOSTICS…); admin offered a non-existent HYGIENE category and lacked four real ones.
 - **Browser QA (local)**: public site, full web booking (date → service → doctor → time → branch → details → confirmation; stored 05:30Z for 10:30 Tashkent, reminder at 03:30Z), admin login and the Telegram link dialog end to end. Note: the local dev DB contains leftover fixtures from earlier verification scripts (e.g. "Konsultatsiya conc_…"); production starts empty.
 
+### Phase 12: White-Label Branding & Design Refresh (2026-11-07)
+- **Per-clinic theme**: `ClinicSettings.primaryColor/secondaryColor/accentColor` now drive the whole UI. `src/lib/brandTheme.ts` builds 50–950 palettes as CSS variables (RGB channels, so `bg-brand-600/20` works); Tailwind `brand`, `secondary`, `accent` (and the legacy `teal` alias) read them. ~2,000 hardcoded teal hex classes were replaced by tokens; text/border/background use brand-neutral `ink`, `line`, `canvas`.
+- **Accessibility**: the primary 600 shade is auto-darkened until white text reaches WCAG AA 4.5:1; status colors (success/warning/danger) never follow the brand.
+- **Server-rendered branding**: the root layout fetches `/api/public/clinic` (`INTERNAL_API_URL`, `http://backend:4000` in prod compose) with 60 s ISR, injects the palette in `<style id="brand-theme">` (no flash) and sets title/description/favicon from clinic data. One `BrandProvider` replaces the three per-component clinic fetches.
+- **Admin**: Settings → "Brend ranglari" with presets, color pickers, contrast check and live preview of the whole panel (reverted if not saved). Backend validates colors as `#RRGGBB` (Regression 71).
+- **Design**: self-hosted Inter; light admin sidebar with grouped navigation (logos stay legible), refreshed header and mobile bottom bar; new split-screen login carrying the clinic brand (password no longer trimmed, show/hide toggle); localized service categories on the homepage.
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 85 full integration tests (Regressions 1–70) | `dentacare_test` | **85 / 85 PASSED (100%)** |
+| **Jest E2E Regressions** | 86 full integration tests (Regressions 1–71) | `dentacare_test` | **86 / 86 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |

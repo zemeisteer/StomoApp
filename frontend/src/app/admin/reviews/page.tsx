@@ -190,10 +190,10 @@ export default function AdminReviewsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-[#152f34]">
+            <h1 className="text-2xl font-extrabold text-ink">
               {isUz ? 'Fikrlarni moderatsiya qilish' : 'Модерация отзывов'}
             </h1>
-            <p className="text-xs text-[#52696e] mt-1">
+            <p className="text-xs text-ink-muted mt-1">
               {isUz
                 ? 'Bemorlar qoldirgan sharhlarni tasdiqlash, rad etish va boshqarish'
                 : 'Проверка, подтверждение и отклонение отзывов пациентов'}
@@ -204,10 +204,10 @@ export default function AdminReviewsPage() {
             <button
               onClick={() => loadReviews()}
               disabled={isLoading}
-              className="p-2.5 bg-white border border-[#d8e5e2] text-[#152f34] rounded-xl hover:bg-[#f3f8f7] shadow-sm transition-all"
+              className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm transition-all"
               title={isUz ? 'Yangilash' : 'Обновить'}
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#167b78]' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-brand-600' : ''}`} />
             </button>
           </div>
         </div>
@@ -257,8 +257,8 @@ export default function AdminReviewsPage() {
               }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                 statusFilter === tab.id
-                  ? 'bg-[#167b78] text-white shadow-sm'
-                  : 'bg-white text-[#52696e] hover:bg-[#f3f8f7] border border-[#d8e5e2]'
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'bg-white text-ink-muted hover:bg-canvas border border-line'
               }`}
             >
               {tab.label}
@@ -267,34 +267,34 @@ export default function AdminReviewsPage() {
         </div>
 
         {/* Reviews List */}
-        <div className="bg-white rounded-3xl border border-[#d8e5e2] shadow-sm overflow-hidden">
+        <div className="bg-white rounded-3xl border border-line shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="p-16 text-center text-[#52696e] text-xs flex flex-col items-center justify-center gap-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-[#167b78]" />
+            <div className="p-16 text-center text-ink-muted text-xs flex flex-col items-center justify-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin text-brand-600" />
               <span>{isUz ? 'Yuklanmoqda...' : 'Загрузка...'}</span>
             </div>
           ) : reviews.length === 0 ? (
-            <div className="p-16 text-center text-[#52696e] text-xs bg-[#f8fbfb]">
-              <MessageSquare className="w-8 h-8 text-[#98b3ad] mx-auto mb-2 opacity-50" />
-              <p className="font-bold text-[#152f34]">
+            <div className="p-16 text-center text-ink-muted text-xs bg-canvas">
+              <MessageSquare className="w-8 h-8 text-ink-subtle mx-auto mb-2 opacity-50" />
+              <p className="font-bold text-ink">
                 {isUz ? 'Sharhlar topilmadi' : 'Отзывы не найдены'}
               </p>
-              <p className="text-[11px] text-[#52696e] mt-0.5">
+              <p className="text-[11px] text-ink-muted mt-0.5">
                 {isUz
                   ? "Tanlangan filtr bo'yicha hech qanday fikr mavjud emas"
                   : 'По выбранному фильтру нет доступных отзывов'}
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-[#e2eeee]">
+            <div className="divide-y divide-line">
               {reviews.map((r) => {
                 const isItemUpdating = updatingId === r.id;
                 return (
-                  <div key={r.id} className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-[#fafdfc] transition-colors">
+                  <div key={r.id} className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-canvas transition-colors">
                     {/* Left content */}
                     <div className="space-y-2 flex-1">
                       <div className="flex flex-wrap items-center gap-2.5">
-                        <span className="font-bold text-sm text-[#152f34]">{r.authorName}</span>
+                        <span className="font-bold text-sm text-ink">{r.authorName}</span>
                         <div className="flex items-center gap-0.5 text-amber-400">
                           {[...Array(5)].map((_, i) => (
                             <Star
@@ -323,17 +323,17 @@ export default function AdminReviewsPage() {
                         </span>
                       </div>
 
-                      <p className="text-xs text-[#2b474d] leading-relaxed italic bg-[#f8fbfb] p-3 rounded-xl border border-[#e8f1f0]">
+                      <p className="text-xs text-ink leading-relaxed italic bg-canvas p-3 rounded-xl border border-line">
                         &ldquo;{r.text}&rdquo;
                       </p>
 
-                      <div className="flex flex-wrap items-center gap-4 text-[11px] text-[#52696e]">
+                      <div className="flex flex-wrap items-center gap-4 text-[11px] text-ink-muted">
                         <span>
                           {isUz ? 'Sana: ' : 'Дата: '}
                           {new Date(r.createdAt).toLocaleString(isUz ? 'uz-UZ' : 'ru-RU')}
                         </span>
                         {r.adminNote && (
-                          <span className="text-[#167b78] font-medium bg-[#e0f2ed] px-2 py-0.5 rounded">
+                          <span className="text-brand-600 font-medium bg-brand-100 px-2 py-0.5 rounded">
                             {isUz ? 'Moderator izohi: ' : 'Примечание: '}
                             {r.adminNote}
                           </span>
@@ -374,7 +374,7 @@ export default function AdminReviewsPage() {
                         type="button"
                         disabled={isItemUpdating}
                         onClick={() => handleOpenNoteModal(r, r.status)}
-                        className="p-2 text-[#52696e] hover:text-[#152f34] hover:bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] transition-all"
+                        className="p-2 text-ink-muted hover:text-ink hover:bg-canvas rounded-xl border border-line transition-all"
                         title={isUz ? 'Izoh qo‘shish / o‘zgartirish' : 'Добавить / изменить примечание'}
                       >
                         <FileEdit className="w-4 h-4" />
@@ -401,7 +401,7 @@ export default function AdminReviewsPage() {
 
           {/* Pagination Footer */}
           {totalPages > 1 && (
-            <div className="p-4 bg-[#f8fbfb] border-t border-[#d8e5e2] flex items-center justify-between text-xs text-[#52696e]">
+            <div className="p-4 bg-canvas border-t border-line flex items-center justify-between text-xs text-ink-muted">
               <span>
                 {isUz
                   ? `Jami ${total} ta sharh (Sahifa ${page} / ${totalPages})`
@@ -411,14 +411,14 @@ export default function AdminReviewsPage() {
                 <button
                   disabled={page <= 1 || isLoading}
                   onClick={() => setPage(page - 1)}
-                  className="p-2 rounded-lg border border-[#d8e5e2] bg-white disabled:opacity-40 hover:bg-[#f3f8f7] transition-all"
+                  className="p-2 rounded-lg border border-line bg-white disabled:opacity-40 hover:bg-canvas transition-all"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
                   disabled={page >= totalPages || isLoading}
                   onClick={() => setPage(page + 1)}
-                  className="p-2 rounded-lg border border-[#d8e5e2] bg-white disabled:opacity-40 hover:bg-[#f3f8f7] transition-all"
+                  className="p-2 rounded-lg border border-line bg-white disabled:opacity-40 hover:bg-canvas transition-all"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -431,9 +431,9 @@ export default function AdminReviewsPage() {
       {/* Moderation Note Modal */}
       {noteModalOpen && activeReview && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#d8e5e2] space-y-4">
-            <div className="flex items-center justify-between border-b border-[#e2eeee] pb-3">
-              <h2 className="text-base font-bold text-[#152f34]">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-line space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h2 className="text-base font-bold text-ink">
                 {pendingTargetStatus === 'APPROVED'
                   ? isUz
                     ? 'Sharhni tasdiqlash'
@@ -454,15 +454,15 @@ export default function AdminReviewsPage() {
               </button>
             </div>
 
-            <div className="text-xs text-[#52696e] space-y-1">
+            <div className="text-xs text-ink-muted space-y-1">
               <p>
-                <strong className="text-[#152f34]">{activeReview.authorName}</strong> ({activeReview.rating} ★)
+                <strong className="text-ink">{activeReview.authorName}</strong> ({activeReview.rating} ★)
               </p>
               <p className="italic line-clamp-2">&ldquo;{activeReview.text}&rdquo;</p>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-[#152f34]">
+              <label className="text-xs font-bold text-ink">
                 {isUz ? 'Ichki moderator izohi (ixtiyoriy)' : 'Внутреннее примечание модератора (необязательно)'}
               </label>
               <textarea
@@ -474,18 +474,18 @@ export default function AdminReviewsPage() {
                     ? 'Rad etish sababi yoki boshqa xodimlar uchun eslatma...'
                     : 'Причина отклонения или заметка для сотрудников...'
                 }
-                className="w-full text-xs p-3 rounded-xl border border-[#d8e5e2] focus:outline-none focus:ring-2 focus:ring-[#167b78] bg-[#f8fbfb]"
+                className="w-full text-xs p-3 rounded-xl border border-line focus:outline-none focus:ring-2 focus:ring-brand-600 bg-canvas"
               />
               <span className="text-[10px] text-slate-400 block text-right">
                 {adminNote.length} / 500
               </span>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2eeee]">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
               <button
                 type="button"
                 onClick={() => setNoteModalOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-[#52696e] hover:bg-[#f3f8f7] rounded-xl transition-all"
+                className="px-4 py-2 text-xs font-bold text-ink-muted hover:bg-canvas rounded-xl transition-all"
               >
                 {isUz ? 'Bekor qilish' : 'Отмена'}
               </button>
@@ -496,7 +496,7 @@ export default function AdminReviewsPage() {
                 className={`px-4 py-2 text-xs font-bold text-white rounded-xl shadow-sm transition-all ${
                   pendingTargetStatus === 'REJECTED'
                     ? 'bg-amber-600 hover:bg-amber-700'
-                    : 'bg-[#167b78] hover:bg-[#125856]'
+                    : 'bg-brand-600 hover:bg-brand-700'
                 }`}
               >
                 {updatingId !== null
@@ -521,7 +521,7 @@ export default function AdminReviewsPage() {
                 <AlertTriangle className="w-5 h-5 text-rose-600" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-[#152f34]">
+                <h2 className="text-base font-bold text-ink">
                   {isUz ? 'Sharhni butunlay o‘chirish' : 'Удалить отзыв навсегда'}
                 </h2>
                 <p className="text-[11px] text-rose-600">
@@ -530,25 +530,25 @@ export default function AdminReviewsPage() {
               </div>
             </div>
 
-            <div className="p-3 bg-rose-50/50 rounded-2xl border border-rose-100 text-xs text-[#2b474d] space-y-1">
+            <div className="p-3 bg-rose-50/50 rounded-2xl border border-rose-100 text-xs text-ink space-y-1">
               <p>
                 <strong>{deleteConfirmReview.authorName}</strong> ({deleteConfirmReview.rating} ★)
               </p>
               <p className="italic line-clamp-2">&ldquo;{deleteConfirmReview.text}&rdquo;</p>
             </div>
 
-            <p className="text-xs text-[#52696e]">
+            <p className="text-xs text-ink-muted">
               {isUz
                 ? 'Sharh maʼlumotlar bazasidan butunlay yo‘qotiladi va audit jurnali qayd etiladi. Faqat rad etish kerak bo‘lsa, "Rad etish" tugmasidan foydalaning.'
                 : 'Отзыв будет полностью удален из базы данных с записью в аудит. Если нужно просто скрыть отзыв, используйте статус "Отклонить".'}
             </p>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2eeee]">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
               <button
                 type="button"
                 disabled={isDeleting}
                 onClick={() => setDeleteConfirmReview(null)}
-                className="px-4 py-2 text-xs font-bold text-[#52696e] hover:bg-[#f3f8f7] rounded-xl transition-all"
+                className="px-4 py-2 text-xs font-bold text-ink-muted hover:bg-canvas rounded-xl transition-all"
               >
                 {isUz ? 'Bekor qilish' : 'Отмена'}
               </button>

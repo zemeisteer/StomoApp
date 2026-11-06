@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { Calendar, ArrowRight, Clock, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { serviceCategoryLabel } from '../../lib/serviceCategories';
 
 interface ServicesSectionProps {
   services: any[];
@@ -21,18 +22,18 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLo
       {/* Section Header */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10 text-center sm:text-left">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider mb-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider mb-2">
             <Sparkles className="w-3.5 h-3.5" />
             <span>{t.nav.services}</span>
           </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#152f34]">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink">
             {isRu ? 'Популярные стоматологические услуги' : 'Ommabop stomatologik xizmatlar'}
           </h2>
         </div>
 
         <Link
           href="/services"
-          className="inline-flex items-center gap-2 text-sm font-bold text-[#167b78] hover:text-[#116460] group transition-colors"
+          className="inline-flex items-center gap-2 text-sm font-bold text-brand-600 hover:text-brand-700 group transition-colors"
         >
           <span>{isRu ? 'Все услуги клиники' : 'Barcha xizmatlarni ko\'rish'}</span>
           <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -45,10 +46,10 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLo
           {[1, 2, 3, 4, 5, 6].map((n) => (
             <div
               key={n}
-              className="bg-white rounded-2xl p-6 border border-[#d8e5e2] animate-pulse space-y-4"
+              className="bg-white rounded-2xl p-6 border border-line animate-pulse space-y-4"
             >
               <div className="flex justify-between items-center">
-                <div className="h-6 w-20 bg-[#eaf5f2] rounded-full" />
+                <div className="h-6 w-20 bg-brand-50 rounded-full" />
                 <div className="h-4 w-16 bg-slate-100 rounded" />
               </div>
               <div className="h-6 w-3/4 bg-slate-100 rounded" />
@@ -56,7 +57,7 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLo
                 <div className="h-4 bg-slate-100 rounded" />
                 <div className="h-4 w-5/6 bg-slate-100 rounded" />
               </div>
-              <div className="pt-4 border-t border-[#d8e5e2] flex justify-between items-center">
+              <div className="pt-4 border-t border-line flex justify-between items-center">
                 <div className="h-6 w-24 bg-slate-100 rounded" />
                 <div className="h-9 w-9 bg-slate-100 rounded-xl" />
               </div>
@@ -73,14 +74,14 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLo
             <button
               type="button"
               onClick={onRetry}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
               {t.common.retry}
             </button>
           ) : (
             <Link
               href="/services"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#167b78] text-white rounded-xl text-xs font-bold"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold"
             >
               {t.common.retry}
             </Link>
@@ -90,8 +91,8 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLo
 
       {/* Empty State */}
       {!isLoading && !error && services.length === 0 && (
-        <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-[#d8e5e2] p-8">
-          <p className="text-[#52696e] text-sm">
+        <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-line p-8">
+          <p className="text-ink-muted text-sm">
             {isRu ? 'Услуги временно недоступны.' : 'Hozircha xizmatlar ro\'yxati mavjud emas.'}
           </p>
         </div>
@@ -108,43 +109,43 @@ export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLo
             return (
               <div
                 key={service.id}
-                className="bg-white rounded-2xl p-6 sm:p-7 border border-[#d8e5e2] shadow-[0_2px_8px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-[#167b78]/40 transition-all flex flex-col justify-between group"
+                className="bg-white rounded-2xl p-6 sm:p-7 border border-line shadow-[0_2px_8px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-brand-600/40 transition-all flex flex-col justify-between group"
               >
                 <div>
                   <div className="flex items-center justify-between mb-3.5">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold">
                       <Clock className="w-3.5 h-3.5" />
                       <span>{service.durationMinutes} {isRu ? 'мин' : 'daqiqa'}</span>
                     </span>
-                    <span className="text-[11px] font-bold text-[#52696e] uppercase tracking-wider">
-                      {service.category}
+                    <span className="text-[11px] font-bold text-ink-muted uppercase tracking-wider">
+                      {serviceCategoryLabel(service.category, language)}
                     </span>
                   </div>
 
                   <Link href={`/services/${service.slug}`}>
-                    <h3 className="text-lg font-bold text-[#152f34] group-hover:text-[#167b78] transition-colors mb-2 leading-snug">
+                    <h3 className="text-lg font-bold text-ink group-hover:text-brand-600 transition-colors mb-2 leading-snug">
                       {name}
                     </h3>
                   </Link>
 
-                  <p className="text-sm text-[#52696e] line-clamp-2 mb-6 leading-relaxed">
+                  <p className="text-sm text-ink-muted line-clamp-2 mb-6 leading-relaxed">
                     {desc || (isRu ? 'Безопасное и безболезненное лечение от ведущих специалистов.' : 'Klinikamiz mutaxassislari tomonidan xavfsiz va og\'riqsiz muolaja.')}
                   </p>
                 </div>
 
-                <div className="pt-4 border-t border-[#d8e5e2] flex items-center justify-between">
+                <div className="pt-4 border-t border-line flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] text-[#52696e] block uppercase font-semibold">
+                    <span className="text-[11px] text-ink-muted block uppercase font-semibold">
                       {t.common.price}
                     </span>
-                    <span className="text-base font-extrabold text-[#152f34]">
+                    <span className="text-base font-extrabold text-ink">
                       {priceFromFormatted} {t.common.uzs}
                     </span>
                   </div>
 
                   <Link
                     href={`/booking?serviceId=${service.id}`}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#eaf5f2] text-[#167b78] hover:bg-[#167b78] hover:text-white rounded-xl transition-all font-semibold text-xs shadow-sm"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white rounded-xl transition-all font-semibold text-xs shadow-sm"
                     title={t.common.bookAppointment}
                   >
                     <Calendar className="w-3.5 h-3.5" />

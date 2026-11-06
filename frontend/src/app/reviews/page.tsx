@@ -77,14 +77,14 @@ export default function ReviewsPage() {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-12">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
           <MessageSquare className="w-3.5 h-3.5" />
           <span>{t.reviews.title}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-[#152f34] tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
           {isRu ? 'Отзывы наших пациентов' : 'Bemorlarimiz bildirgan fikrlar'}
         </h1>
-        <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
+        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
           {isRu
             ? 'Реальные впечатления и отзывы пациентов, прошедших лечение в нашей клинике.'
             : 'Klinikamizda muolaja olgan bemorlarning samimiy va xolis fikrlari.'}
@@ -94,8 +94,8 @@ export default function ReviewsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Reviews List */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#d8e5e2]">
-            <h2 className="text-base font-bold text-[#152f34]">
+          <div className="flex items-center justify-between pb-3 border-b border-line">
+            <h2 className="text-base font-bold text-ink">
               {isRu ? 'Опубликованные отзывы' : 'Tasdiqlangan sharhlar'} ({totalCount})
             </h2>
             {avgRating && (
@@ -107,9 +107,9 @@ export default function ReviewsPage() {
           </div>
 
           {isLoading ? (
-            <div className="p-10 text-center text-[#52696e] text-sm">{t.common.loading}</div>
+            <div className="p-10 text-center text-ink-muted text-sm">{t.common.loading}</div>
           ) : reviews.length === 0 ? (
-            <div className="p-10 text-center text-[#52696e] text-sm bg-white rounded-2xl border border-dashed border-[#d8e5e2]">
+            <div className="p-10 text-center text-ink-muted text-sm bg-white rounded-2xl border border-dashed border-line">
               {isRu ? 'Пока нет опубликованных отзывов. Будьте первыми!' : 'Hozircha e\'lon qilingan fikrlar yo\'q. Birinchi bo\'lib fikr qoldiring!'}
             </div>
           ) : (
@@ -122,11 +122,11 @@ export default function ReviewsPage() {
               return (
                 <div
                   key={r.id}
-                  className="bg-white rounded-2xl p-6 border border-[#d8e5e2] shadow-[0_2px_8px_rgba(21,47,52,0.03)] space-y-3"
+                  className="bg-white rounded-2xl p-6 border border-line shadow-[0_2px_8px_rgba(21,47,52,0.03)] space-y-3"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 font-bold text-xs text-[#152f34]">
-                      <div className="w-7 h-7 rounded-full bg-[#eaf5f2] flex items-center justify-center text-[#167b78] text-xs">
+                    <div className="flex items-center gap-2 font-bold text-xs text-ink">
+                      <div className="w-7 h-7 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 text-xs">
                         <User className="w-3.5 h-3.5" />
                       </div>
                       <span>{author}</span>
@@ -139,11 +139,11 @@ export default function ReviewsPage() {
                     </div>
                   </div>
 
-                  <p className="text-xs sm:text-sm text-[#152f34] leading-relaxed italic">
+                  <p className="text-xs sm:text-sm text-ink leading-relaxed italic">
                     &ldquo;{r.text}&rdquo;
                   </p>
 
-                  <div className="pt-2 text-[11px] text-[#52696e] text-right">
+                  <div className="pt-2 text-[11px] text-ink-muted text-right">
                     <span>{dateStr}</span>
                   </div>
                 </div>
@@ -153,10 +153,10 @@ export default function ReviewsPage() {
         </div>
 
         {/* Right Column: Submit Review Form */}
-        <div className="lg:col-span-5 bg-white rounded-3xl p-7 sm:p-8 border border-[#d8e5e2] shadow-[0_4px_20px_rgba(21,47,52,0.03)] space-y-5">
+        <div className="lg:col-span-5 bg-white rounded-3xl p-7 sm:p-8 border border-line shadow-[0_4px_20px_rgba(21,47,52,0.03)] space-y-5">
           <div>
-            <h3 className="text-lg font-bold text-[#152f34]">{t.reviews.writeReview}</h3>
-            <p className="text-xs text-[#52696e] mt-0.5">
+            <h3 className="text-lg font-bold text-ink">{t.reviews.writeReview}</h3>
+            <p className="text-xs text-ink-muted mt-0.5">
               {isRu ? 'Поделитесь вашим впечатлением о лечении в DentaCare' : 'DentaCare klinikasidagi tajribangiz haqida xolis fikr bildiring'}
             </p>
           </div>
@@ -181,7 +181,7 @@ export default function ReviewsPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-[#152f34] mb-1.5">
+              <label className="block text-xs font-semibold text-ink mb-1.5">
                 {t.common.name} *
               </label>
               <input
@@ -190,12 +190,12 @@ export default function ReviewsPage() {
                 value={authorName}
                 onChange={(e) => setAuthorName(e.target.value)}
                 placeholder={isRu ? 'Например: Азиз Рахимов' : 'Masalan: Aziz Rahimov'}
-                className="w-full px-4 py-2.5 rounded-xl border border-[#d8e5e2] text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#167b78] bg-white text-[#152f34]"
+                className="w-full px-4 py-2.5 rounded-xl border border-line text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#152f34] mb-1.5">
+              <label className="block text-xs font-semibold text-ink mb-1.5">
                 {t.reviews.rating}
               </label>
               <div className="flex items-center gap-1.5">
@@ -218,7 +218,7 @@ export default function ReviewsPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#152f34] mb-1.5">
+              <label className="block text-xs font-semibold text-ink mb-1.5">
                 {t.reviews.comment} *
               </label>
               <textarea
@@ -227,16 +227,16 @@ export default function ReviewsPage() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder={isRu ? 'Напишите ваш отзыв...' : 'Muolaja va xizmat haqida fikringiz...'}
-                className="w-full px-4 py-2.5 rounded-xl border border-[#d8e5e2] text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#167b78] bg-white text-[#152f34]"
+                className="w-full px-4 py-2.5 rounded-xl border border-line text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
               />
             </div>
 
-            <label className="flex items-start gap-2.5 cursor-pointer text-xs text-[#52696e]">
+            <label className="flex items-start gap-2.5 cursor-pointer text-xs text-ink-muted">
               <input
                 type="checkbox"
                 checked={consentDisplayName}
                 onChange={(e) => setConsentDisplayName(e.target.checked)}
-                className="mt-0.5 rounded border-[#d8e5e2] text-[#167b78] focus:ring-[#167b78]"
+                className="mt-0.5 rounded border-line text-brand-600 focus:ring-brand-600"
               />
               <span>
                 {isRu
@@ -248,7 +248,7 @@ export default function ReviewsPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3.5 bg-[#167b78] hover:bg-[#116460] disabled:opacity-50 text-white font-bold rounded-2xl shadow-md shadow-[#167b78]/25 text-xs transition-all flex items-center justify-center gap-2 transform active:scale-95"
+              className="w-full py-3.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-bold rounded-2xl shadow-md shadow-brand-600/25 text-xs transition-all flex items-center justify-center gap-2 transform active:scale-95"
             >
               <Send className="w-3.5 h-3.5" />
               <span>{isSubmitting ? t.common.loading : t.common.submit}</span>

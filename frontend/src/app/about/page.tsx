@@ -80,14 +80,14 @@ export default function AboutPage() {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-14">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
           <Award className="w-3.5 h-3.5" />
           <span>{t.nav.about}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-[#152f34] tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
           {clinicName} — {isRu ? 'стандарты современной стоматологии' : 'Ishonchli stomatologiya xizmati'}
         </h1>
-        <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
+        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
           {isRu
             ? 'Наша главная цель — предоставить каждому пациенту качественную, безопасную и эстетичную стоматологическую помощь.'
             : 'Bizning asosiy maqsadimiz — har bir bemorga sifatli, xavfsiz va qulay stomatologik yordam ko\'rsatishdir.'}
@@ -101,13 +101,13 @@ export default function AboutPage() {
           return (
             <div
               key={i}
-              className="bg-white rounded-3xl p-7 border border-[#d8e5e2] shadow-[0_2px_12px_rgba(21,47,52,0.03)] space-y-3 hover:border-[#167b78]/40 transition-all"
+              className="bg-white rounded-3xl p-7 border border-line shadow-[0_2px_12px_rgba(21,47,52,0.03)] space-y-3 hover:border-brand-600/40 transition-all"
             >
-              <div className="w-12 h-12 rounded-2xl bg-[#eaf5f2] flex items-center justify-center text-[#167b78]">
+              <div className="w-12 h-12 rounded-2xl bg-brand-50 flex items-center justify-center text-brand-600">
                 <IconComp className="w-6 h-6" />
               </div>
-              <h3 className="text-base font-bold text-[#152f34]">{v.title}</h3>
-              <p className="text-xs sm:text-sm text-[#52696e] leading-relaxed">
+              <h3 className="text-base font-bold text-ink">{v.title}</h3>
+              <p className="text-xs sm:text-sm text-ink-muted leading-relaxed">
                 {v.desc}
               </p>
             </div>
@@ -116,30 +116,30 @@ export default function AboutPage() {
       </div>
 
       {/* Facilities & Equipment Section */}
-      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-[#d8e5e2] shadow-[0_4px_20px_rgba(21,47,52,0.04)] space-y-8">
+      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-line shadow-[0_4px_20px_rgba(21,47,52,0.04)] space-y-8">
         <div className="max-w-2xl space-y-2">
-          <span className="text-xs font-bold uppercase tracking-widest text-[#167b78]">
+          <span className="text-xs font-bold uppercase tracking-widest text-brand-600">
             {isRu ? 'Оснащение' : 'Texnologiyalar'}
           </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#152f34]">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink">
             {isRu ? 'Современное оснащение и сертифицированные материалы' : 'Zamonaviy jihozlar va sertifikatlangan materiallar'}
           </h2>
-          <p className="text-xs sm:text-sm text-[#52696e]">
+          <p className="text-xs sm:text-sm text-ink-muted">
             {isRu
               ? 'В работе используются проверенные клинические методики и надежные сертифицированные материалы.'
               : 'Faoliyatimizda faqat xalqaro talablarga javob beradigan sinovdan o\'tgan usullar va materiallar qo\'llaniladi.'}
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-[#152f34]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-ink">
           {technologies.map((item, idx) => (
-            <div key={idx} className="flex items-start gap-3.5 p-5 bg-[#f4f9f7] rounded-2xl border border-[#d8e5e2]">
-              <CheckCircle2 className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+            <div key={idx} className="flex items-start gap-3.5 p-5 bg-canvas rounded-2xl border border-line">
+              <CheckCircle2 className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
               <div>
-                <strong className="text-sm font-bold text-[#152f34] block mb-1">
+                <strong className="text-sm font-bold text-ink block mb-1">
                   {item.brand}
                 </strong>
-                <p className="text-xs text-[#52696e] leading-relaxed">
+                <p className="text-xs text-ink-muted leading-relaxed">
                   {item.desc}
                 </p>
               </div>
@@ -152,7 +152,7 @@ export default function AboutPage() {
       <div className="text-center py-6">
         <Link
           href="/booking"
-          className="inline-flex items-center gap-2 px-8 py-4 bg-[#167b78] hover:bg-[#116460] text-white font-bold text-base rounded-2xl shadow-lg shadow-[#167b78]/25 transition-all"
+          className="inline-flex items-center gap-2 px-8 py-4 bg-brand-600 hover:bg-brand-700 text-white font-bold text-base rounded-2xl shadow-lg shadow-brand-600/25 transition-all"
         >
           <Calendar className="w-5 h-5" />
           <span>{t.common.bookAppointment}</span>

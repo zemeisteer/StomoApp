@@ -1,5 +1,8 @@
 'use client';
 
+import { useBrand } from '../../../lib/brand';
+import { DEFAULT_BRAND, applyBrandToDocument, normalizeHex } from '../../../lib/brandTheme';
+import { BrandColorsEditor } from '../../../components/admin/BrandColorsEditor';
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import {
@@ -60,7 +63,16 @@ export default function AdminSettingsPage() {
     maxBookingHorizonDays: 60,
     bufferMinutes: 5,
     pendingExpiryMinutes: 30,
+    primaryColor: DEFAULT_BRAND.primaryColor,
+    secondaryColor: DEFAULT_BRAND.secondaryColor,
+    accentColor: DEFAULT_BRAND.accentColor,
   });
+  const brand = useBrand();
+  // Colors are previewed live on the whole document; leaving the page without saving restores
+  // the last saved brand.
+  const brandRef = useRef(brand);
+  brandRef.current = brand;
+  useEffect(() => () => applyBrandToDocument(brandRef.current.clinic || {}), []);
 
   // Logo state & guidance
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -128,6 +140,9 @@ export default function AdminSettingsPage() {
           pendingExpiryMinutes: settingsRes.pendingExpiryMinutes ?? 30,
           pendingExpiryOutOfRange: Boolean(settingsRes.pendingExpiryOutOfRange),
           rawPendingExpiryMinutes: settingsRes.rawPendingExpiryMinutes,
+          primaryColor: normalizeHex(settingsRes.primaryColor, DEFAULT_BRAND.primaryColor),
+          secondaryColor: normalizeHex(settingsRes.secondaryColor, DEFAULT_BRAND.secondaryColor),
+          accentColor: normalizeHex(settingsRes.accentColor, DEFAULT_BRAND.accentColor),
         });
 
         if (settingsRes.logo) {
@@ -367,6 +382,14 @@ export default function AdminSettingsPage() {
       };
 
       await api.updateClinicSettingsAdmin(payload);
+      brand.updateBrand({
+        name: settings.name,
+        nameRu: settings.nameRu,
+        logo: logoUrl || null,
+        primaryColor: settings.primaryColor,
+        secondaryColor: settings.secondaryColor,
+        accentColor: settings.accentColor,
+      });
       setSuccessMsg('Klinika sozlamalari muvaffaqiyatli saqlandi');
     } catch (err: any) {
       setErrorMsg(err?.message || 'Sozlamalarni saqlashda xatolik');
@@ -693,6 +716,19 @@ export default function AdminSettingsPage() {
             <Building2 className="w-4 h-4 text-teal-700" />
             <span>Klinika Asosiy Ma&apos;lumotlari</span>
           </h2>
+
+          <BrandColorsEditor
+            isRu={isRu}
+            value={{
+              primaryColor: settings.primaryColor,
+              secondaryColor: settings.secondaryColor,
+              accentColor: settings.accentColor,
+            }}
+            onChange={(colors) => {
+              setSettings((prev: any) => ({ ...prev, ...colors }));
+              applyBrandToDocument(colors);
+            }}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

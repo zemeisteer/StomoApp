@@ -564,8 +564,8 @@ export default function AdminOverviewPage() {
   if (isAuthLoading) {
     return (
       <AdminLayout allowedRoles={allowedRoles}>
-        <div className="p-16 text-center text-[#52696e] text-sm flex items-center justify-center gap-2">
-          <RefreshCw className="w-4 h-4 animate-spin text-[#167b78]" />
+        <div className="p-16 text-center text-ink-muted text-sm flex items-center justify-center gap-2">
+          <RefreshCw className="w-4 h-4 animate-spin text-brand-600" />
           <span>{isUz ? 'Foydalanuvchi ma\'lumotlari yuklanmoqda...' : 'Загрузка данных пользователя...'}</span>
         </div>
       </AdminLayout>
@@ -586,28 +586,28 @@ export default function AdminOverviewPage() {
     <AdminLayout allowedRoles={allowedRoles}>
       <div className="space-y-6">
         {/* Top Operational Bar */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-[#d8e5e2] shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-line shadow-xs">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#167b78] bg-[#e0f2ed] px-2.5 py-0.5 rounded-md">
+              <span className="text-xs font-bold uppercase tracking-wider text-brand-600 bg-brand-100 px-2.5 py-0.5 rounded-md">
                 {isDoctor
                   ? (isUz ? 'Shifokor xonasi' : 'Кабинет врача')
                   : isOwner
                   ? (isUz ? 'Rahbar boshqaruv markazi' : 'Кабинет руководителя')
                   : (isUz ? 'Qabulxona / Administrator' : 'Регистратура / Администратор')}
               </span>
-              <span suppressHydrationWarning className="text-xs text-[#52696e]">
+              <span suppressHydrationWarning className="text-xs text-ink-muted">
                 {formatClinicDate(new Date().toISOString(), language, { includeWeekday: true })}
               </span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-[#152f34] mt-1">
+            <h1 className="text-xl sm:text-2xl font-black text-ink mt-1">
               {isDoctor
                 ? `${isUz ? 'Dr.' : 'Д-р'} ${user?.fullName || user?.email.split('@')[0]}`
                 : isOwner
                 ? (isUz ? 'Klinika rahbari boshqaruvi' : 'Управление клиникой руководителя')
                 : (isUz ? 'Bugungi operatsion boshqaruv' : 'Оперативное управление на сегодня')}
             </h1>
-            <p className="text-xs text-[#52696e] mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               {isDoctor
                 ? (isUz
                     ? 'Shaxsiy qabullar jadvali va sizga yo\'naltirilgan arizalar monitoringi'
@@ -620,14 +620,14 @@ export default function AdminOverviewPage() {
 
           <div className="flex flex-wrap items-center gap-3">
             {/* Authenticated Staff Identity Chip */}
-            <div className="flex items-center gap-2.5 bg-[#f3f8f7] px-3 py-1.5 rounded-xl border border-[#d8e5e2] text-xs">
+            <div className="flex items-center gap-2.5 bg-canvas px-3 py-1.5 rounded-xl border border-line text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
               <div className="flex flex-col">
-                <span className="font-extrabold text-[#152f34] text-xs leading-tight">
+                <span className="font-extrabold text-ink text-xs leading-tight">
                   {user?.fullName || user?.email || (isUz ? 'Xodim' : 'Сотрудник')}
                 </span>
               </div>
-              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-[#167b78] text-white tracking-wider">
+              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-brand-600 text-white tracking-wider">
                 {effectiveRole === 'DOCTOR'
                   ? (isUz ? 'Shifokor' : 'Врач')
                   : effectiveRole === 'OWNER'
@@ -640,13 +640,13 @@ export default function AdminOverviewPage() {
 
             {/* Search Input */}
             <div className="relative min-w-[200px]">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#52696e]" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
               <input
                 type="text"
                 placeholder={isUz ? 'Bemor yoki telefon...' : 'Пациент или телефон...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] focus:outline-none focus:border-[#167b78]"
+                className="w-full pl-9 pr-3 py-2 text-xs bg-canvas border border-line rounded-xl text-ink focus:outline-none focus:border-brand-600"
               />
             </div>
 
@@ -674,10 +674,10 @@ export default function AdminOverviewPage() {
             <button
               type="button"
               onClick={loadData}
-              className="p-2 bg-[#f3f8f7] hover:bg-[#eaf5f2] text-[#152f34] rounded-xl border border-[#d8e5e2] transition-colors"
+              className="p-2 bg-canvas hover:bg-brand-50 text-ink rounded-xl border border-line transition-colors"
               title={isUz ? 'Yangilash' : 'Обновить'}
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#167b78]' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-brand-600' : ''}`} />
             </button>
           </div>
         </div>
@@ -696,9 +696,9 @@ export default function AdminOverviewPage() {
         )}
 
         {statusFeedback && (
-          <div className="bg-[#e0f2ed] border border-[#167b78]/40 rounded-2xl p-3.5 flex items-center justify-between text-xs text-[#116460] font-semibold">
+          <div className="bg-brand-100 border border-brand-600/40 rounded-2xl p-3.5 flex items-center justify-between text-xs text-brand-700 font-semibold">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[#167b78] shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-brand-600 shrink-0" />
               <span>{statusFeedback}</span>
             </div>
             <button onClick={() => setStatusFeedback(null)}>
@@ -712,8 +712,8 @@ export default function AdminOverviewPage() {
           {/* 1: Yangi arizalar (Crucial for test: data-testid="kpi-pending-count") */}
           <div className="ui-card flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Yangi arizalar' : 'Новые заявки'}</span>
-              <p data-testid="kpi-pending-count" className="text-2xl font-black text-[#152f34] mt-0.5">
+              <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Yangi arizalar' : 'Новые заявки'}</span>
+              <p data-testid="kpi-pending-count" className="text-2xl font-black text-ink mt-0.5">
                 {pendingTotal}
               </p>
               <span className="text-[11px] text-amber-700 font-medium">{isUz ? 'Tasdiqlash kutilmoqda' : 'Ожидают подтверждения'}</span>
@@ -726,13 +726,13 @@ export default function AdminOverviewPage() {
           {/* 2: Bugungi qabullar */}
           <div className="ui-card flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Bugungi qabullar' : 'Приемы на сегодня'}</span>
-              <p className="text-2xl font-black text-[#152f34] mt-0.5">
+              <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Bugungi qabullar' : 'Приемы на сегодня'}</span>
+              <p className="text-2xl font-black text-ink mt-0.5">
                 {todayAppointments.length}
               </p>
-              <span className="text-[11px] text-[#167b78] font-medium">{isUz ? 'Jadval bo\'yicha' : 'По расписанию'}</span>
+              <span className="text-[11px] text-brand-600 font-medium">{isUz ? 'Jadval bo\'yicha' : 'По расписанию'}</span>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-[#e0f2ed] text-[#167b78] flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-brand-100 text-brand-600 flex items-center justify-center">
               <Calendar className="w-5 h-5" />
             </div>
           </div>
@@ -740,8 +740,8 @@ export default function AdminOverviewPage() {
           {/* 3: Klinikada / Navbatda */}
           <div className="ui-card flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Klinikada hozir' : 'Сейчас в клинике'}</span>
-              <p className="text-2xl font-black text-[#152f34] mt-0.5">
+              <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Klinikada hozir' : 'Сейчас в клинике'}</span>
+              <p className="text-2xl font-black text-ink mt-0.5">
                 {arrivedCount + inTreatmentCount}
               </p>
               <span className="text-[11px] text-blue-700 font-medium">
@@ -758,8 +758,8 @@ export default function AdminOverviewPage() {
           {/* 4: Yakunlangan */}
           <div className="ui-card flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-[#52696e] block">{isUz ? 'Yakunlandi' : 'Завершено'}</span>
-              <p className="text-2xl font-black text-[#152f34] mt-0.5">
+              <span className="text-xs font-semibold text-ink-muted block">{isUz ? 'Yakunlandi' : 'Завершено'}</span>
+              <p className="text-2xl font-black text-ink mt-0.5">
                 {isDoctor ? completedDoctorCount : completedTodayCount}
               </p>
               <span className="text-[11px] text-emerald-700 font-medium">{isUz ? 'Muvaffaqiyatli' : 'Успешно'}</span>
@@ -791,16 +791,16 @@ export default function AdminOverviewPage() {
           />
         ) : isOwner ? (
           <div className="space-y-6">
-            <div className="p-4 bg-gradient-to-r from-[#12353b] to-[#1a4a52] rounded-2xl text-white border border-[#245158] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm animate-fade-in">
+            <div className="p-4 bg-gradient-to-r from-brand-950 to-brand-900 rounded-2xl text-white border border-brand-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm animate-fade-in">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#167b78] text-white flex items-center justify-center font-bold">
+                <div className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold">
                   <BarChart3 className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold">
                     {isUz ? 'Klinika Rahbari boshqaruv markazi' : 'Центр управления руководителя клиники'}
                   </h3>
-                  <p className="text-xs text-[#b2c9ca]">
+                  <p className="text-xs text-brand-200">
                     {isUz
                       ? 'Filiallar daromadi, shifokorlar samaradorligi va moliyaviy konversiya'
                       : 'Доход филиалов, эффективность врачей и финансовая конверсия'}
@@ -810,7 +810,7 @@ export default function AdminOverviewPage() {
               <div className="flex items-center gap-2">
                 <Link
                   href="/admin/analytics"
-                  className="px-3.5 py-2 bg-[#167b78] hover:bg-[#14bdac] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  className="px-3.5 py-2 bg-brand-600 hover:bg-secondary-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
                 >
                   <Activity className="w-3.5 h-3.5" />
                   <span>{isUz ? 'Batafsil CRM Analitika' : 'Подробная CRM аналитика'}</span>
@@ -898,28 +898,28 @@ export default function AdminOverviewPage() {
             role="dialog"
             aria-modal="true"
           >
-            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#d8e5e2] space-y-4">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-line space-y-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-[#152f34]">
+                  <h3 className="text-base font-bold text-ink">
                     {isUz ? 'Qabulni bekor qilish' : 'Отмена записи на прием'}
                   </h3>
-                  <p className="text-xs text-[#52696e]">
+                  <p className="text-xs text-ink-muted">
                     {isUz ? 'Haqiqatan ham ushbu qabulni bekor qilmoqchimisiz?' : 'Вы действительно хотите отменить эту запись на прием?'}
                   </p>
                 </div>
               </div>
 
-              <div className="p-3 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] text-xs space-y-1 text-[#152f34]">
+              <div className="p-3 bg-canvas rounded-xl border border-line text-xs space-y-1 text-ink">
                 <div>
-                  <span className="text-[#52696e]">{isUz ? 'Bemor: ' : 'Пациент: '}</span>
+                  <span className="text-ink-muted">{isUz ? 'Bemor: ' : 'Пациент: '}</span>
                   <strong>{cancellationTarget.patient?.fullName || cancellationTarget.patientName}</strong>
                 </div>
                 <div>
-                  <span className="text-[#52696e]">{isUz ? 'Vaqti: ' : 'Время: '}</span>
+                  <span className="text-ink-muted">{isUz ? 'Vaqti: ' : 'Время: '}</span>
                   <span>{formatClinicTime(cancellationTarget.startTime)}</span>
                 </div>
               </div>
@@ -928,7 +928,7 @@ export default function AdminOverviewPage() {
                 <button
                   type="button"
                   onClick={() => setCancellationTarget(null)}
-                  className="px-4 py-2 border border-[#d8e5e2] text-[#152f34] rounded-xl text-xs font-semibold hover:bg-[#f3f8f7]"
+                  className="px-4 py-2 border border-line text-ink rounded-xl text-xs font-semibold hover:bg-canvas"
                 >
                   {isUz ? 'Yopish' : 'Закрыть'}
                 </button>
@@ -951,17 +951,17 @@ export default function AdminOverviewPage() {
             role="dialog"
             aria-modal="true"
           >
-            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#d8e5e2] space-y-4">
-              <div className="flex items-center justify-between border-b border-[#d8e5e2] pb-3">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-line space-y-4">
+              <div className="flex items-center justify-between border-b border-line pb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
                     <Wallet className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-[#152f34]">
+                    <h3 className="text-base font-bold text-ink">
                       {isUz ? "Bemor qarzini so'ndirish" : 'Погашение долга пациента'}
                     </h3>
-                    <p className="text-xs text-[#52696e]">
+                    <p className="text-xs text-ink-muted">
                       {isUz ? 'Qarzlar daftari orqali to\'lov qabul qilish' : 'Прием оплаты по книге задолженностей'}
                     </p>
                   </div>
@@ -991,7 +991,7 @@ export default function AdminOverviewPage() {
               <form onSubmit={handleRepayDebtSubmit} className="space-y-3.5 text-xs">
                 {/* Select Patient with Debt */}
                 <div>
-                  <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                  <label className="text-[11px] font-bold text-ink-muted block mb-1">
                     {isUz ? 'Qarzdor bemor' : 'Пациент с долгом'} <span className="text-red-500">*</span>
                   </label>
                   <select
@@ -1002,7 +1002,7 @@ export default function AdminOverviewPage() {
                       const pat = serverDebts.find((p) => p.patientId === pId);
                       if (pat) setDebtAmount(pat.totalDebt);
                     }}
-                    className="w-full px-3 py-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] focus:outline-none focus:border-[#167b78] font-medium"
+                    className="w-full px-3 py-2 bg-canvas border border-line rounded-xl text-ink focus:outline-none focus:border-brand-600 font-medium"
                     required
                   >
                     <option value="">{isUz ? 'Bemorni tanlang' : 'Выберите пациента'}</option>
@@ -1019,7 +1019,7 @@ export default function AdminOverviewPage() {
                 {/* Repayment Amount */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold text-[#52696e]">
+                    <label className="text-[11px] font-bold text-ink-muted">
                       {isUz ? "To'lov summasi (so'm)" : 'Сумма оплаты (сум)'} <span className="text-red-500">*</span>
                     </label>
                     {(() => {
@@ -1038,14 +1038,14 @@ export default function AdminOverviewPage() {
                     value={debtAmount || ''}
                     onChange={(e) => setDebtAmount(Number(e.target.value))}
                     placeholder="500000"
-                    className="w-full px-3 py-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] font-mono font-bold focus:outline-none focus:border-[#167b78]"
+                    className="w-full px-3 py-2 bg-canvas border border-line rounded-xl text-ink font-mono font-bold focus:outline-none focus:border-brand-600"
                     required
                   />
                 </div>
 
                 {/* Payment Method Selector */}
                 <div>
-                  <label className="text-[11px] font-bold text-[#52696e] block mb-1.5">
+                  <label className="text-[11px] font-bold text-ink-muted block mb-1.5">
                     {isUz ? "To'lov usuli" : 'Способ оплаты'}
                   </label>
                   <div className="grid grid-cols-4 gap-2">
@@ -1061,8 +1061,8 @@ export default function AdminOverviewPage() {
                         onClick={() => setDebtMethod(m.id)}
                         className={`p-2 rounded-xl border text-center transition-all ${
                           debtMethod === m.id
-                            ? 'bg-[#167b78] text-white border-[#116460] shadow-2xs font-bold'
-                            : 'bg-[#f3f8f7] text-[#52696e] border-[#d8e5e2] hover:bg-[#eaf5f2]'
+                            ? 'bg-brand-600 text-white border-brand-700 shadow-2xs font-bold'
+                            : 'bg-canvas text-ink-muted border-line hover:bg-brand-50'
                         }`}
                       >
                         <span className="text-[10px] block leading-tight">{m.label}</span>
@@ -1073,7 +1073,7 @@ export default function AdminOverviewPage() {
 
                 {/* Notes */}
                 <div>
-                  <label className="text-[11px] font-bold text-[#52696e] block mb-1">
+                  <label className="text-[11px] font-bold text-ink-muted block mb-1">
                     {isUz ? 'Izoh' : 'Примечание'}
                   </label>
                   <input
@@ -1081,21 +1081,21 @@ export default function AdminOverviewPage() {
                     value={debtNotes}
                     onChange={(e) => setDebtNotes(e.target.value)}
                     placeholder={isUz ? "Qarz to'lovi izohi..." : "Примечание к оплате..."}
-                    className="w-full px-3 py-2 bg-[#f3f8f7] border border-[#d8e5e2] rounded-xl text-[#152f34] focus:outline-none focus:border-[#167b78]"
+                    className="w-full px-3 py-2 bg-canvas border border-line rounded-xl text-ink focus:outline-none focus:border-brand-600"
                   />
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#d8e5e2]">
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
                   <button
                     type="button"
                     onClick={() => setDebtModalOpen(false)}
-                    className="px-4 py-2 border border-[#d8e5e2] text-[#152f34] rounded-xl text-xs font-semibold hover:bg-[#f3f8f7]"
+                    className="px-4 py-2 border border-line text-ink rounded-xl text-xs font-semibold hover:bg-canvas"
                   >
                     {isUz ? 'Yopish' : 'Закрыть'}
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5"
+                    className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5"
                   >
                     <Check className="w-3.5 h-3.5" />
                     <span>{isUz ? "To'lovni tasdiqlash" : 'Подтвердить оплату'}</span>

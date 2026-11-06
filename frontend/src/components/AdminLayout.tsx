@@ -31,6 +31,7 @@ import {
 import { useAuth, StaffRole } from '../lib/auth';
 import { TelegramLinkModal } from './admin/TelegramLinkModal';
 import { useI18n } from '../lib/i18n';
+import { useBrand } from '../lib/brand';
 import { api } from '../lib/api';
 
 interface AdminLayoutProps {
@@ -47,19 +48,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [telegramOpen, setTelegramOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
-  const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+  const brand = useBrand();
+  const clinicLogo = brand.logo;
   const [logoError, setLogoError] = useState(false);
-  const [clinicName, setClinicName] = useState<string>('DentaCare');
+  const clinicName = brand.clinicName(language);
   const [branches, setBranches] = useState<any[]>([]);
 
   useEffect(() => {
-    api.getClinicInfo()
-      .then((info) => {
-        if (info?.logo) setClinicLogo(info.logo);
-        if (info?.name) setClinicName(info.name);
-      })
-      .catch(() => {});
-
     api.getBranches()
       .then((res) => {
         if (Array.isArray(res)) setBranches(res);
@@ -104,9 +99,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#12353b] flex items-center justify-center text-white">
-        <div className="w-8 h-8 border-3 border-[#167b78] border-t-transparent rounded-full animate-spin mr-3" />
-        <span className="text-sm font-semibold text-[#e8f3f2]">{t.common.loading}</span>
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
+        <div className="w-7 h-7 border-[3px] border-brand-600 border-t-transparent rounded-full animate-spin mr-3" />
+        <span className="text-sm font-medium text-ink-muted">{t.common.loading}</span>
       </div>
     );
   }
@@ -117,18 +112,18 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return (
-      <div className="min-h-screen bg-[#f3f8f7] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-xl text-center space-y-4 border border-[#d8e5e2]">
+      <div className="min-h-screen bg-canvas flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-xl text-center space-y-4 border border-line">
           <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto">
             <ShieldCheck className="w-8 h-8" />
           </div>
-          <h2 className="text-xl font-bold text-[#152f34]">Kirish ruxsati cheklangan</h2>
-          <p className="text-sm text-[#52696e]">
+          <h2 className="text-xl font-bold text-ink">Kirish ruxsati cheklangan</h2>
+          <p className="text-sm text-ink-muted">
             Sizning rolingiz ({user.role}) ushbu bo&apos;limga kirish uchun yetarli vakolatga ega emas.
           </p>
           <button
             onClick={() => router.push('/admin')}
-            className="px-6 py-2.5 bg-[#167b78] hover:bg-[#116460] text-white font-semibold rounded-xl text-sm transition-colors"
+            className="px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl text-sm transition-colors"
           >
             Boshqaruv paneliga qaytish
           </button>
@@ -230,315 +225,247 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
     label: language === 'ru' ? 'Управление' : 'Boshqaruv',
   };
 
+  const isRu = language === 'ru';
+  const NAV_GROUPS: Array<{ key: string; label: string; hrefs: string[] }> = [
+    { key: 'work', label: isRu ? 'Работа' : 'Ish', hrefs: ['/admin', '/admin/calendar', '/admin/patients', '/admin/leads'] },
+    { key: 'clinic', label: isRu ? 'Клиника' : 'Klinika', hrefs: ['/admin/doctors', '/admin/services', '/admin/reviews', '/admin/cms'] },
+    { key: 'manage', label: isRu ? 'Управление' : 'Boshqaruv', hrefs: ['/admin/analytics', '/admin/audit', '/admin/notifications', '/admin/staff', '/admin/settings'] },
+  ];
+  const groupedNav = NAV_GROUPS.map((g) => ({
+    ...g,
+    items: g.hrefs.map((h) => visibleNav.find((n) => n.href === h)).filter(Boolean) as typeof visibleNav,
+  })).filter((g) => g.items.length > 0);
+
+  const initial = (user.fullName || user.email).charAt(0).toUpperCase();
+  const roleLabel: Record<string, string> = isRu
+    ? { OWNER: 'Владелец', ADMIN: 'Администратор', DOCTOR: 'Врач', EDITOR: 'Редактор' }
+    : { OWNER: 'Rahbar', ADMIN: 'Administrator', DOCTOR: 'Shifokor', EDITOR: 'Muharrir' };
+
+  const brandMark = (compact = false) =>
+    clinicLogo && !logoError && !compact ? (
+      <Image
+        src={clinicLogo}
+        alt={clinicName}
+        width={150}
+        height={36}
+        unoptimized
+        onError={() => setLogoError(true)}
+        className="clinic-logo h-9 w-auto max-w-[150px] object-contain"
+      />
+    ) : (
+      <span className="flex items-center gap-2.5 min-w-0">
+        <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white shadow-soft shrink-0">
+          <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
+          </svg>
+        </span>
+        {!compact && (
+          <span className="min-w-0">
+            <span className="block font-bold text-[15px] tracking-tight text-ink leading-tight truncate">{clinicName}</span>
+            <span className="block text-[11px] text-ink-subtle font-medium">{isRu ? 'Панель управления' : 'Boshqaruv paneli'}</span>
+          </span>
+        )}
+      </span>
+    );
+
+  const navList = (collapsed: boolean, onNavigate?: () => void) => (
+    <div className="space-y-5">
+      {groupedNav.map((group) => (
+        <div key={group.key}>
+          {!collapsed && (
+            <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-subtle">{group.label}</p>
+          )}
+          <div className="space-y-0.5">
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  title={item.label}
+                  onClick={onNavigate}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative flex items-center rounded-lg text-[13px] font-medium transition-colors ${
+                    collapsed ? 'justify-center h-10' : 'gap-2.5 px-3 h-9'
+                  } ${active ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-ink-muted hover:bg-canvas hover:text-ink'}`}
+                >
+                  {active && <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-brand-600" />}
+                  <Icon className={`w-[18px] h-[18px] shrink-0 ${active ? 'text-brand-600' : 'text-ink-subtle'}`} />
+                  {!collapsed && <span className="truncate">{item.label}</span>}
+                  {item.href === '/admin/calendar' && pendingCount > 0 && (
+                    <span
+                      className={
+                        collapsed
+                          ? 'absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white'
+                          : 'ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold flex items-center justify-center'
+                      }
+                    >
+                      {!collapsed && pendingCount}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const footerBtn = (collapsed: boolean) =>
+    `w-full flex items-center rounded-lg text-[13px] font-medium transition-colors ${collapsed ? 'justify-center h-9' : 'gap-2.5 px-3 h-9'}`;
+
+  const siteLabel = isRu ? 'Сайт клиники' : 'Klinika sayti';
+
   return (
-    <div className="min-h-screen bg-[#f3f8f7] flex">
-      {/* Desktop Sidebar (Collapsible: w-64 vs w-20) */}
+    <div className="min-h-screen bg-canvas flex">
+      {/* Desktop sidebar: light surface so any clinic logo stays legible; brand color marks the active item */}
       <aside
-        className={`hidden lg:flex flex-col bg-[#12353b] text-[#e8f3f2] border-r border-[#1e464d] shrink-0 sticky top-0 h-screen z-20 transition-all duration-200 ${
-          isCollapsed ? 'w-20' : 'w-64'
+        className={`hidden lg:flex flex-col bg-white border-r border-line shrink-0 sticky top-0 h-screen z-20 transition-[width] duration-200 ${
+          isCollapsed ? 'w-[72px]' : 'w-64'
         }`}
       >
-        {/* Brand Header */}
-        <div className="h-16 px-4 border-b border-[#1e464d] flex items-center justify-between">
-          <Link href="/admin" className="flex items-center gap-3 overflow-hidden">
-            {clinicLogo && !logoError ? (
-              <Image
-                src={clinicLogo}
-                alt={clinicName}
-                width={140}
-                height={36}
-                unoptimized
-                onError={() => setLogoError(true)}
-                className="clinic-logo max-h-9 max-w-[140px] brightness-110"
-              />
-            ) : (
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#167b78] flex items-center justify-center text-white shadow-sm shrink-0">
-                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                    <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
-                  </svg>
-                </div>
-                {!isCollapsed && (
-                  <div className="min-w-0">
-                    <span className="font-bold text-base tracking-tight text-white block leading-tight truncate">
-                      {clinicName}
-                    </span>
-                    <span className="text-[10px] text-[#b2c9ca] font-medium tracking-wide block">
-                      Dental OS
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
+        <div className={`h-16 flex items-center border-b border-line ${isCollapsed ? 'justify-center px-2' : 'px-4'}`}>
+          <Link href="/admin" className="flex items-center min-w-0" aria-label={clinicName}>
+            {brandMark(isCollapsed)}
           </Link>
         </div>
 
-        {/* User Card */}
-        <div className={`mx-2.5 my-3 bg-[#18424a] rounded-xl border border-[#23535d]/60 flex items-center ${isCollapsed ? 'p-2 justify-center' : 'p-3 gap-3'}`}>
-          <div
-            className="w-8 h-8 rounded-full bg-[#167b78] text-white flex items-center justify-center font-bold text-xs shrink-0"
-            title={`${user.fullName || user.email} (${user.role})`}
-          >
-            {user.fullName ? user.fullName.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
-          </div>
-          {!isCollapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-white truncate leading-tight">
-                {user.fullName || user.email}
-              </p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#245158] text-[#86efac] font-bold tracking-wider uppercase">
-                  {user.role}
-                </span>
-              </div>
-            </div>
-          )}
-          {!isCollapsed && (
-            <Link
-              href="/"
-              target="_blank"
-              className="p-1.5 text-[#b2c9ca] hover:text-white hover:bg-[#245158] rounded-lg transition-colors"
-              title={language === 'ru' ? "Перейти на сайт клиники" : "Klinika saytiga o'tish"}
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </Link>
-          )}
-        </div>
+        <nav className={`flex-1 overflow-y-auto py-4 ${isCollapsed ? 'px-2' : 'px-3'}`}>{navList(isCollapsed)}</nav>
 
-        {/* Navigation list */}
-        <nav className="flex-1 px-2.5 py-1 space-y-1 overflow-y-auto">
-          {visibleNav.map((item) => {
-            const Icon = item.icon;
-            const active = isActive(item.href);
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={item.label}
-                className={`flex items-center rounded-xl text-sm font-medium transition-all ${
-                  isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3.5 py-2.5'
-                } ${
-                  active
-                    ? 'bg-[#245158] text-white shadow-xs font-semibold'
-                    : 'text-[#b2c9ca] hover:bg-[#1a434a] hover:text-[#e8f3f2]'
-                }`}
-              >
-                <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-[#a7f3d0]' : 'text-[#8ea9ab]'}`} />
-                {!isCollapsed && <span className="truncate">{item.label}</span>}
-                {item.href === '/admin/calendar' && pendingCount > 0 && (
-                  <span className={`${isCollapsed ? 'absolute top-1 right-1 w-2 h-2 rounded-full p-0' : 'ml-auto px-2 py-0.5 rounded-full text-[11px]'} bg-amber-400 text-slate-900 font-bold shadow-xs`}>
-                    {!isCollapsed && pendingCount}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Sidebar Footer with Collapse Toggle & Logout */}
-        <div className="p-2.5 border-t border-[#1e464d] space-y-1">
+        <div className={`border-t border-line py-3 space-y-0.5 ${isCollapsed ? 'px-2' : 'px-3'}`}>
+          <Link href="/" target="_blank" className={`${footerBtn(isCollapsed)} text-ink-muted hover:bg-canvas hover:text-ink`} title={siteLabel}>
+            <ExternalLink className="w-4 h-4 shrink-0" />
+            {!isCollapsed && <span>{siteLabel}</span>}
+          </Link>
+          <button type="button" onClick={() => setTelegramOpen(true)} className={`${footerBtn(isCollapsed)} text-ink-muted hover:bg-canvas hover:text-ink`} title="Telegram">
+            <Send className="w-4 h-4 shrink-0" />
+            {!isCollapsed && <span>Telegram</span>}
+          </button>
           <button
             type="button"
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className={`w-full flex items-center text-xs font-semibold text-[#b2c9ca] hover:bg-[#1a434a] hover:text-white rounded-xl transition-colors ${
-              isCollapsed ? 'justify-center p-2' : 'gap-3 px-3.5 py-2'
-            }`}
-            title={isCollapsed ? (language === 'ru' ? 'Развернуть меню' : 'Kengaytirish') : (language === 'ru' ? 'Свернуть меню' : 'Kichraytirish')}
+            className={`${footerBtn(isCollapsed)} text-ink-muted hover:bg-canvas hover:text-ink`}
+            title={isCollapsed ? (isRu ? 'Развернуть меню' : 'Kengaytirish') : isRu ? 'Свернуть меню' : 'Kichraytirish'}
           >
-            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            {!isCollapsed && <span>{language === 'ru' ? 'Свернуть меню' : 'Kichraytirish'}</span>}
+            {isCollapsed ? <ChevronRight className="w-4 h-4 shrink-0" /> : <ChevronLeft className="w-4 h-4 shrink-0" />}
+            {!isCollapsed && <span>{isRu ? 'Свернуть' : 'Kichraytirish'}</span>}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setTelegramOpen(true)}
-            className={`w-full flex items-center text-xs font-semibold text-[#b2c9ca] hover:bg-[#1a434a] hover:text-white rounded-xl transition-colors ${
-              isCollapsed ? 'justify-center p-2' : 'gap-3 px-3.5 py-2'
-            }`}
-            title="Telegram"
-          >
-            <Send className="w-4 h-4" />
-            {!isCollapsed && <span>Telegram</span>}
-          </button>
-
-          <button
-            type="button"
-            onClick={logout}
-            className={`w-full flex items-center text-xs font-semibold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 rounded-xl transition-colors ${
-              isCollapsed ? 'justify-center p-2' : 'gap-3 px-3.5 py-2'
-            }`}
-            title={t.admin.logout}
-          >
-            <LogOut className="w-4 h-4" />
-            {!isCollapsed && <span>{t.admin.logout}</span>}
-          </button>
+          <div className={`mt-2 pt-3 border-t border-line flex items-center ${isCollapsed ? 'flex-col gap-2' : 'gap-2.5 px-1'}`}>
+            <span
+              className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs shrink-0"
+              title={`${user.fullName || user.email} (${user.role})`}
+            >
+              {initial}
+            </span>
+            {!isCollapsed && (
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold text-ink truncate leading-tight">{user.fullName || user.email.split('@')[0]}</span>
+                <span className="block text-[11px] text-ink-subtle truncate">{roleLabel[user.role] || user.role}</span>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={logout}
+              className="p-2 rounded-lg text-ink-subtle hover:text-rose-600 hover:bg-rose-50 transition-colors"
+              title={t.admin.logout}
+              aria-label={t.admin.logout}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </aside>
 
-      <TelegramLinkModal
-        isOpen={telegramOpen}
-        onClose={() => setTelegramOpen(false)}
-        language={language === 'ru' ? 'ru' : 'uz'}
-      />
+      <TelegramLinkModal isOpen={telegramOpen} onClose={() => setTelegramOpen(false)} language={isRu ? 'ru' : 'uz'} />
 
-      {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen overflow-x-hidden">
-        {/* Compact Clean Top Bar (Desktop & Mobile) */}
-        <header className="h-16 bg-white/90 backdrop-blur-md border-b border-[#d8e5e2] px-4 sm:px-8 flex items-center justify-between sticky top-0 z-30 shadow-xs">
-          {/* Left: Mobile trigger & Page Title */}
-          <div className="flex items-center gap-3">
+        <header className="h-16 bg-white/85 backdrop-blur-md border-b border-line px-4 sm:px-8 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 text-[#152f34] hover:bg-[#f0f7f5] rounded-xl border border-[#d8e5e2]"
-              aria-label={language === 'ru' ? "Открыть меню" : "Menyu ochish"}
+              className="lg:hidden p-2 text-ink hover:bg-canvas rounded-lg border border-line"
+              aria-label={isRu ? 'Открыть меню' : 'Menyu ochish'}
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div>
-              <h1 className="text-base sm:text-lg font-bold text-[#152f34] tracking-tight leading-tight">
-                {currentNavItem.label}
-              </h1>
-            </div>
+            <h1 className="text-base sm:text-[17px] font-semibold text-ink tracking-tight truncate">{currentNavItem.label}</h1>
           </div>
 
-          {/* Right: Branch Info, Language Switcher, Profile Pill */}
           <div className="flex items-center gap-2 sm:gap-3">
             {branches.length > 0 && (
-              <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-[#f0f7f5] text-[#152f34] rounded-xl border border-[#d8e5e2] text-xs font-medium">
-                <Building2 className="w-3.5 h-3.5 text-[#167b78]" />
+              <div className="hidden md:flex items-center gap-1.5 h-8 px-3 text-ink-muted rounded-lg border border-line text-xs font-medium bg-white">
+                <Building2 className="w-3.5 h-3.5 text-ink-subtle" />
                 <span>
                   {branches.length === 1
-                    ? (language === 'ru' ? branches[0].nameRu : branches[0].nameUz)
-                    : (language === 'ru' ? `${branches.length} филиалов` : `${branches.length} ta filial`)}
+                    ? isRu
+                      ? branches[0].nameRu
+                      : branches[0].nameUz
+                    : isRu
+                      ? `${branches.length} филиала`
+                      : `${branches.length} ta filial`}
                 </span>
               </div>
             )}
 
-            {/* Language Switcher */}
-            <div className="flex items-center bg-[#f0f7f5] p-0.5 rounded-xl border border-[#d8e5e2]">
-              <button
-                type="button"
-                onClick={() => setLanguage('uz')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${
-                  language === 'uz'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
-                }`}
-              >
-                UZ
-              </button>
-              <button
-                type="button"
-                onClick={() => setLanguage('ru')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${
-                  language === 'ru'
-                    ? 'bg-[#167b78] text-white shadow-xs'
-                    : 'text-[#52696e] hover:text-[#152f34]'
-                }`}
-              >
-                RU
-              </button>
+            <div className="flex items-center h-8 p-0.5 rounded-lg border border-line bg-canvas" role="group" aria-label={isRu ? 'Язык' : 'Til'}>
+              {(['uz', 'ru'] as const).map((lng) => (
+                <button
+                  key={lng}
+                  type="button"
+                  onClick={() => setLanguage(lng)}
+                  aria-pressed={language === lng}
+                  className={`h-full px-2.5 text-[11px] font-bold rounded-md transition-colors ${
+                    language === lng ? 'bg-white text-ink shadow-soft' : 'text-ink-subtle hover:text-ink'
+                  }`}
+                >
+                  {lng.toUpperCase()}
+                </button>
+              ))}
             </div>
 
-            {/* Staff User Avatar Pill */}
-            <div className="flex items-center gap-2 pl-2 border-l border-[#d8e5e2]">
-              <div className="w-8 h-8 rounded-full bg-[#e0f2ed] text-[#167b78] font-bold flex items-center justify-center text-xs border border-[#167b78]/30">
-                {user.fullName ? user.fullName.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
-              </div>
-              <div className="hidden sm:block text-left">
-                <p className="text-xs font-bold text-[#152f34] leading-tight truncate max-w-[120px]">
-                  {user.fullName || user.email.split('@')[0]}
-                </p>
-                <p className="text-[10px] text-[#52696e] font-medium leading-tight">
-                  {user.role}
-                </p>
-              </div>
-            </div>
+            <span className="lg:hidden w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs">{initial}</span>
           </div>
         </header>
 
-        {/* Mobile Slide-over Drawer */}
         {sidebarOpen && (
           <div className="fixed inset-0 z-50 lg:hidden flex">
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
-              onClick={() => setSidebarOpen(false)}
-            />
-
-            {/* Drawer Content */}
-            <div className="relative w-72 max-w-[85vw] bg-[#12353b] text-[#e8f3f2] h-full flex flex-col justify-between shadow-2xl p-4 z-10 animate-fade-in">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#1e464d]">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-[#167b78] flex items-center justify-center text-white">
-                      <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                        <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
-                      </svg>
-                    </div>
-                    <span className="font-bold text-white text-base">{clinicName}</span>
-                  </div>
-                  <button
-                    onClick={() => setSidebarOpen(false)}
-                    className="p-1.5 text-[#b2c9ca] hover:text-white rounded-lg"
-                    aria-label={language === 'ru' ? "Закрыть" : "Yopish"}
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="p-3 bg-[#18424a] rounded-xl border border-[#23535d]/60">
-                  <p className="text-xs font-semibold text-white truncate">{user.email}</p>
-                  <span className="text-[10px] mt-1 inline-block px-1.5 py-0.5 rounded bg-[#245158] text-[#86efac] font-bold uppercase">
-                    {user.role}
+            <div className="fixed inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={() => setSidebarOpen(false)} />
+            <div className="relative w-72 max-w-[85vw] bg-white h-full flex flex-col shadow-popover z-10 animate-fade-in">
+              <div className="h-16 px-4 flex items-center justify-between border-b border-line">
+                {brandMark()}
+                <button onClick={() => setSidebarOpen(false)} className="p-1.5 text-ink-subtle hover:text-ink rounded-lg" aria-label={isRu ? 'Закрыть' : 'Yopish'}>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <nav className="flex-1 overflow-y-auto px-3 py-4">{navList(false, () => setSidebarOpen(false))}</nav>
+              <div className="border-t border-line p-3 space-y-0.5">
+                <div className="flex items-center gap-2.5 px-1 pb-2">
+                  <span className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs">{initial}</span>
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-semibold text-ink truncate">{user.fullName || user.email}</span>
+                    <span className="block text-[11px] text-ink-subtle">{roleLabel[user.role] || user.role}</span>
                   </span>
                 </div>
-
-                {/* Nav list */}
-                <div className="space-y-1 max-h-[60vh] overflow-y-auto">
-                  {visibleNav.map((item) => {
-                    const Icon = item.icon;
-                    const active = isActive(item.href);
-
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setSidebarOpen(false)}
-                        className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium ${
-                          active
-                            ? 'bg-[#245158] text-white font-semibold'
-                            : 'text-[#b2c9ca] hover:bg-[#1a434a] hover:text-white'
-                        }`}
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                        {item.href === '/admin/calendar' && pendingCount > 0 && (
-                          <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 font-bold text-[10px]">
-                            {pendingCount}
-                          </span>
-                        )}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-[#1e464d] space-y-2">
-                <Link
-                  href="/"
-                  target="_blank"
-                  className="w-full py-2.5 px-3 bg-[#18424a] text-[#b2c9ca] hover:text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>{language === 'ru' ? 'Сайт клиники' : 'Klinika sayti'}</span>
+                <Link href="/" target="_blank" className={`${footerBtn(false)} text-ink-muted hover:bg-canvas`}>
+                  <ExternalLink className="w-4 h-4" />
+                  <span>{siteLabel}</span>
                 </Link>
                 <button
-                  onClick={logout}
-                  className="w-full py-2.5 px-3 bg-rose-950/40 text-rose-300 hover:bg-rose-900/50 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
+                  type="button"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setTelegramOpen(true);
+                  }}
+                  className={`${footerBtn(false)} text-ink-muted hover:bg-canvas`}
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <Send className="w-4 h-4" />
+                  <span>Telegram</span>
+                </button>
+                <button onClick={logout} className={`${footerBtn(false)} text-rose-600 hover:bg-rose-50`}>
+                  <LogOut className="w-4 h-4" />
                   <span>{t.admin.logout}</span>
                 </button>
               </div>
@@ -546,64 +473,45 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
           </div>
         )}
 
-        {/* Main Content Area */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-full pb-20 lg:pb-8">
-          {children}
-        </main>
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-full pb-24 lg:pb-8">{children}</main>
       </div>
 
-      {/* Mobile Bottom Navigation Bar (Image 2/4 Mobile UX) */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#12353b]/95 backdrop-blur-md border-t border-[#1e464d] px-2 py-1.5 flex items-center justify-around shadow-2xl">
-        <Link
-          href="/admin"
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs transition-colors ${
-            pathname === '/admin' ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
-          }`}
-        >
-          <LayoutDashboard className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Главная' : 'Asosiy'}</span>
-        </Link>
-
-        <Link
-          href="/admin/calendar"
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs relative transition-colors ${
-            pathname.startsWith('/admin/calendar') ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
-          }`}
-        >
-          <Calendar className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Календарь' : 'Taqvim'}</span>
-          {pendingCount > 0 && (
-            <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-[#12353b]" />
-          )}
-        </Link>
-
-        <Link
-          href="/admin/patients"
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs transition-colors ${
-            pathname.startsWith('/admin/patients') ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
-          }`}
-        >
-          <Users className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Пациенты' : 'Bemorlar'}</span>
-        </Link>
-
-        <Link
-          href="/admin/analytics"
-          className={`flex flex-col items-center justify-center p-1.5 rounded-xl text-xs transition-colors ${
-            pathname.startsWith('/admin/analytics') ? 'text-[#14bdac] font-bold' : 'text-[#b2c9ca] hover:text-white'
-          }`}
-        >
-          <BarChart3 className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Аналитика' : 'Hisobot'}</span>
-        </Link>
-
+      {/* Mobile bottom navigation */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-line px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-around">
+        {[
+          { href: '/admin', icon: LayoutDashboard, label: isRu ? 'Главная' : 'Asosiy', exact: true },
+          { href: '/admin/calendar', icon: Calendar, label: isRu ? 'Календарь' : 'Taqvim', exact: false },
+          { href: '/admin/patients', icon: Users, label: isRu ? 'Пациенты' : 'Bemorlar', exact: false },
+          { href: '/admin/analytics', icon: BarChart3, label: isRu ? 'Аналитика' : 'Hisobot', exact: false },
+        ]
+          .filter((item) => visibleNav.some((n) => n.href === item.href))
+          .map((item) => {
+            const Icon = item.icon;
+            const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? 'page' : undefined}
+                className={`relative flex flex-col items-center justify-center px-3 py-1 rounded-lg transition-colors ${
+                  active ? 'text-brand-700' : 'text-ink-subtle hover:text-ink'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className={`text-[10px] mt-0.5 ${active ? 'font-semibold' : 'font-medium'}`}>{item.label}</span>
+                {item.href === '/admin/calendar' && pendingCount > 0 && (
+                  <span className="absolute top-0.5 right-2.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white" />
+                )}
+              </Link>
+            );
+          })}
         <button
           type="button"
           onClick={() => setSidebarOpen(true)}
-          className="flex flex-col items-center justify-center p-1.5 rounded-xl text-xs text-[#b2c9ca] hover:text-white transition-colors"
+          className="flex flex-col items-center justify-center px-3 py-1 rounded-lg text-ink-subtle hover:text-ink transition-colors"
         >
           <Menu className="w-5 h-5" />
-          <span className="text-[10px] mt-0.5">{language === 'ru' ? 'Меню' : 'Menyu'}</span>
+          <span className="text-[10px] mt-0.5 font-medium">{isRu ? 'Меню' : 'Menyu'}</span>
         </button>
       </nav>
     </div>

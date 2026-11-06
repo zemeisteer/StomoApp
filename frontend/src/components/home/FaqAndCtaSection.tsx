@@ -91,14 +91,14 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
       {/* FAQ Accordion Section */}
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-12 sm:mb-16 space-y-3">
-          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider">
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
             <HelpCircle className="w-3.5 h-3.5" />
             <span>FAQ</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-[#152f34] tracking-tight">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
             {isRu ? 'Часто задаваемые вопросы' : 'Ko\'p beriladigan savollar'}
           </h2>
-          <p className="text-sm sm:text-base text-[#52696e] max-w-xl mx-auto leading-relaxed">
+          <p className="text-sm sm:text-base text-ink-muted max-w-xl mx-auto leading-relaxed">
             {isRu
               ? 'Ответы на самые важные вопросы о лечении, гарантиях, записи и ценах в нашей клинике.'
               : 'Davolanish, xavfsizlik, narxlar va qabulga tayyorgarlik bo\'yicha eng muhim ma\'lumotlar.'}
@@ -109,7 +109,7 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
         {isLoading && (
           <div className="space-y-4">
             {[1, 2, 3, 4].map((n) => (
-              <div key={n} className="bg-white rounded-3xl border border-[#d8e5e2] p-7 animate-pulse h-24" />
+              <div key={n} className="bg-white rounded-3xl border border-line p-7 animate-pulse h-24" />
             ))}
           </div>
         )}
@@ -123,7 +123,7 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
               <button
                 type="button"
                 onClick={onRetry}
-                className="px-5 py-2 bg-[#167b78] hover:bg-[#126462] text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
               >
                 {t.common.retry}
               </button>
@@ -143,8 +143,8 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
                   key={faq.id}
                   className={`bg-white rounded-2xl sm:rounded-3xl border transition-all duration-200 overflow-hidden ${
                     isOpen
-                      ? 'border-[#167b78] ring-2 ring-[#167b78]/10 shadow-[0_8px_30px_rgba(22,123,120,0.08)] bg-gradient-to-b from-white to-[#f7fbf9]'
-                      : 'border-[#d8e5e2] hover:border-[#167b78]/40 shadow-[0_2px_10px_rgba(21,47,52,0.02)]'
+                      ? 'border-brand-600 ring-2 ring-brand-600/10 shadow-[0_8px_30px_rgb(var(--brand-600)/0.08)] bg-gradient-to-b from-white to-canvas'
+                      : 'border-line hover:border-brand-600/40 shadow-[0_2px_10px_rgba(21,47,52,0.02)]'
                   }`}
                 >
                   <button
@@ -157,13 +157,13 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
                       <div
                         className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-xs sm:text-sm font-extrabold shrink-0 transition-colors ${
                           isOpen
-                            ? 'bg-[#167b78] text-white shadow-md shadow-[#167b78]/25'
-                            : 'bg-[#eaf5f2] text-[#167b78] group-hover:bg-[#167b78]/15'
+                            ? 'bg-brand-600 text-white shadow-md shadow-brand-600/25'
+                            : 'bg-brand-50 text-brand-600 group-hover:bg-brand-600/15'
                         }`}
                       >
                         {itemNum}
                       </div>
-                      <span className="font-bold text-base sm:text-lg text-[#152f34] group-hover:text-[#167b78] transition-colors leading-snug">
+                      <span className="font-bold text-base sm:text-lg text-ink group-hover:text-brand-600 transition-colors leading-snug">
                         {faq.question}
                       </span>
                     </div>
@@ -171,8 +171,8 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
                     <div
                       className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all ${
                         isOpen
-                          ? 'bg-[#167b78] text-white rotate-180 shadow-sm'
-                          : 'bg-[#f3f8f7] group-hover:bg-[#eaf5f2] text-[#167b78]'
+                          ? 'bg-brand-600 text-white rotate-180 shadow-sm'
+                          : 'bg-canvas group-hover:bg-brand-50 text-brand-600'
                       }`}
                     >
                       <ChevronDown className="w-5 h-5 transition-transform duration-200" />
@@ -181,8 +181,8 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
 
                   {isOpen && (
                     <div className="px-6 sm:px-8 pb-7 pt-1 animate-fade-in">
-                      <div className="border-t border-[#d8e5e2]/80 pt-5 pl-13 sm:pl-15">
-                        <p className="text-sm sm:text-base text-[#465e64] leading-relaxed">
+                      <div className="border-t border-line/80 pt-5 pl-13 sm:pl-15">
+                        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
                           {faq.answer}
                         </p>
                       </div>
@@ -196,7 +196,7 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
       </div>
 
       {/* Final Pre-Footer Booking Call To Action Banner */}
-      <div className="bg-gradient-to-tr from-[#167b78] to-[#1a8e8b] rounded-3xl p-8 sm:p-14 text-white shadow-xl shadow-[#167b78]/15 relative overflow-hidden">
+      <div className="bg-gradient-to-tr from-brand-600 to-brand-500 rounded-3xl p-8 sm:p-14 text-white shadow-xl shadow-brand-600/15 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full blur-2xl pointer-events-none" />
 
         <div className="relative z-10 max-w-2xl mx-auto text-center space-y-6">
@@ -220,9 +220,9 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3.5">
             <Link
               href="/booking"
-              className="w-full sm:w-auto px-8 py-4 bg-white text-[#167b78] hover:bg-[#f3f8f7] font-bold text-base rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 transform active:scale-95"
+              className="w-full sm:w-auto px-8 py-4 bg-white text-brand-600 hover:bg-canvas font-bold text-base rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 transform active:scale-95"
             >
-              <Calendar className="w-5 h-5 text-[#167b78]" />
+              <Calendar className="w-5 h-5 text-brand-600" />
               <span>{t.common.bookAppointment}</span>
             </Link>
 

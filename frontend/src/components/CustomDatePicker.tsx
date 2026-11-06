@@ -439,10 +439,10 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       aria-modal="true"
       aria-label={isRu ? 'Выбор даты' : 'Sana tanlash'}
       tabIndex={-1}
-      className={`bg-white rounded-3xl border border-[#d8e5e2] p-4 text-[#152f34] select-none ${
+      className={`bg-white rounded-3xl border border-line p-4 text-ink select-none ${
         inline
           ? 'w-full shadow-sm'
-          : 'shadow-[0_12px_40px_rgba(21,47,52,0.14)] ring-1 ring-[#167b78]/15 animate-fade-in'
+          : 'shadow-[0_12px_40px_rgba(21,47,52,0.14)] ring-1 ring-brand-600/15 animate-fade-in'
       }`}
       onKeyDown={handleGridKeyDown}
     >
@@ -451,20 +451,20 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
         <button
           type="button"
           onClick={prevMonth}
-          className="w-8 h-8 rounded-xl bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#167b78] flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#167b78]"
+          className="w-8 h-8 rounded-xl bg-brand-50 hover:bg-brand-50 text-brand-600 flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-600"
           aria-label={isRu ? 'Предыдущий месяц' : 'Oldingi oy'}
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
 
-        <span className="font-extrabold text-sm text-[#152f34]" aria-live="polite">
+        <span className="font-extrabold text-sm text-ink" aria-live="polite">
           {isRu ? MONTH_NAMES_RU[viewMonth - 1] : MONTH_NAMES_UZ[viewMonth - 1]} {viewYear}
         </span>
 
         <button
           type="button"
           onClick={nextMonth}
-          className="w-8 h-8 rounded-xl bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#167b78] flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#167b78]"
+          className="w-8 h-8 rounded-xl bg-brand-50 hover:bg-brand-50 text-brand-600 flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-600"
           aria-label={isRu ? 'Следующий месяц' : 'Keyingi oy'}
         >
           <ChevronRight className="w-4 h-4" />
@@ -479,7 +479,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
             role="columnheader"
             aria-label={dayName}
             className={`text-[11px] font-bold uppercase py-1 ${
-              idx >= 5 ? 'text-[#167b78]/70' : 'text-[#52696e]'
+              idx >= 5 ? 'text-brand-600/70' : 'text-ink-muted'
             }`}
           >
             {dayName}
@@ -523,19 +523,19 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
               aria-disabled={isDisabled}
               aria-label={`${dayNum} ${monthName} ${viewYear}${isToday ? (isRu ? ' (Сегодня)' : ' (Bugun)') : ''}`}
               onClick={() => handleDaySelect(dayNum)}
-              className={`h-8 sm:h-9 w-full rounded-xl text-xs font-bold transition-all flex items-center justify-center relative cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#167b78] ${
+              className={`h-8 sm:h-9 w-full rounded-xl text-xs font-bold transition-all flex items-center justify-center relative cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-600 ${
                 isSelected
-                  ? 'bg-[#167b78] text-white shadow-md shadow-[#167b78]/30 scale-105 font-extrabold'
+                  ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30 scale-105 font-extrabold'
                   : isDisabled
                   ? 'text-slate-300 cursor-not-allowed opacity-40 line-through'
                   : isToday
-                  ? 'bg-[#eaf5f2] text-[#167b78] hover:bg-[#167b78] hover:text-white ring-1 ring-[#167b78]/40'
-                  : 'text-[#152f34] hover:bg-[#f0f6f4] hover:text-[#167b78]'
+                  ? 'bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white ring-1 ring-brand-600/40'
+                  : 'text-ink hover:bg-brand-50 hover:text-brand-600'
               }`}
             >
               <span>{dayNum}</span>
               {isToday && !isSelected && (
-                <span className="absolute bottom-1 w-1 h-1 rounded-full bg-[#167b78]" />
+                <span className="absolute bottom-1 w-1 h-1 rounded-full bg-brand-600" />
               )}
             </button>
           );
@@ -543,7 +543,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       </div>
 
       {/* Quick shortcut chips */}
-      <div className="mt-3 pt-3 border-t border-[#d8e5e2] flex items-center justify-between text-[11px] gap-2">
+      <div className="mt-3 pt-3 border-t border-line flex items-center justify-between text-[11px] gap-2">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -552,7 +552,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
             className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
               isTodayDisabled
                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
-                : 'bg-[#eaf5f2] hover:bg-[#d8ebe7] text-[#167b78]'
+                : 'bg-brand-50 hover:bg-brand-100 text-brand-600'
             }`}
           >
             {isRu ? 'Сегодня' : 'Bugun'}
@@ -564,7 +564,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
             className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
               isTomorrowDisabled
                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
-                : 'bg-[#f0f6f4] hover:bg-[#eaf5f2] text-[#52696e] hover:text-[#167b78]'
+                : 'bg-brand-50 hover:bg-brand-50 text-ink-muted hover:text-brand-600'
             }`}
           >
             {isRu ? 'Завтра' : 'Ertaga'}
@@ -595,7 +595,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     return (
       <div className={`space-y-1.5 ${className}`}>
         {label && (
-          <label className="block text-xs font-bold text-[#152f34]">
+          <label className="block text-xs font-bold text-ink">
             {label}
             {required && <span className="text-rose-500 ml-0.5">*</span>}
           </label>
@@ -608,7 +608,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   return (
     <div ref={containerRef} className={`relative space-y-1.5 ${className}`}>
       {label && (
-        <label htmlFor={inputId} className="block text-xs font-bold text-[#152f34]">
+        <label htmlFor={inputId} className="block text-xs font-bold text-ink">
           {label}
           {required && <span className="text-rose-500 ml-0.5">*</span>}
         </label>
@@ -627,19 +627,19 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
             disabled
               ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
               : isOpen
-              ? 'border-[#167b78] ring-2 ring-[#167b78]/15 bg-white text-[#152f34] shadow-sm'
-              : 'border-[#d8e5e2] bg-[#f9fcfa] hover:bg-white text-[#152f34] hover:border-[#167b78]/40 focus:border-[#167b78] focus:ring-2 focus:ring-[#167b78]/15'
+              ? 'border-brand-600 ring-2 ring-brand-600/15 bg-white text-ink shadow-sm'
+              : 'border-line bg-canvas hover:bg-white text-ink hover:border-brand-600/40 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/15'
           }`}
         >
-          <CalendarIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#167b78]" />
+          <CalendarIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-600" />
 
-          <span className={value ? 'font-bold text-[#152f34]' : 'text-[#52696e]'}>
+          <span className={value ? 'font-bold text-ink' : 'text-ink-muted'}>
             {value ? formatFormattedDisplay(value) : effectivePlaceholder}
           </span>
 
           {(!value || required || disabled) && (
-            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#52696e] pointer-events-none">
-              <Clock className="w-3.5 h-3.5 text-[#167b78]/60" />
+            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-ink-muted pointer-events-none">
+              <Clock className="w-3.5 h-3.5 text-brand-600/60" />
             </span>
           )}
         </button>
@@ -654,7 +654,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
               onChange('');
               triggerRef.current?.focus();
             }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-[#52696e] hover:text-rose-600 p-1 rounded-full hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-[#167b78] cursor-pointer"
+            className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-ink-muted hover:text-rose-600 p-1 rounded-full hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>

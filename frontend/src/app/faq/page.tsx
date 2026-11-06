@@ -67,14 +67,14 @@ export default function FaqPage() {
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-16 space-y-12">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#eaf5f2] text-[#167b78] text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
           <HelpCircle className="w-3.5 h-3.5" />
           <span>FAQ</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-[#152f34] tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
           {isRu ? 'Часто задаваемые вопросы' : 'Ko\'p beriladigan savollar'}
         </h1>
-        <p className="text-sm sm:text-base text-[#52696e] leading-relaxed">
+        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
           {isRu
             ? 'Ответы на самые популярные вопросы о лечении, гарантиях, записи и подготовке к приему.'
             : 'Davolanish, to\'lovlar, kafolatlar va tayyorgarlik bo\'yicha eng dolzarb javoblar.'}
@@ -84,13 +84,13 @@ export default function FaqPage() {
       {/* Search Bar */}
       <div className="max-w-md mx-auto">
         <div className="relative">
-          <Search className="absolute left-3.5 top-3 w-4 h-4 text-[#52696e]" />
+          <Search className="absolute left-3.5 top-3 w-4 h-4 text-ink-muted" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={isRu ? 'Поиск по вопросам...' : 'Savollar bo\'yicha qidiruv...'}
-            className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-[#d8e5e2] text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#167b78] bg-white text-[#152f34] shadow-sm"
+            className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-line text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink shadow-sm"
           />
         </div>
       </div>
@@ -98,11 +98,11 @@ export default function FaqPage() {
       {isLoading ? (
         <div className="space-y-4">
           {[1, 2, 3, 4].map((n) => (
-            <div key={n} className="bg-white rounded-3xl border border-[#d8e5e2] p-7 animate-pulse h-24" />
+            <div key={n} className="bg-white rounded-3xl border border-line p-7 animate-pulse h-24" />
           ))}
         </div>
       ) : filteredFaqs.length === 0 ? (
-        <div className="p-16 text-center text-[#52696e] text-sm bg-white rounded-3xl border border-dashed border-[#d8e5e2]">
+        <div className="p-16 text-center text-ink-muted text-sm bg-white rounded-3xl border border-dashed border-line">
           {isRu ? 'Вопросы не найдены.' : 'Savollar topilmadi.'}
         </div>
       ) : (
@@ -116,8 +116,8 @@ export default function FaqPage() {
                 key={faq.id}
                 className={`bg-white rounded-2xl sm:rounded-3xl border transition-all duration-200 overflow-hidden ${
                   isOpen
-                    ? 'border-[#167b78] ring-2 ring-[#167b78]/10 shadow-[0_8px_30px_rgba(22,123,120,0.08)] bg-gradient-to-b from-white to-[#f7fbf9]'
-                    : 'border-[#d8e5e2] hover:border-[#167b78]/40 shadow-[0_2px_10px_rgba(21,47,52,0.02)]'
+                    ? 'border-brand-600 ring-2 ring-brand-600/10 shadow-[0_8px_30px_rgb(var(--brand-600)/0.08)] bg-gradient-to-b from-white to-canvas'
+                    : 'border-line hover:border-brand-600/40 shadow-[0_2px_10px_rgba(21,47,52,0.02)]'
                 }`}
               >
                 <button
@@ -130,13 +130,13 @@ export default function FaqPage() {
                     <div
                       className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-xs sm:text-sm font-extrabold shrink-0 transition-colors ${
                         isOpen
-                          ? 'bg-[#167b78] text-white shadow-md shadow-[#167b78]/25'
-                          : 'bg-[#eaf5f2] text-[#167b78] group-hover:bg-[#167b78]/15'
+                          ? 'bg-brand-600 text-white shadow-md shadow-brand-600/25'
+                          : 'bg-brand-50 text-brand-600 group-hover:bg-brand-600/15'
                       }`}
                     >
                       {itemNum}
                     </div>
-                    <span className="font-bold text-base sm:text-lg text-[#152f34] group-hover:text-[#167b78] transition-colors leading-snug">
+                    <span className="font-bold text-base sm:text-lg text-ink group-hover:text-brand-600 transition-colors leading-snug">
                       {faq.question}
                     </span>
                   </div>
@@ -144,8 +144,8 @@ export default function FaqPage() {
                   <div
                     className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all ${
                       isOpen
-                        ? 'bg-[#167b78] text-white rotate-180 shadow-sm'
-                        : 'bg-[#f3f8f7] group-hover:bg-[#eaf5f2] text-[#167b78]'
+                        ? 'bg-brand-600 text-white rotate-180 shadow-sm'
+                        : 'bg-canvas group-hover:bg-brand-50 text-brand-600'
                     }`}
                   >
                     <ChevronDown className="w-5 h-5 transition-transform duration-200" />
@@ -154,8 +154,8 @@ export default function FaqPage() {
 
                 {isOpen && (
                   <div className="px-6 sm:px-8 pb-7 pt-1 animate-fade-in">
-                    <div className="border-t border-[#d8e5e2]/80 pt-5 pl-13 sm:pl-15">
-                      <p className="text-sm sm:text-base text-[#465e64] leading-relaxed">
+                    <div className="border-t border-line/80 pt-5 pl-13 sm:pl-15">
+                      <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
                         {faq.answer}
                       </p>
                     </div>
@@ -168,7 +168,7 @@ export default function FaqPage() {
       )}
 
       {/* CTA Box */}
-      <div className="p-8 sm:p-12 bg-gradient-to-tr from-[#167b78] to-[#1a8e8b] rounded-3xl text-white text-center space-y-5 shadow-xl shadow-[#167b78]/15 relative overflow-hidden">
+      <div className="p-8 sm:p-12 bg-gradient-to-tr from-brand-600 to-brand-500 rounded-3xl text-white text-center space-y-5 shadow-xl shadow-brand-600/15 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-white/5 rounded-full blur-2xl pointer-events-none" />
         <div className="relative z-10 max-w-xl mx-auto space-y-4">
           <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
@@ -182,9 +182,9 @@ export default function FaqPage() {
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3.5">
             <Link
               href="/booking"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-white text-[#167b78] hover:bg-[#f3f8f7] font-bold text-sm rounded-2xl shadow-lg transition-all transform active:scale-95"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-white text-brand-600 hover:bg-canvas font-bold text-sm rounded-2xl shadow-lg transition-all transform active:scale-95"
             >
-              <Calendar className="w-4 h-4 text-[#167b78]" />
+              <Calendar className="w-4 h-4 text-brand-600" />
               <span>{t.common.bookAppointment}</span>
             </Link>
             <Link

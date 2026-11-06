@@ -152,8 +152,8 @@ export default function BookingStatusPage() {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
         <div className="text-center space-y-3">
-          <div className="w-10 h-10 border-3 border-[#167b78] border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-semibold text-[#52696e]">{t.common.loading}</p>
+          <div className="w-10 h-10 border-3 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-semibold text-ink-muted">{t.common.loading}</p>
         </div>
       </div>
     );
@@ -165,8 +165,8 @@ export default function BookingStatusPage() {
         <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-200">
           <AlertCircle className="w-8 h-8" />
         </div>
-        <h2 className="text-xl font-bold text-[#152f34] mb-2">{t.common.error}</h2>
-        <p className="text-sm text-[#52696e] mb-6">{errorMessage}</p>
+        <h2 className="text-xl font-bold text-ink mb-2">{t.common.error}</h2>
+        <p className="text-sm text-ink-muted mb-6">{errorMessage}</p>
         <Link
           href="/"
           className="ui-button ui-button--primary text-sm font-bold"
@@ -211,13 +211,13 @@ export default function BookingStatusPage() {
       <div className="flex items-center justify-between">
         <Link
           href="/"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#52696e] hover:text-[#167b78] transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-brand-600 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>{t.nav.home}</span>
         </Link>
 
-        <span className="text-xs text-[#52696e] bg-[#eaf5f2] px-3 py-1 rounded-full font-semibold border border-[#d8e5e2]">
+        <span className="text-xs text-ink-muted bg-brand-50 px-3 py-1 rounded-full font-semibold border border-line">
           {isUz ? "Bemor portali (O'z-o'ziga xizmat)" : "Портал пациента (Самообслуживание)"}
         </span>
       </div>
@@ -238,16 +238,16 @@ export default function BookingStatusPage() {
       )}
 
       {/* Welcome & Patient Header (Image 1 Style) */}
-      <div className="bg-white p-6 rounded-2xl border border-[#d8e5e2] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white p-6 rounded-2xl border border-line shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-[#e0f2ed] text-[#167b78] flex items-center justify-center font-bold text-base border border-[#167b78]/20">
+          <div className="w-12 h-12 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-base border border-brand-600/20">
             {appointment.patient?.fullName?.charAt(0) || appointment.patientName?.charAt(0) || 'B'}
           </div>
           <div>
-            <h1 className="text-lg sm:text-xl font-bold text-[#152f34]">
+            <h1 className="text-lg sm:text-xl font-bold text-ink">
               {appointment.patient?.fullName || appointment.patientName}
             </h1>
-            <p className="text-xs text-[#52696e]">
+            <p className="text-xs text-ink-muted">
               {appointment.patient?.phone || (isUz ? 'Telefon qayd etilgan' : 'Телефон указан')}
             </p>
           </div>
@@ -264,12 +264,12 @@ export default function BookingStatusPage() {
 
       {/* Main Upcoming Appointment Card (Image 1 OraDent Style) */}
       <div className="ui-card space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#d8e5e2] pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-4">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#167b78] bg-[#e0f2ed] px-2 py-0.5 rounded-md">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-brand-600 bg-brand-100 px-2 py-0.5 rounded-md">
               {isUz ? 'Navbatdagi qabulingiz' : 'Ваш следующий прием'}
             </span>
-            <h2 className="text-xl font-black text-[#152f34] mt-1">
+            <h2 className="text-xl font-black text-ink mt-1">
               {serviceTitle}
             </h2>
           </div>
@@ -311,40 +311,40 @@ export default function BookingStatusPage() {
         {/* Doctor & Location Info (Image 1 Style) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
           {/* Doctor Info */}
-          <div className="p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-[#167b78] text-white flex items-center justify-center font-bold text-sm shrink-0">
+          <div className="p-4 bg-canvas rounded-xl border border-line flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-brand-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
               {doctorDisplayName.replace(/^(Dr\.|Д-р)\s*/, '').charAt(0)}
             </div>
             <div>
-              <span className="text-[#52696e] block text-[11px]">
+              <span className="text-ink-muted block text-[11px]">
                 {isUz ? 'Shifokoringiz' : 'Ваш лечащий врач'}
               </span>
-              <span className="font-bold text-[#152f34] text-sm">{doctorDisplayName}</span>
+              <span className="font-bold text-ink text-sm">{doctorDisplayName}</span>
             </div>
           </div>
 
           {/* Time & Duration */}
-          <div className="p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#e0f2ed] text-[#167b78] flex items-center justify-center shrink-0">
+          <div className="p-4 bg-canvas rounded-xl border border-line flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-brand-100 text-brand-600 flex items-center justify-center shrink-0">
               <Calendar className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-[#52696e] block text-[11px]">
+              <span className="text-ink-muted block text-[11px]">
                 {isUz ? `Qabul vaqti (${durationMinutes} daqiqa)` : `Время приема (${durationMinutes} минут)`}
               </span>
-              <span className="font-bold text-[#152f34] text-sm">
+              <span className="font-bold text-ink text-sm">
                 {formatClinicDate(appointment.startTime, currentLang, { includeWeekday: true })} • {formatClinicTime(appointment.startTime)}
               </span>
             </div>
           </div>
 
           {/* Branch & Map */}
-          <div className="sm:col-span-2 p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="sm:col-span-2 p-4 bg-canvas rounded-xl border border-line flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-2.5">
-              <MapPin className="w-4 h-4 text-[#167b78] shrink-0 mt-0.5" />
+              <MapPin className="w-4 h-4 text-brand-600 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-[#152f34] block">{branchDisplayName}</span>
-                {branchAddress && <span className="text-[#52696e] text-[11px] block">{branchAddress}</span>}
+                <span className="font-bold text-ink block">{branchDisplayName}</span>
+                {branchAddress && <span className="text-ink-muted text-[11px] block">{branchAddress}</span>}
               </div>
             </div>
 
@@ -353,7 +353,7 @@ export default function BookingStatusPage() {
                 href={appointment.branch.mapUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-[#167b78] hover:bg-[#eaf5f2] rounded-lg border border-[#d8e5e2] font-semibold text-xs transition-colors shrink-0"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-brand-600 hover:bg-brand-50 rounded-lg border border-line font-semibold text-xs transition-colors shrink-0"
               >
                 <span>{isUz ? "Xaritada ko'rish" : "Посмотреть на карте"}</span>
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -364,22 +364,22 @@ export default function BookingStatusPage() {
 
         {/* Services & Price breakdown */}
         {appointment.serviceItems && appointment.serviceItems.length > 0 && (
-          <div className="p-4 bg-[#f3f8f7] rounded-xl border border-[#d8e5e2] space-y-2">
-            <span className="text-xs font-bold text-[#152f34] block uppercase tracking-wider">
+          <div className="p-4 bg-canvas rounded-xl border border-line space-y-2">
+            <span className="text-xs font-bold text-ink block uppercase tracking-wider">
               {isUz ? `Tanlangan xizmatlar (${appointment.serviceItems.length}):` : `Выбранные услуги (${appointment.serviceItems.length}):`}
             </span>
             <div className="space-y-1.5">
               {appointment.serviceItems.map((item: any, idx: number) => {
                 const itemName = currentLang === 'ru' && item.serviceNameRu ? item.serviceNameRu : item.serviceNameUz;
                 return (
-                  <div key={item.id || idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-[#d8e5e2]">
-                    <span className="font-semibold text-[#152f34]">{itemName}</span>
+                  <div key={item.id || idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-line">
+                    <span className="font-semibold text-ink">{itemName}</span>
                     <div className="text-right">
-                      <span className="text-[#52696e] mr-2">
+                      <span className="text-ink-muted mr-2">
                         {item.durationMinutes} {isUz ? 'daqiqa' : 'мин'}
                       </span>
                       {item.priceFrom ? (
-                        <span className="font-bold text-[#167b78]">
+                        <span className="font-bold text-brand-600">
                           {(item.priceFrom / 100).toLocaleString(isUz ? 'uz-UZ' : 'ru-RU')} {isUz ? "so'm" : "сум"}
                         </span>
                       ) : null}
@@ -393,7 +393,7 @@ export default function BookingStatusPage() {
 
         {/* Action Buttons: Reschedule & Cancel */}
         {!isTerminal && !isRescheduling && !isCancelling && (
-          <div className="pt-3 border-t border-[#d8e5e2] flex flex-wrap items-center gap-3">
+          <div className="pt-3 border-t border-line flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setIsRescheduling(true)}
@@ -414,12 +414,12 @@ export default function BookingStatusPage() {
         {/* Reschedule Form Drawer */}
         {isRescheduling && (
           <form onSubmit={handleRescheduleSubmit} className="p-4 bg-teal-50/50 rounded-2xl border border-teal-200 space-y-4 animate-fade-in text-xs">
-            <h3 className="font-bold text-[#152f34] text-sm">
+            <h3 className="font-bold text-ink text-sm">
               {isUz ? "Qabul vaqtini o'zgartirish" : 'Перенос времени приема'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="font-semibold text-[#52696e] block mb-1">
+                <label className="font-semibold text-ink-muted block mb-1">
                   {isUz ? 'Yangi sanani tanlang:' : 'Выберите новую дату:'}
                 </label>
                 <CustomDatePicker
@@ -434,11 +434,11 @@ export default function BookingStatusPage() {
               </div>
 
               <div>
-                <label className="font-semibold text-[#52696e] block mb-1">
+                <label className="font-semibold text-ink-muted block mb-1">
                   {isUz ? "Mavjud bo'sh vaqtlar:" : 'Доступное свободное время:'}
                 </label>
                 {isLoadingSlots ? (
-                  <p className="text-[#52696e] py-2">
+                  <p className="text-ink-muted py-2">
                     {isUz ? 'Vaqtlar tekshirilmoqda...' : 'Проверка доступного времени...'}
                   </p>
                 ) : availableSlots.length === 0 ? (
@@ -474,7 +474,7 @@ export default function BookingStatusPage() {
               <button
                 type="button"
                 onClick={() => setIsRescheduling(false)}
-                className="px-4 py-2 border border-[#d8e5e2] text-[#152f34] rounded-xl font-semibold hover:bg-white"
+                className="px-4 py-2 border border-line text-ink rounded-xl font-semibold hover:bg-white"
               >
                 {isUz ? 'Bekor qilish' : 'Отмена'}
               </button>
@@ -492,7 +492,7 @@ export default function BookingStatusPage() {
               placeholder={isUz ? 'Bekor qilish sababi (ixtiyoriy)...' : 'Причина отмены (необязательно)...'}
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
-              className="w-full p-3 bg-white rounded-xl border border-rose-200 text-[#152f34]"
+              className="w-full p-3 bg-white rounded-xl border border-rose-200 text-ink"
               rows={2}
             />
             <div className="flex items-center gap-2">
@@ -508,7 +508,7 @@ export default function BookingStatusPage() {
               <button
                 type="button"
                 onClick={() => setIsCancelling(false)}
-                className="px-4 py-2 border border-[#d8e5e2] text-[#152f34] rounded-xl font-semibold hover:bg-white"
+                className="px-4 py-2 border border-line text-ink rounded-xl font-semibold hover:bg-white"
               >
                 {isUz ? 'Ortga qaytish' : 'Назад'}
               </button>
@@ -518,10 +518,10 @@ export default function BookingStatusPage() {
       </div>
 
       {/* Security & Milestone Disclosure */}
-      <div className="p-4 bg-white rounded-2xl border border-[#d8e5e2] text-xs text-[#52696e] flex items-start gap-3">
-        <ShieldCheck className="w-5 h-5 text-[#167b78] shrink-0 mt-0.5" />
+      <div className="p-4 bg-white rounded-2xl border border-line text-xs text-ink-muted flex items-start gap-3">
+        <ShieldCheck className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
         <div className="space-y-1">
-          <strong className="text-[#152f34] block">
+          <strong className="text-ink block">
             {isUz ? 'Maxfiylik va Xavfsizlik' : 'Конфиденциальность и безопасность'}
           </strong>
           <p className="leading-relaxed">

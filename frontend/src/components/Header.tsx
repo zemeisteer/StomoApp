@@ -18,6 +18,7 @@ import {
   Stethoscope,
 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { useBrand } from '../lib/brand';
 import { CallbackModal } from './CallbackModal';
 import { api } from '../lib/api';
 
@@ -29,10 +30,11 @@ export const Header: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [clinicDropdownOpen, setClinicDropdownOpen] = useState(false);
   const [callbackModalOpen, setCallbackModalOpen] = useState(false);
-  const [clinicLogo, setClinicLogo] = useState<string | null>(null);
+  const brand = useBrand();
+  const clinicLogo = brand.logo;
   const [logoError, setLogoError] = useState(false);
-  const [clinicName, setClinicName] = useState<string>('DentaCare');
-  const [clinicPhone, setClinicPhone] = useState<string>('');
+  const clinicName = brand.clinicName(language);
+  const clinicPhone = (brand.clinic?.phone as string) || '';
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -40,21 +42,7 @@ export const Header: React.FC = () => {
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerCloseBtnRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    api.getClinicInfo()
-      .then((info) => {
-        if (!isMounted) return;
-        if (info?.logo) setClinicLogo(info.logo);
-        if (info?.phone) setClinicPhone(info.phone);
-        if (info?.name) setClinicName(info.name);
-        else if (info?.clinicName) setClinicName(info.clinicName);
-      })
-      .catch(() => {});
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  useEffect(() => setLogoError(false), [clinicLogo]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -143,13 +131,13 @@ export const Header: React.FC = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#d8e5e2] transition-all">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-line transition-all">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           
           {/* 1. Clinic Brand Logo on the Left */}
           <Link
             href="/"
-            className="flex items-center gap-2.5 sm:gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] rounded-2xl py-1 pr-1 shrink-0"
+            className="flex items-center gap-2.5 sm:gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 rounded-2xl py-1 pr-1 shrink-0"
             aria-label={`${clinicName} - ${t.nav.home}`}
           >
             {clinicLogo && !logoError ? (
@@ -164,14 +152,14 @@ export const Header: React.FC = () => {
               />
             ) : (
               <>
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-[#167b78] to-[#2bb49c] flex items-center justify-center text-white shadow-md shadow-[#167b78]/25 group-hover:scale-105 transition-transform shrink-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-brand-600 to-secondary-600 flex items-center justify-center text-white shadow-md shadow-brand-600/25 group-hover:scale-105 transition-transform shrink-0">
                   <Stethoscope className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.2]" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#152f34] group-hover:text-[#167b78] transition-colors truncate block">
+                  <span className="text-xl sm:text-2xl font-extrabold tracking-tight text-ink group-hover:text-brand-600 transition-colors truncate block">
                     {clinicName}
                   </span>
-                  <p className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-[#52696e] truncate">
+                  <p className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-ink-muted truncate">
                     {language === 'ru' ? 'Стоматологическая клиника' : 'Stomatologiya klinikasi'}
                   </p>
                 </div>
@@ -184,10 +172,10 @@ export const Header: React.FC = () => {
             {/* Services */}
             <Link
               href="/services"
-              className={`text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] ${
+              className={`text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 ${
                 isActive('/services')
-                  ? 'bg-[#eaf5f2] text-[#167b78] font-bold shadow-sm'
-                  : 'text-[#152f34] hover:text-[#167b78] hover:bg-[#f0f7f5]'
+                  ? 'bg-brand-50 text-brand-600 font-bold shadow-sm'
+                  : 'text-ink hover:text-brand-600 hover:bg-brand-50'
               }`}
             >
               {t.nav.services}
@@ -196,10 +184,10 @@ export const Header: React.FC = () => {
             {/* Doctors */}
             <Link
               href="/doctors"
-              className={`text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] ${
+              className={`text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 ${
                 isActive('/doctors')
-                  ? 'bg-[#eaf5f2] text-[#167b78] font-bold shadow-sm'
-                  : 'text-[#152f34] hover:text-[#167b78] hover:bg-[#f0f7f5]'
+                  ? 'bg-brand-50 text-brand-600 font-bold shadow-sm'
+                  : 'text-ink hover:text-brand-600 hover:bg-brand-50'
               }`}
             >
               {t.nav.doctors}
@@ -219,23 +207,23 @@ export const Header: React.FC = () => {
                 }}
                 aria-expanded={clinicDropdownOpen}
                 aria-haspopup="true"
-                className={`flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] cursor-pointer ${
+                className={`flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 cursor-pointer ${
                   isClinicActive || clinicDropdownOpen
-                    ? 'bg-[#eaf5f2] text-[#167b78] font-bold shadow-sm'
-                    : 'text-[#152f34] hover:text-[#167b78] hover:bg-[#f0f7f5]'
+                    ? 'bg-brand-50 text-brand-600 font-bold shadow-sm'
+                    : 'text-ink hover:text-brand-600 hover:bg-brand-50'
                 }`}
               >
                 <span>{t.nav.clinic || (language === 'ru' ? 'Клиника' : 'Klinika')}</span>
                 <ChevronDown
                   className={`w-4 h-4 transition-transform duration-200 ${
-                    clinicDropdownOpen ? 'rotate-180 text-[#167b78]' : 'text-[#52696e]'
+                    clinicDropdownOpen ? 'rotate-180 text-brand-600' : 'text-ink-muted'
                   }`}
                 />
               </button>
 
               {clinicDropdownOpen && (
                 <div
-                  className="absolute left-0 mt-2.5 w-64 bg-white rounded-2xl shadow-xl border border-[#d8e5e2] py-2 z-50 animate-fade-in"
+                  className="absolute left-0 mt-2.5 w-64 bg-white rounded-2xl shadow-xl border border-line py-2 z-50 animate-fade-in"
                   role="menu"
                   aria-orientation="vertical"
                 >
@@ -249,11 +237,11 @@ export const Header: React.FC = () => {
                         role="menuitem"
                         className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
                           isActive(item.href)
-                            ? 'bg-[#eaf5f2] text-[#167b78] font-bold'
-                            : 'text-[#152f34] hover:bg-[#f0f7f5] hover:text-[#167b78]'
+                            ? 'bg-brand-50 text-brand-600 font-bold'
+                            : 'text-ink hover:bg-brand-50 hover:text-brand-600'
                         }`}
                       >
-                        <div className="w-8 h-8 rounded-xl bg-[#eaf5f2] flex items-center justify-center text-[#167b78] shrink-0">
+                        <div className="w-8 h-8 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600 shrink-0">
                           <IconComponent className="w-4 h-4" />
                         </div>
                         <span>{item.label}</span>
@@ -267,10 +255,10 @@ export const Header: React.FC = () => {
             {/* Contacts */}
             <Link
               href="/contacts"
-              className={`text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] ${
+              className={`text-sm font-semibold px-4 py-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 ${
                 isActive('/contacts')
-                  ? 'bg-[#eaf5f2] text-[#167b78] font-bold shadow-sm'
-                  : 'text-[#152f34] hover:text-[#167b78] hover:bg-[#f0f7f5]'
+                  ? 'bg-brand-50 text-brand-600 font-bold shadow-sm'
+                  : 'text-ink hover:text-brand-600 hover:bg-brand-50'
               }`}
             >
               {t.nav.contacts}
@@ -283,17 +271,17 @@ export const Header: React.FC = () => {
             {clinicPhone && (
               <a
                 href={`tel:${clinicPhone.replace(/\s+/g, '')}`}
-                className="hidden xl:inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold text-[#152f34] hover:text-[#167b78] hover:bg-[#eaf5f2] transition-colors"
+                className="hidden xl:inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold text-ink hover:text-brand-600 hover:bg-brand-50 transition-colors"
                 title={language === 'ru' ? 'Позвонить в клинику' : 'Klinikaga qo\'ng\'iroq qilish'}
               >
-                <Phone className="w-3.5 h-3.5 text-[#167b78]" />
+                <Phone className="w-3.5 h-3.5 text-brand-600" />
                 <span>{clinicPhone}</span>
               </a>
             )}
 
             {/* Language Switcher Pill (Fits comfortably at 360px) */}
             <div
-              className="flex items-center bg-[#eaf5f2] rounded-xl p-0.5 sm:p-1 border border-[#d8e5e2]"
+              className="flex items-center bg-brand-50 rounded-xl p-0.5 sm:p-1 border border-line"
               role="group"
               aria-label={t.common.selectLanguage}
             >
@@ -305,8 +293,8 @@ export const Header: React.FC = () => {
                 aria-pressed={language === 'uz'}
                 className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   language === 'uz'
-                    ? 'bg-[#167b78] text-white shadow-sm'
-                    : 'text-[#52696e] hover:text-[#152f34]'
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 UZ
@@ -319,8 +307,8 @@ export const Header: React.FC = () => {
                 aria-pressed={language === 'ru'}
                 className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   language === 'ru'
-                    ? 'bg-[#167b78] text-white shadow-sm'
-                    : 'text-[#52696e] hover:text-[#152f34]'
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 RU
@@ -330,7 +318,7 @@ export const Header: React.FC = () => {
             {/* Book Appointment CTA Button (Desktop) */}
             <Link
               href="/booking"
-              className="hidden sm:inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#167b78] hover:bg-[#116460] text-white font-bold text-sm shadow-md shadow-[#167b78]/20 hover:shadow-lg transition-all transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-sm shadow-md shadow-brand-600/20 hover:shadow-lg transition-all transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 cursor-pointer"
             >
               <Calendar className="w-4 h-4" />
               <span>{t.common.bookAppointment}</span>
@@ -341,7 +329,7 @@ export const Header: React.FC = () => {
               id="mobile-menu-trigger-btn"
               ref={menuButtonRef}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="lg:hidden p-2 text-[#152f34] hover:text-[#167b78] rounded-xl hover:bg-[#eaf5f2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#167b78] cursor-pointer"
+              className="lg:hidden p-2 text-ink hover:text-brand-600 rounded-xl hover:bg-brand-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 cursor-pointer"
               aria-label={mobileMenuOpen ? (language === 'ru' ? 'Закрыть меню' : 'Menyuni yopish') : (language === 'ru' ? 'Меню' : 'Menyu')}
               aria-expanded={mobileMenuOpen}
               aria-controls="mobile-navigation"
@@ -356,7 +344,7 @@ export const Header: React.FC = () => {
           <>
             {/* Backdrop */}
             <div
-              className="fixed inset-0 bg-[#0b2228]/50 backdrop-blur-sm z-40 lg:hidden"
+              className="fixed inset-0 bg-brand-950/50 backdrop-blur-sm z-40 lg:hidden"
               onClick={() => {
                 setMobileMenuOpen(false);
                 menuButtonRef.current?.focus();
@@ -368,15 +356,15 @@ export const Header: React.FC = () => {
             <div
               id="mobile-navigation"
               ref={drawerRef}
-              className="fixed top-0 right-0 w-full sm:w-96 bottom-0 bg-white z-50 lg:hidden overflow-y-auto px-6 py-6 space-y-6 shadow-2xl animate-fade-in border-l border-[#d8e5e2] flex flex-col justify-between"
+              className="fixed top-0 right-0 w-full sm:w-96 bottom-0 bg-white z-50 lg:hidden overflow-y-auto px-6 py-6 space-y-6 shadow-2xl animate-fade-in border-l border-line flex flex-col justify-between"
               role="dialog"
               aria-modal="true"
               aria-label={language === 'ru' ? 'Мобильное меню навигации' : 'Mobil navigatsiya menyusi'}
             >
               <div className="space-y-6">
                 {/* Header with Title and Visible Close Button */}
-                <div className="flex items-center justify-between pb-3 border-b border-[#d8e5e2]">
-                  <span className="font-extrabold text-base text-[#152f34]">
+                <div className="flex items-center justify-between pb-3 border-b border-line">
+                  <span className="font-extrabold text-base text-ink">
                     {clinicName}
                   </span>
                   <button
@@ -387,7 +375,7 @@ export const Header: React.FC = () => {
                       setMobileMenuOpen(false);
                       menuButtonRef.current?.focus();
                     }}
-                    className="p-2 rounded-xl text-[#52696e] hover:text-[#152f34] hover:bg-[#f0f7f5] transition-colors cursor-pointer"
+                    className="p-2 rounded-xl text-ink-muted hover:text-ink hover:bg-brand-50 transition-colors cursor-pointer"
                     aria-label={language === 'ru' ? 'Закрыть меню' : 'Menyuni yopish'}
                   >
                     <X className="w-5 h-5" />
@@ -401,8 +389,8 @@ export const Header: React.FC = () => {
                     onClick={() => setMobileMenuOpen(false)}
                     className={`block px-4 py-3 rounded-2xl text-base font-semibold transition-colors ${
                       isActive('/services')
-                        ? 'bg-[#eaf5f2] text-[#167b78] font-bold'
-                        : 'text-[#152f34] hover:bg-[#f0f7f5]'
+                        ? 'bg-brand-50 text-brand-600 font-bold'
+                        : 'text-ink hover:bg-brand-50'
                     }`}
                   >
                     {t.nav.services}
@@ -413,8 +401,8 @@ export const Header: React.FC = () => {
                     onClick={() => setMobileMenuOpen(false)}
                     className={`block px-4 py-3 rounded-2xl text-base font-semibold transition-colors ${
                       isActive('/doctors')
-                        ? 'bg-[#eaf5f2] text-[#167b78] font-bold'
-                        : 'text-[#152f34] hover:bg-[#f0f7f5]'
+                        ? 'bg-brand-50 text-brand-600 font-bold'
+                        : 'text-ink hover:bg-brand-50'
                     }`}
                   >
                     {t.nav.doctors}
@@ -422,7 +410,7 @@ export const Header: React.FC = () => {
 
                   {/* Klinika section with secondary links */}
                   <div className="pt-3 pb-1">
-                    <p className="px-4 text-xs font-bold uppercase tracking-wider text-[#52696e] mb-2">
+                    <p className="px-4 text-xs font-bold uppercase tracking-wider text-ink-muted mb-2">
                       {t.nav.clinic || (language === 'ru' ? 'Клиника' : 'Klinika')}
                     </p>
                     <div className="pl-2 space-y-1">
@@ -433,8 +421,8 @@ export const Header: React.FC = () => {
                           onClick={() => setMobileMenuOpen(false)}
                           className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
                             isActive(item.href)
-                              ? 'bg-[#eaf5f2] text-[#167b78] font-bold'
-                              : 'text-[#52696e] hover:bg-[#f0f7f5] hover:text-[#152f34]'
+                              ? 'bg-brand-50 text-brand-600 font-bold'
+                              : 'text-ink-muted hover:bg-brand-50 hover:text-ink'
                           }`}
                         >
                           <span>{item.label}</span>
@@ -448,8 +436,8 @@ export const Header: React.FC = () => {
                     onClick={() => setMobileMenuOpen(false)}
                     className={`block px-4 py-3 rounded-2xl text-base font-semibold transition-colors ${
                       isActive('/contacts')
-                        ? 'bg-[#eaf5f2] text-[#167b78] font-bold'
-                        : 'text-[#152f34] hover:bg-[#f0f7f5]'
+                        ? 'bg-brand-50 text-brand-600 font-bold'
+                        : 'text-ink hover:bg-brand-50'
                     }`}
                   >
                     {t.nav.contacts}
@@ -458,11 +446,11 @@ export const Header: React.FC = () => {
               </div>
 
               {/* Action Buttons: Qabulga yozilish & Direct Call */}
-              <div className="pt-4 border-t border-[#d8e5e2] space-y-3">
+              <div className="pt-4 border-t border-line space-y-3">
                 <Link
                   href="/booking"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="w-full py-3.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-2xl font-bold text-center flex items-center justify-center gap-2 shadow-lg shadow-[#167b78]/25 active:scale-95 transition-all text-sm cursor-pointer"
+                  className="w-full py-3.5 bg-brand-600 hover:bg-brand-700 text-white rounded-2xl font-bold text-center flex items-center justify-center gap-2 shadow-lg shadow-brand-600/25 active:scale-95 transition-all text-sm cursor-pointer"
                 >
                   <Calendar className="w-4 h-4" />
                   <span>{t.common.bookAppointment}</span>
@@ -471,9 +459,9 @@ export const Header: React.FC = () => {
                 {clinicPhone && (
                   <a
                     href={`tel:${clinicPhone.replace(/\s+/g, '')}`}
-                    className="w-full py-3 border border-[#d8e5e2] hover:border-[#167b78] text-[#152f34] rounded-2xl font-semibold flex items-center justify-center gap-2 hover:bg-[#f0f7f5] transition-colors text-sm"
+                    className="w-full py-3 border border-line hover:border-brand-600 text-ink rounded-2xl font-semibold flex items-center justify-center gap-2 hover:bg-brand-50 transition-colors text-sm"
                   >
-                    <Phone className="w-4 h-4 text-[#167b78]" />
+                    <Phone className="w-4 h-4 text-brand-600" />
                     <span>{clinicPhone}</span>
                   </a>
                 )}
@@ -482,7 +470,7 @@ export const Header: React.FC = () => {
                   <Link
                     href="/admin/login"
                     onClick={() => setMobileMenuOpen(false)}
-                    className="text-xs text-[#52696e] hover:text-[#167b78] transition-colors font-medium"
+                    className="text-xs text-ink-muted hover:text-brand-600 transition-colors font-medium"
                   >
                     {t.nav.admin}
                   </Link>

@@ -58,7 +58,7 @@ export function PaymentReceiptModal({
       <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-200 space-y-5 animate-scale-up print:shadow-none print:border-none print:p-2 print:max-w-none">
         {/* Actions Header (hidden on print) */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-3 print:hidden">
-          <div className="flex items-center gap-2 text-[#167b78] font-bold text-sm">
+          <div className="flex items-center gap-2 text-brand-600 font-bold text-sm">
             <Printer className="w-4 h-4" />
             <span>{isUz ? "Kassa to'lov kvitansiyasi" : 'Кассовая квитанция об оплате'}</span>
           </div>
@@ -66,7 +66,7 @@ export function PaymentReceiptModal({
             <button
               type="button"
               onClick={handlePrint}
-              className="px-3 py-1.5 bg-[#167b78] hover:bg-[#116460] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>{isUz ? 'Chop etish' : 'Печать'}</span>
@@ -82,10 +82,10 @@ export function PaymentReceiptModal({
         </div>
 
         {/* Thermal / Paper Receipt Body */}
-        <div className="p-6 bg-[#fafcfb] rounded-2xl border border-slate-200 space-y-4 font-mono text-xs print:bg-white print:border-none print:p-0">
+        <div className="p-6 bg-canvas rounded-2xl border border-slate-200 space-y-4 font-mono text-xs print:bg-white print:border-none print:p-0">
           {/* Clinic Branding */}
           <div className="text-center space-y-1 border-b border-dashed border-slate-300 pb-4">
-            <h2 className="text-base font-extrabold text-[#152f34] tracking-wider uppercase font-sans">
+            <h2 className="text-base font-extrabold text-ink tracking-wider uppercase font-sans">
               DENTACARE CLINIC
             </h2>
             <p className="text-[11px] text-slate-500 font-sans">
@@ -151,10 +151,10 @@ export function PaymentReceiptModal({
               </div>
             )}
             <div className="pt-2 flex justify-between items-baseline text-sm">
-              <span className="font-extrabold text-[#152f34] uppercase font-sans">
+              <span className="font-extrabold text-ink uppercase font-sans">
                 {isUz ? 'Jami to\'landi:' : 'ИТОГО К ОПЛАТЕ:'}
               </span>
-              <span className="font-extrabold text-base text-[#167b78]">
+              <span className="font-extrabold text-base text-brand-600">
                 {data.amount.toLocaleString()} so&apos;m
               </span>
             </div>
