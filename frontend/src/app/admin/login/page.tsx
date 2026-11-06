@@ -7,6 +7,8 @@ import { Lock, Mail, AlertCircle, ArrowLeft, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../../lib/auth';
 import { useI18n } from '../../../lib/i18n';
 
+const SHOW_DEMO_CREDENTIALS = process.env.NODE_ENV !== 'production';
+
 export default function AdminLoginPage() {
   const { login } = useAuth();
   const { t } = useI18n();
@@ -90,7 +92,7 @@ export default function AdminLoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@dentacare.local"
+                placeholder="email@klinika.uz"
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
             </div>
@@ -122,7 +124,9 @@ export default function AdminLoginPage() {
           </button>
         </form>
 
-        {/* Demo Credentials Quick-Fill Buttons */}
+        {/* Demo quick-fill: development builds only. NODE_ENV is inlined at build time,
+            so production bundles contain neither these buttons nor the seed passwords. */}
+        {SHOW_DEMO_CREDENTIALS && (
         <div className="pt-4 border-t border-slate-800 space-y-2">
           <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider text-center">
             Tezkor test hisoblari:
@@ -146,6 +150,7 @@ export default function AdminLoginPage() {
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

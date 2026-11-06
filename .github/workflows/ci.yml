@@ -130,6 +130,13 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:4000
         run: npm run build
 
+      - name: Production Bundle Has No Seed Credentials
+        working-directory: ./frontend
+        run: |
+          if grep -rlE "DentacareAdmin2026|Doctor2026" .next/static .next/server; then
+            echo "Seed/demo passwords found in the production build"; exit 1
+          fi
+
   bot-verification:
     name: Telegram Bot Flow Tests
     runs-on: ubuntu-latest
