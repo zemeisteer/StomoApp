@@ -7835,4 +7835,87 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       }
     }
   });
+
+  it('Regression 69: Ops alert summarizes failed notifications once per window without recipient data', async () => {
+    const { OpsAlertService } = await import('../src/notifications/ops-alert.service');
+    // Fixed window far from real data: 2030-01-01 10:00–10:30 UTC
+    const now = new Date('2030-01-01T10:31:00.000Z');
+    const { start, end } = OpsAlertService.windowFor(now);
+    expect(start.toISOString()).toBe('2030-01-01T10:00:00.000Z');
+    expect(end.toISOString()).toBe('2030-01-01T10:30:00.000Z');
+
+    const tag = `reg69_${Date.now()}`;
+    const secretRecipient = '+998901112233';
+    // Prisma stores UTC in timestamp(3) without zone; pass plain UTC strings so the
+    // DB session timezone cannot shift them
+    const inWindowUtc = '2030-01-01 10:10:00';
+    const outOfWindowUtc = '2030-01-01 09:50:00';
+    const created = await Promise.all([
+      prisma.notificationJob.create({ data: { channel: 'SMS', status: 'FAILED', templateKey: 'appointment_reminder', recipient: secretRecipient, payload: {}, lastError: 'Eskiz 401 Unauthorized', deduplicationKey: `${tag}_1` } }),
+      prisma.notificationJob.create({ data: { channel: 'SMS', status: 'FAILED', templateKey: 'appointment_reminder', recipient: secretRecipient, payload: {}, deduplicationKey: `${tag}_2` } }),
+      prisma.notificationJob.create({ data: { channel: 'TELEGRAM', status: 'FAILED', templateKey: 'bot_patient_reminder_24h', recipient: '123456', payload: {}, deduplicationKey: `${tag}_3` } }),
+      prisma.notificationJob.create({ data: { channel: 'SMS', status: 'FAILED', templateKey: 'appointment_reminder', recipient: secretRecipient, payload: {}, deduplicationKey: `${tag}_old` } }),
+      prisma.notificationJob.create({ data: { channel: 'SMS', status: 'SENT', templateKey: 'appointment_reminder', recipient: secretRecipient, payload: {}, deduplicationKey: `${tag}_ok` } }),
+    ]);
+    const ids = created.map((c) => c.id);
+    await prisma.$executeRaw`UPDATE "notification_jobs" SET "updated_at" = ${inWindowUtc}::timestamp WHERE "deduplication_key" IN (${`${tag}_1`}, ${`${tag}_2`}, ${`${tag}_3`}, ${`${tag}_ok`})`;
+    await prisma.$executeRaw`UPDATE "notification_jobs" SET "updated_at" = ${outOfWindowUtc}::timestamp WHERE "deduplication_key" = ${`${tag}_old`}`;
+
+    const fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: true, status: 200 } as any);
+    try {
+      const cfg = (values: Record<string, string>) => ({ get: (k: string) => values[k] }) as any;
+
+      // Counts only FAILED jobs inside the window
+      const svc = new OpsAlertService(prisma, cfg({ FRONTEND_URL: 'https://clinic.test' }));
+      const summary = await svc.summarizeFailures(start, end);
+      expect(summary.total).toBe(3);
+      expect(summary.groups[0]).toEqual({ channel: 'SMS', templateKey: 'appointment_reminder', count: 2 });
+
+      // Not configured -> no send, no claim
+      expect(await svc.run(now)).toEqual({ total: 3, sent: false, reason: 'not configured' });
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      // Configured -> one message per window, without recipients
+      const configured = new OpsAlertService(prisma, cfg({ TELEGRAM_BOT_TOKEN: 'tkn', TELEGRAM_CHAT_ID: '-100', OPS_TELEGRAM_CHAT_ID: '-200', FRONTEND_URL: 'https://clinic.test' }));
+      expect(await configured.run(now)).toEqual({ total: 3, sent: true });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse((fetchSpy.mock.calls[0][1] as any).body);
+      expect(body.chat_id).toBe('-200'); // OPS chat preferred over staff group
+      expect(body.text).toContain('3 ta');
+      expect(body.text).toContain('Eskiz 401');
+      expect(body.text).toContain('https://clinic.test/admin/notifications');
+      expect(body.text).not.toContain(secretRecipient);
+
+      expect(await configured.run(now)).toEqual({ total: 3, sent: false, reason: 'already sent' });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchSpy.mockRestore();
+      await prisma.notificationJob.deleteMany({ where: { id: { in: ids } } });
+      await prisma.notificationJob.deleteMany({ where: { deduplicationKey: `ops_failed_notifications_alert_${start.toISOString()}` } });
+    }
+  });
+
+  it('Regression 70: Database sessions use UTC so NOW() comparisons on stored UTC timestamps are not shifted', async () => {
+    const [{ TimeZone }] = await prisma.$queryRaw<[{ TimeZone: string }]>`SHOW timezone`;
+    expect(TimeZone).toBe('UTC');
+
+    const key = `reg70_${Date.now()}`;
+    const job = await prisma.notificationJob.create({
+      data: {
+        channel: 'SMS', status: 'CANCELLED', templateKey: 'reg70_probe', recipient: 'x', payload: {},
+        scheduledFor: new Date(Date.now() + 3 * 60 * 60 * 1000), deduplicationKey: key,
+      },
+    });
+    try {
+      // Same predicate the outbox worker uses: a job 3h in the future must not be due yet
+      const due = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "notification_jobs" WHERE id = ${job.id} AND "scheduled_for" <= NOW()`;
+      expect(due).toHaveLength(0);
+      const dueIn4h = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "notification_jobs" WHERE id = ${job.id} AND "scheduled_for" <= NOW() + INTERVAL '4 hours'`;
+      expect(dueIn4h).toHaveLength(1);
+    } finally {
+      await prisma.notificationJob.delete({ where: { id: job.id } });
+    }
+  });
 });

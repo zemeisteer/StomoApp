@@ -9,6 +9,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-dentacare}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-dentacare}
+      TZ: UTC
+      PGTZ: UTC
+    # Stored timestamps are UTC; keep the server default zone UTC as well
+    command: ['postgres', '-c', 'timezone=UTC', '-c', 'log_timezone=UTC']
     volumes:
       - prod_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -72,6 +76,8 @@ services:
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://localhost:9000/dentacare}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      # Optional separate chat for technical alerts (failed notifications); defaults to TELEGRAM_CHAT_ID
+      OPS_TELEGRAM_CHAT_ID: ${OPS_TELEGRAM_CHAT_ID:-}
       # Exactly one reverse proxy (nginx) sits in front of the backend;
       # without this every client shares nginx's IP for rate limiting.
       TRUST_PROXY: ${TRUST_PROXY:-1}

@@ -7,6 +7,10 @@ services:
       POSTGRES_USER: dentacare
       POSTGRES_PASSWORD: dentacare_dev_password
       POSTGRES_DB: dentacare
+      TZ: UTC
+      PGTZ: UTC
+    # Stored timestamps are UTC; keep the server default zone UTC as well
+    command: ['postgres', '-c', 'timezone=UTC', '-c', 'log_timezone=UTC']
     ports:
       - '5432:5432'
     volumes:
