@@ -24,6 +24,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { serviceCategoryLabel } from '../../lib/serviceCategories';
 import { api } from '../../lib/api';
 import { PhoneInput } from '../../components/PhoneInput';
 import { CustomDatePicker } from '../../components/CustomDatePicker';
@@ -1450,7 +1451,7 @@ function BookingContent() {
                       <div>
                         <div className="flex items-center justify-between text-xs text-[#52696e] mb-1.5">
                           <span className="font-bold text-[#167b78] uppercase tracking-wider text-[10px]">
-                            {s.category}
+                            {serviceCategoryLabel(s.category, language)}
                           </span>
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-[#52696e]">

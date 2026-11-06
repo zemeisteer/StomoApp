@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { SERVICE_CATEGORIES } from '../../../lib/serviceCategories';
 import {
   Stethoscope,
   Clock,
@@ -23,15 +24,8 @@ import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect } from '../../../components/CustomSelect';
 import { api } from '../../../lib/api';
 
-const CATEGORIES = [
-  { value: 'THERAPY', label: 'Terapiya' },
-  { value: 'ORTHODONTICS', label: 'Ortodontiya' },
-  { value: 'IMPLANTS', label: 'Implantatsiya' },
-  { value: 'WHITENING', label: 'Oqartirish' },
-  { value: 'PEDIATRIC', label: 'Bolalar stomatologiyasi' },
-  { value: 'SURGERY', label: 'Jarrohlik' },
-  { value: 'HYGIENE', label: 'Gigiyena' },
-];
+// Must match the Prisma ServiceCategory enum (shared with the public site)
+const CATEGORIES = SERVICE_CATEGORIES.map((c) => ({ value: c.value, label: c.uz }));
 
 export default function AdminServicesPage() {
   const [activeTab, setActiveTab] = useState<'catalog' | 'legacy'>('catalog');

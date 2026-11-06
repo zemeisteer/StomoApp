@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { serviceCategoryLabel } from '../../lib/serviceCategories';
 import { api } from '../../lib/api';
 import { CustomSelect } from '../../components/CustomSelect';
 
@@ -346,7 +347,7 @@ export default function PricesPage() {
                     : 'bg-[#f0f6f4] text-[#52696e] hover:bg-[#eaf5f2] hover:text-[#167b78] border border-[#d8e5e2]'
                 }`}
               >
-                {cat}
+                {serviceCategoryLabel(cat, language)}
               </button>
             ))}
           </div>
@@ -410,7 +411,7 @@ export default function PricesPage() {
                   <div className="flex-1 space-y-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-[#167b78] bg-[#eaf5f2] px-2.5 py-0.5 rounded-full inline-block border border-[#d8e5e2]">
-                        {s.category || 'Xizmat'}
+                        {serviceCategoryLabel(s.category, language) || (isRu ? 'Услуга' : 'Xizmat')}
                       </span>
                       <span className="inline-flex items-center gap-1 text-[11px] text-[#52696e]">
                         <Clock className="w-3 h-3 text-[#167b78]" />

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Calendar, Search, Sparkles, Clock, ArrowRight } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { serviceCategoryLabel } from '../../lib/serviceCategories';
 import { api } from '../../lib/api';
 
 export default function ServicesPage() {
@@ -143,7 +144,7 @@ export default function ServicesPage() {
                       <span>{service.durationMinutes} {isRu ? 'мин' : 'daqiqa'}</span>
                     </span>
                     <span className="text-[11px] font-bold text-[#52696e] uppercase tracking-wider">
-                      {service.category}
+                      {serviceCategoryLabel(service.category, isRu ? 'ru' : 'uz')}
                     </span>
                   </div>
 
