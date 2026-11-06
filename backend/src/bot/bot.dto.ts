@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString, MaxLength } from 'class-validator';
 
 export class SyncPatientDto {
   @IsString()
@@ -55,4 +55,18 @@ export class CancelBotAppointmentDto {
   @IsString()
   @IsNotEmpty()
   telegramUserId!: string;
+}
+
+export class ReportBotJobFailureDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  error!: string;
+}
+
+export class ClaimDailyDigestDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  recipient!: string;
 }

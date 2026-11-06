@@ -8,7 +8,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { AuditService } from '../audit/audit.service';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, NotificationChannel, NotificationStatus, Prisma } from '@prisma/client';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { SyncPatientDto, CreateBotBookingDto } from './bot.dto';
 
 @Injectable()
@@ -502,56 +503,137 @@ export class BotService {
     };
   }
 
-  async getUpcomingReminders() {
-    const now = new Date();
-    const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const in2h = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+  // ---------------------------------------------------------------------------
+  // Telegram reminders & daily schedule digest
+  //
+  // The backend outbox already sends the 2h reminder over SMS/email, so the bot
+  // only adds a 24h Telegram reminder for patients linked to Telegram.
+  // Each send is claimed once by inserting a notification_jobs row with a unique
+  // deduplication key (status SENT, never PENDING, so the outbox worker never
+  // picks it up). The key includes scheduleRevision, so a rescheduled
+  // appointment gets a fresh reminder. Rows are not linked via appointmentId so
+  // they don't interfere with the outbox's per-appointment job bookkeeping.
+  // ---------------------------------------------------------------------------
 
-    const windowMs = 15 * 60 * 1000;
+  private static readonly REMINDER_TEMPLATE = 'bot_patient_reminder_24h';
+  private static readonly DIGEST_TEMPLATE = 'bot_staff_daily_schedule';
+  // Window around "24h before start"; wide enough to survive short bot downtime.
+  private static readonly REMINDER_WINDOW_FROM_MS = 23 * 60 * 60 * 1000;
+  private static readonly REMINDER_WINDOW_TO_MS = 25 * 60 * 60 * 1000;
 
-    const appts = await this.prisma.appointment.findMany({
+  private async getClinicTimezone(): Promise<string> {
+    const settings = await this.prisma.clinicSettings.findFirst({ select: { timezone: true } });
+    return settings?.timezone || 'Asia/Tashkent';
+  }
+
+  private isUniqueViolation(e: unknown): boolean {
+    return e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+  }
+
+  private async findTelegramReminderCandidates(now: Date) {
+    return this.prisma.appointment.findMany({
       where: {
         status: { in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED] },
-        OR: [
-          {
-            startTime: {
-              gte: new Date(in24h.getTime() - windowMs),
-              lte: new Date(in24h.getTime() + windowMs),
-            },
-          },
-          {
-            startTime: {
-              gte: new Date(in2h.getTime() - windowMs),
-              lte: new Date(in2h.getTime() + windowMs),
-            },
-          },
-        ],
+        startTime: {
+          gte: new Date(now.getTime() + BotService.REMINDER_WINDOW_FROM_MS),
+          lte: new Date(now.getTime() + BotService.REMINDER_WINDOW_TO_MS),
+        },
+        patient: { is: { telegramUserId: { not: null } } },
       },
-      include: {
-        patient: true,
-        doctor: true,
-      },
-    });
-
-    return appts.map((a) => {
-      const is24h = Math.abs(a.startTime.getTime() - in24h.getTime()) < Math.abs(a.startTime.getTime() - in2h.getTime());
-      const doctorName = a.doctor ? `Dr. ${a.doctor.firstNameUz} ${a.doctor.lastNameUz}`.trim() : 'Shifokor';
-      const timeStr = a.startTime.toISOString().slice(11, 16);
-      return {
-        id: a.id,
-        patientName: a.patient?.fullName || 'Bemor',
-        doctorName,
-        timeStr,
-        window: is24h ? '24h' : '2h',
-      };
+      include: { patient: true, doctor: true },
+      orderBy: { startTime: 'asc' },
     });
   }
 
-  async getDailyDoctorSchedules() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+  private toReminderView(
+    a: Awaited<ReturnType<BotService['findTelegramReminderCandidates']>>[number],
+    timezone: string,
+  ) {
+    return {
+      id: a.id,
+      telegramUserId: a.patient?.telegramUserId ?? null,
+      patientName: a.patient?.fullName || 'Bemor',
+      doctorName: a.doctor ? `Dr. ${a.doctor.firstNameUz} ${a.doctor.lastNameUz}`.trim() : 'Shifokor',
+      dateStr: formatInTimeZone(a.startTime, timezone, 'dd.MM.yyyy'),
+      timeStr: formatInTimeZone(a.startTime, timezone, 'HH:mm'),
+      startTime: a.startTime.toISOString(),
+      window: '24h' as const,
+    };
+  }
+
+  /** Read-only preview of reminders that would be sent now (no side effects). */
+  async getUpcomingReminders() {
+    const timezone = await this.getClinicTimezone();
+    const appts = await this.findTelegramReminderCandidates(new Date());
+    return appts.map((a) => this.toReminderView(a, timezone));
+  }
+
+  /**
+   * Atomically claims due 24h Telegram reminders. Each appointment revision is
+   * returned at most once across all callers; the caller must send it and
+   * report a failure via reportReminderFailure().
+   */
+  async claimTelegramReminders() {
+    const now = new Date();
+    const timezone = await this.getClinicTimezone();
+    const appts = await this.findTelegramReminderCandidates(now);
+
+    const claimed: Array<ReturnType<BotService['toReminderView']> & { jobId: string }> = [];
+    for (const a of appts) {
+      const view = this.toReminderView(a, timezone);
+      if (!view.telegramUserId) continue;
+      try {
+        const job = await this.prisma.notificationJob.create({
+          data: {
+            channel: NotificationChannel.TELEGRAM,
+            status: NotificationStatus.SENT,
+            templateKey: BotService.REMINDER_TEMPLATE,
+            recipient: view.telegramUserId,
+            scheduleRevision: a.scheduleRevision,
+            attempts: 1,
+            sentAt: now,
+            deduplicationKey: `${BotService.REMINDER_TEMPLATE}_${a.id}_s${a.scheduleRevision}`,
+            payload: { appointmentId: a.id, startTime: view.startTime },
+          },
+        });
+        claimed.push({ ...view, jobId: job.id });
+      } catch (e) {
+        if (this.isUniqueViolation(e)) continue; // already claimed
+        throw e;
+      }
+    }
+    return claimed;
+  }
+
+  /** Marks a claimed bot job as failed so the admin outbox shows the real outcome. */
+  async reportBotJobFailure(jobId: string, error: string) {
+    const res = await this.prisma.notificationJob.updateMany({
+      where: {
+        id: jobId,
+        templateKey: { in: [BotService.REMINDER_TEMPLATE, BotService.DIGEST_TEMPLATE] },
+      },
+      data: {
+        status: NotificationStatus.FAILED,
+        lastError: (error || 'unknown error').slice(0, 1000),
+        sentAt: null,
+      },
+    });
+    if (res.count === 0) {
+      throw new NotFoundException('Bot notification job not found');
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Today's schedule per doctor in the clinic timezone. Patient names are left
+   * out on purpose: this goes to the staff Telegram group, which (like the
+   * staff_new_booking alert) carries no patient details.
+   */
+  async getDailyDoctorSchedules(now: Date = new Date()) {
+    const timezone = await this.getClinicTimezone();
+    const dateStr = formatInTimeZone(now, timezone, 'yyyy-MM-dd');
+    const dayStart = fromZonedTime(`${dateStr} 00:00:00.000`, timezone);
+    const dayEnd = fromZonedTime(`${dateStr} 23:59:59.999`, timezone);
 
     const doctors = await this.prisma.doctor.findMany({
       where: { isActive: true },
@@ -559,12 +641,12 @@ export class BotService {
         appointments: {
           where: {
             status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.PENDING] },
-            startTime: { gte: today, lt: tomorrow },
+            startTime: { gte: dayStart, lte: dayEnd },
           },
-          include: { patient: true },
           orderBy: { startTime: 'asc' },
         },
       },
+      orderBy: { sortOrder: 'asc' },
     });
 
     return doctors
@@ -574,10 +656,38 @@ export class BotService {
         doctorName: `Dr. ${d.firstNameUz} ${d.lastNameUz}`.trim(),
         appointments: d.appointments.map((a) => ({
           id: a.id,
-          patientName: a.patient?.fullName || 'Bemor',
-          time: a.startTime.toISOString().slice(11, 16),
-          notes: a.note || '',
+          time: formatInTimeZone(a.startTime, timezone, 'HH:mm'),
+          serviceName: a.serviceName || '',
         })),
       }));
+  }
+
+  /** Claims today's staff digest exactly once per clinic day. */
+  async claimDailyScheduleDigest(recipient: string) {
+    const now = new Date();
+    const timezone = await this.getClinicTimezone();
+    const dateStr = formatInTimeZone(now, timezone, 'yyyy-MM-dd');
+    const doctors = await this.getDailyDoctorSchedules(now);
+
+    try {
+      const job = await this.prisma.notificationJob.create({
+        data: {
+          channel: NotificationChannel.TELEGRAM,
+          status: NotificationStatus.SENT,
+          templateKey: BotService.DIGEST_TEMPLATE,
+          recipient: recipient || 'staff_group',
+          attempts: 1,
+          sentAt: now,
+          deduplicationKey: `${BotService.DIGEST_TEMPLATE}_${dateStr}`,
+          payload: { date: dateStr, doctorCount: doctors.length },
+        },
+      });
+      return { claimed: true, jobId: job.id, date: dateStr, doctors };
+    } catch (e) {
+      if (this.isUniqueViolation(e)) {
+        return { claimed: false, jobId: null, date: dateStr, doctors: [] };
+      }
+      throw e;
+    }
   }
 }

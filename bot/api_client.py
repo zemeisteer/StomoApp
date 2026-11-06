@@ -109,5 +109,17 @@ class NestApiClient:
         res = await self._get("/bot/daily-schedules")
         return res if isinstance(res, list) else []
 
+    async def claim_reminders(self) -> List[Dict[str, Any]]:
+        """Claims due 24h reminders; the backend returns each one only once."""
+        res = await self._post("/bot/reminders/claim", {})
+        return res if isinstance(res, list) else []
+
+    async def claim_daily_schedule_digest(self, recipient: str) -> Optional[Dict[str, Any]]:
+        """Claims today's staff digest; returns {"claimed": False} if already sent today."""
+        return await self._post("/bot/daily-schedules/claim", {"recipient": recipient})
+
+    async def report_job_failure(self, job_id: str, error: str) -> None:
+        await self._post(f"/bot/jobs/{job_id}/failed", {"error": error[:1000]})
+
 
 api_client = NestApiClient()

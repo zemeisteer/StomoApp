@@ -13,7 +13,13 @@ import {
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { BotService } from './bot.service';
 import { BotServiceGuard } from './bot-service.guard';
-import { SyncPatientDto, CreateBotBookingDto, CancelBotAppointmentDto } from './bot.dto';
+import {
+  SyncPatientDto,
+  CreateBotBookingDto,
+  CancelBotAppointmentDto,
+  ReportBotJobFailureDto,
+  ClaimDailyDigestDto,
+} from './bot.dto';
 
 @Controller('bot')
 @UseGuards(BotServiceGuard, ThrottlerGuard)
@@ -80,8 +86,28 @@ export class BotController {
     return this.botService.getUpcomingReminders();
   }
 
+  /** Claims due 24h reminders; each appointment revision is returned only once. */
+  @Post('reminders/claim')
+  @HttpCode(HttpStatus.OK)
+  async claimReminders() {
+    return this.botService.claimTelegramReminders();
+  }
+
+  @Post('jobs/:jobId/failed')
+  @HttpCode(HttpStatus.OK)
+  async reportJobFailure(@Param('jobId') jobId: string, @Body() dto: ReportBotJobFailureDto) {
+    return this.botService.reportBotJobFailure(jobId, dto.error);
+  }
+
   @Get('daily-schedules')
   async getDailyDoctorSchedules() {
     return this.botService.getDailyDoctorSchedules();
+  }
+
+  /** Claims today's staff schedule digest; `claimed: false` if already sent today. */
+  @Post('daily-schedules/claim')
+  @HttpCode(HttpStatus.OK)
+  async claimDailySchedules(@Body() dto: ClaimDailyDigestDto) {
+    return this.botService.claimDailyScheduleDigest(dto.recipient);
   }
 }

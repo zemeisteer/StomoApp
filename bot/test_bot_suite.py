@@ -92,34 +92,75 @@ async def test_bot_flows():
     print(" [PASS] NestApiClient service token contract verified", flush=True)
 
     # 5. Test Scheduler Runners with Mocked API Responses
-    with patch.object(api_client, "get_reminders", new_callable=AsyncMock) as mock_get_reminders, \
-         patch.object(api_client, "get_daily_doctor_schedules", new_callable=AsyncMock) as mock_get_schedules:
+    with patch.object(api_client, "claim_reminders", new_callable=AsyncMock) as mock_claim, \
+         patch.object(api_client, "report_job_failure", new_callable=AsyncMock) as mock_report:
 
-        mock_get_reminders.return_value = [
+        # 5a. Claimed reminder is actually sent to the patient's Telegram chat, HTML-escaped
+        mock_bot.send_message.reset_mock()
+        mock_claim.return_value = [
             {
                 "id": "appt-1",
-                "patientName": "Aziz Rahimov",
+                "jobId": "job-1",
+                "telegramUserId": "123456789",
+                "patientName": "Aziz <Rahimov>",
                 "doctorName": "Dr. Jasur Mansurov",
+                "dateStr": "07.11.2026",
                 "timeStr": "10:00",
-                "window": "2h",
+                "window": "24h",
             }
         ]
         await send_appointment_reminders(mock_bot)
-        assert mock_get_reminders.called
-        print(" [PASS] send_appointment_reminders executed cleanly via NestJS API contract", flush=True)
+        mock_bot.send_message.assert_awaited_once()
+        kwargs = mock_bot.send_message.await_args.kwargs
+        assert kwargs["chat_id"] == 123456789
+        assert "07.11.2026" in kwargs["text"] and "10:00" in kwargs["text"]
+        assert "&lt;Rahimov&gt;" in kwargs["text"]
+        mock_report.assert_not_awaited()
+        print(" [PASS] 24h reminder delivered to patient chat with escaped HTML", flush=True)
 
-        mock_get_schedules.return_value = [
-            {
-                "doctorId": "doc-1",
-                "doctorName": "Dr. Jasur Mansurov",
-                "appointments": [
-                    {"id": "appt-1", "patientName": "Aziz Rahimov", "time": "10:00", "notes": "Ko'rik"}
-                ],
-            }
-        ]
+        # 5b. Delivery failure (e.g. patient blocked bot) is reported back to the backend
+        mock_bot.send_message.reset_mock()
+        mock_bot.send_message.side_effect = Exception("Forbidden: bot was blocked by the user")
+        await send_appointment_reminders(mock_bot)
+        mock_report.assert_awaited_once_with("job-1", "Forbidden: bot was blocked by the user")
+        mock_bot.send_message.side_effect = None
+        print(" [PASS] Failed reminder delivery reported to backend outbox", flush=True)
+
+        # 5c. Nothing claimed (already sent) -> nothing sent
+        mock_bot.send_message.reset_mock()
+        mock_claim.return_value = []
+        await send_appointment_reminders(mock_bot)
+        mock_bot.send_message.assert_not_awaited()
+        print(" [PASS] Already-claimed reminders are not re-sent", flush=True)
+
+    with patch.object(api_client, "claim_daily_schedule_digest", new_callable=AsyncMock) as mock_digest:
+        # 5d. Claimed digest is posted to the staff group without patient names
+        mock_bot.send_message.reset_mock()
+        mock_digest.return_value = {
+            "claimed": True,
+            "jobId": "job-2",
+            "date": "2026-11-06",
+            "doctors": [
+                {
+                    "doctorId": "doc-1",
+                    "doctorName": "Dr. Jasur Mansurov",
+                    "appointments": [{"id": "appt-1", "time": "10:00", "serviceName": "Konsultatsiya"}],
+                }
+            ],
+        }
         await dispatch_daily_doctor_schedules(mock_bot)
-        assert mock_get_schedules.called
-        print(" [PASS] dispatch_daily_doctor_schedules executed cleanly via NestJS API contract", flush=True)
+        mock_bot.send_message.assert_awaited_once()
+        kwargs = mock_bot.send_message.await_args.kwargs
+        assert kwargs["chat_id"] == config.STAFF_GROUP_CHAT_ID
+        assert "Dr. Jasur Mansurov" in kwargs["text"] and "10:00" in kwargs["text"]
+        print(" [PASS] Daily schedule digest posted to staff group", flush=True)
+
+        # 5e. Digest already sent today -> no second message
+        mock_bot.send_message.reset_mock()
+        mock_digest.return_value = {"claimed": False, "jobId": None, "date": "2026-11-06", "doctors": []}
+        await dispatch_daily_doctor_schedules(mock_bot)
+        mock_bot.send_message.assert_not_awaited()
+        print(" [PASS] Daily digest sent at most once per day", flush=True)
 
     # 6. Test Security: Reject Foreign / Forged Contact
     from aiogram.types import Contact, User, Message

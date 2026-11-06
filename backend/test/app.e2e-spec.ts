@@ -7451,7 +7451,99 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.doctorCommission.deleteMany({ where: { doctorId: testDoctorBId } });
     }
   });
+
+  it('Regression 64: Bot 24h Telegram reminders and daily staff digest are claimed exactly once', async () => {
+    const serviceToken = testServiceToken;
+    const runTag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const tgUserId = `9${Date.now()}`.slice(0, 12);
+    const patient = await prisma.patient.create({
+      data: { fullName: 'Reminder <Bot> Patient', phone: `+998977${Date.now().toString().slice(-6)}`, telegramUserId: tgUserId },
+    });
+    const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `reg64_${runTag}`,
+        patientId: patient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: start,
+        endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg64 Service',
+        durationMinutes: 30,
+        bufferMinutes: 0,
+        consentGiven: true,
+      },
+    });
+    const reminderKeyPrefix = `bot_patient_reminder_24h_${appt.id}_`;
+    const digestKey = `bot_staff_daily_schedule_`;
+
+    try {
+      // Read-only preview has no side effects
+      const preview = await request(app.getHttpServer())
+        .get('/api/bot/reminders').set('x-service-token', serviceToken).expect(200);
+      expect(preview.body.some((r: any) => r.id === appt.id)).toBe(true);
+      expect(await prisma.notificationJob.count({ where: { deduplicationKey: { startsWith: reminderKeyPrefix } } })).toBe(0);
+
+      // First claim returns the reminder with the patient's Telegram chat
+      const first = await request(app.getHttpServer())
+        .post('/api/bot/reminders/claim').set('x-service-token', serviceToken).send({}).expect(200);
+      const claimed = first.body.find((r: any) => r.id === appt.id);
+      expect(claimed).toBeDefined();
+      expect(claimed.telegramUserId).toBe(tgUserId);
+      expect(claimed.jobId).toBeTruthy();
+      expect(claimed.timeStr).toMatch(/^\d{2}:\d{2}$/);
+
+      // Concurrent + repeated claims never return it again
+      const again = await Promise.all([1, 2, 3].map(() =>
+        request(app.getHttpServer()).post('/api/bot/reminders/claim').set('x-service-token', serviceToken).send({})));
+      for (const res of again) {
+        expect(res.status).toBe(200);
+        expect(res.body.some((r: any) => r.id === appt.id)).toBe(false);
+      }
+
+      const job = await prisma.notificationJob.findUnique({ where: { id: claimed.jobId } });
+      expect(job!.status).toBe('SENT');
+      expect(job!.appointmentId).toBeNull(); // never touches outbox per-appointment bookkeeping
+
+      // Failure report marks the job FAILED; unknown ids are 404
+      await request(app.getHttpServer())
+        .post(`/api/bot/jobs/${claimed.jobId}/failed`).set('x-service-token', serviceToken)
+        .send({ error: 'Forbidden: bot was blocked by the user' }).expect(200);
+      const failed = await prisma.notificationJob.findUnique({ where: { id: claimed.jobId } });
+      expect(failed!.status).toBe('FAILED');
+      expect(failed!.lastError).toContain('blocked');
+      await request(app.getHttpServer())
+        .post('/api/bot/jobs/does-not-exist/failed').set('x-service-token', serviceToken)
+        .send({ error: 'x' }).expect(404);
+
+      // Rescheduling (new scheduleRevision) makes the reminder claimable again
+      await prisma.appointment.update({ where: { id: appt.id }, data: { scheduleRevision: { increment: 1 } } });
+      const afterReschedule = await request(app.getHttpServer())
+        .post('/api/bot/reminders/claim').set('x-service-token', serviceToken).send({}).expect(200);
+      expect(afterReschedule.body.some((r: any) => r.id === appt.id)).toBe(true);
+
+      // Daily digest: once per clinic day, no patient names
+      await prisma.notificationJob.deleteMany({ where: { deduplicationKey: { startsWith: digestKey } } });
+      const d1 = await request(app.getHttpServer())
+        .post('/api/bot/daily-schedules/claim').set('x-service-token', serviceToken)
+        .send({ recipient: '-1000000000000' }).expect(200);
+      expect(d1.body.claimed).toBe(true);
+      expect(d1.body.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(JSON.stringify(d1.body)).not.toContain('Reminder <Bot> Patient');
+      const d2 = await request(app.getHttpServer())
+        .post('/api/bot/daily-schedules/claim').set('x-service-token', serviceToken)
+        .send({ recipient: '-1000000000000' }).expect(200);
+      expect(d2.body.claimed).toBe(false);
+
+      // Endpoints stay behind the service token guard
+      await request(app.getHttpServer()).post('/api/bot/reminders/claim').send({}).expect(401);
+    } finally {
+      await prisma.notificationJob.deleteMany({ where: { deduplicationKey: { startsWith: reminderKeyPrefix } } });
+      await prisma.notificationJob.deleteMany({ where: { deduplicationKey: { startsWith: digestKey } } });
+      await prisma.appointment.deleteMany({ where: { id: appt.id } });
+      await prisma.patient.deleteMany({ where: { id: patient.id } });
+    }
+  });
 });
-
-
-
