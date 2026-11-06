@@ -5,8 +5,9 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install build tools for native addons (bcrypt, sharp)
-RUN apk add --no-cache python3 make g++
+# Build tools for native addons (bcrypt, sharp); openssl so Prisma downloads
+# the OpenSSL 3 engines that match the runner image
+RUN apk add --no-cache python3 make g++ openssl
 
 COPY package*.json ./
 COPY prisma ./prisma/
@@ -19,6 +20,9 @@ RUN npx prisma generate
 # ------------------------------------------------------------------------------
 FROM node:20-alpine AS builder
 WORKDIR /app
+
+# Same OpenSSL as deps/runner so Prisma resolves the same engine binaries
+RUN apk add --no-cache openssl
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -54,5 +58,6 @@ USER nestjs
 EXPOSE 4000
 
 # Apply pending migrations, then start. Safe to run on every start (idempotent).
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/src/main.js"]
+ENV PRISMA_HIDE_UPDATE_MESSAGE=1
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/src/main.js"]
 
