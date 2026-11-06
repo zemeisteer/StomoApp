@@ -493,6 +493,7 @@ export class BotService {
     );
 
     const doctorName = appt.doctor ? `Dr. ${appt.doctor.firstNameUz} ${appt.doctor.lastNameUz}`.trim() : 'Shifokor';
+    const timezone = await this.getClinicTimezone();
 
     return {
       success: true,
@@ -500,6 +501,9 @@ export class BotService {
       patientName: appt.patient?.fullName || 'Bemor',
       doctorName,
       startTime: appt.startTime,
+      // Clinic-local date/time so callers don't render UTC
+      dateStr: formatInTimeZone(appt.startTime, timezone, 'dd.MM.yyyy'),
+      timeStr: formatInTimeZone(appt.startTime, timezone, 'HH:mm'),
     };
   }
 

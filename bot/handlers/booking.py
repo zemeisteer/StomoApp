@@ -10,7 +10,7 @@ from bot.keyboards.inline import (
     get_time_slots_keyboard,
     get_cancel_confirm_keyboard,
 )
-from bot.services.notifier import notify_staff_new_booking, notify_staff_cancellation
+from bot.services.notifier import notify_staff_cancellation
 
 router = Router()
 
@@ -113,14 +113,7 @@ async def handle_confirm_slot(callback: CallbackQuery):
 
     doctor_name = booking_res.get("doctorName", "Shifokor")
 
-    await notify_staff_new_booking(
-        bot=callback.bot,
-        patient_name=patient_name,
-        patient_phone=patient_phone,
-        doctor_name=doctor_name,
-        date_str=date_str,
-        time_str=slot_time,
-    )
+    # Staff are notified by the backend outbox (staff_new_booking) for every booking.
 
     user_booking_sessions.pop(user_id, None)
 
@@ -130,7 +123,7 @@ async def handle_confirm_slot(callback: CallbackQuery):
         f"👨‍⚕️ <b>Shifokor:</b> {doctor_name}\n"
         f"📅 <b>Sana:</b> {date_str}\n"
         f"⏰ <b>Vaqt:</b> {slot_time}\n\n"
-        f"<i>Qabul boshlanishidan 24 soat va 2 soat oldin sizga eslatma yuboramiz.</i>",
+        f"<i>Qabuldan 24 soat oldin shu yerda, 2 soat oldin SMS orqali eslatma yuboramiz.</i>",
         parse_mode="HTML",
     )
     await callback.answer("Qabul tasdiqlandi!")
@@ -153,15 +146,13 @@ async def handle_confirm_cancel(callback: CallbackQuery):
     cancel_res = await api_client.cancel_appointment(appt_id, str(callback.from_user.id))
 
     if cancel_res and cancel_res.get("success"):
-        p_name = cancel_res.get("patientName", "Bemor")
         d_name = cancel_res.get("doctorName", "Shifokor")
-        st_raw = cancel_res.get("startTime", "")
-        d_str = st_raw[:10] if len(st_raw) >= 10 else ""
-        t_str = st_raw[11:16] if len(st_raw) >= 16 else ""
+        # Clinic-local date/time from the backend (startTime is UTC)
+        d_str = cancel_res.get("dateStr", "")
+        t_str = cancel_res.get("timeStr", "")
 
         await notify_staff_cancellation(
             bot=callback.bot,
-            patient_name=p_name,
             doctor_name=d_name,
             date_str=d_str,
             time_str=t_str,

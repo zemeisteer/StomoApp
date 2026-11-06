@@ -16,7 +16,7 @@ from bot.services.scheduler import (
     send_appointment_reminders,
     dispatch_daily_doctor_schedules,
 )
-from bot.services.notifier import notify_staff_new_booking, notify_staff_cancellation
+from bot.services.notifier import notify_staff_cancellation
 from bot.keyboards.inline import (
     get_appointment_actions_keyboard,
     get_date_picker_keyboard,
@@ -56,26 +56,14 @@ async def test_bot_flows():
     mock_bot = MagicMock(spec=Bot)
     mock_bot.send_message = AsyncMock()
 
-    await notify_staff_new_booking(
-        bot=mock_bot,
-        patient_name="Aziz Rahimov",
-        patient_phone="+998901234567",
-        doctor_name="Dr. Jasur Mansurov",
-        date_str="2026-11-01",
-        time_str="10:00",
-    )
-    assert mock_bot.send_message.called
-    print(" [PASS] Staff new booking alert dispatched to group", flush=True)
-
-    mock_bot.send_message.reset_mock()
     await notify_staff_cancellation(
         bot=mock_bot,
-        patient_name="Aziz Rahimov",
         doctor_name="Dr. Jasur Mansurov",
-        date_str="2026-11-01",
+        date_str="01.11.2026",
         time_str="10:00",
     )
     assert mock_bot.send_message.called
+    assert "Aziz" not in mock_bot.send_message.await_args.kwargs["text"]
     print(" [PASS] Staff cancellation alert dispatched to group", flush=True)
 
     # 3. Test APScheduler setup
@@ -259,13 +247,18 @@ async def test_bot_flows():
             "success": True,
             "patientName": "RealUser",
             "doctorName": "Dr. Jasur Mansurov",
-            "startTime": "2026-11-10T14:00:00Z",
+            "startTime": "2026-11-10T09:00:00Z",
+            "dateStr": "10.11.2026",
+            "timeStr": "14:00",
         }
         await handle_confirm_cancel(cancel_cb)
         assert mock_cancel_api.called
         mock_cancel_api.assert_called_with("appt-xyz", "11111")
         assert cancel_cb.message.edit_text.called
         assert mock_notify_cancel.called
+        notify_kwargs = mock_notify_cancel.await_args.kwargs
+        assert notify_kwargs["time_str"] == "14:00"  # clinic-local, not UTC
+        assert "patient_name" not in notify_kwargs
         print(" [PASS] Patient cancel flow verified with ownership & staff alert", flush=True)
 
     print("--- ALL TELEGRAM BOT FLOW TESTS PASSED SUCCESSFULLY! ---", flush=True)
