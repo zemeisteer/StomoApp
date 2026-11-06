@@ -112,8 +112,12 @@ The repository includes multi-stage production Dockerfiles and an orchestration 
 Prerequisites: DNS A/AAAA records for `DOMAIN` (and every `EXTRA_DOMAINS` entry) point to the server, and ports 80/443 are open.
 
 ```bash
-# 1. Create the production environment file and fill in secrets, DOMAIN, EXTRA_DOMAINS, LETSENCRYPT_EMAIL
-cp .env.production.example .env.production
+# 1. Create .env.production with fresh random secrets, then fill in the provider values
+#    (SMS_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_BOT_USERNAME)
+./scripts/generate-env.sh dentacare.uz admin@dentacare.uz
+
+# 1b. Check DNS, ports, Docker, secrets and the compose file (read-only)
+./scripts/preflight.sh
 
 # 2. First deploy only: obtain the Let's Encrypt certificate and start the stack
 #    (STAGING=1 first to test without hitting Let's Encrypt rate limits)
@@ -123,8 +127,9 @@ cp .env.production.example .env.production
 #    then configure clinic settings, branches, services and doctors in the admin panel
 docker compose --env-file .env.production -f docker-compose.prod.yml run --rm   -e OWNER_EMAIL=owner@example.uz -e OWNER_NAME="Ism Familiya" -e OWNER_PASSWORD='change-me-please'   backend node scripts/create-owner.js
 
-# 4. Later deploys (migrations are applied automatically when the backend starts)
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+# 4. Later deploys: preflight, pre-deploy DB backup, rebuild, wait for healthy
+#    (migrations are applied automatically when the backend starts)
+./scripts/deploy.sh --pull
 
 # 5. Check container health
 docker compose --env-file .env.production -f docker-compose.prod.yml ps

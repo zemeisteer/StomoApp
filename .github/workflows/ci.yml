@@ -187,8 +187,22 @@ jobs:
             -e SERVICE_TOKEN=ci_service_token_random_secure_32_chars_minimum_length_abcdef \
             stomo-bot:ci python -c "import bot.main; print('bot image OK')"
 
-      - name: Validate Bootstrap Script Syntax
-        run: bash -n scripts/init-letsencrypt.sh
+      - name: Validate Ops Script Syntax
+        run: for f in scripts/*.sh backend/scripts/*.sh; do bash -n "$f" && echo "ok $f"; done
+
+      - name: Generate Env & Preflight (DNS skipped)
+        run: |
+          ./scripts/generate-env.sh example.test ci@example.test
+          # Provider values a human fills in after generation
+          sed -i -e 's/^TELEGRAM_BOT_TOKEN=.*/TELEGRAM_BOT_TOKEN=123456:ci_dummy/' \
+                 -e 's/^TELEGRAM_CHAT_ID=.*/TELEGRAM_CHAT_ID=-1000000000000/' .env.production
+          PREFLIGHT_SKIP_DNS=1 ./scripts/preflight.sh
+          # Placeholder secrets must be rejected
+          cp .env.production.example /tmp/bad.env
+          if ENV_FILE=/tmp/bad.env PREFLIGHT_SKIP_DNS=1 ./scripts/preflight.sh; then
+            echo "preflight accepted template placeholders"; exit 1
+          fi
+          rm -f .env.production
 
       - name: Render Templates & Run nginx -t
         run: |
