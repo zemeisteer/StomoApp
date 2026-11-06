@@ -737,6 +737,39 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
+  // Patient card & treatment plans (estimate -> approval -> progress)
+  getPatientCard: (patientId: string) => fetcher<any>(`/api/admin/clinical/patient-card/${patientId}`),
+  getTreatmentPlans: (patientId: string) => fetcher<any[]>(`/api/admin/clinical/patients/${patientId}/plans`),
+  getTreatmentPlanById: (planId: string) => fetcher<any>(`/api/admin/clinical/plans/${planId}`),
+  createTreatmentPlan: (patientId: string, payload: { title: string; notes?: string; doctorId?: string }) =>
+    fetcher<any>(`/api/admin/clinical/patients/${patientId}/plans`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateTreatmentPlan: (planId: string, payload: { title?: string; notes?: string; discountUzs?: number }) =>
+    fetcher<any>(`/api/admin/clinical/plans/${planId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  addTreatmentPlanItem: (planId: string, payload: Record<string, unknown>) =>
+    fetcher<any>(`/api/admin/clinical/plans/${planId}/items`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateTreatmentPlanItem: (itemId: string, payload: Record<string, unknown>) =>
+    fetcher<any>(`/api/admin/clinical/plan-items/${itemId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteTreatmentPlanItem: (itemId: string) =>
+    fetcher<any>(`/api/admin/clinical/plan-items/${itemId}`, { method: 'DELETE' }),
+  presentTreatmentPlan: (planId: string) =>
+    fetcher<{ approvalPath: string; expiresAt: string; plan: any }>(`/api/admin/clinical/plans/${planId}/present`, { method: 'POST' }),
+  acceptTreatmentPlan: (planId: string, payload: { method: 'IN_CLINIC_SIGNATURE' | 'VERBAL'; acceptedByName: string; signature?: string }) =>
+    fetcher<any>(`/api/admin/clinical/plans/${planId}/accept`, { method: 'POST', body: JSON.stringify(payload) }),
+  declineTreatmentPlan: (planId: string, reason?: string) =>
+    fetcher<any>(`/api/admin/clinical/plans/${planId}/decline`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  cancelTreatmentPlan: (planId: string) => fetcher<any>(`/api/admin/clinical/plans/${planId}/cancel`, { method: 'POST' }),
+  getPublicTreatmentPlan: (token: string) => fetcher<any>(`/api/public/treatment-plans/${encodeURIComponent(token)}`),
+  acceptPublicTreatmentPlan: (token: string, fullName: string) =>
+    fetcher<any>(`/api/public/treatment-plans/${encodeURIComponent(token)}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ fullName, agree: true }),
+    }),
+  declinePublicTreatmentPlan: (token: string, reason?: string) =>
+    fetcher<any>(`/api/public/treatment-plans/${encodeURIComponent(token)}/decline`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+
   // Billing & Invoices & Debts
   getInvoices: (params?: { patientId?: string; appointmentId?: string }) => {
     const q = new URLSearchParams();

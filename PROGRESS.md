@@ -199,13 +199,19 @@ A new CI job builds the production images and runs the stack; it found the image
 - **Admin**: Settings → "Brend ranglari" with presets, color pickers, contrast check and live preview of the whole panel (reverted if not saved). Backend validates colors as `#RRGGBB` (Regression 71).
 - **Design**: self-hosted Inter; light admin sidebar with grouped navigation (logos stay legible), refreshed header and mobile bottom bar; new split-screen login carrying the clinic brand (password no longer trimmed, show/hide toggle); localized service categories on the homepage.
 
+### Phase 13: Patient Card & Treatment Plans (2026-11-07)
+- **Patient card** (`/admin/patients/[id]`): one `GET /api/admin/clinical/patient-card/:id` call returns profile, visit stats, next appointment, plan counters and money (billed/paid/debt with invoices and payments). Tabs: overview, tooth chart, treatment plans, visits, payments. Doctors only see their own visits with the patient and no financial data; internal `[lang:xx]` note markers are hidden.
+- **Treatment plans** (new `treatment_plans` table, items gain `plan_id`, `service_id`, `quantity`, `unit_price_uzs`, `phase`, `sort_order`): lifecycle DRAFT → PRESENTED → ACCEPTED/DECLINED → IN_PROGRESS → COMPLETED (or CANCELLED). Items are priced from the service catalog (tiyin → so'm) or typed manually, grouped into phases, with a plan-level discount.
+- **Approval**: in clinic (signature on screen, PNG data URL validated, or verbal consent recorded in the audit log) or via a private 14-day link `/plan/<token>` that shows only the patient's first name and prices. Only the SHA-256 of the token is stored; links are single use, noindex/no-referrer, throttled, and revoked when prices change after presenting. Accepted plans lock prices and snapshot `acceptedTotalUzs`; item progress drives plan status.
+- **Printable estimate** (browser print) with clinic header and signature lines. Regression 72 covers the whole flow.
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 86 full integration tests (Regressions 1–71) | `dentacare_test` | **86 / 86 PASSED (100%)** |
+| **Jest E2E Regressions** | 87 full integration tests (Regressions 1–72) | `dentacare_test` | **87 / 87 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |

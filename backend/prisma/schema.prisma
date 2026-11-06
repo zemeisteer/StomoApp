@@ -182,6 +182,7 @@ model Doctor {
   appointments Appointment[]
   odontogramRecords  OdontogramRecord[]
   treatmentPlanItems TreatmentPlanItem[]
+  treatmentPlans     TreatmentPlan[]
   commission         DoctorCommission?
 
   @@map("doctors")
@@ -261,6 +262,7 @@ model Service {
   doctors      DoctorService[]
   appointments Appointment[]
   appointmentItems AppointmentServiceItem[]
+  treatmentPlanItems TreatmentPlanItem[]
 
   @@map("services")
 }
@@ -368,6 +370,7 @@ model Patient {
   appointments Appointment[]
   odontogramRecords  OdontogramRecord[]
   treatmentPlanItems TreatmentPlanItem[]
+  treatmentPlans     TreatmentPlan[]
   invoices     Invoice[]
   payments     Payment[]
   reviews      Review[]
@@ -781,14 +784,64 @@ model TreatmentPlanItem {
   treatmentNameUz String       @map("treatment_name_uz")
   treatmentNameRu String?      @map("treatment_name_ru")
   costUzs         Int          @default(0) @map("cost_uzs") // Whole integer in so'm
-  status          String       @default("PLANNED") // PLANNED, IN_PROGRESS, COMPLETED
+  status          String       @default("PLANNED") // PLANNED, IN_PROGRESS, COMPLETED, CANCELLED
   notes           String?      @db.Text
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  // Grouping into a patient-facing plan (null = legacy free-standing item)
+  planId       String?        @map("plan_id")
+  plan         TreatmentPlan? @relation(fields: [planId], references: [id], onDelete: Cascade)
+  serviceId    String?        @map("service_id")
+  service      Service?       @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  quantity     Int            @default(1)
+  unitPriceUzs Int            @default(0) @map("unit_price_uzs") // so'm; costUzs = unitPriceUzs * quantity
+  phase        Int            @default(1) // treatment stage (1 = first visit block, ...)
+  sortOrder    Int            @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([patientId])
   @@index([doctorId])
+  @@index([planId])
   @@map("treatment_plan_items")
+}
+
+/// A priced treatment proposal the patient reviews and accepts (in clinic or via a private link).
+model TreatmentPlan {
+  id          String  @id @default(cuid())
+  patientId   String  @map("patient_id")
+  patient     Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId    String? @map("doctor_id")
+  doctor      Doctor? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  createdById String? @map("created_by_id")
+  title       String
+  // DRAFT, PRESENTED, ACCEPTED, DECLINED, IN_PROGRESS, COMPLETED, CANCELLED
+  status      String  @default("DRAFT")
+  discountUzs Int     @default(0) @map("discount_uzs")
+  notes       String? @db.Text
+
+  // Private approval link: only the SHA-256 of the token is stored
+  approvalTokenHash String?   @unique @map("approval_token_hash")
+  approvalExpiresAt DateTime? @map("approval_expires_at")
+
+  presentedAt         DateTime? @map("presented_at")
+  acceptedAt          DateTime? @map("accepted_at")
+  declinedAt          DateTime? @map("declined_at")
+  acceptedByName      String?   @map("accepted_by_name")
+  acceptanceMethod    String?   @map("acceptance_method") // IN_CLINIC_SIGNATURE, VERBAL, ONLINE
+  acceptanceSignature String?   @map("acceptance_signature") @db.Text // PNG data URL
+  acceptanceIp        String?   @map("acceptance_ip")
+  acceptedTotalUzs    Int?      @map("accepted_total_uzs") // price snapshot the patient agreed to
+  declineReason       String?   @map("decline_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items TreatmentPlanItem[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("treatment_plans")
 }
 
 // ============================================================

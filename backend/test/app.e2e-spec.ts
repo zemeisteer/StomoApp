@@ -7946,4 +7946,90 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       }
     }
   });
+  it('Regression 72: Treatment plans price from the catalog, lock on acceptance and use a revocable private approval link', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg72 Bemorov Testovich', phone: '+998900007272' } });
+    const service = await prisma.service.findFirst({ where: { priceFrom: { not: null } } });
+    expect(service).toBeTruthy();
+    try {
+      // Doctor without an appointment with this patient is denied (plans and card)
+      await http().get(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(doctorBToken)).expect(403);
+      await http().get(`/api/admin/clinical/patient-card/${patient.id}`).set(auth(doctorBToken)).expect(403);
+
+      const created = await http().post(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(adminToken))
+        .send({ title: 'Kompleks davolash' }).expect(201);
+      const planId = created.body.id;
+      expect(created.body.status).toBe('DRAFT');
+
+      // Catalog price is converted from tiyin to so'm when no price is given
+      let plan = (await http().post(`/api/admin/clinical/plans/${planId}/items`).set(auth(adminToken))
+        .send({ serviceId: service!.id, toothNumber: 16 }).expect(201)).body;
+      const catalogPrice = Math.round(service!.priceFrom! / 100);
+      expect(plan.items[0]).toMatchObject({ unitPriceUzs: catalogPrice, costUzs: catalogPrice, quantity: 1, treatmentNameUz: service!.nameUz });
+
+      plan = (await http().post(`/api/admin/clinical/plans/${planId}/items`).set(auth(adminToken))
+        .send({ treatmentNameUz: 'Plomba', unitPriceUzs: 200000, quantity: 2, phase: 2 }).expect(201)).body;
+      plan = (await http().patch(`/api/admin/clinical/plans/${planId}`).set(auth(adminToken)).send({ discountUzs: 50000 }).expect(200)).body;
+      expect(plan.totals).toMatchObject({ subtotalUzs: catalogPrice + 400000, discountUzs: 50000, totalUzs: catalogPrice + 350000 });
+
+      // Work cannot start before the patient agrees
+      const itemId = plan.items[1].id;
+      await http().patch(`/api/admin/clinical/plan-items/${itemId}`).set(auth(adminToken)).send({ status: 'COMPLETED' }).expect(400);
+
+      // Present -> private link shows only the first name, never phone or full name
+      const first = (await http().post(`/api/admin/clinical/plans/${planId}/present`).set(auth(adminToken)).expect(201)).body;
+      const token1 = first.approvalPath.split('/').pop();
+      const pub = await http().get(`/api/public/treatment-plans/${token1}`).expect(200);
+      expect(pub.body.patientFirstName).toBe('Reg72');
+      expect(JSON.stringify(pub.body)).not.toContain('+998900007272');
+      expect(JSON.stringify(pub.body)).not.toContain('Bemorov');
+      expect(pub.body.totals.totalUzs).toBe(catalogPrice + 350000);
+      const stored = await prisma.treatmentPlan.findUnique({ where: { id: planId } });
+      expect(stored!.approvalTokenHash).not.toBe(token1);
+
+      // Changing prices after presenting revokes the link and returns to DRAFT
+      plan = (await http().patch(`/api/admin/clinical/plan-items/${itemId}`).set(auth(adminToken)).send({ unitPriceUzs: 250000 }).expect(200)).body;
+      expect(plan.status).toBe('DRAFT');
+      await http().get(`/api/public/treatment-plans/${token1}`).expect(404);
+
+      const second = (await http().post(`/api/admin/clinical/plans/${planId}/present`).set(auth(adminToken)).expect(201)).body;
+      const token2 = second.approvalPath.split('/').pop();
+      await http().post(`/api/public/treatment-plans/${token2}/accept`).send({ fullName: 'Reg72 Bemorov', agree: false }).expect(400);
+      await http().post(`/api/public/treatment-plans/${token2}/accept`).send({ fullName: 'Reg72 Bemorov', agree: true }).expect(201);
+      // Single use
+      await http().post(`/api/public/treatment-plans/${token2}/accept`).send({ fullName: 'Reg72 Bemorov', agree: true }).expect(404);
+
+      plan = (await http().get(`/api/admin/clinical/plans/${planId}`).set(auth(adminToken)).expect(200)).body;
+      expect(plan).toMatchObject({ status: 'ACCEPTED', acceptanceMethod: 'ONLINE', acceptedTotalUzs: catalogPrice + 450000, hasApprovalLink: false });
+
+      // Accepted prices are locked
+      await http().post(`/api/admin/clinical/plans/${planId}/items`).set(auth(adminToken)).send({ treatmentNameUz: 'X', unitPriceUzs: 1 }).expect(400);
+      await http().patch(`/api/admin/clinical/plan-items/${itemId}`).set(auth(adminToken)).send({ unitPriceUzs: 1 }).expect(400);
+
+      // Progress drives plan status
+      plan = (await http().patch(`/api/admin/clinical/plan-items/${itemId}`).set(auth(adminToken)).send({ status: 'IN_PROGRESS' }).expect(200)).body;
+      expect(plan.status).toBe('IN_PROGRESS');
+      await http().patch(`/api/admin/clinical/plan-items/${plan.items[0].id}`).set(auth(adminToken)).send({ status: 'CANCELLED' }).expect(200);
+      plan = (await http().patch(`/api/admin/clinical/plan-items/${itemId}`).set(auth(adminToken)).send({ status: 'COMPLETED' }).expect(200)).body;
+      expect(plan.status).toBe('COMPLETED');
+
+      // In-clinic acceptance validates the signature image
+      const p2 = (await http().post(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(adminToken)).send({ title: 'Ikkinchi' }).expect(201)).body;
+      await http().post(`/api/admin/clinical/plans/${p2.id}/items`).set(auth(adminToken)).send({ treatmentNameUz: 'Gigiyena', unitPriceUzs: 300000 }).expect(201);
+      await http().post(`/api/admin/clinical/plans/${p2.id}/accept`).set(auth(adminToken))
+        .send({ method: 'IN_CLINIC_SIGNATURE', acceptedByName: 'Reg72', signature: 'data:text/html;base64,PHNjcmlwdD4=' }).expect(400);
+      const signed = (await http().post(`/api/admin/clinical/plans/${p2.id}/accept`).set(auth(adminToken))
+        .send({ method: 'IN_CLINIC_SIGNATURE', acceptedByName: 'Reg72', signature: 'data:image/png;base64,iVBORw0KGgo=' }).expect(201)).body;
+      expect(signed).toMatchObject({ status: 'ACCEPTED', acceptanceMethod: 'IN_CLINIC_SIGNATURE', hasSignature: true });
+
+      // Card: owner sees money, plan counters reflect the plans above
+      const card = (await http().get(`/api/admin/clinical/patient-card/${patient.id}`).set(auth(adminToken)).expect(200)).body;
+      expect(card.finance).toMatchObject({ billedUzs: 0, paidUzs: 0, debtUzs: 0 });
+      expect(card.stats.activePlans).toBe(1);
+      expect(card.patient.telegramUserId).toBeUndefined();
+    } finally {
+      await prisma.patient.delete({ where: { id: patient.id } });
+    }
+  });
 });

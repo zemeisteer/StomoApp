@@ -15,10 +15,13 @@ import {
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { formatClinicDate } from '../../../lib/dateFormat';
 
 export default function AdminPatientsPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [patients, setPatients] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -190,7 +193,7 @@ export default function AdminPatientsPage() {
                   {patients.map((p) => (
                     <tr
                       key={p.id}
-                      onClick={() => openPatientDetail(p.id)}
+                      onClick={() => router.push(`/admin/patients/${p.id}`)}
                       className="hover:bg-teal-50/40 cursor-pointer transition-colors"
                     >
                       <td className="py-4 px-6 font-bold text-slate-900">
@@ -208,12 +211,25 @@ export default function AdminPatientsPage() {
                         {formatClinicDate(p.createdAt, 'uz')}
                       </td>
                       <td className="py-4 px-6 text-right">
-                        <button
-                          type="button"
-                          className="text-teal-700 font-bold hover:underline"
-                        >
-                          Tarixni ko&apos;rish
-                        </button>
+                        <span className="inline-flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPatientDetail(p.id);
+                            }}
+                            className="text-ink-muted font-semibold hover:text-ink"
+                          >
+                            Tez ko&apos;rish
+                          </button>
+                          <Link
+                            href={`/admin/patients/${p.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-brand-700 font-bold hover:underline"
+                          >
+                            Kartani ochish
+                          </Link>
+                        </span>
                       </td>
                     </tr>
                   ))}

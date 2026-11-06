@@ -322,7 +322,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
     <div className="min-h-screen bg-canvas flex">
       {/* Desktop sidebar: light surface so any clinic logo stays legible; brand color marks the active item */}
       <aside
-        className={`hidden lg:flex flex-col bg-white border-r border-line shrink-0 sticky top-0 h-screen z-20 transition-[width] duration-200 ${
+        className={`hidden lg:flex print:!hidden flex-col bg-white border-r border-line shrink-0 sticky top-0 h-screen z-20 transition-[width] duration-200 ${
           isCollapsed ? 'w-[72px]' : 'w-64'
         }`}
       >
@@ -382,7 +382,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       <TelegramLinkModal isOpen={telegramOpen} onClose={() => setTelegramOpen(false)} language={isRu ? 'ru' : 'uz'} />
 
       <div className="flex-1 flex flex-col min-w-0 min-h-screen overflow-x-hidden">
-        <header className="h-16 bg-white/85 backdrop-blur-md border-b border-line px-4 sm:px-8 flex items-center justify-between sticky top-0 z-30">
+        <header className="print:hidden h-16 bg-white/85 backdrop-blur-md border-b border-line px-4 sm:px-8 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -473,11 +473,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
           </div>
         )}
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-full pb-24 lg:pb-8">{children}</main>
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-full pb-24 lg:pb-8 print:p-0">{children}</main>
       </div>
 
       {/* Mobile bottom navigation */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-line px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-around">
+      <nav className="print:hidden lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-line px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-around">
         {[
           { href: '/admin', icon: LayoutDashboard, label: isRu ? 'Главная' : 'Asosiy', exact: true },
           { href: '/admin/calendar', icon: Calendar, label: isRu ? 'Календарь' : 'Taqvim', exact: false },
