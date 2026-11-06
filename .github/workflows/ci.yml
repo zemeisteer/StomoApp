@@ -205,3 +205,43 @@ jobs:
             -v "$PWD/nginx/snippets:/etc/nginx/snippets:ro" \
             -v /tmp/le:/etc/letsencrypt:ro \
             nginx:1.25-alpine nginx -t
+
+  production-stack-smoke:
+    name: Production Stack Smoke Test (backend image, migrations, health)
+    runs-on: ubuntu-latest
+    env:
+      DOMAIN: example.test
+      TELEGRAM_BOT_TOKEN: ci_dummy_token
+      TELEGRAM_CHAT_ID: '-1000000000000'
+      POSTGRES_PASSWORD: ci_smoke_pg_password_0123456789abcdef
+      REDIS_PASSWORD: ci_smoke_redis_password_0123456789abcd
+      JWT_SECRET: ci_smoke_jwt_secret_0123456789abcdef0123
+      JWT_REFRESH_SECRET: ci_smoke_jwt_refresh_secret_0123456789ab
+      SERVICE_TOKEN: ci_smoke_service_token_0123456789abcdef0123
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build & Start postgres, redis, backend
+        run: docker compose -f docker-compose.prod.yml up -d --build --wait --wait-timeout 300 postgres redis backend
+
+      - name: Backend Health (migrations applied, DB reachable)
+        run: |
+          docker compose -f docker-compose.prod.yml exec -T backend wget -qO- http://127.0.0.1:4000/api/health | tee /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          docker compose -f docker-compose.prod.yml exec -T backend npx prisma migrate status
+
+      - name: Owner Bootstrap Script
+        run: |
+          docker compose -f docker-compose.prod.yml run --rm \
+            -e OWNER_EMAIL=owner@example.test -e OWNER_NAME="CI Owner" -e OWNER_PASSWORD=ci-owner-password-123 \
+            backend node scripts/create-owner.js
+
+      - name: Logs on Failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail 200 backend postgres
+
+      - name: Tear Down
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v
