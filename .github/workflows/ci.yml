@@ -251,9 +251,36 @@ jobs:
           ls backups/dentacare_*.dump && ls backups/uploads_*.tar.gz
           docker compose -f docker-compose.prod.yml exec -T backup sh -c 'pg_restore --list /var/backups/dentacare/dentacare_*.dump | grep -q "TABLE public staff_users"'
 
+      - name: Frontend Image & HTTPS Gateway (self-signed, same path as init-letsencrypt.sh)
+        run: |
+          docker compose -f docker-compose.prod.yml run --rm --no-deps --entrypoint sh certbot -c '
+            mkdir -p /etc/letsencrypt/live/example.test &&
+            openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+              -keyout /etc/letsencrypt/live/example.test/privkey.pem \
+              -out /etc/letsencrypt/live/example.test/fullchain.pem -subj /CN=example.test'
+          docker compose -f docker-compose.prod.yml up -d --build --wait --wait-timeout 600 frontend nginx
+          R="--resolve example.test:443:127.0.0.1 --resolve example.test:80:127.0.0.1"
+          # HTTP redirects to HTTPS
+          test "$(curl -s -o /dev/null -w '%{http_code}' $R http://example.test/)" = "301"
+          # Frontend through the gateway, with HSTS
+          test "$(curl -sk -o /dev/null -w '%{http_code}' $R https://example.test/)" = "200"
+          curl -skI $R https://example.test/ | grep -qi '^strict-transport-security'
+          # API through the gateway
+          curl -sk $R https://example.test/api/health | grep -q '"status":"ok"'
+
+      - name: Owner Login over HTTPS (Secure cookies)
+        run: |
+          R="--resolve example.test:443:127.0.0.1"
+          curl -sk $R -D /tmp/login.headers -o /tmp/login.json -H 'Content-Type: application/json' \
+            -d '{"email":"owner@example.test","password":"ci-owner-password-123"}' https://example.test/api/auth/login
+          head -1 /tmp/login.headers
+          grep -qE '^HTTP/[0-9.]+ 20[01]' /tmp/login.headers
+          grep -q '"accessToken"' /tmp/login.json
+          grep -i '^set-cookie: refresh_token=' /tmp/login.headers | grep -qi 'secure'
+
       - name: Logs on Failure
         if: failure()
-        run: docker compose -f docker-compose.prod.yml logs --tail 200 backend postgres backup
+        run: docker compose -f docker-compose.prod.yml logs --tail 200 backend postgres backup frontend nginx
 
       - name: Tear Down
         if: always()
