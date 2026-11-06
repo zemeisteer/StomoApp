@@ -1,13 +1,20 @@
 # StomoApp (DentaCare) Production Readiness & Verification Report
 
-## Overall Status: 100% GREEN, VERIFIED & PRODUCTION-READY (Branch: `dev`)
+## Overall Status: CI green; not yet deployed (Branch: `dev`)
+
+> **Correction (2026-11-06):** earlier revisions of this report said "100% green".
+> In fact every GitHub Actions run had failed until commit `0fab9c6`: the backend
+> job crashed at `prisma validate` (no `DATABASE_URL`) and the test DB was never
+> seeded, so backend lint, build and e2e only ever passed locally. CI has been
+> green on every push since `1c65518`. Open launch blockers are listed in
+> [ROADMAP.md](ROADMAP.md#next).
 
 - **Repository**: `https://github.com/zemeisteer/StomoApp`
 - **Branch**: `dev`
 - **Single Source of Truth**: **NestJS 10 + Prisma ORM 5 + PostgreSQL 16** (`localhost:5432`, dev: `dentacare`, test: `dentacare_test`)
 - **Frontend**: Next.js 14 (App Router) + TailwindCSS + Three.js
 - **Verification Suites (All passing in current session)**:
-  - Backend Jest E2E Suite: **78 / 78 passed (100%)**
+  - Backend Jest E2E Suite: **80 / 80 passed (100%)** (local and CI)
   - Priority Verification (`verify-all-priorities.ts`): **60 / 60 passed (100%)**
   - Backend Build (`nest build`): **0 errors**
   - Backend Lint (`npm run lint`): **0 errors**
@@ -156,13 +163,23 @@
   - Updated `docker-compose.prod.yml` to route ingress through Nginx container (ports 80 & 443), isolating backend and frontend on internal network.
   - Created `.env.production.example` template with production security guidelines.
 
+### Phase 9: CI Repair, HTTPS Gateway, Bot in Production & Notification Correctness (2026-11-06)
+- **CI actually runs now** (`0fab9c6`, `b4ebfc4`): job-level test env incl. `DATABASE_URL`, test DB seeding, and a new gateway job (`docker compose config`, `nginx -t` on rendered templates, bot image build).
+- **HTTPS** (`b4ebfc4`): nginx serves ACME challenges on :80 and redirects to HTTPS; TLS 1.2/1.3, HTTP/2, HSTS; certbot auto-renewal; `scripts/init-letsencrypt.sh` bootstrap. Security headers now also apply to cached assets; the declared rate-limit zones are actually used. Backend `TRUST_PROXY=1` so throttling sees real client IPs.
+- **Bot in production compose** (`a48c692`): `bot/Dockerfile` (non-root), `bot` service on internal + public networks.
+- **Fail-closed secrets** (`6004493`): compose refuses to start without Postgres/Redis passwords, JWT and service secrets (previously public `ChangeMe` defaults).
+- **Reminders actually delivered** (`1c65518`): bot scheduler only logged before. Now 24h Telegram reminders and the daily digest are claimed exactly once through `notification_jobs` dedup keys, rendered in clinic time, with failures reported back (Regression 64).
+- **Telegram reminder contacts** (`8a1d5ff`): branch address/phone instead of a hardcoded street and number.
+- **Staff group policy** (`6282f37`): removed the bot's duplicate new-booking alert (it repeated the backend alert with patient name and phone); cancellation alert has no patient name and uses clinic time.
+- **Doctor personal schedule** (`0e32675`): `StaffUser.telegramUserId` (private, never on public doctor endpoints), editable by OWNER in Admin > Xodimlar; `/myid` bot command; per-doctor daily schedule (Regression 65). Bot contact details configurable (website was hardcoded to localhost).
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 78 full integration tests (Regressions 1–63) | `dentacare_test` | **78 / 78 PASSED (100%)** |
+| **Jest E2E Regressions** | 80 full integration tests (Regressions 1–65) | `dentacare_test` | **80 / 80 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |
