@@ -37,7 +37,7 @@ async def test_bot_flows():
     print(" [PASS] Contact sharing keyboard generated", flush=True)
 
     main_menu_kb = get_main_menu_keyboard()
-    assert len(main_menu_kb.keyboard) == 3
+    assert len(main_menu_kb.keyboard) == 4  # + language row
     print(" [PASS] Main menu keyboard generated (Qabullarim, Davolash rejasi, Qarzdorlik, Booking)", flush=True)
 
     doctors_kb = get_doctors_keyboard([{"id": "doc-1", "name": "Dr. Jasur Mansurov", "spec": "Terapevt"}])
@@ -210,7 +210,7 @@ async def test_bot_flows():
         }
         await handle_contact(valid_contact_msg)
         assert mock_sync.called
-        mock_sync.assert_called_with("+998901234567", "RealUser", "11111")
+        mock_sync.assert_called_with("+998901234567", "RealUser", "11111", "uz")
         print(" [PASS] Authentic own-contact sharing accepted and synced with telegram_user_id", flush=True)
 
     # 8. Test Patient Portal: View Appointments
@@ -258,7 +258,7 @@ async def test_bot_flows():
         mock_get_debt.assert_called_with("11111")
         assert debt_msg.answer.called
         debt_text = debt_msg.answer.call_args[0][0]
-        assert "250,000 so'm" in debt_text
+        assert "250 000 so'm" in debt_text
         print(" [PASS] Patient debt portal flow verified with telegram_user_id scoping", flush=True)
 
     # 10. Test Patient Portal: Cancel Appointment with Ownership Validation
@@ -359,6 +359,100 @@ async def test_bot_flows():
         print(" [PASS] Stale slot selection is rejected safely", flush=True)
 
     print("--- ALL TELEGRAM BOT FLOW TESTS PASSED SUCCESSFULLY! ---", flush=True)
+
+
+@pytest.mark.asyncio
+async def test_i18n_clinic_info_and_staff_linking():
+    from aiogram.types import User
+    from bot.i18n import format_working_hours, t, money, BUTTONS
+    from bot.services import lang as user_lang
+    from bot.handlers.start import handle_start, handle_set_language
+    from bot.handlers.common import show_location
+    from bot.handlers.patient import show_my_appointments
+    from bot.services.scheduler import build_reminder_text
+
+    # Working hours are grouped by identical spans, per language
+    hours = {d: {"open": "09:00", "close": "20:00"} for d in ["mon", "tue", "wed", "thu", "fri"]}
+    hours["sat"] = {"open": "09:00", "close": "18:00"}
+    assert format_working_hours("uz", hours) == "Du–Ju 09:00–20:00, Sh 09:00–18:00, Ya dam olish"
+    assert format_working_hours("ru", hours) == "Пн–Пт 09:00–20:00, Сб 09:00–18:00, Вс выходной"
+    assert money("ru", 1500000) == "1 500 000 сум"
+    print(" [PASS] Working hours and currency formatting (uz/ru)", flush=True)
+
+    # Language: Telegram client language as default, explicit choice wins and is saved
+    ru_user = User(id=70001, is_bot=False, first_name="Ivan", language_code="ru")
+    uz_user = User(id=70002, is_bot=False, first_name="Aziz", language_code="uz")
+    assert user_lang.lang_of(ru_user) == "ru" and user_lang.lang_of(uz_user) == "uz"
+    cb = MagicMock()
+    cb.data = "set_lang:ru"
+    cb.from_user = uz_user
+    cb.message.edit_text = AsyncMock()
+    cb.message.answer = AsyncMock()
+    cb.answer = AsyncMock()
+    with patch.object(api_client, "set_patient_language", new_callable=AsyncMock) as mock_set:
+        await handle_set_language(cb)
+        mock_set.assert_awaited_once_with("70002", "ru")
+    assert user_lang.lang_of(uz_user) == "ru"
+    menu = cb.message.answer.await_args.kwargs["reply_markup"]
+    assert menu.keyboard[0][0].text == BUTTONS["appointments"]["ru"]
+    print(" [PASS] Language choice persisted and menu switched to Russian", flush=True)
+
+    # Russian menu buttons route to the same handlers
+    appt_msg = MagicMock()
+    appt_msg.from_user = uz_user  # now ru
+    appt_msg.answer = AsyncMock()
+    with patch.object(api_client, "get_patient_appointments", new_callable=AsyncMock) as mock_appts:
+        mock_appts.return_value = None
+        await show_my_appointments(appt_msg)
+        assert appt_msg.answer.await_args.args[0] == t("ru", "not_registered")
+    print(" [PASS] Unlinked Telegram user is told to register (not 'no appointments')", flush=True)
+
+    # Location comes from clinic-info (branches, hours, map), not hardcoded text
+    loc_msg = MagicMock()
+    loc_msg.from_user = ru_user
+    loc_msg.answer = AsyncMock()
+    with patch.object(api_client, "get_clinic_info", new_callable=AsyncMock) as mock_info:
+        mock_info.return_value = {
+            "name": "DentaCare", "nameRu": "ДентаКеа", "phone": "+998 71 000 00 00",
+            "branches": [{
+                "name": "Chilonzor", "nameRu": "Чиланзар",
+                "address": "Bunyodkor 42", "addressRu": "Бунёдкор 42",
+                "phone": "+998 71 111 11 11", "mapUrl": "https://maps.example/x?a=1&b=2",
+                "workingHours": hours,
+            }],
+        }
+        await show_location(loc_msg)
+        text = loc_msg.answer.await_args.args[0]
+        assert "Чиланзар" in text and "Бунёдкор 42" in text and "Пн–Пт 09:00–20:00" in text
+        assert "a=1&amp;b=2" in text  # URL escaped for HTML
+    print(" [PASS] Branch address/hours/map rendered from clinic settings", flush=True)
+
+    # Reminder uses the patient's saved language and booked branch
+    rem_text = build_reminder_text({
+        "lang": "ru", "patientName": "Иван", "dateStr": "07.11.2026", "timeStr": "10:00",
+        "doctorName": "Dr. A", "doctorNameRu": "Др. А", "branchName": "Chilonzor", "branchNameRu": "Чиланзар",
+        "branchAddress": "x", "branchAddressRu": "Бунёдкор 42", "branchPhone": "+998 71 111 11 11",
+    })
+    assert "НАПОМИНАНИЕ" in rem_text and "Др. А" in rem_text and "Чиланзар" in rem_text
+    print(" [PASS] Russian reminder with branch details", flush=True)
+
+    # Staff deep link: /start link_... links the account and never shows the patient welcome
+    start_msg = MagicMock()
+    start_msg.from_user = User(id=555000222, is_bot=False, first_name="Doc", language_code="uz")
+    start_msg.answer = AsyncMock()
+    command = MagicMock()
+    command.args = "link_abc123def456ghi789jkl_m0n1o2_0123456789abcdef0123"
+    with patch.object(api_client, "link_staff_telegram", new_callable=AsyncMock) as mock_link:
+        mock_link.return_value = {"linked": True, "fullName": "Dr. Doc"}
+        await handle_start(start_msg, command)
+        mock_link.assert_awaited_once_with(command.args, "555000222")
+        assert "Dr. Doc" in start_msg.answer.await_args.args[0]
+
+        start_msg.answer.reset_mock()
+        mock_link.return_value = None
+        await handle_start(start_msg, command)
+        assert start_msg.answer.await_args.args[0] == t("uz", "staff_link_failed")
+    print(" [PASS] Staff deep-link linking success and failure paths", flush=True)
 
 
 if __name__ == "__main__":

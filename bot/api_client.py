@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from bot.config import config
 
@@ -14,12 +15,15 @@ class NestApiClient:
             "Content-Type": "application/json",
             "X-Service-Token": self.service_token,
         }
+        self._clinic_cache: Optional[Tuple[float, Dict[str, Any]]] = None
 
     async def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         url = f"{self.base_url}{path}"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.get(url, headers=self.headers, params=params)
+                if res.status_code == 404 and path.startswith("/bot/patient/"):
+                    return None  # Telegram user not linked to a patient yet
                 if res.status_code >= 400:
                     logger.warning(f"GET {path} returned status {res.status_code}: {res.text}")
                     return [] if "reminders" in path or "schedules" in path or "appointments" in path or "doctors" in path else None
@@ -58,24 +62,39 @@ class NestApiClient:
         return []
 
     async def sync_patient(
-        self, phone: str, full_name: str, telegram_user_id: str
+        self, phone: str, full_name: str, telegram_user_id: str, language: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        return await self._post(
-            "/bot/patient/sync",
-            {
-                "phone": phone,
-                "fullName": full_name,
-                "telegramUserId": telegram_user_id,
-            },
-        )
+        payload = {"phone": phone, "fullName": full_name, "telegramUserId": telegram_user_id}
+        if language:
+            payload["language"] = language
+        return await self._post("/bot/patient/sync", payload)
 
-    async def get_patient_appointments(self, telegram_user_id: str) -> List[Dict[str, Any]]:
+    async def set_patient_language(self, telegram_user_id: str, language: str) -> None:
+        await self._post(f"/bot/patient/{telegram_user_id}/language", {"language": language})
+
+    async def link_staff_telegram(self, token: str, telegram_user_id: str) -> Optional[Dict[str, Any]]:
+        return await self._post("/bot/staff/link", {"token": token, "telegramUserId": telegram_user_id})
+
+    async def get_clinic_info(self) -> Optional[Dict[str, Any]]:
+        """Clinic contacts and active branches; cached for 5 minutes."""
+        now = time.monotonic()
+        if self._clinic_cache and now - self._clinic_cache[0] < 300:
+            return self._clinic_cache[1]
+        res = await self._get("/bot/clinic-info")
+        if isinstance(res, dict):
+            self._clinic_cache = (now, res)
+            return res
+        return self._clinic_cache[1] if self._clinic_cache else None
+
+    async def get_patient_appointments(self, telegram_user_id: str) -> Optional[List[Dict[str, Any]]]:
+        """None when the Telegram user is not linked to a patient."""
         res = await self._get(f"/bot/patient/{telegram_user_id}/appointments")
-        return res if isinstance(res, list) else []
+        return res if isinstance(res, list) or res is None else []
 
-    async def get_patient_treatment_plan(self, telegram_user_id: str) -> List[Dict[str, Any]]:
+    async def get_patient_treatment_plan(self, telegram_user_id: str) -> Optional[List[Dict[str, Any]]]:
+        """None when the Telegram user is not linked to a patient."""
         res = await self._get(f"/bot/patient/{telegram_user_id}/treatment-plan")
-        return res if isinstance(res, list) else []
+        return res if isinstance(res, list) or res is None else []
 
     async def get_patient_debt(self, telegram_user_id: str) -> Optional[Dict[str, Any]]:
         return await self._get(f"/bot/patient/{telegram_user_id}/debt")

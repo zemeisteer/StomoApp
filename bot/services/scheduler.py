@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.config import config
 from bot.api_client import api_client
+from bot.i18n import t, norm_lang
 
 logger = logging.getLogger(__name__)
 
@@ -15,14 +16,29 @@ def _e(value) -> str:
 
 
 def build_reminder_text(rem: dict) -> str:
-    return (
-        f"⏰ <b>ESLATMA: ERTAGA QABULINGIZ BOR</b>\n\n"
-        f"Hurmatli {_e(rem.get('patientName') or 'Bemor')},\n"
-        f"Siz <b>{_e(rem.get('dateStr'))}</b> kuni soat <b>{_e(rem.get('timeStr'))}</b> da "
-        f"<b>{_e(rem.get('doctorName') or 'Shifokor')}</b> qabuliga yozilgansiz.\n\n"
-        f"📍 <b>Klinika manzili:</b> <a href=\"{html.escape(config.CLINIC_LOCATION_URL)}\">Xaritada ko'rish</a>\n"
-        f"📞 <b>Telefon:</b> {_e(config.CLINIC_PHONE)}\n\n"
-        f"<i>Kela olmasangiz, \"📅 Qabullarim\" bo'limidan qabulni bekor qilishingiz mumkin.</i>"
+    """Patient reminder in the patient's saved language, with the booked branch's details."""
+    lang = norm_lang(rem.get("lang"))
+    ru = lang == "ru"
+    doctor = (rem.get("doctorNameRu") if ru else None) or rem.get("doctorName") or ""
+    branch_name = (rem.get("branchNameRu") if ru else None) or rem.get("branchName")
+    address = (rem.get("branchAddressRu") if ru else None) or rem.get("branchAddress")
+    branch_lines = []
+    if branch_name or address:
+        branch_lines.append(t(lang, "branch_block", name=_e(branch_name), address=_e(address)))
+    map_url = rem.get("branchMapUrl") or config.CLINIC_LOCATION_URL
+    if map_url:
+        branch_lines.append(t(lang, "map", url=html.escape(map_url)))
+    phone = rem.get("branchPhone") or config.CLINIC_PHONE
+    if phone:
+        branch_lines.append(t(lang, "phone", phone=_e(phone)))
+    return t(
+        lang,
+        "reminder_24h",
+        patient=_e(rem.get("patientName")),
+        date=_e(rem.get("dateStr")),
+        time=_e(rem.get("timeStr")),
+        doctor=_e(doctor),
+        branch=("\n" + "\n".join(branch_lines)) if branch_lines else "",
     )
 
 

@@ -7707,4 +7707,132 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       }
     }
   });
+
+  it('Regression 67: Staff self-service Telegram link is signed, single-use, expiring and unique', async () => {
+    const serviceToken = testServiceToken;
+    const doctorStaff = await prisma.staffUser.findFirst({ where: { email: 'dr.rahimov@dentacare.local' } });
+    expect(doctorStaff).toBeTruthy();
+    const tgId = `6${Date.now()}`.slice(0, 11);
+    const otherTg = `5${Date.now()}`.slice(0, 11);
+    await prisma.staffUser.update({ where: { id: doctorStaff!.id }, data: { telegramUserId: null } });
+
+    try {
+      // Unauthenticated access is rejected
+      await request(app.getHttpServer()).post('/api/admin/me/telegram/link').expect(401);
+
+      // Doctor (non-owner) can manage their own link
+      const status0 = await request(app.getHttpServer())
+        .get('/api/admin/me/telegram').set('Authorization', `Bearer ${doctorAToken}`).expect(200);
+      expect(status0.body.linked).toBe(false);
+
+      const link = await request(app.getHttpServer())
+        .post('/api/admin/me/telegram/link').set('Authorization', `Bearer ${doctorAToken}`).expect(200);
+      const token: string = link.body.token;
+      expect(token).toMatch(/^link_[A-Za-z0-9_-]+$/);
+      expect(token.length).toBeLessThanOrEqual(64); // Telegram /start payload limit
+      expect(link.body.command).toBe(`/start ${token}`);
+
+      // Tampered token is rejected
+      const tampered = token.slice(0, -1) + (token.endsWith('0') ? '1' : '0');
+      await request(app.getHttpServer())
+        .post('/api/bot/staff/link').set('x-service-token', serviceToken)
+        .send({ token: tampered, telegramUserId: tgId }).expect(400);
+
+      // Bot links it
+      const linked = await request(app.getHttpServer())
+        .post('/api/bot/staff/link').set('x-service-token', serviceToken)
+        .send({ token, telegramUserId: tgId }).expect(200);
+      expect(linked.body.linked).toBe(true);
+      expect((await prisma.staffUser.findUnique({ where: { id: doctorStaff!.id } }))!.telegramUserId).toBe(tgId);
+
+      // Single use: replaying the same token (even with another chat) fails
+      await request(app.getHttpServer())
+        .post('/api/bot/staff/link').set('x-service-token', serviceToken)
+        .send({ token, telegramUserId: otherTg }).expect(400);
+
+      // Requires the service token
+      await request(app.getHttpServer())
+        .post('/api/bot/staff/link').send({ token, telegramUserId: otherTg }).expect(401);
+
+      // A Telegram account linked to one staff member cannot be linked to another
+      const ownerLink = await request(app.getHttpServer())
+        .post('/api/admin/me/telegram/link').set('Authorization', `Bearer ${adminToken}`).expect(200);
+      await request(app.getHttpServer())
+        .post('/api/bot/staff/link').set('x-service-token', serviceToken)
+        .send({ token: ownerLink.body.token, telegramUserId: tgId }).expect(409);
+
+      // Expired tokens are rejected
+      const { createTelegramLinkToken } = await import('../src/common/telegram-link.helper');
+      const fresh = await prisma.staffUser.findUnique({ where: { id: doctorStaff!.id } });
+      const expired = createTelegramLinkToken(
+        process.env.JWT_SECRET as string,
+        { staffId: fresh!.id, tokenVersion: fresh!.tokenVersion, telegramUserId: fresh!.telegramUserId },
+        Date.now() - 11 * 60 * 1000,
+      );
+      await request(app.getHttpServer())
+        .post('/api/bot/staff/link').set('x-service-token', serviceToken)
+        .send({ token: expired.token, telegramUserId: otherTg }).expect(400);
+
+      // Unlink
+      const unlinked = await request(app.getHttpServer())
+        .delete('/api/admin/me/telegram').set('Authorization', `Bearer ${doctorAToken}`).expect(200);
+      expect(unlinked.body.linked).toBe(false);
+    } finally {
+      await prisma.staffUser.updateMany({
+        where: { telegramUserId: { in: [tgId, otherTg] } },
+        data: { telegramUserId: null },
+      });
+    }
+  });
+
+  it('Regression 68: Bot clinic info from DB, persisted bot language, and no fabricated treatment prices', async () => {
+    const serviceToken = testServiceToken;
+    const tgUserId = `4${Date.now()}`.slice(0, 11);
+    const phone = `+998944${Date.now().toString().slice(-6)}`;
+    let patientId: string | undefined;
+
+    try {
+      // Clinic info reflects active branches and clinic settings
+      const info = await request(app.getHttpServer())
+        .get('/api/bot/clinic-info').set('x-service-token', serviceToken).expect(200);
+      const branch = info.body.branches.find((b: any) => b.id === testBranchId);
+      const dbBranch = await prisma.branch.findUnique({ where: { id: testBranchId } });
+      expect(branch.address).toBe(dbBranch!.addressUz);
+      expect(branch.addressRu).toBe(dbBranch!.addressRu);
+      expect(typeof branch.workingHours).toBe('object');
+      expect(info.body).toHaveProperty('timezone');
+
+      // Language sent at registration is stored; later changes persist
+      const sync = await request(app.getHttpServer())
+        .post('/api/bot/patient/sync').set('x-service-token', serviceToken)
+        .send({ phone, fullName: 'Reg68 Patient', telegramUserId: tgUserId, language: 'ru' }).expect(200);
+      patientId = sync.body.id;
+      expect((await prisma.patient.findUnique({ where: { id: patientId } }))!.preferredLanguage).toBe('ru');
+
+      await request(app.getHttpServer())
+        .post(`/api/bot/patient/${tgUserId}/language`).set('x-service-token', serviceToken)
+        .send({ language: 'uz' }).expect(200);
+      expect((await prisma.patient.findUnique({ where: { id: patientId } }))!.preferredLanguage).toBe('uz');
+      await request(app.getHttpServer())
+        .post(`/api/bot/patient/${tgUserId}/language`).set('x-service-token', serviceToken)
+        .send({ language: 'en' }).expect(400);
+
+      // A non-healthy tooth without a doctor-authored plan must not produce an invented priced item
+      await prisma.odontogramRecord.create({
+        data: { patientId: patientId!, toothNumber: 36, condition: 'CARIES' },
+      });
+      const plan = await request(app.getHttpServer())
+        .get(`/api/bot/patient/${tgUserId}/treatment-plan`).set('x-service-token', serviceToken).expect(200);
+      expect(plan.body).toEqual([]);
+
+      // Unknown Telegram user -> 404 (bot shows "register first")
+      await request(app.getHttpServer())
+        .get('/api/bot/patient/999999999999/appointments').set('x-service-token', serviceToken).expect(404);
+    } finally {
+      if (patientId) {
+        await prisma.odontogramRecord.deleteMany({ where: { patientId } });
+        await prisma.patient.deleteMany({ where: { id: patientId } });
+      }
+    }
+  });
 });

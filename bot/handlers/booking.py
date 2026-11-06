@@ -14,6 +14,9 @@ from bot.keyboards.inline import (
     get_cancel_confirm_keyboard,
 )
 from bot.services.notifier import notify_staff_cancellation
+from bot.i18n import t, button_labels
+from bot.keyboards.inline import _name
+from bot.services import lang as user_lang
 
 router = Router()
 
@@ -21,9 +24,6 @@ router = Router()
 # In-memory is fine for a single bot process; after a restart the user starts over.
 user_booking_sessions: Dict[int, Dict[str, Any]] = {}
 
-SESSION_EXPIRED = (
-    "Qabul sessiyasi eskirgan. Iltimos, \"📝 Yangi qabulga yozilish\" tugmasidan qaytadan boshlang."
-)
 
 
 def _e(value) -> str:
@@ -34,59 +34,70 @@ def _find(items, item_id) -> Optional[dict]:
     return next((i for i in items or [] if i.get("id") == item_id), None)
 
 
+def _lang(event) -> str:
+    return user_lang.lang_of(event.from_user)
+
+
+async def _expired(callback: CallbackQuery):
+    await callback.message.edit_text(t(_lang(callback), "session_expired"))
+    await callback.answer()
+
+
 async def _ask_date(callback: CallbackQuery, session: Dict[str, Any]):
+    lang = _lang(callback)
     await callback.message.edit_text(
         f"🏥 {_e(session['branch_name'])}\n🦷 {_e(session['service_name'])}\n\n"
-        f"📅 <b>Qabul kunini tanlang:</b>",
-        reply_markup=get_date_picker_keyboard(config.TIMEZONE),
+        f"{t(lang, 'choose_date')}",
+        reply_markup=get_date_picker_keyboard(config.TIMEZONE, lang=lang),
         parse_mode="HTML",
     )
 
 
 async def _ask_service(callback: CallbackQuery, session: Dict[str, Any]):
+    lang = _lang(callback)
     services = session["doctor"].get("services") or []
     if len(services) == 1:
         session["service_id"] = services[0]["id"]
-        session["service_name"] = services[0]["name"]
+        session["service_name"] = _name(services[0], lang)
         await _ask_date(callback, session)
         return
     await callback.message.edit_text(
-        "🦷 <b>Xizmatni tanlang:</b>",
-        reply_markup=get_services_keyboard(services),
+        t(lang, "choose_service"),
+        reply_markup=get_services_keyboard(services, lang),
         parse_mode="HTML",
     )
 
 
-async def _show_doctors(send, user_id: int):
+async def _show_doctors(send, user_id: int, lang: str):
     docs = await api_client.get_doctors()
     # Only doctors that can actually be booked: at least one branch and one service
     docs = [d for d in docs if d.get("branches") and d.get("services")]
     if not docs:
-        await send("Hozirda onlayn band qilish uchun faol shifokorlar mavjud emas.")
+        await send(t(lang, "no_doctors"))
         return
     user_booking_sessions[user_id] = {"doctors": docs}
     await send(
-        "👨‍⚕️ <b>Iltimos, ko'rigiga yozilmoqchi bo'lgan shifokorni tanlang:</b>",
-        reply_markup=get_doctors_keyboard(docs),
+        t(lang, "choose_doctor"),
+        reply_markup=get_doctors_keyboard(docs, lang),
         parse_mode="HTML",
     )
 
 
-@router.message(F.text == "📝 Yangi qabulga yozilish")
+@router.message(F.text.in_(button_labels("book")))
 async def start_booking_flow(message: Message):
-    await _show_doctors(message.answer, message.from_user.id)
+    await _show_doctors(message.answer, message.from_user.id, _lang(message))
 
 
 @router.callback_query(F.data == "back_to_doctors")
 async def handle_back_to_doctors(callback: CallbackQuery):
-    await _show_doctors(callback.message.edit_text, callback.from_user.id)
+    await _show_doctors(callback.message.edit_text, callback.from_user.id, _lang(callback))
     await callback.answer()
 
 
 @router.callback_query(F.data == "cancel_booking")
 async def handle_cancel_booking(callback: CallbackQuery):
     user_booking_sessions.pop(callback.from_user.id, None)
-    await callback.message.edit_text("Qabulga yozilish bekor qilindi.")
+    await callback.message.edit_text(t(_lang(callback), "booking_cancelled"))
     await callback.answer()
 
 
@@ -96,8 +107,7 @@ async def handle_select_doctor(callback: CallbackQuery):
     session = user_booking_sessions.get(callback.from_user.id)
     doctor = _find(session.get("doctors") if session else None, doc_id)
     if not doctor:
-        await callback.message.edit_text(SESSION_EXPIRED)
-        await callback.answer()
+        await _expired(callback)
         return
 
     for key in ("branch_id", "branch_name", "service_id", "service_name", "date", "slots"):
@@ -107,12 +117,12 @@ async def handle_select_doctor(callback: CallbackQuery):
     branches = doctor.get("branches") or []
     if len(branches) == 1:
         session["branch_id"] = branches[0]["id"]
-        session["branch_name"] = branches[0]["name"]
+        session["branch_name"] = _name(branches[0], _lang(callback))
         await _ask_service(callback, session)
     else:
         await callback.message.edit_text(
-            "🏥 <b>Filialni tanlang:</b>",
-            reply_markup=get_branches_keyboard(branches),
+            t(_lang(callback), "choose_branch"),
+            reply_markup=get_branches_keyboard(branches, _lang(callback)),
             parse_mode="HTML",
         )
     await callback.answer()
@@ -124,11 +134,10 @@ async def handle_select_branch(callback: CallbackQuery):
     session = user_booking_sessions.get(callback.from_user.id) or {}
     branch = _find((session.get("doctor") or {}).get("branches"), branch_id)
     if not branch:
-        await callback.message.edit_text(SESSION_EXPIRED)
-        await callback.answer()
+        await _expired(callback)
         return
     session["branch_id"] = branch["id"]
-    session["branch_name"] = branch["name"]
+    session["branch_name"] = _name(branch, _lang(callback))
     await _ask_service(callback, session)
     await callback.answer()
 
@@ -139,11 +148,10 @@ async def handle_select_service(callback: CallbackQuery):
     session = user_booking_sessions.get(callback.from_user.id) or {}
     service = _find((session.get("doctor") or {}).get("services"), service_id)
     if not service or not session.get("branch_id"):
-        await callback.message.edit_text(SESSION_EXPIRED)
-        await callback.answer()
+        await _expired(callback)
         return
     session["service_id"] = service["id"]
-    session["service_name"] = service["name"]
+    session["service_name"] = _name(service, _lang(callback))
     await _ask_date(callback, session)
     await callback.answer()
 
@@ -152,9 +160,9 @@ async def handle_select_service(callback: CallbackQuery):
 async def handle_back_to_dates(callback: CallbackQuery):
     session = user_booking_sessions.get(callback.from_user.id) or {}
     if not session.get("service_id"):
-        await callback.message.edit_text(SESSION_EXPIRED)
-    else:
-        await _ask_date(callback, session)
+        await _expired(callback)
+        return
+    await _ask_date(callback, session)
     await callback.answer()
 
 
@@ -163,8 +171,7 @@ async def handle_select_date(callback: CallbackQuery):
     date_str = callback.data.split(":", 1)[1]
     session = user_booking_sessions.get(callback.from_user.id) or {}
     if not (session.get("doctor_id") and session.get("branch_id") and session.get("service_id")):
-        await callback.message.edit_text(SESSION_EXPIRED)
-        await callback.answer()
+        await _expired(callback)
         return
 
     session["date"] = date_str
@@ -175,15 +182,15 @@ async def handle_select_date(callback: CallbackQuery):
 
     if not slots:
         await callback.message.edit_text(
-            "⚠️ Tanlangan kunda bo'sh vaqtlar qolmagan. Iltimos, boshqa kunni tanlang:",
-            reply_markup=get_date_picker_keyboard(config.TIMEZONE),
+            t(_lang(callback), "no_slots"),
+            reply_markup=get_date_picker_keyboard(config.TIMEZONE, lang=_lang(callback)),
         )
         await callback.answer()
         return
 
     await callback.message.edit_text(
-        f"⏰ <b>{_e(date_str)}</b> sanasi uchun bo'sh qabul vaqtini tanlang:",
-        reply_markup=get_time_slots_keyboard([s["time"] for s in slots]),
+        t(_lang(callback), "choose_time", date=_e(date_str)),
+        reply_markup=get_time_slots_keyboard([s["time"] for s in slots], _lang(callback)),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -200,8 +207,7 @@ async def handle_confirm_slot(callback: CallbackQuery):
         slot = None
 
     if not slot or not session.get("service_id"):
-        await callback.message.edit_text(SESSION_EXPIRED)
-        await callback.answer()
+        await _expired(callback)
         return
 
     booking_res = await api_client.create_booking(
@@ -215,10 +221,8 @@ async def handle_confirm_slot(callback: CallbackQuery):
 
     if not booking_res or not booking_res.get("appointmentId"):
         await callback.message.edit_text(
-            "Kechirasiz, qabulni band qilib bo'lmadi: vaqt hozirgina band qilingan bo'lishi mumkin. "
-            "Agar hali telefon raqamingizni ulashmagan bo'lsangiz, avval /start buyrug'ini yuboring.\n\n"
-            "Boshqa kunni tanlang:",
-            reply_markup=get_date_picker_keyboard(config.TIMEZONE),
+            t(_lang(callback), "booking_failed"),
+            reply_markup=get_date_picker_keyboard(config.TIMEZONE, lang=_lang(callback)),
         )
         await callback.answer()
         return
@@ -226,18 +230,21 @@ async def handle_confirm_slot(callback: CallbackQuery):
     # Staff are notified by the backend outbox (staff_new_booking) for every booking.
     user_booking_sessions.pop(user_id, None)
 
+    lang = _lang(callback)
+    doctor_name = (booking_res.get("doctorName") if lang != "ru" else None) or _name(session["doctor"], lang)
     await callback.message.edit_text(
-        f"✅ <b>QABULINGIZ BAND QILINDI!</b>\n\n"
-        f"👨‍⚕️ <b>Shifokor:</b> {_e(booking_res.get('doctorName') or session['doctor'].get('name'))}\n"
-        f"🏥 <b>Filial:</b> {_e(session.get('branch_name'))}\n"
-        f"🦷 <b>Xizmat:</b> {_e(session.get('service_name'))}\n"
-        f"📅 <b>Sana:</b> {_e(session.get('date'))}\n"
-        f"⏰ <b>Vaqt:</b> {_e(slot['time'])}\n\n"
-        f"<i>Klinika qabulni tasdiqlaydi. Qabuldan 24 soat oldin shu yerda, "
-        f"2 soat oldin SMS orqali eslatma yuboramiz.</i>",
+        t(
+            lang,
+            "booked",
+            doctor=_e(doctor_name),
+            branch=_e(session.get("branch_name")),
+            service=_e(session.get("service_name")),
+            date=_e(session.get("date")),
+            time=_e(slot["time"]),
+        ),
         parse_mode="HTML",
     )
-    await callback.answer("Qabul band qilindi!")
+    await callback.answer("✅")
 
 
 # Cancellation Flow
@@ -245,8 +252,8 @@ async def handle_confirm_slot(callback: CallbackQuery):
 async def handle_cancel_request(callback: CallbackQuery):
     appt_id = callback.data.split(":", 1)[1]
     await callback.message.edit_text(
-        "⚠️ <b>Haqiqatan ham ushbu qabulni bekor qilmoqchimisiz?</b>",
-        reply_markup=get_cancel_confirm_keyboard(appt_id),
+        t(_lang(callback), "cancel_confirm_q"),
+        reply_markup=get_cancel_confirm_keyboard(appt_id, _lang(callback)),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -270,14 +277,11 @@ async def handle_confirm_cancel(callback: CallbackQuery):
             date_str=d_str,
             time_str=t_str,
         )
-        await callback.message.edit_text("❌ <b>Qabulingiz bekor qilindi.</b>", parse_mode="HTML")
-        await callback.answer("Bekor qilindi")
+        await callback.message.edit_text(t(_lang(callback), "cancelled"), parse_mode="HTML")
+        await callback.answer("✅")
     else:
-        await callback.message.edit_text(
-            "⚠️ <b>Xatolik:</b> Ushbu qabulni bekor qilib bo'lmaydi (yakunlangan qabul yoki ruxsat etilmagan).",
-            parse_mode="HTML",
-        )
-        await callback.answer("Bekor qilish rad etildi")
+        await callback.message.edit_text(t(_lang(callback), "cancel_failed"), parse_mode="HTML")
+        await callback.answer("⚠️")
 
 
 @router.callback_query(F.data == "close_cancel")

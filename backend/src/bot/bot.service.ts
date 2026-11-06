@@ -384,31 +384,15 @@ export class BotService {
       orderBy: { toothNumber: 'asc' },
     });
 
-    const odontogramRecords = await this.prisma.odontogramRecord.findMany({
-      where: {
-        patientId: patient.id,
-        condition: { not: 'HEALTHY' },
-      },
-      orderBy: { toothNumber: 'asc' },
-    });
-
+    // Only the doctor-authored plan is shown. (A previous fallback invented a
+    // 150 000 so'm item per non-healthy tooth, showing patients fake prices.)
     const results = planItems.map((p) => ({
       toothNumber: p.toothNumber,
       procedureName: p.treatmentNameUz,
+      procedureNameRu: p.treatmentNameRu || p.treatmentNameUz,
       price: p.costUzs,
       status: p.status,
     }));
-
-    if (results.length === 0 && odontogramRecords.length > 0) {
-      for (const rec of odontogramRecords) {
-        results.push({
-          toothNumber: rec.toothNumber,
-          procedureName: `${rec.condition} muolajasi`,
-          price: 150000,
-          status: 'PLANNED',
-        });
-      }
-    }
 
     return results;
   }
