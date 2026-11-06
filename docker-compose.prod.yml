@@ -131,6 +131,28 @@ services:
       - dentacare-internal
       - dentacare-public
 
+  backup:
+    image: postgres:16-alpine
+    container_name: dentacare-prod-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dentacare}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-dentacare}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      TZ: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
+    entrypoint: ['sh', '/opt/backup/backup-loop.sh']
+    volumes:
+      - ./scripts/backup-loop.sh:/opt/backup/backup-loop.sh:ro
+      - ./backend/scripts/backup-database.sh:/opt/backup/backup-database.sh:ro
+      - prod_backend_uploads:/uploads:ro
+      # Host directory: sync it offsite (rclone/rsync) from the host
+      - ${BACKUP_HOST_DIR:-./backups}:/var/backups/dentacare
+    networks:
+      - dentacare-internal
+
   nginx:
     image: nginx:1.25-alpine
     container_name: dentacare-prod-nginx

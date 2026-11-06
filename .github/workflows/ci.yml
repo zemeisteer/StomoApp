@@ -238,9 +238,22 @@ jobs:
             -e OWNER_EMAIL=owner@example.test -e OWNER_NAME="CI Owner" -e OWNER_PASSWORD=ci-owner-password-123 \
             backend node scripts/create-owner.js
 
+      - name: Scheduled Backup Service Produces Verified Archives
+        run: |
+          mkdir -p backups
+          docker compose -f docker-compose.prod.yml up -d backup
+          for i in $(seq 1 30); do
+            if ls backups/dentacare_*.dump >/dev/null 2>&1 && ls backups/uploads_*.tar.gz >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker compose -f docker-compose.prod.yml logs backup
+          ls -la backups
+          ls backups/dentacare_*.dump && ls backups/uploads_*.tar.gz
+          docker compose -f docker-compose.prod.yml exec -T backup sh -c 'pg_restore --list /var/backups/dentacare/dentacare_*.dump | grep -q "TABLE public staff_users"'
+
       - name: Logs on Failure
         if: failure()
-        run: docker compose -f docker-compose.prod.yml logs --tail 200 backend postgres
+        run: docker compose -f docker-compose.prod.yml logs --tail 200 backend postgres backup
 
       - name: Tear Down
         if: always()
