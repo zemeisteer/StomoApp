@@ -59,5 +59,5 @@ EXPOSE 4000
 
 # Apply pending migrations, then start. Safe to run on every start (idempotent).
 ENV PRISMA_HIDE_UPDATE_MESSAGE=1
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/src/main.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/main.js"]
 
