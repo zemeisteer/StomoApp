@@ -111,6 +111,10 @@ model StaffUser {
   doctorId String? @unique @map("doctor_id")
   doctor   Doctor? @relation(fields: [doctorId], references: [id])
 
+  // Private Telegram chat for personal notifications (e.g. doctor daily schedule).
+  // Lives on StaffUser, never on the public Doctor profile.
+  telegramUserId String? @unique @map("telegram_user_id")
+
   tokenVersion     Int       @default(1) @map("token_version")
   refreshTokenHash String?   @map("refresh_token_hash")
 

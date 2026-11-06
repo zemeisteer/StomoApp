@@ -39,6 +39,12 @@ class BotConfig:
     CLINIC_PHONE: str = os.getenv("CLINIC_PHONE", "+998 71 200 55 44")
     CLINIC_LOCATION_URL: str = os.getenv("CLINIC_LOCATION_URL", "https://maps.google.com/?q=41.311081,69.240562")
     TIMEZONE: str = os.getenv("CLINIC_TIMEZONE", "Asia/Tashkent")
+    # Optional contact details; lines are hidden in bot replies when empty
+    CLINIC_ADDRESS: str = os.getenv("CLINIC_ADDRESS", "")
+    CLINIC_LANDMARK: str = os.getenv("CLINIC_LANDMARK", "")
+    CLINIC_WORKING_HOURS: str = os.getenv("CLINIC_WORKING_HOURS", "")
+    CLINIC_TELEGRAM_SUPPORT: str = os.getenv("CLINIC_TELEGRAM_SUPPORT", "")
+    CLINIC_WEBSITE: str = os.getenv("CLINIC_WEBSITE", "")
 
 
 config = BotConfig()

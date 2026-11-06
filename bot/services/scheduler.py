@@ -43,6 +43,23 @@ def build_daily_digest_text(date_str: str, doctors: list) -> str:
     return "\n".join(lines)
 
 
+def build_doctor_schedule_text(item: dict) -> str:
+    appts = item.get("appointments", [])
+    lines = [
+        f"☀️ <b>XAYRLI TONG, {_e(item.get('doctorName') or 'Shifokor')}!</b>\n",
+        f"📋 <b>Bugungi qabullaringiz ({_e(item.get('date'))}):</b>",
+    ]
+    for idx, a in enumerate(appts, 1):
+        service = f" ({_e(a.get('serviceName'))})" if a.get("serviceName") else ""
+        lines.append(f"{idx}. ⏰ <b>{_e(a.get('time'))}</b> — {_e(a.get('patientName') or 'Bemor')}{service}")
+    lines.append(f"\nJami: <b>{len(appts)} ta qabul</b>. Ish kuni unumli o'tsin!")
+    return "\n".join(lines)
+
+
+def _chat_id(value):
+    return int(value) if str(value).lstrip("-").isdigit() else value
+
+
 async def send_appointment_reminders(bot: Bot):
     """
     Sends 24h Telegram reminders to patients linked to the bot.
@@ -57,7 +74,7 @@ async def send_appointment_reminders(bot: Bot):
             continue
         try:
             await bot.send_message(
-                chat_id=int(chat_id) if str(chat_id).lstrip("-").isdigit() else chat_id,
+                chat_id=_chat_id(chat_id),
                 text=build_reminder_text(rem),
                 parse_mode="HTML",
                 disable_web_page_preview=True,
@@ -70,13 +87,33 @@ async def send_appointment_reminders(bot: Bot):
                 await api_client.report_job_failure(job_id, str(e))
 
 
+async def dispatch_doctor_personal_schedules(bot: Bot):
+    """Sends each doctor with a linked Telegram chat their own schedule for today."""
+    items = await api_client.claim_doctor_daily_schedules()
+    for item in items:
+        try:
+            await bot.send_message(
+                chat_id=_chat_id(item.get("telegramUserId")),
+                text=build_doctor_schedule_text(item),
+                parse_mode="HTML",
+            )
+            logger.info(f"[Doctor schedule sent] date={item.get('date')} count={len(item.get('appointments', []))}")
+        except Exception as e:
+            logger.warning(f"[Doctor schedule failed] {e}")
+            if item.get("jobId"):
+                await api_client.report_job_failure(item["jobId"], str(e))
+
+
 async def dispatch_daily_doctor_schedules(bot: Bot):
     """
-    Every day at 08:00 (clinic timezone) posts today's schedule per doctor to the
-    staff group. Doctors have no Telegram link in the system, so the staff group
-    is the delivery target. The backend claim guarantees one digest per day even
-    across bot restarts.
+    Every day at 08:00 (clinic timezone):
+      1. each doctor whose staff account has a Telegram ID gets their own schedule
+         (with patient names) in a private chat;
+      2. the staff group gets an overview of all doctors (no patient names).
+    Backend claims guarantee one message per recipient per day, even across restarts.
     """
+    await dispatch_doctor_personal_schedules(bot)
+
     if not config.STAFF_GROUP_CHAT_ID:
         logger.info("STAFF_GROUP_CHAT_ID not set; skipping daily schedule digest")
         return

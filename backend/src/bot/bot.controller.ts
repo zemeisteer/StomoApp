@@ -104,6 +104,13 @@ export class BotController {
     return this.botService.getDailyDoctorSchedules();
   }
 
+  /** Claims today's personal schedule for each doctor with a linked Telegram chat. */
+  @Post('daily-schedules/doctors/claim')
+  @HttpCode(HttpStatus.OK)
+  async claimDoctorSchedules() {
+    return this.botService.claimDoctorDailySchedules();
+  }
+
   /** Claims today's staff schedule digest; `claimed: false` if already sent today. */
   @Post('daily-schedules/claim')
   @HttpCode(HttpStatus.OK)

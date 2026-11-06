@@ -4,7 +4,11 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { StaffRole } from '@prisma/client';
-import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsBoolean } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsBoolean, Matches, ValidateIf } from 'class-validator';
+
+// Telegram user ids are positive integers; null clears the link
+const TELEGRAM_ID_PATTERN = /^\d{5,15}$/;
+const TELEGRAM_ID_MESSAGE = "Telegram ID faqat raqamlardan iborat bo'lishi kerak (botga /myid yuboring)";
 
 class CreateStaffDto {
   @IsEmail()
@@ -23,6 +27,12 @@ class CreateStaffDto {
   @IsOptional()
   @IsString()
   doctorId?: string;
+
+  @IsOptional()
+  @ValidateIf((o) => o.telegramUserId !== null)
+  @IsString()
+  @Matches(TELEGRAM_ID_PATTERN, { message: TELEGRAM_ID_MESSAGE })
+  telegramUserId?: string | null;
 }
 
 class UpdateStaffDto {
@@ -41,6 +51,12 @@ class UpdateStaffDto {
   @IsOptional()
   @IsString()
   doctorId?: string | null;
+
+  @IsOptional()
+  @ValidateIf((o) => o.telegramUserId !== null)
+  @IsString()
+  @Matches(TELEGRAM_ID_PATTERN, { message: TELEGRAM_ID_MESSAGE })
+  telegramUserId?: string | null;
 }
 
 @Controller('admin/staff')

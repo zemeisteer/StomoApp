@@ -7546,4 +7546,85 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.deleteMany({ where: { id: patient.id } });
     }
   });
+
+  it('Regression 65: Doctor Telegram link lives on StaffUser, is validated, private, and gets one personal schedule per day', async () => {
+    const serviceToken = testServiceToken;
+    const doctorStaff = await prisma.staffUser.findFirst({ where: { doctorId: testDoctorAId } });
+    expect(doctorStaff).toBeTruthy();
+    const otherStaff = await prisma.staffUser.findFirst({ where: { id: { not: doctorStaff!.id } } });
+    const tgId = `7${Date.now()}`.slice(0, 11);
+    const runTag = Date.now().toString(36);
+    const patient = await prisma.patient.create({
+      data: { fullName: 'Reg65 Private Patient', phone: `+998966${Date.now().toString().slice(-6)}` },
+    });
+    // Today in clinic time, late enough to stay "today" for the test duration
+    const start = new Date(Date.now() + 60 * 1000);
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `reg65_${runTag}`,
+        patientId: patient.id,
+        doctorId: testDoctorAId,
+        serviceId: testServiceId,
+        branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED,
+        startTime: start,
+        endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg65 Service',
+        durationMinutes: 30,
+        bufferMinutes: 0,
+        consentGiven: true,
+      },
+    });
+    const digestPrefix = `bot_doctor_daily_schedule_${testDoctorAId}_`;
+
+    try {
+      // Invalid ids are rejected
+      await request(app.getHttpServer())
+        .put(`/api/admin/staff/${doctorStaff!.id}`).set('Authorization', `Bearer ${adminToken}`)
+        .send({ telegramUserId: '@not_numeric' }).expect(400);
+
+      // Owner links the doctor's Telegram ID
+      const linked = await request(app.getHttpServer())
+        .put(`/api/admin/staff/${doctorStaff!.id}`).set('Authorization', `Bearer ${adminToken}`)
+        .send({ telegramUserId: tgId }).expect(200);
+      expect(linked.body.telegramUserId).toBe(tgId);
+
+      // Same id cannot be linked to a second staff member
+      if (otherStaff) {
+        await request(app.getHttpServer())
+          .put(`/api/admin/staff/${otherStaff.id}`).set('Authorization', `Bearer ${adminToken}`)
+          .send({ telegramUserId: tgId }).expect(409);
+      }
+
+      // Never exposed on public doctor endpoints
+      const publicDoctors = await request(app.getHttpServer()).get('/api/doctors').expect(200);
+      expect(JSON.stringify(publicDoctors.body)).not.toContain(tgId);
+
+      // Personal schedule claimed once per day, with the doctor's own patients
+      await prisma.notificationJob.deleteMany({ where: { deduplicationKey: { startsWith: digestPrefix } } });
+      const first = await request(app.getHttpServer())
+        .post('/api/bot/daily-schedules/doctors/claim').set('x-service-token', serviceToken).send({}).expect(200);
+      const mine = first.body.find((d: any) => d.telegramUserId === tgId);
+      // The appointment is "today" unless the run straddles clinic midnight
+      const clinicDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(d);
+      if (clinicDay(start) === clinicDay(new Date())) {
+        expect(mine).toBeDefined();
+        expect(mine.appointments.some((a: any) => a.id === appt.id && a.patientName === 'Reg65 Private Patient')).toBe(true);
+        const second = await request(app.getHttpServer())
+          .post('/api/bot/daily-schedules/doctors/claim').set('x-service-token', serviceToken).send({}).expect(200);
+        expect(second.body.some((d: any) => d.telegramUserId === tgId)).toBe(false);
+      }
+
+      // null clears the link
+      const cleared = await request(app.getHttpServer())
+        .put(`/api/admin/staff/${doctorStaff!.id}`).set('Authorization', `Bearer ${adminToken}`)
+        .send({ telegramUserId: null }).expect(200);
+      expect(cleared.body.telegramUserId).toBeNull();
+    } finally {
+      await prisma.staffUser.update({ where: { id: doctorStaff!.id }, data: { telegramUserId: null } });
+      await prisma.notificationJob.deleteMany({ where: { deduplicationKey: { startsWith: digestPrefix } } });
+      await prisma.appointment.deleteMany({ where: { id: appt.id } });
+      await prisma.patient.deleteMany({ where: { id: patient.id } });
+    }
+  });
 });

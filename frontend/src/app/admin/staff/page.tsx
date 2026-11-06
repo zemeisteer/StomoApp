@@ -27,6 +27,7 @@ export default function AdminStaffPage() {
   const [editRole, setEditRole] = useState('ADMIN');
   const [editIsActive, setEditIsActive] = useState(true);
   const [editDoctorId, setEditDoctorId] = useState('');
+  const [editTelegramId, setEditTelegramId] = useState('');
 
   const loadData = async () => {
     try {
@@ -84,6 +85,7 @@ export default function AdminStaffPage() {
         role: editRole,
         isActive: editIsActive,
         doctorId: editRole === 'DOCTOR' ? (editDoctorId || null) : null,
+        telegramUserId: editTelegramId.trim() || null,
       });
       setEditingStaff(null);
       await loadData();
@@ -225,6 +227,7 @@ export default function AdminStaffPage() {
                               setEditRole(member.role);
                               setEditIsActive(member.isActive);
                               setEditDoctorId(member.doctorId || '');
+                              setEditTelegramId(member.telegramUserId || '');
                             }}
                             className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-[11px] transition-colors"
                           >
@@ -418,6 +421,25 @@ export default function AdminStaffPage() {
                     onChange={(val) => setEditDoctorId(val)}
                   />
                 )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Telegram ID (ixtiyoriy)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d{5,15}"
+                    placeholder="Masalan: 123456789"
+                    value={editTelegramId}
+                    onChange={(e) => setEditTelegramId(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Xodim klinika botiga <code>/myid</code> yuborib raqamini oladi. Shifokorlar har kuni 08:00 da
+                    o&apos;z qabullari jadvalini shu Telegram&apos;ga oladi. Bo&apos;sh qoldirilsa, bog&apos;lanish olib tashlanadi.
+                  </p>
+                </div>
 
                 <div className="p-3 bg-amber-50 rounded-xl text-[11px] text-amber-800 border border-amber-200">
                   ⚠️ Eslatma: Rol o&apos;zgartirilsa yoki hisob bloklansa, xodimning joriy seanslari darhol bekor qilinadi.

@@ -121,7 +121,9 @@ async def test_bot_flows():
         mock_bot.send_message.assert_not_awaited()
         print(" [PASS] Already-claimed reminders are not re-sent", flush=True)
 
-    with patch.object(api_client, "claim_daily_schedule_digest", new_callable=AsyncMock) as mock_digest:
+    with patch.object(api_client, "claim_daily_schedule_digest", new_callable=AsyncMock) as mock_digest, \
+         patch.object(api_client, "claim_doctor_daily_schedules", new_callable=AsyncMock) as mock_doctor_claim:
+        mock_doctor_claim.return_value = []
         # 5d. Claimed digest is posted to the staff group without patient names
         mock_bot.send_message.reset_mock()
         mock_digest.return_value = {
@@ -149,6 +151,33 @@ async def test_bot_flows():
         await dispatch_daily_doctor_schedules(mock_bot)
         mock_bot.send_message.assert_not_awaited()
         print(" [PASS] Daily digest sent at most once per day", flush=True)
+
+        # 5f. Doctors with a linked Telegram ID get their own schedule (with patient names) privately
+        mock_bot.send_message.reset_mock()
+        mock_doctor_claim.return_value = [
+            {
+                "jobId": "job-3",
+                "telegramUserId": "555000111",
+                "doctorName": "Dr. Jasur Mansurov",
+                "date": "2026-11-06",
+                "appointments": [{"id": "appt-1", "time": "10:00", "patientName": "Aziz Rahimov", "serviceName": "Konsultatsiya"}],
+            }
+        ]
+        await dispatch_daily_doctor_schedules(mock_bot)
+        mock_bot.send_message.assert_awaited_once()  # group digest already claimed (5e)
+        kwargs = mock_bot.send_message.await_args.kwargs
+        assert kwargs["chat_id"] == 555000111
+        assert "Aziz Rahimov" in kwargs["text"] and "10:00" in kwargs["text"]
+        print(" [PASS] Doctor personal schedule delivered to private chat", flush=True)
+
+    # 5g. /myid shows the user's Telegram ID for staff linking
+    from bot.handlers.common import show_my_telegram_id
+    myid_msg = MagicMock()
+    myid_msg.from_user.id = 987654321
+    myid_msg.answer = AsyncMock()
+    await show_my_telegram_id(myid_msg)
+    assert "987654321" in myid_msg.answer.await_args.args[0]
+    print(" [PASS] /myid returns the caller's Telegram ID", flush=True)
 
     # 6. Test Security: Reject Foreign / Forged Contact
     from aiogram.types import Contact, User, Message

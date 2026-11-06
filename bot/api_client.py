@@ -118,6 +118,11 @@ class NestApiClient:
         """Claims today's staff digest; returns {"claimed": False} if already sent today."""
         return await self._post("/bot/daily-schedules/claim", {"recipient": recipient})
 
+    async def claim_doctor_daily_schedules(self) -> List[Dict[str, Any]]:
+        """Claims today's personal schedule for each doctor with a linked Telegram chat."""
+        res = await self._post("/bot/daily-schedules/doctors/claim", {})
+        return res if isinstance(res, list) else []
+
     async def report_job_failure(self, job_id: str, error: str) -> None:
         await self._post(f"/bot/jobs/{job_id}/failed", {"error": error[:1000]})
 

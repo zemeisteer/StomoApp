@@ -104,6 +104,11 @@ services:
       CLINIC_PHONE: ${CLINIC_PHONE:-+998 71 200 55 44}
       CLINIC_LOCATION_URL: ${CLINIC_LOCATION_URL:-https://maps.google.com/?q=41.311081,69.240562}
       CLINIC_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
+      CLINIC_ADDRESS: ${CLINIC_ADDRESS:-}
+      CLINIC_LANDMARK: ${CLINIC_LANDMARK:-}
+      CLINIC_WORKING_HOURS: ${CLINIC_WORKING_HOURS:-}
+      CLINIC_TELEGRAM_SUPPORT: ${CLINIC_TELEGRAM_SUPPORT:-}
+      CLINIC_WEBSITE: ${CLINIC_WEBSITE:-https://${DOMAIN}}
     networks:
       # internal: reach the backend; public: reach api.telegram.org
       - dentacare-internal

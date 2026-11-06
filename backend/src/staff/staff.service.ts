@@ -16,6 +16,7 @@ export class StaffService {
     fullName: string;
     role: StaffRole;
     doctorId?: string;
+    telegramUserId?: string | null;
   }) {
     const existing = await this.prisma.staffUser.findUnique({
       where: { email: data.email.toLowerCase() },
@@ -23,6 +24,8 @@ export class StaffService {
     if (existing) {
       throw new ConflictException('Bu email allaqachon ro\'yxatdan o\'tgan');
     }
+
+    await this.assertTelegramIdFree(this.prisma, data.telegramUserId);
 
     const passwordHash = await this.authService.hashPassword(data.password);
 
@@ -33,6 +36,7 @@ export class StaffService {
         fullName: data.fullName,
         role: data.role,
         doctorId: data.doctorId,
+        telegramUserId: data.telegramUserId || null,
       },
       select: {
         id: true,
@@ -45,6 +49,21 @@ export class StaffService {
     });
   }
 
+  private async assertTelegramIdFree(
+    client: Prisma.TransactionClient | PrismaService,
+    telegramUserId: string | null | undefined,
+    excludeId?: string,
+  ) {
+    if (!telegramUserId) return;
+    const other = await client.staffUser.findFirst({
+      where: { telegramUserId, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+      select: { id: true },
+    });
+    if (other) {
+      throw new ConflictException('Bu Telegram ID boshqa xodimga biriktirilgan');
+    }
+  }
+
   async findAll() {
     return this.prisma.staffUser.findMany({
       select: {
@@ -55,6 +74,7 @@ export class StaffService {
         isActive: true,
         lastLoginAt: true,
         doctorId: true,
+        telegramUserId: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -72,6 +92,7 @@ export class StaffService {
         isActive: true,
         lastLoginAt: true,
         doctorId: true,
+        telegramUserId: true,
         createdAt: true,
       },
     });
@@ -84,6 +105,7 @@ export class StaffService {
     role?: StaffRole;
     isActive?: boolean;
     doctorId?: string | null;
+    telegramUserId?: string | null;
   }) {
     return this.prisma.$transaction(async (tx) => {
       // Transactional advisory lock to serialize concurrent staff owner demotions/updates
@@ -115,6 +137,8 @@ export class StaffService {
         if (!doctor) throw new BadRequestException('Biriktirilayotgan shifokor topilmadi');
       }
 
+      await this.assertTelegramIdFree(tx, data.telegramUserId, id);
+
       // Invalidate sessions immediately if role changed or staff disabled
       const roleChanged = data.role !== undefined && data.role !== user.role;
       const deactivated = data.isActive === false && user.isActive === true;
@@ -134,6 +158,7 @@ export class StaffService {
           role: true,
           isActive: true,
           doctorId: true,
+          telegramUserId: true,
         },
       });
     }, {

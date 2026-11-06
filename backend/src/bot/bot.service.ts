@@ -521,6 +521,7 @@ export class BotService {
 
   private static readonly REMINDER_TEMPLATE = 'bot_patient_reminder_24h';
   private static readonly DIGEST_TEMPLATE = 'bot_staff_daily_schedule';
+  private static readonly DOCTOR_DIGEST_TEMPLATE = 'bot_doctor_daily_schedule';
   // Window around "24h before start"; wide enough to survive short bot downtime.
   private static readonly REMINDER_WINDOW_FROM_MS = 23 * 60 * 60 * 1000;
   private static readonly REMINDER_WINDOW_TO_MS = 25 * 60 * 60 * 1000;
@@ -614,7 +615,9 @@ export class BotService {
     const res = await this.prisma.notificationJob.updateMany({
       where: {
         id: jobId,
-        templateKey: { in: [BotService.REMINDER_TEMPLATE, BotService.DIGEST_TEMPLATE] },
+        templateKey: {
+          in: [BotService.REMINDER_TEMPLATE, BotService.DIGEST_TEMPLATE, BotService.DOCTOR_DIGEST_TEMPLATE],
+        },
       },
       data: {
         status: NotificationStatus.FAILED,
@@ -664,6 +667,84 @@ export class BotService {
           serviceName: a.serviceName || '',
         })),
       }));
+  }
+
+  /**
+   * Claims today's personal schedule for every active doctor whose staff account
+   * has a linked Telegram chat. Each doctor gets at most one message per clinic
+   * day. Unlike the staff-group digest this includes patient names: it goes to
+   * the doctor's private chat and lists only their own appointments.
+   */
+  async claimDoctorDailySchedules(now: Date = new Date()) {
+    const timezone = await this.getClinicTimezone();
+    const dateStr = formatInTimeZone(now, timezone, 'yyyy-MM-dd');
+    const dayStart = fromZonedTime(`${dateStr} 00:00:00.000`, timezone);
+    const dayEnd = fromZonedTime(`${dateStr} 23:59:59.999`, timezone);
+
+    const staff = await this.prisma.staffUser.findMany({
+      where: {
+        isActive: true,
+        telegramUserId: { not: null },
+        doctor: { is: { isActive: true, isArchived: false } },
+      },
+      include: {
+        doctor: {
+          include: {
+            appointments: {
+              where: {
+                status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.PENDING] },
+                startTime: { gte: dayStart, lte: dayEnd },
+              },
+              include: { patient: { select: { fullName: true } } },
+              orderBy: { startTime: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    const claimed: Array<{
+      jobId: string;
+      telegramUserId: string;
+      doctorName: string;
+      date: string;
+      appointments: Array<{ id: string; time: string; patientName: string; serviceName: string }>;
+    }> = [];
+
+    for (const s of staff) {
+      const doctor = s.doctor;
+      if (!doctor || !s.telegramUserId || doctor.appointments.length === 0) continue;
+      try {
+        const job = await this.prisma.notificationJob.create({
+          data: {
+            channel: NotificationChannel.TELEGRAM,
+            status: NotificationStatus.SENT,
+            templateKey: BotService.DOCTOR_DIGEST_TEMPLATE,
+            recipient: s.telegramUserId,
+            attempts: 1,
+            sentAt: now,
+            deduplicationKey: `${BotService.DOCTOR_DIGEST_TEMPLATE}_${doctor.id}_${dateStr}`,
+            payload: { date: dateStr, doctorId: doctor.id, count: doctor.appointments.length },
+          },
+        });
+        claimed.push({
+          jobId: job.id,
+          telegramUserId: s.telegramUserId,
+          doctorName: `Dr. ${doctor.firstNameUz} ${doctor.lastNameUz}`.trim(),
+          date: dateStr,
+          appointments: doctor.appointments.map((a) => ({
+            id: a.id,
+            time: formatInTimeZone(a.startTime, timezone, 'HH:mm'),
+            patientName: a.patient?.fullName || 'Bemor',
+            serviceName: a.serviceName || '',
+          })),
+        });
+      } catch (e) {
+        if (this.isUniqueViolation(e)) continue;
+        throw e;
+      }
+    }
+    return claimed;
   }
 
   /** Claims today's staff digest exactly once per clinic day. */
