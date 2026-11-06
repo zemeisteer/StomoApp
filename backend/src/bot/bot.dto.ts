@@ -31,15 +31,17 @@ export class CreateBotBookingDto {
   @IsNotEmpty()
   serviceId!: string;
 
+  // Ignored when the Telegram user is linked to a patient (their verified phone wins)
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  patientPhone!: string;
+  patientPhone?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  patientName!: string;
+  patientName?: string;
 
-  @IsDateString()
+  // Exact UTC instant from /bot/slots `slotTimes[].startTime`
+  @IsDateString({ strict: true })
   startTime!: string;
 
   @IsString()

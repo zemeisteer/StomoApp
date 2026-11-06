@@ -290,6 +290,74 @@ async def test_bot_flows():
         assert "patient_name" not in notify_kwargs
         print(" [PASS] Patient cancel flow verified with ownership & staff alert", flush=True)
 
+    # 9. Booking flow: doctor -> (single branch auto) -> service -> date -> slot -> booking
+    from bot.handlers import booking as booking_handlers
+
+    def make_cb(data: str, user_id: int = 4242):
+        cb = MagicMock()
+        cb.data = data
+        cb.from_user.id = user_id
+        cb.message.edit_text = AsyncMock()
+        cb.answer = AsyncMock()
+        return cb
+
+    doctors_payload = [{
+        "id": "doc-1", "name": "Dr. Jasur Mansurov", "spec": "Terapevt",
+        "branches": [{"id": "br-1", "name": "Chilonzor", "address": "x"}],
+        "services": [
+            {"id": "svc-1", "name": "Konsultatsiya", "priceFrom": 100000},
+            {"id": "svc-2", "name": "Plomba", "priceFrom": 300000},
+        ],
+    }]
+    slot_payload = [
+        {"time": "10:00", "startTime": "2026-11-10T05:00:00.000Z"},
+        {"time": "10:30", "startTime": "2026-11-10T05:30:00.000Z"},
+    ]
+
+    start_msg = MagicMock()
+    start_msg.from_user.id = 4242
+    start_msg.answer = AsyncMock()
+    with patch.object(api_client, "get_doctors", new_callable=AsyncMock) as mock_docs, \
+         patch.object(api_client, "get_slots", new_callable=AsyncMock) as mock_slots, \
+         patch.object(api_client, "create_booking", new_callable=AsyncMock) as mock_book:
+        mock_docs.return_value = doctors_payload
+        mock_slots.return_value = slot_payload
+        mock_book.return_value = {"appointmentId": "appt-new", "doctorName": "Dr. Jasur Mansurov"}
+
+        await booking_handlers.start_booking_flow(start_msg)
+        assert start_msg.answer.await_args.kwargs["reply_markup"] is not None
+
+        # Single branch is auto-selected; two services -> service picker
+        cb = make_cb("select_doc:doc-1")
+        await booking_handlers.handle_select_doctor(cb)
+        session = booking_handlers.user_booking_sessions[4242]
+        assert session["branch_id"] == "br-1"
+        assert "Xizmatni tanlang" in cb.message.edit_text.await_args.args[0]
+
+        await booking_handlers.handle_select_service(make_cb("select_service:svc-2"))
+        assert session["service_id"] == "svc-2"
+
+        await booking_handlers.handle_select_date(make_cb("select_date:2026-11-10"))
+        mock_slots.assert_awaited_with("2026-11-10", "doc-1", "svc-2", "br-1")
+
+        # Slot buttons carry an index; booking sends the exact UTC instant, branch and service
+        confirm_cb = make_cb("select_slot:1")
+        await booking_handlers.handle_confirm_slot(confirm_cb)
+        kwargs = mock_book.await_args.kwargs
+        assert kwargs["start_time"] == "2026-11-10T05:30:00.000Z"
+        assert kwargs["branch_id"] == "br-1" and kwargs["service_id"] == "svc-2"
+        assert kwargs["doctor_id"] == "doc-1" and kwargs["telegram_user_id"] == "4242"
+        assert "10:30" in confirm_cb.message.edit_text.await_args.args[0]
+        assert 4242 not in booking_handlers.user_booking_sessions
+        print(" [PASS] Bot booking flow sends branch, service and exact slot instant", flush=True)
+
+        # Stale/unknown slot index -> session-expired message, no booking
+        mock_book.reset_mock()
+        stale_cb = make_cb("select_slot:7")
+        await booking_handlers.handle_confirm_slot(stale_cb)
+        mock_book.assert_not_awaited()
+        print(" [PASS] Stale slot selection is rejected safely", flush=True)
+
     print("--- ALL TELEGRAM BOT FLOW TESTS PASSED SUCCESSFULLY! ---", flush=True)
 
 

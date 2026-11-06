@@ -7627,4 +7627,84 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.deleteMany({ where: { id: patient.id } });
     }
   });
+
+  it('Regression 66: Bot booking end-to-end uses branch + service, clinic-local slot labels, exact UTC instant and verified phone', async () => {
+    const serviceToken = testServiceToken;
+    const tgUserId = `8${Date.now()}`.slice(0, 11);
+    const verifiedPhone = `+998955${Date.now().toString().slice(-6)}`;
+    let patientId: string | undefined;
+    let appointmentId: string | undefined;
+
+    try {
+      const sync = await request(app.getHttpServer())
+        .post('/api/bot/patient/sync').set('x-service-token', serviceToken)
+        .send({ phone: verifiedPhone, fullName: 'Reg66 Bot Patient', telegramUserId: tgUserId }).expect(200);
+      patientId = sync.body.id;
+
+      // Doctors expose bookable branches and services
+      const docs = await request(app.getHttpServer())
+        .get('/api/bot/doctors').set('x-service-token', serviceToken).expect(200);
+      const docA = docs.body.find((d: any) => d.id === testDoctorAId);
+      expect(docA.branches.some((b: any) => b.id === testBranchId)).toBe(true);
+      expect(docA.services.some((s: any) => s.id === testServiceId)).toBe(true);
+
+      // Slots: clinic-local label + exact UTC instant that round-trips
+      const day = getNextWorkingSlot(3, 10, 0);
+      const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(day);
+      const slotsRes = await request(app.getHttpServer())
+        .get(`/api/bot/slots?date=${dateStr}&doctorId=${testDoctorAId}&serviceId=${testServiceId}&branchId=${testBranchId}`)
+        .set('x-service-token', serviceToken).expect(200);
+      expect(slotsRes.body.slotTimes.length).toBeGreaterThan(0);
+      const toLocal = (iso: string) =>
+        new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+      for (const s of slotsRes.body.slotTimes) {
+        expect(s.time).toBe(toLocal(s.startTime));
+      }
+      expect(slotsRes.body.slots).toEqual(slotsRes.body.slotTimes.map((s: any) => s.time));
+      const slot = slotsRes.body.slotTimes[Math.floor(slotsRes.body.slotTimes.length / 2)];
+
+      // Booking with the exact instant; a phone in the request must not override the verified one
+      const booking = await request(app.getHttpServer())
+        .post('/api/bot/booking').set('x-service-token', serviceToken)
+        .send({
+          doctorId: testDoctorAId,
+          branchId: testBranchId,
+          serviceId: testServiceId,
+          startTime: slot.startTime,
+          telegramUserId: tgUserId,
+          patientPhone: '+998900000000',
+        }).expect(201);
+      appointmentId = booking.body.appointmentId;
+      expect(appointmentId).toBeTruthy();
+
+      const appt = await prisma.appointment.findUnique({ where: { id: appointmentId }, include: { patient: true } });
+      expect(appt!.startTime.toISOString()).toBe(slot.startTime);
+      expect(appt!.branchId).toBe(testBranchId);
+      expect(appt!.patientId).toBe(patientId);
+      expect(appt!.patient!.phone).toBe(verifiedPhone);
+
+      // Patient portal shows the same clinic-local time
+      const mine = await request(app.getHttpServer())
+        .get(`/api/bot/patient/${tgUserId}/appointments`).set('x-service-token', serviceToken).expect(200);
+      const listed = mine.body.find((a: any) => a.id === appointmentId);
+      expect(listed.time).toBe(slot.time);
+      expect(listed.date).toBe(dateStr);
+
+      // The booked slot is no longer offered
+      const after = await request(app.getHttpServer())
+        .get(`/api/bot/slots?date=${dateStr}&doctorId=${testDoctorAId}&serviceId=${testServiceId}&branchId=${testBranchId}`)
+        .set('x-service-token', serviceToken).expect(200);
+      expect(after.body.slotTimes.some((s: any) => s.startTime === slot.startTime)).toBe(false);
+    } finally {
+      if (appointmentId) {
+        await prisma.notificationJob.deleteMany({ where: { appointmentId } });
+        await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId } });
+        await prisma.appointment.deleteMany({ where: { id: appointmentId } });
+      }
+      if (patientId) {
+        await prisma.consentRecord.deleteMany({ where: { phone: verifiedPhone } });
+        await prisma.patient.deleteMany({ where: { id: patientId } });
+      }
+    }
+  });
 });

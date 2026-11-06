@@ -39,14 +39,10 @@ Phases 0–8 and the 2026-11-06 production pass are summarised in
 ## Next
 
 ### Blocking for launch
-1. **Telegram bot booking flow is broken.** Since Regression 60 the backend
-   requires `branchId` and `serviceId` for `/bot/slots` and `/bot/booking`, but
-   the bot never sends them, so every bot booking attempt fails. The bot needs
-   branch and service selection steps (or a documented single-branch default).
-2. **First production deploy.** DNS for `DOMAIN`, `.env.production`,
+1. **First production deploy.** DNS for `DOMAIN`, `.env.production`,
    `STAGING=1 ./scripts/init-letsencrypt.sh`, then a real certificate; smoke test
    login over HTTPS, booking, SMS, bot and reminders against real providers.
-3. **First release.** Merge `dev` into `main` once the deploy is verified.
+2. **First release.** Merge `dev` into `main` once the deploy is verified.
 
 ### After launch
 - Doctor self-service Telegram linking (today the OWNER enters the ID that the

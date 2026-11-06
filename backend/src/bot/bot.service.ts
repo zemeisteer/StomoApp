@@ -96,28 +96,33 @@ export class BotService {
       throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatmaydi');
     }
 
+    const timezone = await this.getClinicTimezone();
     const res = await this.schedulingService.getAvailableSlots(
       doctorId,
       dateStr,
       serviceId,
       branchId,
-      'Asia/Tashkent',
+      timezone,
     );
 
-    const availableTimeStrings = (res.slots || [])
+    // Slot start times are UTC ISO strings. Show clinic-local labels, and give
+    // callers the exact UTC instant to book so no timezone guessing happens.
+    const slotTimes = (res.slots || [])
       .filter((s) => s.available)
-      .map((s) => {
-        const timePart = s.startTime.includes('T') ? s.startTime.split('T')[1].slice(0, 5) : s.startTime.slice(0, 5);
-        return timePart;
-      });
+      .map((s) => ({
+        time: formatInTimeZone(new Date(s.startTime), timezone, 'HH:mm'),
+        startTime: new Date(s.startTime).toISOString(),
+      }));
 
     return {
       date: dateStr,
       doctorId,
       branchId,
       serviceId,
+      timezone,
       durationMinutes: res.durationMinutes,
-      slots: availableTimeStrings,
+      slots: slotTimes.map((s) => s.time),
+      slotTimes,
       slotObjects: res.slots,
     };
   }
@@ -284,9 +289,11 @@ export class BotService {
       orderBy: { startTime: 'asc' },
     });
 
+    const timezone = await this.getClinicTimezone();
     return appts.map((a) => {
-      const datePart = a.startTime.toISOString().slice(0, 10);
-      const timePart = a.startTime.toISOString().slice(11, 16);
+      // Clinic-local, not UTC
+      const datePart = formatInTimeZone(a.startTime, timezone, 'yyyy-MM-dd');
+      const timePart = formatInTimeZone(a.startTime, timezone, 'HH:mm');
       const docName = a.doctor ? `Dr. ${a.doctor.firstNameUz} ${a.doctor.lastNameUz}`.trim() : 'Shifokor';
       const spec = a.doctor?.specialties?.[0]?.specialty?.nameUz || a.doctor?.titleUz || 'Stomatolog';
       return {
@@ -424,14 +431,16 @@ export class BotService {
       throw new BadRequestException('Shifokor ushbu xizmatni ko\'rsatmaydi');
     }
 
-    const normalizedPhone = this.normalizePhone(dto.patientPhone || patient.phone);
+    // The linked patient's phone was verified via Telegram contact sharing; never
+    // trust a phone supplied in the request over it.
+    const normalizedPhone = this.normalizePhone(patient.phone || dto.patientPhone || '');
 
     const bookingResult = await this.appointmentsService.createBooking({
       doctorId: dto.doctorId,
       branchId: dto.branchId,
       serviceId: dto.serviceId,
       startTime: dto.startTime,
-      patientName: patient.fullName || dto.patientName,
+      patientName: patient.fullName || dto.patientName || 'Telegram bemor',
       patientPhone: normalizedPhone,
       consentGiven: true,
       source: 'telegram_bot',

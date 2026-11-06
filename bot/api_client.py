@@ -45,10 +45,16 @@ class NestApiClient:
         res = await self._get("/bot/doctors")
         return res if isinstance(res, list) else []
 
-    async def get_slots(self, date_str: str, doctor_id: str) -> List[str]:
-        res = await self._get("/bot/slots", params={"date": date_str, "doctorId": doctor_id})
-        if isinstance(res, dict) and "slots" in res:
-            return res["slots"]
+    async def get_slots(
+        self, date_str: str, doctor_id: str, service_id: str, branch_id: str
+    ) -> List[Dict[str, str]]:
+        """Returns [{"time": "HH:mm" (clinic-local), "startTime": UTC ISO}, ...]."""
+        res = await self._get(
+            "/bot/slots",
+            params={"date": date_str, "doctorId": doctor_id, "serviceId": service_id, "branchId": branch_id},
+        )
+        if isinstance(res, dict) and isinstance(res.get("slotTimes"), list):
+            return res["slotTimes"]
         return []
 
     async def sync_patient(
@@ -77,17 +83,18 @@ class NestApiClient:
     async def create_booking(
         self,
         doctor_id: str,
+        branch_id: str,
+        service_id: str,
         start_time: str,
-        patient_name: str,
-        patient_phone: str,
         telegram_user_id: str,
         notes: str = "Telegram bot orqali band qilindi",
     ) -> Optional[Dict[str, Any]]:
+        """start_time must be the exact UTC ISO instant from get_slots()."""
         payload = {
             "doctorId": doctor_id,
+            "branchId": branch_id,
+            "serviceId": service_id,
             "startTime": start_time,
-            "patientName": patient_name,
-            "patientPhone": patient_phone,
             "telegramUserId": telegram_user_id,
             "notes": notes,
         }

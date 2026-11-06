@@ -14,7 +14,7 @@
 - **Single Source of Truth**: **NestJS 10 + Prisma ORM 5 + PostgreSQL 16** (`localhost:5432`, dev: `dentacare`, test: `dentacare_test`)
 - **Frontend**: Next.js 14 (App Router) + TailwindCSS + Three.js
 - **Verification Suites (All passing in current session)**:
-  - Backend Jest E2E Suite: **80 / 80 passed (100%)** (local and CI)
+  - Backend Jest E2E Suite: **81 / 81 passed (100%)** (local and CI)
   - Priority Verification (`verify-all-priorities.ts`): **60 / 60 passed (100%)**
   - Backend Build (`nest build`): **0 errors**
   - Backend Lint (`npm run lint`): **0 errors**
@@ -172,6 +172,7 @@
 - **Telegram reminder contacts** (`8a1d5ff`): branch address/phone instead of a hardcoded street and number.
 - **Staff group policy** (`6282f37`): removed the bot's duplicate new-booking alert (it repeated the backend alert with patient name and phone); cancellation alert has no patient name and uses clinic time.
 - **Doctor personal schedule** (`0e32675`): `StaffUser.telegramUserId` (private, never on public doctor endpoints), editable by OWNER in Admin > Xodimlar; `/myid` bot command; per-doctor daily schedule (Regression 65). Bot contact details configurable (website was hardcoded to localhost).
+- **Bot booking works again**: it never sent `branchId`/`serviceId` (required since Regression 60), so every bot booking failed. Added branch and service steps (auto-skipped when there is one option), slot buttons by index (the `HH:mm` label broke callback parsing), clinic-local slot labels with the exact UTC instant sent back for booking, the patient's verified phone instead of a hardcoded `+998900000000`, handlers for the Back/Cancel buttons, and clinic-local times in "Qabullarim" (Regression 66).
 
 ---
 
@@ -179,7 +180,7 @@
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 80 full integration tests (Regressions 1–65) | `dentacare_test` | **80 / 80 PASSED (100%)** |
+| **Jest E2E Regressions** | 81 full integration tests (Regressions 1–66) | `dentacare_test` | **81 / 81 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |
