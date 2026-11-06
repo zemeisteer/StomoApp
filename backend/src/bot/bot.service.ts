@@ -49,18 +49,56 @@ export class BotService {
     return doctors.map((doc) => ({
       id: doc.id,
       name: `Dr. ${doc.firstNameUz} ${doc.lastNameUz}`.trim(),
+      nameRu: `Др. ${doc.firstNameRu} ${doc.lastNameRu}`.trim(),
       spec: doc.specialties?.[0]?.specialty?.nameUz || doc.titleUz || 'Stomatolog',
+      specRu: doc.specialties?.[0]?.specialty?.nameRu || doc.titleRu || 'Стоматолог',
       branches: doc.branches.map((b) => ({
         id: b.branch.id,
         name: b.branch.nameUz,
+        nameRu: b.branch.nameRu,
         address: b.branch.addressUz,
+        addressRu: b.branch.addressRu,
       })),
       services: doc.services.map((s) => ({
         id: s.service.id,
         name: s.service.nameUz,
+        nameRu: s.service.nameRu,
         priceFrom: s.service.priceFrom,
       })),
     }));
+  }
+
+  /**
+   * Public-facing clinic contact info for the bot, taken from clinic settings
+   * and active branches so admin edits show up in the bot immediately.
+   */
+  async getClinicInfo() {
+    const [settings, branches] = await Promise.all([
+      this.prisma.clinicSettings.findFirst(),
+      this.prisma.branch.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } }),
+    ]);
+    return {
+      name: settings?.name || 'DentaCare',
+      nameRu: settings?.nameRu || settings?.name || 'DentaCare',
+      phone: settings?.phone || null,
+      website: settings?.website || null,
+      telegramLink: settings?.telegramLink || null,
+      timezone: settings?.timezone || 'Asia/Tashkent',
+      branches: branches.map((b) => ({
+        id: b.id,
+        name: b.nameUz,
+        nameRu: b.nameRu,
+        address: b.addressUz,
+        addressRu: b.addressRu,
+        phone: b.phone || settings?.phone || null,
+        mapUrl:
+          b.mapUrl ||
+          (b.latitude != null && b.longitude != null
+            ? `https://maps.google.com/?q=${b.latitude},${b.longitude}`
+            : null),
+        workingHours: b.workingHours ?? {},
+      })),
+    };
   }
 
   async getSlots(dateStr: string, doctorId: string, serviceId?: string, branchId?: string) {
@@ -128,6 +166,24 @@ export class BotService {
   }
 
   async syncPatient(dto: SyncPatientDto) {
+    const result: any = await this.syncPatientIdentity(dto);
+    // Persist the bot language chosen before/at registration (ignored on ambiguous matches)
+    if (dto.language && result?.id && !result?.ambiguous) {
+      await this.prisma.patient.update({ where: { id: result.id }, data: { preferredLanguage: dto.language } });
+      result.preferredLanguage = dto.language;
+    }
+    return result;
+  }
+
+  async setPatientLanguage(telegramUserId: string, language: 'uz' | 'ru') {
+    const res = await this.prisma.patient.updateMany({
+      where: { telegramUserId },
+      data: { preferredLanguage: language },
+    });
+    return { updated: res.count > 0, language };
+  }
+
+  private async syncPatientIdentity(dto: SyncPatientDto) {
     const normalized = this.normalizePhone(dto.phone);
     const cleanName = (dto.fullName || '').trim();
     const telegramUserId = (dto.telegramUserId || '').trim();
@@ -300,7 +356,9 @@ export class BotService {
         id: a.id,
         token: a.publicToken,
         doctorName: docName,
+        doctorNameRu: a.doctor ? `Др. ${a.doctor.firstNameRu} ${a.doctor.lastNameRu}`.trim() : 'Врач',
         specialization: spec,
+        specializationRu: a.doctor?.specialties?.[0]?.specialty?.nameRu || a.doctor?.titleRu || 'Стоматолог',
         date: datePart,
         time: timePart,
         status: a.status,
@@ -554,7 +612,7 @@ export class BotService {
         },
         patient: { is: { telegramUserId: { not: null } } },
       },
-      include: { patient: true, doctor: true },
+      include: { patient: true, doctor: true, branch: true },
       orderBy: { startTime: 'asc' },
     });
   }
@@ -571,6 +629,14 @@ export class BotService {
       dateStr: formatInTimeZone(a.startTime, timezone, 'dd.MM.yyyy'),
       timeStr: formatInTimeZone(a.startTime, timezone, 'HH:mm'),
       startTime: a.startTime.toISOString(),
+      doctorNameRu: a.doctor ? `Др. ${a.doctor.firstNameRu} ${a.doctor.lastNameRu}`.trim() : 'Врач',
+      branchName: a.branch?.nameUz || null,
+      branchNameRu: a.branch?.nameRu || null,
+      branchAddress: a.branch?.addressUz || null,
+      branchAddressRu: a.branch?.addressRu || null,
+      branchPhone: a.branch?.phone || null,
+      branchMapUrl: a.branch?.mapUrl || null,
+      lang: a.patient?.preferredLanguage || 'uz',
       window: '24h' as const,
     };
   }

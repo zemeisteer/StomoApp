@@ -19,6 +19,7 @@ import {
   CancelBotAppointmentDto,
   ReportBotJobFailureDto,
   ClaimDailyDigestDto,
+  SetBotLanguageDto,
 } from './bot.dto';
 
 @Controller('bot')
@@ -30,6 +31,11 @@ export class BotController {
   @Get('doctors')
   async getDoctors() {
     return this.botService.getDoctors();
+  }
+
+  @Get('clinic-info')
+  async getClinicInfo() {
+    return this.botService.getClinicInfo();
   }
 
   @Get('slots')
@@ -49,6 +55,15 @@ export class BotController {
   @HttpCode(HttpStatus.OK)
   async syncPatient(@Body() dto: SyncPatientDto) {
     return this.botService.syncPatient(dto);
+  }
+
+  @Post('patient/:telegramUserId/language')
+  @HttpCode(HttpStatus.OK)
+  async setPatientLanguage(
+    @Param('telegramUserId') telegramUserId: string,
+    @Body() dto: SetBotLanguageDto,
+  ) {
+    return this.botService.setPatientLanguage(telegramUserId, dto.language);
   }
 
   @Get('patient/:telegramUserId/appointments')

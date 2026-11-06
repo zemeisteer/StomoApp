@@ -358,6 +358,8 @@ model Patient {
   email     String?
   notes     String?  @db.Text
   telegramUserId String? @unique @map("telegram_user_id")
+  // Language for Telegram bot messages ("uz" | "ru")
+  preferredLanguage String @default("uz") @map("preferred_language")
 
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")

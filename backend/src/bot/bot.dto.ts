@@ -1,4 +1,6 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString, MaxLength, IsIn } from 'class-validator';
+
+export const BOT_LANGUAGES = ['uz', 'ru'] as const;
 
 export class SyncPatientDto {
   @IsString()
@@ -16,6 +18,15 @@ export class SyncPatientDto {
   @IsOptional()
   @IsString()
   patientId?: string;
+
+  @IsOptional()
+  @IsIn(BOT_LANGUAGES)
+  language?: 'uz' | 'ru';
+}
+
+export class SetBotLanguageDto {
+  @IsIn(BOT_LANGUAGES)
+  language!: 'uz' | 'ru';
 }
 
 export class CreateBotBookingDto {
