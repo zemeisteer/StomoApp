@@ -176,9 +176,8 @@ services:
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - certbot_conf:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro
-    # Reload every 6h so renewed certificates are picked up without downtime.
-    # Overrides CMD only; the image ENTRYPOINT still renders the templates.
-    command: /bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & exec nginx -g "daemon off;"'
+      # Periodic reload for renewed certificates (runs via the image entrypoint)
+      - ./nginx/reload-certs.sh:/docker-entrypoint.d/99-reload-certs.sh:ro
     depends_on:
       backend:
         condition: service_healthy
