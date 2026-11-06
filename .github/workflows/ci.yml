@@ -168,7 +168,17 @@ jobs:
           DOMAIN: example.test
           TELEGRAM_BOT_TOKEN: ci_dummy_token
           TELEGRAM_CHAT_ID: '-1000000000000'
-        run: docker compose -f docker-compose.prod.yml config --quiet
+          POSTGRES_PASSWORD: ci_dummy
+          REDIS_PASSWORD: ci_dummy
+          JWT_SECRET: ci_dummy
+          JWT_REFRESH_SECRET: ci_dummy
+          SERVICE_TOKEN: ci_dummy
+        run: |
+          docker compose -f docker-compose.prod.yml config --quiet
+          # Must refuse to render without required secrets
+          if POSTGRES_PASSWORD= docker compose -f docker-compose.prod.yml config --quiet 2>/dev/null; then
+            echo 'compose accepted an empty POSTGRES_PASSWORD'; exit 1
+          fi
 
       - name: Build Bot Image & Import Smoke Test
         run: |

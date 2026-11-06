@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dentacare}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ChangeMeInProductionSecret2026!}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-dentacare}
     volumes:
       - prod_postgres_data:/var/lib/postgresql/data
@@ -23,11 +23,11 @@ services:
     image: redis:7-alpine
     container_name: dentacare-prod-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-ChangeMeRedisSecret2026!}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     volumes:
       - prod_redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-ChangeMeRedisSecret2026!}', 'ping']
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:?REDIS_PASSWORD must be set}', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,10 +50,10 @@ services:
       PORT: 4000
       APP_URL: ${APP_URL:-https://${DOMAIN}}
       FRONTEND_URL: ${FRONTEND_URL:-https://${DOMAIN}}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-dentacare}:${POSTGRES_PASSWORD:-ChangeMeInProductionSecret2026!}@postgres:5432/${POSTGRES_DB:-dentacare}?schema=public
-      REDIS_URL: redis://:${REDIS_PASSWORD:-ChangeMeRedisSecret2026!}@redis:6379
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dentacare}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-dentacare}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set}
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-uz}
       SMS_PROVIDER: ${SMS_PROVIDER:-eskiz}
@@ -61,7 +61,7 @@ services:
       SMS_API_URL: ${SMS_API_URL:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?SERVICE_TOKEN must be set}
       # Exactly one reverse proxy (nginx) sits in front of the backend;
       # without this every client shares nginx's IP for rate limiting.
       TRUST_PROXY: ${TRUST_PROXY:-1}
@@ -99,7 +99,7 @@ services:
       BOT_TOKEN: ${BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:?BOT_TOKEN or TELEGRAM_BOT_TOKEN must be set}}
       STAFF_GROUP_CHAT_ID: ${STAFF_GROUP_CHAT_ID:-${TELEGRAM_CHAT_ID:?STAFF_GROUP_CHAT_ID or TELEGRAM_CHAT_ID must be set}}
       BACKEND_API_URL: http://backend:4000/api
-      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?SERVICE_TOKEN must be set}
       CLINIC_NAME: ${CLINIC_NAME:-DentaCare Stomatologiya Klinikasi}
       CLINIC_PHONE: ${CLINIC_PHONE:-+998 71 200 55 44}
       CLINIC_LOCATION_URL: ${CLINIC_LOCATION_URL:-https://maps.google.com/?q=41.311081,69.240562}
