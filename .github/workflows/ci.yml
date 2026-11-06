@@ -84,6 +84,10 @@ jobs:
         working-directory: ./backend
         run: npx prisma migrate deploy
 
+      - name: Seed Test Fixtures (dentacare_test)
+        working-directory: ./backend
+        run: npx prisma db seed
+
       - name: Run Jest E2E Test Suite
         working-directory: ./backend
         run: npx jest --config ./test/jest-e2e.json --runInBand
