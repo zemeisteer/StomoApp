@@ -224,13 +224,24 @@ A new CI job builds the production images and runs the stack; it found the image
 - **Payroll** (`/admin/payroll`, owner): monthly collected amount per doctor × percentage + bonus, inline rate editing, per-doctor breakdown, CSV export. Fix: payments on invoices billed from a treatment plan (no appointment) are now attributed to the plan's doctor; new plans can name the treating doctor.
 - Test fix: Regression 9 used the same Monday 14:00 slot as Regression 8 when the suite runs on a Saturday. Regression 75 covers this phase.
 
+### Phase 17: Feedback fixes — billing on completion, unified dashboard, reception role, UI polish (2026-11-08)
+- **Completed visits are billed**: moving an appointment to COMPLETED creates one invoice from the booked service price snapshots, so the cash desk, debts, patient card and dashboard see it immediately.
+- **Unified owner dashboard** (`GET /api/admin/dashboard?from&to`, `ClinicDashboard`): collected / billed / outstanding money, average check, completed visits (by actual completion time), new and served patients, no-show rate, pending approvals, daily revenue chart, payment methods, top services and doctors; period presets. "Kengaytirilgan tahlil" left the menu and is linked from the dashboard.
+- **Patients list** shows completed visits, last visit and open balance.
+- **Recall per service**: `services.recall_days` (null = clinic default, 0 = never); the recall list and the daily job use the shortest interval among the services of the last visit.
+- **Reception role** now works: appointments, patients, leads and schedules endpoints and pages open to RECEPTION; staff page explains roles and lists doctors without a login (one click creates a linked account).
+- **Russian spelling**: names and addresses use Russian letters (q→к, h→х, g'→г, o'→о, initial e→э) instead of Uzbek Cyrillic; free text (bio, education) is no longer auto-"translated"; known universities use official Russian names.
+- **Fixes**: settings save sent display-only fields (400); uploaded media URLs are same-origin relative paths (logo was blocked cross-origin in dev).
+- **UI**: `TimeSelect` (15-minute grid) replaces all native time inputs; light slate classes mapped to neutral tokens across the app; branded native select / date controls; searchable service picker in plans.
+- Regression 77.
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 90 full integration tests (Regressions 1–75) | `dentacare_test` | **90 / 90 PASSED (100%)** |
+| **Jest E2E Regressions** | 92 full integration tests (Regressions 1–77) | `dentacare_test` | **92 / 92 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |

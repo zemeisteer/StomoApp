@@ -24,6 +24,7 @@ import {
   IsArray,
   Min,
   Max,
+  ValidateIf,
   Length,
 } from 'class-validator';
 
@@ -97,6 +98,14 @@ export class CreateServiceDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+
+  /** Days until the patient is invited for a check-up after this service; null = clinic default, 0 = never */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsInt()
+  @Min(0)
+  @Max(1095)
+  recallDays?: number | null;
 
   @IsOptional()
   @IsArray()

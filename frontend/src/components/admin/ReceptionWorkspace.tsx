@@ -198,7 +198,7 @@ export function ReceptionWorkspace({
                             type="button"
                             disabled={isMutating}
                             onClick={() => handleStatusChange(appt.id, 'CHECKED_IN')}
-                            className="px-2.5 py-1 bg-white text-brand-600 rounded-lg text-[11px] font-bold shadow-xs hover:bg-slate-100"
+                            className="px-2.5 py-1 bg-white text-brand-600 rounded-lg text-[11px] font-bold shadow-xs hover:bg-canvas"
                           >
                             {isUz ? 'Keldi' : 'Прибыл'}
                           </button>
@@ -208,7 +208,7 @@ export function ReceptionWorkspace({
                             type="button"
                             disabled={isMutating}
                             onClick={() => handleStartTreatment(appt.id)}
-                            className="px-2.5 py-1 bg-white text-blue-700 rounded-lg text-[11px] font-bold shadow-xs hover:bg-slate-100 flex items-center gap-1"
+                            className="px-2.5 py-1 bg-white text-blue-700 rounded-lg text-[11px] font-bold shadow-xs hover:bg-canvas flex items-center gap-1"
                           >
                             <Play className="w-3 h-3 fill-current" />
                             <span>{isUz ? 'Qabul' : 'Прием'}</span>
@@ -356,7 +356,7 @@ export function ReceptionWorkspace({
                           {isUz ? 'Kutilmoqda' : 'Ожидается'}
                         </span>
                       ) : (
-                        <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 font-bold text-[11px]">
+                        <span className="px-2.5 py-1 rounded-full bg-canvas text-ink font-bold text-[11px]">
                           {item.status}
                         </span>
                       )}
@@ -774,7 +774,7 @@ export function ReceptionWorkspace({
                       serviceName: inv.procedures?.[0]?.nameUz || (isUz ? 'Stomatologik xizmat' : 'Стоматологическая процедура'),
                       note: inv.notes,
                     })}
-                    className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-100 rounded-lg transition-colors cursor-pointer"
+                    className="p-1.5 text-ink-subtle hover:text-brand-600 hover:bg-brand-100 rounded-lg transition-colors cursor-pointer"
                     title={isUz ? 'Kvitansiyani chop etish' : 'Печать квитанции'}
                   >
                     <Printer className="w-3.5 h-3.5" />

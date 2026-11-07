@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { ModalDialog } from '../../ModalDialog';
+import { CustomSelect } from '../../CustomSelect';
 import { StatusBadge } from '../../ui/StatusBadge';
 import { SignaturePad } from './SignaturePad';
 import { ITEM_STATUS, PLAN_STATUS, doctorName, formatUzs } from '../../../lib/clinicFormat';
@@ -764,14 +765,19 @@ function AddItemForm({
     >
       <p className="mb-2 text-[12px] font-semibold text-ink">{L("Muolaja qo'shish", 'Добавить процедуру')}</p>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-12">
-        <select value={serviceId} onChange={(e) => pickService(e.target.value)} className={`${field} col-span-2 sm:col-span-5`} aria-label={L('Xizmat', 'Услуга')}>
-          <option value="">{L('Katalogdan tanlang…', 'Выбрать из каталога…')}</option>
-          {services.map((s) => (
-            <option key={s.id} value={s.id}>
-              {isRu ? s.nameRu || s.nameUz : s.nameUz}
-            </option>
-          ))}
-        </select>
+        <CustomSelect
+          className="col-span-2 sm:col-span-5"
+          searchable
+          locale={lang}
+          placeholder={L('Katalogdan tanlang…', 'Выбрать из каталога…')}
+          value={serviceId}
+          onChange={pickService}
+          options={services.map((s) => ({
+            value: s.id,
+            label: isRu ? s.nameRu || s.nameUz : s.nameUz,
+            badge: s.priceFrom ? formatUzs(Math.round(s.priceFrom / 100), lang) : undefined,
+          }))}
+        />
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={L('yoki nomini yozing', 'или введите название')} className={`${field} col-span-2 sm:col-span-7`} />
         <input
           value={tooth}

@@ -58,12 +58,12 @@ export default function DoctorsPage() {
               <div className="flex gap-4">
                 <div className="w-24 h-28 bg-brand-50 rounded-2xl" />
                 <div className="space-y-2 flex-1">
-                  <div className="h-5 w-3/4 bg-slate-100 rounded" />
-                  <div className="h-4 w-1/2 bg-slate-100 rounded" />
-                  <div className="h-4 w-1/3 bg-slate-100 rounded" />
+                  <div className="h-5 w-3/4 bg-canvas rounded" />
+                  <div className="h-4 w-1/2 bg-canvas rounded" />
+                  <div className="h-4 w-1/3 bg-canvas rounded" />
                 </div>
               </div>
-              <div className="h-12 bg-slate-100 rounded-xl" />
+              <div className="h-12 bg-canvas rounded-xl" />
             </div>
           ))}
         </div>

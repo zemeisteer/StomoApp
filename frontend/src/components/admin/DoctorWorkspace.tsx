@@ -249,9 +249,9 @@ export function DoctorWorkspace({
                 <span>{isUploading ? (isUz ? 'Yuklanmoqda...' : 'Загрузка...') : (isUz ? 'Rentgen yuklash' : 'Загрузить снимок')}</span>
               </button>
 
-              <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+              <div className="h-4 w-px bg-line hidden sm:block" />
 
-              <div className="flex items-center gap-1.5 text-xs text-ink-muted bg-slate-50 px-2 py-1 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-1.5 text-xs text-ink-muted bg-canvas px-2 py-1 rounded-xl border border-line">
                 <span className="font-medium text-[11px]">{isUz ? 'Yorug\':' : 'Ярк:'} {xrayBrightness}%</span>
                 <input
                   type="range"
@@ -264,7 +264,7 @@ export function DoctorWorkspace({
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 text-xs text-ink-muted bg-slate-50 px-2 py-1 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-1.5 text-xs text-ink-muted bg-canvas px-2 py-1 rounded-xl border border-line">
                 <span className="font-medium text-[11px]">{isUz ? 'Kontrast:' : 'Контр:'} {xrayContrast}%</span>
                 <input
                   type="range"
@@ -284,7 +284,7 @@ export function DoctorWorkspace({
                   className={`px-2 py-1 rounded-xl text-xs font-semibold border transition-colors ${
                     isInverted
                       ? 'bg-purple-600 text-white border-purple-600'
-                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      : 'bg-white text-ink border-line hover:bg-canvas'
                   }`}
                   title={isUz ? 'Negativ / Pozitiv rentgen rejimi' : 'Режим негатива / позитива'}
                 >
@@ -294,7 +294,7 @@ export function DoctorWorkspace({
                 <button
                   type="button"
                   onClick={() => setRotationDeg((deg) => (deg + 90) % 360)}
-                  className="p-1.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-xs"
+                  className="p-1.5 text-ink-muted hover:text-ink bg-white border border-line rounded-xl hover:bg-canvas text-xs"
                   title={isUz ? '90° ga burish' : 'Повернуть на 90°'}
                 >
                   <RotateCw className="w-3.5 h-3.5" />
@@ -303,7 +303,7 @@ export function DoctorWorkspace({
                 <button
                   type="button"
                   onClick={() => setZoomLevel((z) => Math.min(3, +(z + 0.25).toFixed(2)))}
-                  className="p-1.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-xs"
+                  className="p-1.5 text-ink-muted hover:text-ink bg-white border border-line rounded-xl hover:bg-canvas text-xs"
                   title={isUz ? 'Kattalashtirish' : 'Увеличить'}
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
@@ -312,7 +312,7 @@ export function DoctorWorkspace({
                 <button
                   type="button"
                   onClick={() => setZoomLevel((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
-                  className="p-1.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-xs"
+                  className="p-1.5 text-ink-muted hover:text-ink bg-white border border-line rounded-xl hover:bg-canvas text-xs"
                   title={isUz ? 'Kichiklashtirish' : 'Уменьшить'}
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
@@ -321,7 +321,7 @@ export function DoctorWorkspace({
                 <button
                   type="button"
                   onClick={handleResetControls}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors"
+                  className="p-1.5 text-ink-subtle hover:text-ink rounded-xl hover:bg-canvas transition-colors"
                   title={isUz ? 'Asliga qaytarish' : 'Сброс всех настроек'}
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -389,7 +389,7 @@ export function DoctorWorkspace({
             <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl text-white font-mono text-[11px] border border-white/10 flex items-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>{isUz ? 'Bemor' : 'Пациент'}: {patientName}</span>
-              <span className="text-slate-400">|</span>
+              <span className="text-ink-subtle">|</span>
               <span className="text-teal-300">{Math.round(zoomLevel * 100)}%</span>
               {rotationDeg > 0 && <span className="text-amber-300">{rotationDeg}°</span>}
               {isInverted && <span className="text-purple-300 font-bold">INV</span>}
@@ -439,7 +439,7 @@ export function DoctorWorkspace({
                   className={`relative shrink-0 w-20 h-16 rounded-xl overflow-hidden border-2 transition-all ${
                     selectedXrayIndex === idx
                       ? 'border-brand-600 ring-2 ring-brand-600/30 scale-105'
-                      : 'border-slate-200 opacity-70 hover:opacity-100 hover:border-slate-300'
+                      : 'border-line opacity-70 hover:opacity-100 hover:border-line-strong'
                   }`}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -458,7 +458,7 @@ export function DoctorWorkspace({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
-                className="shrink-0 w-20 h-16 rounded-xl border-2 border-dashed border-slate-300 hover:border-brand-600 flex flex-col items-center justify-center text-slate-400 hover:text-brand-600 transition-colors bg-slate-50"
+                className="shrink-0 w-20 h-16 rounded-xl border-2 border-dashed border-line-strong hover:border-brand-600 flex flex-col items-center justify-center text-ink-subtle hover:text-brand-600 transition-colors bg-canvas"
                 title={isUz ? 'Yangi rasm qo\'shish' : 'Добавить снимок'}
               >
                 <Upload className="w-4 h-4" />
@@ -578,7 +578,7 @@ export function DoctorWorkspace({
                 </div>
                 <button
                   type="button"
-                  className="px-2 py-1 bg-white hover:bg-slate-100 text-brand-600 rounded-lg text-[11px] font-bold border border-line shrink-0"
+                  className="px-2 py-1 bg-white hover:bg-canvas text-brand-600 rounded-lg text-[11px] font-bold border border-line shrink-0"
                 >
                   {isUz ? 'Ochish' : 'Открыть'}
                 </button>

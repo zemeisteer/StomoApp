@@ -25,6 +25,7 @@ export const ADDRESS_TERMS: Record<string, { uz: string; ru: string }> = {
   'toshkent sh.': { uz: 'Toshkent sh.', ru: 'г. Ташкент' },
   'toshkent shahri': { uz: 'Toshkent shahri', ru: 'город Ташкент' },
   'filial': { uz: 'Filial', ru: 'Филиал' },
+  'filiali': { uz: 'filiali', ru: 'филиал' },
   'markaziy': { uz: 'Markaziy', ru: 'Центральный' },
   'chilonzor': { uz: 'Chilonzor', ru: 'Чиланзар' },
   'yunusobod': { uz: 'Yunusobod', ru: 'Юнусабад' },
@@ -112,6 +113,53 @@ export function latinToCyrillic(input: string): string {
   return out;
 }
 
+/**
+ * Uzbek Latin -> Russian spelling (names, streets, districts shown on the Russian site).
+ * Unlike latinToCyrillic (Uzbek Cyrillic), it uses only Russian letters:
+ * q->к, h->х, g'->г, o'->о, word-initial e->э ("Qodirov" -> "Кодиров", "Erkin" -> "Эркин").
+ */
+export function latinToRussian(input: string): string {
+  if (!input) return '';
+  const apos = /[ʻ`'ʼ‘’]/;
+  let res = input
+    .replace(new RegExp(`([GgOo])${apos.source}`, 'g'), (_m, l: string) => ({ G: 'Г', g: 'г', O: 'О', o: 'о' })[l as 'G'])
+    .replace(new RegExp(apos.source, 'g'), '');
+  const multi: Array<[RegExp, string]> = [
+    [/SH/g, 'Ш'], [/Sh/g, 'Ш'], [/sh/g, 'ш'],
+    [/CH/g, 'Ч'], [/Ch/g, 'Ч'], [/ch/g, 'ч'],
+    [/YO/g, 'Ё'], [/Yo/g, 'Ё'], [/yo/g, 'ё'],
+    [/YU/g, 'Ю'], [/Yu/g, 'Ю'], [/yu/g, 'ю'],
+    [/YA/g, 'Я'], [/Ya/g, 'Я'], [/ya/g, 'я'],
+    [/YE/g, 'Е'], [/Ye/g, 'Е'], [/ye/g, 'е'],
+    [/TS/g, 'Ц'], [/Ts/g, 'Ц'], [/ts/g, 'ц'],
+  ];
+  for (const [re, rep] of multi) res = res.replace(re, rep);
+  // Word-initial E / e is written Э in Russian spelling of Uzbek names
+  res = res.replace(/(^|[^A-Za-zА-Яа-яЁё])E/g, '$1Э').replace(/(^|[^A-Za-zА-Яа-яЁё])e/g, '$1э');
+  const single: Record<string, string> = {
+    A: 'А', a: 'а', B: 'Б', b: 'б', C: 'К', c: 'к', D: 'Д', d: 'д', E: 'Е', e: 'е', F: 'Ф', f: 'ф',
+    G: 'Г', g: 'г', H: 'Х', h: 'х', I: 'И', i: 'и', J: 'Ж', j: 'ж', K: 'К', k: 'к', L: 'Л', l: 'л',
+    M: 'М', m: 'м', N: 'Н', n: 'н', O: 'О', o: 'о', P: 'П', p: 'п', Q: 'К', q: 'к', R: 'Р', r: 'р',
+    S: 'С', s: 'с', T: 'Т', t: 'т', U: 'У', u: 'у', V: 'В', v: 'в', W: 'В', w: 'в', X: 'Х', x: 'х',
+    Y: 'Й', y: 'й', Z: 'З', z: 'з',
+  };
+  let out = '';
+  for (const ch of res) out += single[ch] ?? ch;
+  return out;
+}
+
+/** Common Uzbek medical universities with their official Russian names. */
+export const EDUCATION_DICTIONARY: Record<string, string> = {
+  'Toshkent Davlat Stomatologiya Instituti': 'Ташкентский государственный стоматологический институт',
+  'Samarqand Davlat Tibbiyot Universiteti': 'Самаркандский государственный медицинский университет',
+  'Toshkent Tibbiyot Akademiyasi': 'Ташкентская медицинская академия',
+  'Andijon Davlat Tibbiyot Instituti': 'Андижанский государственный медицинский институт',
+  'Buxoro Davlat Tibbiyot Instituti': 'Бухарский государственный медицинский институт',
+  'Toshkent Pediatriya Tibbiyot Instituti': 'Ташкентский педиатрический медицинский институт',
+};
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Convert Cyrillic to Uzbek Latin
 export function cyrillicToLatin(input: string): string {
   if (!input) return '';
@@ -190,7 +238,7 @@ export function translateName(text: string): { uz: string; ru: string } {
   } else {
     return {
       uz: trimmed,
-      ru: latinToCyrillic(trimmed),
+      ru: latinToRussian(trimmed),
     };
   }
 }
@@ -209,7 +257,9 @@ export function translateSpecialty(text: string): { uz: string; ru: string } {
     }
   }
 
-  return translateName(text);
+  // Unknown titles are not guessed: transliteration is not a translation
+  const trimmed = text.trim();
+  return isCyrillic(trimmed) ? { uz: cyrillicToLatin(trimmed), ru: trimmed } : { uz: trimmed, ru: '' };
 }
 
 /**
@@ -237,11 +287,21 @@ export function translateBranchOrAddress(text: string): { uz: string; ru: string
       uzText = uzText.replace(cyrRegex, val.uz);
     }
   } else {
-    ruText = latinToCyrillic(text);
-    for (const val of Object.values(ADDRESS_TERMS)) {
-      const latRegex = new RegExp(`\\b${val.uz}\\b`, 'gi');
-      ruText = ruText.replace(latRegex, val.ru);
+    // Translate known words first, then spell the rest in Russian. Longer terms win
+    // ("toshkent sh." before "toshkent"); placeholders keep translated words from being re-spelled.
+    const terms = Object.entries(ADDRESS_TERMS).sort((a, b) => b[0].length - a[0].length);
+    const saved: string[] = [];
+    // One apostrophe form for matching (people type ', ‘, ʻ or ’)
+    const norm = (v: string) => v.replace(/[ʻ`'ʼ’]/g, '‘');
+    let work = norm(text.trim());
+    for (const [key, val] of terms) {
+      const re = new RegExp(`(^|[\\s,(-])${escapeRegExp(norm(key))}(?=$|[\\s,.)])`, 'gi');
+      work = work.replace(re, (_m, pre: string) => {
+        saved.push(val.ru);
+        return `${pre}\u0000${saved.length - 1}\u0000`;
+      });
     }
+    ruText = latinToRussian(work).replace(/\u0000(\d+)\u0000/g, (_m, i: string) => saved[Number(i)]);
   }
 
   return { uz: uzText, ru: ruText };

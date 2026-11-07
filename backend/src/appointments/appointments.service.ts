@@ -971,6 +971,28 @@ export class AppointmentsService {
         },
       });
 
+      // A finished visit is billed: invoice the booked services at their snapshot prices
+      // (once per appointment), so revenue, debts and the cash desk see it immediately.
+      if (isCompleting) {
+        const existingInvoice = await tx.invoice.count({ where: { appointmentId } });
+        const itemsTotalTiyin = appt.serviceItems.reduce((sum, i) => sum + (i.priceFrom || 0), 0);
+        const totalUzs = Math.round((itemsTotalTiyin || appt.servicePriceFrom || 0) / 100);
+        if (existingInvoice === 0 && totalUzs > 0) {
+          const names = appt.serviceItems.length
+            ? appt.serviceItems.map((i) => i.serviceNameUz).join(', ')
+            : appt.serviceName || '';
+          await tx.invoice.create({
+            data: {
+              patientId: appt.patientId,
+              appointmentId,
+              totalAmount: totalUzs,
+              status: 'PENDING',
+              notes: names.slice(0, 1000) || null,
+            },
+          });
+        }
+      }
+
       // Record audit log inside tx using verified staff ID
       let validStaffId: string | null = null;
       if (changedBy && changedBy !== 'system' && changedBy !== 'patient') {

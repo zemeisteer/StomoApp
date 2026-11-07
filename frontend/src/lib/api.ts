@@ -772,6 +772,9 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  // Owner dashboard (money, visits, patients, daily series, top services and doctors)
+  getDashboardSummary: (from: string, to: string) => fetcher<any>(`/api/admin/dashboard?from=${from}&to=${to}`),
+
   // Cash desk, refunds, online payment links, plan invoicing
   getCashierSummary: (date?: string) => fetcher<any>(`/api/admin/cashier/summary${date ? `?date=${date}` : ''}`),
   getCashShifts: (limit = 10) => fetcher<any[]>(`/api/admin/cashier/shifts?limit=${limit}`),

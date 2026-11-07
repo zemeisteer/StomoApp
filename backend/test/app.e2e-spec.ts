@@ -8450,4 +8450,77 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       (sms as any).eskizToken = null;
     }
   });
+  it('Regression 77: Completing a visit bills it once, the dashboard and patient list see it, reception can operate, recall follows the service interval', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg77_${Date.now()}`;
+    const service = await prisma.service.findUnique({ where: { id: testServiceId } });
+    const savedRecall = service!.recallDays;
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg77 Bemor', phone: '+998900007777' } });
+    const start = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `${tag}_1`, patientId: patient.id, doctorId: testDoctorAId, serviceId: testServiceId, branchId: testBranchId,
+        status: AppointmentStatus.CHECKED_IN, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg77', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+        serviceItems: { create: [{ serviceId: testServiceId, serviceNameUz: 'Reg77 xizmat', durationMinutes: 30, priceFrom: 12_300_000 }] },
+      },
+    });
+    const recUser = await prisma.staffUser.create({
+      data: { email: `${tag}@reception.local`, passwordHash: await bcrypt.hash('Reception2026!x', 10), fullName: 'Reg77 Qabulxona', role: StaffRole.RECEPTION },
+    });
+    try {
+      const recToken = (await http().post('/api/auth/login').send({ email: recUser.email, password: 'Reception2026!x' }).expect(200)).body.accessToken;
+      // Reception runs the desk: sees appointments and patients, completes visits; owner-only areas stay closed
+      await http().get('/api/admin/appointments?limit=1').set(auth(recToken)).expect(200);
+      await http().get('/api/admin/patients?limit=1').set(auth(recToken)).expect(200);
+      await http().get('/api/admin/dashboard').set(auth(recToken)).expect(403);
+      await http().get('/api/admin/staff').set(auth(recToken)).expect(403);
+
+      const day = new Date().toISOString().slice(0, 10);
+      const before = (await http().get(`/api/admin/dashboard?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+
+      await http().patch(`/api/admin/appointments/${appt.id}/status`).set(auth(recToken)).send({ status: 'COMPLETED' }).expect(200);
+      const invoices = await prisma.invoice.findMany({ where: { appointmentId: appt.id } });
+      expect(invoices).toHaveLength(1);
+      expect(invoices[0]).toMatchObject({ patientId: patient.id, totalAmount: 123000, status: 'PENDING' });
+
+      const after = (await http().get(`/api/admin/dashboard?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      expect(after.money.billedUzs - before.money.billedUzs).toBe(123000);
+      expect(after.money.outstandingUzs - before.money.outstandingUzs).toBe(123000);
+      expect(after.visits.completed - before.visits.completed).toBe(1);
+      await http().get('/api/admin/dashboard?from=2020-01-01&to=2026-12-31').set(auth(adminToken)).expect(400);
+
+      // Paying moves it from outstanding to collected
+      await http().post('/api/admin/billing/payments').set(auth(recToken)).send({ invoiceId: invoices[0].id, amount: 123000, method: 'CASH' }).expect(201);
+      const paid = (await http().get(`/api/admin/dashboard?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      expect(paid.money.collectedUzs - after.money.collectedUzs).toBe(123000);
+      expect(after.money.outstandingUzs - paid.money.outstandingUzs).toBe(123000);
+      expect(paid.series.find((d: any) => d.date === day)).toBeTruthy();
+
+      // Patient list shows the visit and the (now zero) balance
+      const list = (await http().get('/api/admin/patients?search=Reg77').set(auth(adminToken)).expect(200)).body.items;
+      expect(list[0]).toMatchObject({ id: patient.id, completedVisits: 1, debtUzs: 0 });
+      expect(list[0].lastVisitAt).toBeTruthy();
+
+      // Recall interval comes from the service of the last visit; 0 disables recall for it
+      await http().put(`/api/services/admin/${testServiceId}`).set(auth(adminToken)).send({ recallDays: -1 }).expect(400);
+      await prisma.service.update({ where: { id: testServiceId }, data: { recallDays: 1 } });
+      await prisma.appointment.update({ where: { id: appt.id }, data: { actualEndTime: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) } });
+      let due = (await http().get('/api/admin/engagement/recall').set(auth(adminToken)).expect(200)).body.items;
+      expect(due.find((r: any) => r.patientId === patient.id)).toMatchObject({ intervalDays: 1 });
+      await prisma.service.update({ where: { id: testServiceId }, data: { recallDays: 0 } });
+      due = (await http().get('/api/admin/engagement/recall').set(auth(adminToken)).expect(200)).body.items;
+      expect(due.find((r: any) => r.patientId === patient.id)).toBeUndefined();
+
+      // Re-completing is impossible and never bills twice
+      expect(await prisma.invoice.count({ where: { appointmentId: appt.id } })).toBe(1);
+    } finally {
+      await prisma.service.update({ where: { id: testServiceId }, data: { recallDays: savedRecall } });
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+      await prisma.staffUser.delete({ where: { id: recUser.id } }).catch(() => {});
+    }
+  });
 });

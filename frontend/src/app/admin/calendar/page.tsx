@@ -1,5 +1,6 @@
 'use client';
 
+import { TimeSelect } from '../../../components/ui/TimeSelect';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Calendar as CalendarIcon,
@@ -60,7 +61,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; desc: string
   CHECKED_IN: { label: 'Klinikaga keldi', color: 'bg-blue-100 text-blue-900 border-blue-300', desc: 'Bemor klinikada ro‘yxatdan o‘tdi / navbatda' },
   COMPLETED: { label: 'Yakunlandi', color: 'bg-emerald-100 text-emerald-900 border-emerald-300', desc: 'Muolaja to‘liq yakunlangan' },
   CANCELLED: { label: 'Bekor qilindi', color: 'bg-rose-100 text-rose-900 border-rose-300', desc: 'Qabul bekor qilingan' },
-  NO_SHOW: { label: 'Kelmadi', color: 'bg-slate-200 text-slate-800 border-slate-300', desc: 'Bemor kelmadi (xodim tomonidan qo‘lda belgilangan)' },
+  NO_SHOW: { label: 'Kelmadi', color: 'bg-line text-ink border-line-strong', desc: 'Bemor kelmadi (xodim tomonidan qo‘lda belgilangan)' },
 };
 
 export default function AdminCalendarPage() {
@@ -72,7 +73,7 @@ export default function AdminCalendarPage() {
     (status: string) => {
       const uz = STATUS_LABELS[status] || {
         label: status,
-        color: 'bg-slate-100 text-slate-800 border-slate-300',
+        color: 'bg-canvas text-ink border-line-strong',
         desc: '',
       };
       if (!isRu) return uz;
@@ -981,15 +982,15 @@ export default function AdminCalendarPage() {
   const endIndex = Math.min(currentPage * pageSize, totalCount);
 
   return (
-    <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'DOCTOR']}>
+    <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'DOCTOR', 'RECEPTION']}>
       <div className="space-y-6">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
+            <h1 className="text-2xl font-extrabold text-ink">
               {isRu ? 'Календарь приемов' : 'Qabullar taqvimi'}
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               {isRu
                 ? 'Ежедневное и еженедельное расписание, мониторинг визитов и подтверждение заявок'
                 : 'Kunlik, haftalik jadval monitoringi va yangi arizalarni tasdiqlash'}
@@ -1007,7 +1008,7 @@ export default function AdminCalendarPage() {
 
             <button
               onClick={loadAppointments}
-              className="p-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 shadow-sm transition-all"
+              className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm transition-all"
               title="Yangilash"
             >
               <RefreshCw className="w-4 h-4" />
@@ -1059,7 +1060,7 @@ export default function AdminCalendarPage() {
               <button
                 type="button"
                 onClick={() => setConfirmedToast(null)}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-emerald-100/50 cursor-pointer"
+                className="p-2 text-ink-subtle hover:text-ink-muted rounded-lg hover:bg-emerald-100/50 cursor-pointer"
                 title={isRu ? 'Закрыть' : 'Yopish'}
               >
                 <XCircle className="w-4 h-4" />
@@ -1095,7 +1096,7 @@ export default function AdminCalendarPage() {
             <button
               type="button"
               onClick={() => setCancelToast(null)}
-              className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-rose-100/50 cursor-pointer self-end sm:self-center"
+              className="p-2 text-ink-subtle hover:text-ink-muted rounded-lg hover:bg-rose-100/50 cursor-pointer self-end sm:self-center"
               title={isRu ? 'Закрыть' : 'Yopish'}
             >
               <XCircle className="w-4 h-4" />
@@ -1104,7 +1105,7 @@ export default function AdminCalendarPage() {
         )}
 
         {/* Mode Selector: Pending Applications vs Working Calendar */}
-        <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-fit">
+        <div className="flex flex-wrap items-center gap-2 bg-canvas p-1.5 rounded-2xl w-fit">
           <button
             type="button"
             onClick={() => {
@@ -1115,7 +1116,7 @@ export default function AdminCalendarPage() {
             className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
               !isInboxMode
                 ? 'bg-white text-teal-800 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
+                : 'text-ink-muted hover:text-ink'
             }`}
           >
             <CalendarIcon className="w-4 h-4" />
@@ -1132,7 +1133,7 @@ export default function AdminCalendarPage() {
             className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
               isInboxMode
                 ? 'bg-amber-500 text-white shadow-sm'
-                : 'text-slate-700 hover:text-slate-900 hover:bg-white/50'
+                : 'text-ink hover:text-ink hover:bg-white/50'
             }`}
           >
             <Inbox className="w-4 h-4" />
@@ -1151,18 +1152,18 @@ export default function AdminCalendarPage() {
 
         {/* Date Navigation Bar (Visible only in Calendar Mode) */}
         {!isInboxMode ? (
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="bg-white p-4 rounded-2xl border border-line shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={handlePrevDate}
-                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600"
+                className="p-2 border border-line rounded-xl hover:bg-canvas text-ink-muted"
                 title="Oldingi"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
                 onClick={handleToday}
-                className="px-3 py-1.5 border border-slate-200 rounded-xl hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer"
+                className="px-3 py-1.5 border border-line rounded-xl hover:bg-canvas text-xs font-bold text-ink cursor-pointer"
               >
                 {isRu ? 'Сегодня' : 'Bugun'}
               </button>
@@ -1175,18 +1176,18 @@ export default function AdminCalendarPage() {
               </button>
               <button
                 onClick={handleNextDate}
-                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 cursor-pointer"
+                className="p-2 border border-line rounded-xl hover:bg-canvas text-ink-muted cursor-pointer"
                 title={isRu ? "Вперед" : "Keyingi"}
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
 
-              <span className="text-sm font-extrabold text-slate-800 ml-2">
+              <span className="text-sm font-extrabold text-ink ml-2">
                 {currentRangeLabel()}
               </span>
             </div>
 
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+            <div className="flex items-center bg-canvas p-1 rounded-xl">
               {(['day', 'week', 'month'] as const).map((mode) => (
                 <button
                   key={mode}
@@ -1197,7 +1198,7 @@ export default function AdminCalendarPage() {
                   className={`px-3 py-1 rounded-lg text-xs font-bold capitalize transition-all cursor-pointer ${
                     viewMode === mode
                       ? 'bg-white text-teal-800 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
+                      : 'text-ink-muted hover:text-ink'
                   }`}
                 >
                   {mode === 'day' ? (isRu ? 'День' : 'Kunlik') : mode === 'week' ? (isRu ? 'Неделя' : 'Haftalik') : (isRu ? 'Месяц' : 'Oylik')}
@@ -1231,15 +1232,15 @@ export default function AdminCalendarPage() {
         )}
 
         {/* Filters Bar with CustomSelect and Search */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+        <div className="bg-white p-4 rounded-2xl border border-line shadow-sm space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-ink">
             <Filter className="w-4 h-4 text-teal-700" />
             <span>{isRu ? 'Фильтрация и поиск:' : 'Filtrlash va qidirish:'}</span>
           </div>
 
           {/* Search Box by Name OR Phone */}
           <div className="relative">
-            <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3.5 top-3 w-4 h-4 text-ink-subtle" />
             <input
               type="text"
               value={search}
@@ -1252,7 +1253,7 @@ export default function AdminCalendarPage() {
                   ? 'Поиск по имени пациента (Ф.И.О.) или номеру телефона...'
                   : 'Bemor ismi (F.I.SH) yoki telefon raqami bo\'yicha qidirish...'
               }
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-line text-xs focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
             />
           </div>
 
@@ -1338,13 +1339,13 @@ export default function AdminCalendarPage() {
         )}
 
         {/* Appointments List / Grid */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 mb-4 gap-2">
+        <div className="bg-white rounded-3xl border border-line shadow-sm p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-line mb-4 gap-2">
             <div>
-              <h2 className="text-base font-bold text-slate-800">
+              <h2 className="text-base font-bold text-ink">
                 {isInboxMode ? 'Kutilayotgan arizalar ro\'yxati' : 'Qabullar jadvali'}
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-ink-muted mt-0.5">
                 {totalCount > 0
                   ? `Jami ${totalCount} ta yozuvdan ${startIndex}-${endIndex} ko'rsatilmoqda`
                   : 'Yozuvlar topilmadi'}
@@ -1353,14 +1354,14 @@ export default function AdminCalendarPage() {
 
             <div className="flex items-center gap-3">
               {viewMode === 'day' && !isInboxMode && (
-                <div className="flex items-center bg-slate-100 p-0.5 rounded-xl text-xs font-bold">
+                <div className="flex items-center bg-canvas p-0.5 rounded-xl text-xs font-bold">
                   <button
                     type="button"
                     onClick={() => setDaySubView('timeline')}
                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
                       daySubView === 'timeline'
                         ? 'bg-white text-teal-800 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
+                        : 'text-ink-muted hover:text-ink'
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
@@ -1372,7 +1373,7 @@ export default function AdminCalendarPage() {
                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
                       daySubView === 'list'
                         ? 'bg-white text-teal-800 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
+                        : 'text-ink-muted hover:text-ink'
                     }`}
                   >
                     <List className="w-3.5 h-3.5" />
@@ -1385,7 +1386,7 @@ export default function AdminCalendarPage() {
                       className={`ml-1 px-2 py-1 rounded-lg transition-all ${
                         showFullDayHours
                           ? 'bg-teal-700 text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
+                          : 'text-ink-muted hover:text-ink'
                       }`}
                       title={showFullDayHours ? "Moslashuvchan ish vaqtiga qaytish" : "To'liq 24 soatlik ko'rinish"}
                     >
@@ -1402,18 +1403,18 @@ export default function AdminCalendarPage() {
                     type="button"
                     disabled={currentPage <= 1 || isLoading}
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+                    className="px-3 py-1.5 border border-line rounded-xl text-xs font-bold text-ink hover:bg-canvas disabled:opacity-40 transition-colors"
                   >
                     Oldingi
                   </button>
-                  <span className="text-xs font-semibold text-slate-600">
+                  <span className="text-xs font-semibold text-ink-muted">
                     {currentPage} / {totalPages}
                   </span>
                   <button
                     type="button"
                     disabled={currentPage >= totalPages || isLoading}
                     onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+                    className="px-3 py-1.5 border border-line rounded-xl text-xs font-bold text-ink hover:bg-canvas disabled:opacity-40 transition-colors"
                   >
                     Keyingi
                   </button>
@@ -1424,17 +1425,17 @@ export default function AdminCalendarPage() {
 
           {/* Month Calendar Overview Grid */}
           {viewMode === 'month' && !isInboxMode && !isLoading && (
-            <div className="mb-6 p-4 bg-slate-50/70 rounded-2xl border border-slate-200">
+            <div className="mb-6 p-4 bg-canvas/70 rounded-2xl border border-line">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                <span className="text-xs font-bold text-ink flex items-center gap-2">
                   <CalendarIcon className="w-4 h-4 text-teal-700" />
                   <span>Oylik qabullar xaritasi:</span>
                 </span>
-                <span className="text-[11px] text-slate-400">Kunni tanlab, uning kunlik jadvaliga o&apos;tishingiz mumkin</span>
+                <span className="text-[11px] text-ink-subtle">Kunni tanlab, uning kunlik jadvaliga o&apos;tishingiz mumkin</span>
               </div>
-              <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-bold text-slate-600 mb-1.5">
+              <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-bold text-ink-muted mb-1.5">
                 {['Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan', 'Yak'].map((wd) => (
-                  <div key={wd} className="py-1.5 bg-slate-100 rounded-lg text-slate-600 font-semibold text-[11px]">
+                  <div key={wd} className="py-1.5 bg-canvas rounded-lg text-ink-muted font-semibold text-[11px]">
                     {wd}
                   </div>
                 ))}
@@ -1442,7 +1443,7 @@ export default function AdminCalendarPage() {
               <div className="grid grid-cols-7 gap-1.5">
                 {monthCells.map((cell, idx) => {
                   if (!cell.day) {
-                    return <div key={`empty-${idx}`} className="min-h-[72px] bg-slate-100/40 rounded-xl" />;
+                    return <div key={`empty-${idx}`} className="min-h-[72px] bg-canvas/40 rounded-xl" />;
                   }
 
                   const isToday = cell.dateStr === toClinicDateString(new Date());
@@ -1463,13 +1464,13 @@ export default function AdminCalendarPage() {
                           ? 'border-teal-600 bg-teal-50/60 shadow-sm ring-2 ring-teal-500/20'
                           : isToday
                           ? 'border-teal-400 bg-white'
-                          : 'border-slate-200/80 hover:border-teal-400 bg-white hover:bg-slate-50'
+                          : 'border-line/80 hover:border-teal-400 bg-white hover:bg-canvas'
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <span
                           className={`text-xs font-extrabold w-5 h-5 flex items-center justify-center rounded-full ${
-                            isToday ? 'bg-teal-700 text-white' : 'text-slate-800'
+                            isToday ? 'bg-teal-700 text-white' : 'text-ink'
                           }`}
                         >
                           {cell.day}
@@ -1485,13 +1486,13 @@ export default function AdminCalendarPage() {
                         {cell.appts.slice(0, 2).map((a) => (
                           <div
                             key={a.id}
-                            className="text-[9px] truncate px-1 py-0.5 rounded bg-slate-100 text-slate-700 font-medium"
+                            className="text-[9px] truncate px-1 py-0.5 rounded bg-canvas text-ink font-medium"
                           >
                             {formatClinicTime(a.startTime)} {a.patient?.fullName?.split(' ')[0] || a.patientName?.split(' ')[0]}
                           </div>
                         ))}
                         {cell.totalCount > 2 && (
-                          <div className="text-[8px] text-slate-400 font-bold pl-0.5">
+                          <div className="text-[8px] text-ink-subtle font-bold pl-0.5">
                             +{cell.totalCount - Math.min(2, cell.appts.length)} ta yana
                           </div>
                         )}
@@ -1509,9 +1510,9 @@ export default function AdminCalendarPage() {
           )}
 
           {isLoading ? (
-            <div className="p-16 text-center text-slate-400 text-sm">Qabullar yuklanmoqda...</div>
+            <div className="p-16 text-center text-ink-subtle text-sm">Qabullar yuklanmoqda...</div>
           ) : appointments.length === 0 ? (
-            <div className="p-16 text-center text-slate-500 text-sm bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+            <div className="p-16 text-center text-ink-muted text-sm bg-canvas rounded-2xl border border-dashed border-line">
               {isInboxMode
                 ? 'Tasdiqlash kutilayotgan yangi arizalar mavjud emas.'
                 : 'Ushbu sana va parametrlar bo\'yicha qabullar topilmadi.'}
@@ -1545,12 +1546,12 @@ export default function AdminCalendarPage() {
 
                 return (
                   <div key={hour} className="flex gap-3 sm:gap-4 items-start group">
-                    <div className="w-14 sm:w-16 shrink-0 pt-1.5 text-right font-mono text-xs font-bold text-slate-500">
+                    <div className="w-14 sm:w-16 shrink-0 pt-1.5 text-right font-mono text-xs font-bold text-ink-muted">
                       {hourLabel}
                     </div>
-                    <div className="flex-1 min-h-[56px] border-l-2 border-slate-200 pl-3 sm:pl-4 pb-3">
+                    <div className="flex-1 min-h-[56px] border-l-2 border-line pl-3 sm:pl-4 pb-3">
                       {hourAppts.length === 0 ? (
-                        <div className="h-full border border-dashed border-slate-100 rounded-xl px-3 py-2 text-[11px] text-slate-400 flex items-center justify-between">
+                        <div className="h-full border border-dashed border-line rounded-xl px-3 py-2 text-[11px] text-ink-subtle flex items-center justify-between">
                           <span>Bo&apos;sh vaqt oralig&apos;i</span>
                           <span className="text-[10px] text-teal-600 font-semibold">
                             {selectedDoctorId ? 'Shifokor bo\'sh' : 'Barcha shifokorlar bo\'sh'}
@@ -1559,8 +1560,8 @@ export default function AdminCalendarPage() {
                       ) : (
                         <div className="space-y-2">
                           {!selectedDoctorId && occupiedDoctorNames.length > 0 && (
-                            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 pb-0.5">
-                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
+                            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-ink-muted pb-0.5">
+                              <span className="px-1.5 py-0.5 rounded bg-canvas text-ink font-bold">
                                 Band: {occupiedDoctorNames.join(', ')}
                               </span>
                               {doctors.length > occupiedDoctorIds.size && (
@@ -1581,10 +1582,10 @@ export default function AdminCalendarPage() {
                                   key={appt.id}
                                   data-testid="appointment-row"
                                   onClick={() => openAppointment(appt)}
-                                  className={`p-3 bg-white hover:bg-slate-50 border rounded-2xl shadow-sm cursor-pointer transition-all space-y-1.5 ${
+                                  className={`p-3 bg-white hover:bg-canvas border rounded-2xl shadow-sm cursor-pointer transition-all space-y-1.5 ${
                                     highlightedApptId === appt.id
                                       ? 'ring-4 ring-brand-600 border-brand-600 bg-brand-100/40 shadow-md'
-                                      : 'border-slate-200 hover:border-teal-500'
+                                      : 'border-line hover:border-teal-500'
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1602,13 +1603,13 @@ export default function AdminCalendarPage() {
                                       {badge.label}
                                     </span>
                                   </div>
-                                  <div className="font-bold text-xs text-slate-900">
+                                  <div className="font-bold text-xs text-ink">
                                     {appt.patient?.fullName || appt.patientName}
-                                    <span className="text-slate-400 font-normal ml-1.5">
+                                    <span className="text-ink-subtle font-normal ml-1.5">
                                       ({appt.patient?.phone || appt.patientPhone})
                                     </span>
                                   </div>
-                                  <div className="text-[11px] text-slate-600">
+                                  <div className="text-[11px] text-ink-muted">
                                     {appt.serviceName || appt.service?.nameUz} • Dr. {appt.doctor?.firstNameUz} {appt.doctor?.lastNameUz}
                                   </div>
                                   {appt.actualStartTime && appt.status !== 'COMPLETED' && (
@@ -1634,7 +1635,7 @@ export default function AdminCalendarPage() {
               })}
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-line">
               {appointments.map((appt) => {
                 const dateFormatted = formatClinicDate(appt.startTime, 'uz', {
                   includeWeekday: true,
@@ -1651,7 +1652,7 @@ export default function AdminCalendarPage() {
                     className={`py-4 px-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer transition-colors ${
                       highlightedApptId === appt.id
                         ? 'ring-4 ring-brand-600 border border-brand-600 bg-brand-100/40 shadow-md'
-                        : 'hover:bg-slate-50'
+                        : 'hover:bg-canvas'
                     }`}
                   >
                     <div className="flex items-start gap-4">
@@ -1659,24 +1660,24 @@ export default function AdminCalendarPage() {
                         <span className="block text-xs font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-lg">
                           {dateFormatted}
                         </span>
-                        <span className="block text-sm font-extrabold text-slate-800 mt-1">
+                        <span className="block text-sm font-extrabold text-ink mt-1">
                           {timeFormatted}
                         </span>
                       </div>
 
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-bold text-slate-900">
+                          <h3 className="text-sm font-bold text-ink">
                             {appt.patient?.fullName || appt.patientName}
                           </h3>
-                          <span className="text-xs text-slate-400">
+                          <span className="text-xs text-ink-subtle">
                             ({appt.patient?.phone || appt.patientPhone})
                           </span>
                         </div>
-                        <p className="text-xs text-slate-600 mt-0.5">
+                        <p className="text-xs text-ink-muted mt-0.5">
                           {appt.serviceName || appt.service?.nameUz} • Dr. {appt.doctor?.firstNameUz} {appt.doctor?.lastNameUz}
                         </p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
+                        <p className="text-[11px] text-ink-subtle mt-0.5">
                           {appt.branch?.nameUz} • {appt.durationMinutes} daqiqa
                         </p>
                       </div>
@@ -1719,7 +1720,7 @@ export default function AdminCalendarPage() {
 
           {/* Bottom Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-4 text-xs text-slate-500">
+            <div className="flex items-center justify-between pt-4 border-t border-line mt-4 text-xs text-ink-muted">
               <span>
                 {startIndex}-{endIndex} / {totalCount} ta qabul
               </span>
@@ -1728,7 +1729,7 @@ export default function AdminCalendarPage() {
                   type="button"
                   disabled={currentPage <= 1 || isLoading}
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  className="px-3 py-1.5 border border-slate-200 rounded-xl font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  className="px-3 py-1.5 border border-line rounded-xl font-bold text-ink hover:bg-canvas disabled:opacity-40"
                 >
                   Oldingi
                 </button>
@@ -1739,7 +1740,7 @@ export default function AdminCalendarPage() {
                   type="button"
                   disabled={currentPage >= totalPages || isLoading}
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  className="px-3 py-1.5 border border-slate-200 rounded-xl font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  className="px-3 py-1.5 border border-line rounded-xl font-bold text-ink hover:bg-canvas disabled:opacity-40"
                 >
                   Keyingi
                 </button>
@@ -1749,8 +1750,8 @@ export default function AdminCalendarPage() {
         </div>
 
         {/* Attendance Status Legend */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-xs space-y-2">
-          <div className="font-bold text-slate-800 flex items-center gap-2">
+        <div className="bg-white rounded-2xl border border-line p-4 shadow-sm text-xs space-y-2">
+          <div className="font-bold text-ink flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-teal-700" />
             <span>{isRu ? 'Статусы приемов и их значения:' : 'Qabullar holatlari va ma\'nolari:'}</span>
           </div>
@@ -1762,7 +1763,7 @@ export default function AdminCalendarPage() {
                   <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border shrink-0 mt-0.5 ${s.color}`}>
                     {s.label}
                   </span>
-                  <span className="text-[11px] text-slate-500 leading-tight">
+                  <span className="text-[11px] text-ink-muted leading-tight">
                     {s.desc}
                   </span>
                 </div>
@@ -1790,9 +1791,9 @@ export default function AdminCalendarPage() {
               </div>
             )}
 
-            <div className="space-y-3 text-xs text-slate-700">
-              <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
-                <span className="text-slate-500">Telefon:</span>
+            <div className="space-y-3 text-xs text-ink">
+              <div className="flex justify-between p-2.5 bg-canvas rounded-xl">
+                <span className="text-ink-muted">Telefon:</span>
                 <a
                   href={`tel:${selectedAppt.patient?.phone || selectedAppt.patientPhone}`}
                   className="font-bold text-teal-700"
@@ -1801,8 +1802,8 @@ export default function AdminCalendarPage() {
                 </a>
               </div>
 
-              <div className="p-2.5 bg-slate-50 rounded-xl space-y-2">
-                <div className="flex justify-between items-center text-slate-500 font-medium">
+              <div className="p-2.5 bg-canvas rounded-xl space-y-2">
+                <div className="flex justify-between items-center text-ink-muted font-medium">
                   <span>Xizmatlar ({selectedAppt.serviceItems?.length || 1}):</span>
                   {selectedAppt.durationMinutes && (
                     <span className="text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md flex items-center gap-1.5">
@@ -1824,13 +1825,13 @@ export default function AdminCalendarPage() {
                 </div>
 
                 {selectedAppt.serviceItems && selectedAppt.serviceItems.length > 0 ? (
-                  <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
+                  <div className="space-y-1.5 pt-1 border-t border-line/60">
                     {selectedAppt.serviceItems.map((item: any, idx: number) => (
                       <div key={item.id || idx} className="flex justify-between items-center text-xs">
-                        <span className="font-semibold text-slate-800">
+                        <span className="font-semibold text-ink">
                           {idx + 1}. {item.serviceNameUz || item.serviceNameRu}
                         </span>
-                        <div className="flex items-center gap-2 text-slate-600 font-medium">
+                        <div className="flex items-center gap-2 text-ink-muted font-medium">
                           <span>{item.durationMinutes} daq</span>
                           <span>•</span>
                           <span className="font-bold text-teal-700">
@@ -1840,7 +1841,7 @@ export default function AdminCalendarPage() {
                       </div>
                     ))}
                     {selectedAppt.price && (
-                      <div className="flex justify-between items-center pt-1 border-t border-slate-200/60 text-xs font-bold text-slate-900">
+                      <div className="flex justify-between items-center pt-1 border-t border-line/60 text-xs font-bold text-ink">
                         <span>Jami summa:</span>
                         <span className="text-teal-800">
                           {Number(selectedAppt.price).toLocaleString('uz-UZ')} so&apos;m
@@ -1850,7 +1851,7 @@ export default function AdminCalendarPage() {
                   </div>
                 ) : (
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-slate-800">
+                    <span className="font-bold text-ink">
                       {selectedAppt.serviceName || selectedAppt.service?.nameUz}
                     </span>
                     {selectedAppt.price && (
@@ -1862,50 +1863,50 @@ export default function AdminCalendarPage() {
                 )}
               </div>
 
-              <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
-                <span className="text-slate-500">Shifokor:</span>
-                <span className="font-bold text-slate-800">
+              <div className="flex justify-between p-2.5 bg-canvas rounded-xl">
+                <span className="text-ink-muted">Shifokor:</span>
+                <span className="font-bold text-ink">
                   Dr. {selectedAppt.doctor?.firstNameUz} {selectedAppt.doctor?.lastNameUz}
                 </span>
               </div>
 
-              <div className="flex justify-between p-2.5 bg-slate-50 rounded-xl">
-                <span className="text-slate-500">Filial:</span>
-                <span className="font-bold text-slate-800">
+              <div className="flex justify-between p-2.5 bg-canvas rounded-xl">
+                <span className="text-ink-muted">Filial:</span>
+                <span className="font-bold text-ink">
                   {selectedAppt.branch?.nameUz || 'Asosiy filial'}
                 </span>
               </div>
 
-              <div className="p-2.5 bg-slate-50 rounded-xl space-y-1.5 text-xs">
+              <div className="p-2.5 bg-canvas rounded-xl space-y-1.5 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Rejalashtirilgan:</span>
-                  <span className="font-bold text-slate-800">
+                  <span className="text-ink-muted">Rejalashtirilgan:</span>
+                  <span className="font-bold text-ink">
                     {formatClinicDate(selectedAppt.startTime, 'uz', { includeWeekday: true, includeYear: true })}{' '}
                     • {formatClinicTime(selectedAppt.startTime)} - {formatClinicTime(selectedAppt.endTime)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Klinikaga kelgan:</span>
-                  <span className="font-semibold text-slate-700">
+                  <span className="text-ink-muted">Klinikaga kelgan:</span>
+                  <span className="font-semibold text-ink">
                     {selectedAppt.arrivedAt ? formatClinicTime(selectedAppt.arrivedAt) : 'Kelmagan / kutilmoqda'}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Muolaja boshlanishi:</span>
-                  <span className="font-semibold text-slate-700">
+                  <span className="text-ink-muted">Muolaja boshlanishi:</span>
+                  <span className="font-semibold text-ink">
                     {selectedAppt.actualStartTime ? formatClinicTime(selectedAppt.actualStartTime) : 'Boshlanmagan'}
                   </span>
                 </div>
                 {selectedAppt.actualEndTime && (
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Muolaja yakuni:</span>
-                    <span className="font-semibold text-slate-700">
+                    <span className="text-ink-muted">Muolaja yakuni:</span>
+                    <span className="font-semibold text-ink">
                       {formatClinicTime(selectedAppt.actualEndTime)}
                     </span>
                   </div>
                 )}
-                <div className="flex justify-between pt-1 border-t border-slate-200/60">
-                  <span className="text-slate-500 font-semibold">{isRu ? 'Текущий статус:' : 'Joriy holat:'}</span>
+                <div className="flex justify-between pt-1 border-t border-line/60">
+                  <span className="text-ink-muted font-semibold">{isRu ? 'Текущий статус:' : 'Joriy holat:'}</span>
                   <span className="font-bold text-teal-800">
                     {getStatusInfo(selectedAppt.status).label}
                   </span>
@@ -1913,16 +1914,16 @@ export default function AdminCalendarPage() {
               </div>
 
               {selectedAppt.note && (
-                <div className="p-2.5 bg-slate-50 rounded-xl">
-                  <span className="text-slate-500 block mb-1">Izoh / shikoyat:</span>
-                  <p className="text-slate-700 italic">{selectedAppt.note}</p>
+                <div className="p-2.5 bg-canvas rounded-xl">
+                  <span className="text-ink-muted block mb-1">Izoh / shikoyat:</span>
+                  <p className="text-ink italic">{selectedAppt.note}</p>
                 </div>
               )}
             </div>
 
             {/* Valid Status Transitions & Clinical Actions */}
-            <div className="pt-2 border-t border-slate-100 space-y-2">
-              <p className="text-xs font-bold text-slate-700">Amallar va holatni o&apos;zgartirish:</p>
+            <div className="pt-2 border-t border-line space-y-2">
+              <p className="text-xs font-bold text-ink">Amallar va holatni o&apos;zgartirish:</p>
               <div className="flex flex-wrap gap-2 items-center">
                 {/* Explicit Start Treatment Action */}
                 {['CONFIRMED', 'CHECKED_IN'].includes(selectedAppt.status) && !selectedAppt.actualStartTime && (
@@ -2008,7 +2009,7 @@ export default function AdminCalendarPage() {
 
             {/* Delay & Overrun Section for in-progress or confirmed bookings */}
             {['CONFIRMED', 'CHECKED_IN'].includes(selectedAppt.status) && (
-              <div className="pt-2 border-t border-slate-100 space-y-2">
+              <div className="pt-2 border-t border-line space-y-2">
                 {selectedAppt.overrunActive && (
                   <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-1.5 text-xs">
                     <div className="flex items-center justify-between">
@@ -2054,7 +2055,7 @@ export default function AdminCalendarPage() {
                       <button
                         type="button"
                         onClick={() => setShowDelayModal(false)}
-                        className="text-slate-400 hover:text-slate-600 text-xs"
+                        className="text-ink-subtle hover:text-ink-muted text-xs"
                       >
                         ✕
                       </button>
@@ -2065,7 +2066,7 @@ export default function AdminCalendarPage() {
                     </p>
 
                     <div className="flex items-center gap-2">
-                      <label className="font-semibold text-slate-700 shrink-0">Qo‘shimcha vaqt:</label>
+                      <label className="font-semibold text-ink shrink-0">Qo‘shimcha vaqt:</label>
                       <div className="flex gap-1.5 flex-wrap">
                         {[10, 15, 20, 30, 45, 60].map((mins) => (
                           <button
@@ -2085,13 +2086,13 @@ export default function AdminCalendarPage() {
                     </div>
 
                     <div>
-                      <label className="block text-slate-700 font-semibold mb-1">Kechikish sababi (ixtiyoriy):</label>
+                      <label className="block text-ink font-semibold mb-1">Kechikish sababi (ixtiyoriy):</label>
                       <input
                         type="text"
                         value={delayReason}
                         onChange={(e) => setDelayReason(e.target.value)}
                         placeholder="Masalan: Murakkab kanal tozalash yoki kutilmagan asorat"
-                        className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 bg-white"
+                        className="w-full px-3 py-1.5 rounded-lg border border-line text-xs focus:ring-2 focus:ring-teal-600 bg-white"
                       />
                     </div>
 
@@ -2099,7 +2100,7 @@ export default function AdminCalendarPage() {
                       <button
                         type="button"
                         onClick={() => setShowDelayModal(false)}
-                        className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold"
+                        className="px-3 py-1.5 text-ink-muted hover:bg-canvas rounded-lg font-semibold"
                       >
                         Bekor qilish
                       </button>
@@ -2119,22 +2120,22 @@ export default function AdminCalendarPage() {
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                           <span>Kechikish muvaffaqiyatli qayd etildi!</span>
                         </div>
-                        <p className="text-slate-600 text-[11px]">
+                        <p className="text-ink-muted text-[11px]">
                           Rejalashtirilgan tugash: <strong>{new Date(delayResult.scheduledEndTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })}</strong><br />
                           Kutilayotgan yangi tugash: <strong className="text-amber-800">{new Date(delayResult.estimatedEndTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })} (taxminiy)</strong><br />
                           Bufer bilan shifokor bo‘shash vaqti: <strong className="text-teal-800">{new Date(delayResult.estimatedFreeTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })}</strong>
                         </p>
 
                         {delayResult.affectedCount > 0 ? (
-                          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                          <div className="pt-2 border-t border-line space-y-1.5">
                             <span className="font-bold text-rose-700 block">
                               ⚠️ Ta&apos;sirlangan keyingi qabullar ({delayResult.affectedCount} ta):
                             </span>
                             {delayResult.affectedAppointments.map((aff: any) => (
-                              <div key={aff.id} className="p-2 bg-rose-50/60 rounded-lg border border-rose-200 text-[11px] text-slate-800 flex justify-between items-center">
+                              <div key={aff.id} className="p-2 bg-rose-50/60 rounded-lg border border-rose-200 text-[11px] text-ink flex justify-between items-center">
                                 <div>
                                   <span className="font-bold">{aff.patientName}</span> ({aff.patientPhone})
-                                  <div className="text-[10px] text-slate-500">
+                                  <div className="text-[10px] text-ink-muted">
                                     Reja: {new Date(aff.scheduledStartTime).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tashkent' })} • Taxminiy kechikish: +{aff.estimatedDelayMinutes} daqiqa
                                   </div>
                                 </div>
@@ -2143,7 +2144,7 @@ export default function AdminCalendarPage() {
                                 </span>
                               </div>
                             ))}
-                            <p className="text-[10px] text-slate-500 italic mt-1">
+                            <p className="text-[10px] text-ink-muted italic mt-1">
                               * Bemorlar bilan telefon orqali bog‘lanib, ularning roziligi bilan yangi qulay vaqtga ko‘chirish tavsiya etiladi.
                             </p>
                           </div>
@@ -2161,7 +2162,7 @@ export default function AdminCalendarPage() {
 
             {/* Reschedule Section */}
             {['PENDING', 'CONFIRMED'].includes(selectedAppt.status) && (
-              <div className="pt-2 border-t border-slate-100">
+              <div className="pt-2 border-t border-line">
                 {!isRescheduling ? (
                   <button
                     type="button"
@@ -2173,16 +2174,16 @@ export default function AdminCalendarPage() {
                       const dStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(target);
                       setRescheduleDate(dStr);
                     }}
-                    className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all"
+                    className="w-full py-2 bg-canvas hover:bg-line text-ink rounded-xl text-xs font-bold transition-all"
                   >
                     Boshqa vaqtga ko&apos;chirish (Reschedule)
                   </button>
                 ) : (
-                  <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                    <p className="text-xs font-bold text-slate-800">Yangi sana va vaqtni tanlang:</p>
+                  <div className="space-y-3 bg-canvas p-4 rounded-2xl border border-line">
+                    <p className="text-xs font-bold text-ink">Yangi sana va vaqtni tanlang:</p>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[11px] text-slate-500 block mb-1">Sana</label>
+                        <label className="text-[11px] text-ink-muted block mb-1">Sana</label>
                         <CustomDatePicker
                           id="admin-calendar-reschedule-date"
                           value={rescheduleDate}
@@ -2192,23 +2193,18 @@ export default function AdminCalendarPage() {
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-500 block mb-1">Tanlangan vaqt</label>
-                        <input
-                          type="time"
-                          value={rescheduleTime}
-                          onChange={(e) => setRescheduleTime(e.target.value)}
-                          className="w-full px-3 py-1.5 border border-slate-300 rounded-xl text-xs bg-white"
-                        />
+                        <label className="text-[11px] text-ink-muted block mb-1">Tanlangan vaqt</label>
+                        <TimeSelect value={rescheduleTime} onChange={(v) => setRescheduleTime(v)} />
                       </div>
                     </div>
 
                     {/* Appointment-aware slots */}
                     <div>
-                      <span className="text-[11px] text-slate-500 block mb-1.5">
+                      <span className="text-[11px] text-ink-muted block mb-1.5">
                         Mavjud bo&apos;sh vaqtlar ({selectedAppt.durationMinutes} daq qabul):
                       </span>
                       {isLoadingAdminSlots ? (
-                        <div className="p-3 text-center text-xs text-slate-400">Bo&apos;sh vaqtlar tekshirilmoqda...</div>
+                        <div className="p-3 text-center text-xs text-ink-subtle">Bo&apos;sh vaqtlar tekshirilmoqda...</div>
                       ) : adminSlots.length > 0 ? (
                         <div className="grid grid-cols-4 gap-1.5 max-h-32 overflow-y-auto">
                           {adminSlots.map((slot: any) => {
@@ -2222,7 +2218,7 @@ export default function AdminCalendarPage() {
                                 onClick={() => setRescheduleTime(timeStr)}
                                 className={`py-1 px-1 text-xs font-semibold rounded-lg ${
                                   !slot.available
-                                    ? 'bg-slate-200 text-slate-400 line-through'
+                                    ? 'bg-line text-ink-subtle line-through'
                                     : isSelected
                                     ? 'bg-teal-700 text-white'
                                     : 'bg-white border border-teal-200 text-teal-800 hover:bg-teal-50'
@@ -2234,7 +2230,7 @@ export default function AdminCalendarPage() {
                           })}
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-400 italic">Ushbu sanada bo&apos;sh vaqtlar topilmadi</p>
+                        <p className="text-xs text-ink-subtle italic">Ushbu sanada bo&apos;sh vaqtlar topilmadi</p>
                       )}
                     </div>
 
@@ -2250,7 +2246,7 @@ export default function AdminCalendarPage() {
                       <button
                         type="button"
                         onClick={() => setIsRescheduling(false)}
-                        className="px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-600 hover:bg-slate-100"
+                        className="px-3 py-2 border border-line-strong rounded-xl text-xs text-ink-muted hover:bg-canvas"
                       >
                         Bekor qilish
                       </button>
@@ -2282,7 +2278,7 @@ export default function AdminCalendarPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Bekor qilish sababi (ixtiyoriy):
               </label>
               <textarea
@@ -2290,15 +2286,15 @@ export default function AdminCalendarPage() {
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 placeholder="Masalan: Bemor kelishini bekor qildi yoki boshqa kunga ko'chirishni so'radi"
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-rose-500 outline-none"
+                className="w-full px-3 py-2 border border-line rounded-xl text-xs focus:ring-2 focus:ring-rose-500 outline-none"
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
               <button
                 type="button"
                 onClick={() => setCancelModalAppt(null)}
-                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50"
+                className="px-4 py-2 border border-line rounded-xl text-xs font-bold text-ink hover:bg-canvas"
               >
                 Ortga
               </button>
@@ -2335,7 +2331,7 @@ export default function AdminCalendarPage() {
             <form onSubmit={handleCreateAppointment} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-ink mb-1">
                     Bemor F.I.Sh. *
                   </label>
                   <input
@@ -2344,7 +2340,7 @@ export default function AdminCalendarPage() {
                     value={createForm.patientName}
                     onChange={(e) => setCreateForm({ ...createForm, patientName: e.target.value })}
                     placeholder="Masalan, Alisher Navoiy"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-teal-600 outline-none"
+                    className="w-full px-3 py-2 border border-line rounded-xl text-xs focus:ring-2 focus:ring-teal-600 outline-none"
                   />
                 </div>
                 <div>
@@ -2403,7 +2399,7 @@ export default function AdminCalendarPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-ink mb-1">
                     Sana *
                   </label>
                   <CustomDatePicker
@@ -2415,21 +2411,15 @@ export default function AdminCalendarPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-ink mb-1">
                     Vaqt *
                   </label>
-                  <input
-                    type="time"
-                    required
-                    value={createForm.time}
-                    onChange={(e) => setCreateForm({ ...createForm, time: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-teal-600 outline-none"
-                  />
+                  <TimeSelect value={createForm.time} onChange={(v) => setCreateForm({ ...createForm, time: v })} required />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-bold text-ink mb-1">
                   Izoh yoki shikoyat (ixtiyoriy)
                 </label>
                 <textarea
@@ -2437,15 +2427,15 @@ export default function AdminCalendarPage() {
                   value={createForm.note}
                   onChange={(e) => setCreateForm({ ...createForm, note: e.target.value })}
                   placeholder="Bemor shikoyati..."
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-teal-600 outline-none"
+                  className="w-full px-3 py-2 border border-line rounded-xl text-xs focus:ring-2 focus:ring-teal-600 outline-none"
                 />
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs text-slate-600 hover:bg-slate-50 font-bold"
+                  className="px-4 py-2 border border-line rounded-xl text-xs text-ink-muted hover:bg-canvas font-bold"
                 >
                   Bekor qilish
                 </button>

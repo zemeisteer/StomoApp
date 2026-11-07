@@ -72,13 +72,13 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
   return (
     <div className={`space-y-1 ${className}`}>
       {label && (
-        <label htmlFor={inputId} className="block text-xs font-semibold text-slate-700">
+        <label htmlFor={inputId} className="block text-xs font-semibold text-ink">
           {label} {required && <span className="text-red-500">*</span>}
         </label>
       )}
 
       <div className="relative">
-        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-ink-subtle">
           <Phone className="w-4 h-4" />
         </div>
 
@@ -100,8 +100,8 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           className={`w-full pl-10 pr-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-medium transition-all outline-none ${
             effectiveError
               ? 'border-red-300 bg-red-50/40 text-red-900 focus:ring-2 focus:ring-red-400'
-              : 'border-slate-200 bg-white text-slate-900 hover:border-teal-300 focus:ring-2 focus:ring-teal-600 focus:border-teal-600'
-          } ${disabled ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
+              : 'border-line bg-white text-ink hover:border-teal-300 focus:ring-2 focus:ring-teal-600 focus:border-teal-600'
+          } ${disabled ? 'opacity-50 cursor-not-allowed bg-canvas' : ''}`}
         />
       </div>
 

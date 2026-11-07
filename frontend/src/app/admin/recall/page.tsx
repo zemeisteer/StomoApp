@@ -86,15 +86,15 @@ export default function RecallPage() {
             <Toggle
               label={L('Avtomatik ko‘rik eslatmasi', 'Автонапоминание об осмотре')}
               hint={L(
-                `Oxirgi tashrifdan ${settings.recallMonths} oy o‘tgan va qabulga yozilmagan bemorlarga har kuni soat 10:00 da bir marta yuboriladi`,
-                `Раз в день в 10:00 пациентам, у которых с последнего визита прошло ${settings.recallMonths} мес. и нет записи`,
+                `Muddat har bir xizmatda belgilanadi (Xizmatlar → Qayta ko‘rikka chaqirish). Belgilanmagan xizmatlar uchun: ${settings.recallMonths} oy. Har kuni 10:00 da, qabulga yozilmaganlarga bir marta`,
+                `Интервал задаётся в каждой услуге (Услуги → Повторный осмотр). Для остальных: ${settings.recallMonths} мес. Каждый день в 10:00, только тем, кто не записан`,
               )}
               checked={settings.recallEnabled}
               disabled={!isOwner || busy === 'settings'}
               onChange={(v) => saveSettings({ recallEnabled: v })}
               extra={
                 <label className="mt-2 flex items-center gap-2 text-xs text-ink-muted">
-                  {L('Interval (oy)', 'Интервал (мес.)')}
+                  {L('Standart muddat (oy)', 'Интервал по умолчанию (мес.)')}
                   <select
                     value={settings.recallMonths}
                     disabled={!isOwner}
@@ -173,8 +173,14 @@ export default function RecallPage() {
                         {r.fullName}
                       </Link>
                       <p className="text-xs text-ink-muted">
-                        {L('Oxirgi tashrif', 'Последний визит')}: {formatClinicDate(r.lastVisitAt, lang)} · {r.monthsSinceVisit} {L('oy oldin', 'мес. назад')}
+                        {L('Oxirgi tashrif', 'Последний визит')}: {formatClinicDate(r.lastVisitAt, lang)} ·{' '}
+                        {r.daysSinceVisit >= 60 ? `${r.monthsSinceVisit} ${L('oy oldin', 'мес. назад')}` : `${r.daysSinceVisit} ${L('kun oldin', 'дн. назад')}`}
                         {r.telegramLinked ? ' · Telegram' : ''}
+                      </p>
+                      <p className="text-xs text-ink-subtle">
+                        {r.lastServices ? `${r.lastServices} · ` : ''}
+                        {L('chaqirish muddati', 'интервал')}:{' '}
+                        {r.intervalDays % 30 === 0 ? `${r.intervalDays / 30} ${L('oy', 'мес.')}` : `${r.intervalDays} ${L('kun', 'дн.')}`}
                       </p>
                       {r.optedOut && <p className="text-xs font-medium text-amber-700">{L('Eslatmalardan voz kechgan', 'Отказался от напоминаний')}</p>}
                       {r.contactedAt && (

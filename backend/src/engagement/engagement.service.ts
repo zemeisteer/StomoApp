@@ -25,6 +25,8 @@ type RecallRow = {
   marketing_opt_out: boolean;
   last_recall_at: Date | null;
   last_visit: Date;
+  interval_days: number;
+  service_names: string | null;
 };
 
 @Injectable()
@@ -80,27 +82,55 @@ export class EngagementService {
   // Recall list
   // ---------------------------------------------------------------------------
 
-  /** Patients whose last completed visit is older than the recall interval and who have nothing booked. */
+  /**
+   * Patients due for a check-up and with nothing booked. The interval comes from the services of
+   * their last finished visit (shortest positive recall_days); services with 0 never recall, and
+   * services without a value use the clinic default (recall_months).
+   */
   private async dueRows(months: number, limit = 300) {
+    const defaultDays = Math.round(months * 30.44);
     return this.prisma.$queryRaw<RecallRow[]>`
       WITH last_visit AS (
-        SELECT patient_id, MAX(start_time) AS last_visit
+        SELECT DISTINCT ON (patient_id) id AS appointment_id, patient_id, service_id,
+               COALESCE(actual_end_time, start_time) AS last_visit
         FROM appointments WHERE status = 'COMPLETED'
-        GROUP BY patient_id
+        ORDER BY patient_id, COALESCE(actual_end_time, start_time) DESC
       ),
       upcoming AS (
         SELECT DISTINCT patient_id FROM appointments
         WHERE status IN ('PENDING', 'CONFIRMED') AND start_time > NOW()
+      ),
+      visit_interval AS (
+        SELECT lv.patient_id, lv.last_visit,
+               CASE
+                 WHEN r.min_days IS NOT NULL THEN r.min_days
+                 WHEN r.total > 0 AND r.zero_count = r.total THEN NULL
+                 ELSE ${defaultDays}::int
+               END AS interval_days,
+               r.service_names
+        FROM last_visit lv
+        LEFT JOIN LATERAL (
+          SELECT MIN(s.recall_days) FILTER (WHERE s.recall_days > 0) AS min_days,
+                 COUNT(*) FILTER (WHERE s.recall_days = 0) AS zero_count,
+                 COUNT(s.id) AS total,
+                 STRING_AGG(DISTINCT s.name_uz, ', ') AS service_names
+          FROM services s
+          WHERE s.id IN (
+            SELECT i.service_id FROM appointment_service_items i WHERE i.appointment_id = lv.appointment_id
+            UNION SELECT lv.service_id
+          )
+        ) r ON true
       )
       SELECT p.id, p.full_name, p.phone, p.telegram_user_id, p.preferred_language,
-             p.marketing_opt_out, p.last_recall_at, lv.last_visit
+             p.marketing_opt_out, p.last_recall_at, vi.last_visit, vi.interval_days, vi.service_names
       FROM patients p
-      JOIN last_visit lv ON lv.patient_id = p.id
+      JOIN visit_interval vi ON vi.patient_id = p.id
       LEFT JOIN upcoming u ON u.patient_id = p.id
       WHERE p.is_active = true
         AND u.patient_id IS NULL
-        AND lv.last_visit <= NOW() - make_interval(months => ${months}::int)
-      ORDER BY lv.last_visit ASC
+        AND vi.interval_days IS NOT NULL
+        AND vi.last_visit <= NOW() - make_interval(days => vi.interval_days)
+      ORDER BY vi.last_visit ASC
       LIMIT ${limit}`;
   }
 
@@ -118,6 +148,9 @@ export class EngagementService {
         optedOut: r.marketing_opt_out,
         lastVisitAt: r.last_visit,
         monthsSinceVisit: Math.floor((now - new Date(r.last_visit).getTime()) / (30.44 * 24 * 60 * 60 * 1000)),
+        daysSinceVisit: Math.floor((now - new Date(r.last_visit).getTime()) / (24 * 60 * 60 * 1000)),
+        intervalDays: Number(r.interval_days),
+        lastServices: r.service_names,
         // Already reminded for this gap (automatic message or a staff call after the last visit)
         contactedAt: r.last_recall_at && r.last_recall_at >= r.last_visit ? r.last_recall_at : null,
       })),

@@ -60,9 +60,9 @@ export const DoctorsSection: React.FC<DoctorsSectionProps> = ({
                 className="bg-white rounded-2xl p-5 border border-line animate-pulse space-y-3"
               >
                 <div className="w-full aspect-[4/5] bg-brand-50 rounded-xl" />
-                <div className="h-5 w-3/4 bg-slate-100 rounded" />
-                <div className="h-4 w-1/2 bg-slate-100 rounded" />
-                <div className="h-9 w-full bg-slate-100 rounded-xl pt-2" />
+                <div className="h-5 w-3/4 bg-canvas rounded" />
+                <div className="h-4 w-1/2 bg-canvas rounded" />
+                <div className="h-9 w-full bg-canvas rounded-xl pt-2" />
               </div>
             ))}
           </div>

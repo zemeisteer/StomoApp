@@ -100,7 +100,8 @@ export default function AdminStaffPage() {
     OWNER: 'bg-purple-100 text-purple-900 border-purple-300',
     ADMIN: 'bg-teal-100 text-teal-900 border-teal-300',
     DOCTOR: 'bg-blue-100 text-blue-900 border-blue-300',
-    EDITOR: 'bg-slate-100 text-slate-800 border-slate-300',
+    EDITOR: 'bg-canvas text-ink border-line-strong',
+    RECEPTION: 'bg-amber-100 text-amber-900 border-amber-300',
   };
 
   const roleLabels: Record<string, string> = {
@@ -108,6 +109,18 @@ export default function AdminStaffPage() {
     ADMIN: 'Administrator',
     DOCTOR: 'Shifokor',
     EDITOR: 'Muharrir',
+    RECEPTION: 'Qabulxona',
+  };
+
+  // Doctors are public profiles; only some of them have a login. List the ones without one.
+  const linkedDoctorIds = new Set(staffList.map((m) => m.doctorId).filter(Boolean));
+  const doctorsWithoutLogin = doctors.filter((d: any) => !linkedDoctorIds.has(d.id));
+  const startDoctorAccount = (d: any) => {
+    setErrorMessage(null);
+    setCreateRole('DOCTOR');
+    setCreateDoctorId(d.id);
+    setCreateFullName(`${d.firstNameUz || ''} ${d.lastNameUz || ''}`.trim());
+    setShowCreateModal(true);
   };
 
   return (
@@ -115,11 +128,12 @@ export default function AdminStaffPage() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
-              Xodimlar va Ruxsatnomalar
+            <h1 className="text-2xl font-extrabold text-ink">
+              Xodimlar (panelga kirish)
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Klinika xodimlari, rollar, shifokor profiliga biriktirish va xavfsizlik nazorati
+            <p className="text-xs text-ink-muted mt-0.5">
+              Bu yerda admin panelga kim kira olishi va nima qila olishi boshqariladi. Shifokorlarning saytdagi profili
+              &quot;Shifokorlar va jadvallar&quot; bo&apos;limida.
             </p>
           </div>
 
@@ -136,7 +150,7 @@ export default function AdminStaffPage() {
             </button>
             <button
               onClick={loadData}
-              className="p-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 shadow-sm"
+              className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm"
               title="Yangilash"
             >
               <RefreshCw className="w-4 h-4" />
@@ -144,18 +158,55 @@ export default function AdminStaffPage() {
           </div>
         </div>
 
+        {/* What each role can do */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {[
+            ['OWNER', "Hamma narsa: sozlamalar, maosh, xodimlar, hisobotlar"],
+            ['ADMIN', "Qabullar, bemorlar, kassa, xizmatlar, shifokorlar jadvali"],
+            ['RECEPTION', "Qabulxona: qabullar, bemorlarni ro'yxatga olish, kassa"],
+            ['DOCTOR', "Faqat o'z bemorlari: karta, tish formulasi, davolash rejasi"],
+            ['EDITOR', "Sayt kontenti va sharhlar"],
+          ].map(([role, text]) => (
+            <div key={role} className="rounded-2xl border border-line bg-white p-3">
+              <span className={`inline-block rounded-md border px-2 py-0.5 text-[11px] font-bold ${roleColors[role]}`}>{roleLabels[role]}</span>
+              <p className="mt-1.5 text-xs text-ink-muted">{text}</p>
+            </div>
+          ))}
+        </div>
+
+        {doctorsWithoutLogin.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+            <p className="text-sm font-semibold text-ink">Panelga kirish akkaunti yo&apos;q shifokorlar</p>
+            <p className="text-xs text-ink-muted">
+              Shifokor o&apos;z jadvali va bemorlarini ko&apos;rishi uchun unga akkaunt yarating. Akkaunt shifokor profiliga avtomatik biriktiriladi.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {doctorsWithoutLogin.map((d: any) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => startDoctorAccount(d)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink hover:border-brand-600 hover:text-brand-700"
+                >
+                  <Plus className="h-3.5 w-3.5" /> {d.firstNameUz} {d.lastNameUz}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Staff Table */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-3xl border border-line shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="p-16 text-center text-slate-400 text-sm">Yuklanmoqda...</div>
+            <div className="p-16 text-center text-ink-subtle text-sm">Yuklanmoqda...</div>
           ) : staffList.length === 0 ? (
-            <div className="p-16 text-center text-slate-500 text-sm bg-slate-50">
+            <div className="p-16 text-center text-ink-muted text-sm bg-canvas">
               Xodimlar ro&apos;yxati bo&apos;sh.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                <thead className="bg-canvas border-b border-line text-ink-subtle font-bold uppercase tracking-wider">
                   <tr>
                     <th className="py-3.5 px-6">Xodim</th>
                     <th className="py-3.5 px-6">Email</th>
@@ -166,27 +217,27 @@ export default function AdminStaffPage() {
                     <th className="py-3.5 px-6 text-right">Amallar</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-line">
                   {staffList.map((member) => {
                     const linkedDoc = doctors.find((d) => d.id === member.doctorId);
                     return (
-                      <tr key={member.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="py-4 px-6 font-bold text-slate-900">
+                      <tr key={member.id} className="hover:bg-canvas/70 transition-colors">
+                        <td className="py-4 px-6 font-bold text-ink">
                           {member.fullName}
                         </td>
-                        <td className="py-4 px-6 text-slate-600 font-medium">
+                        <td className="py-4 px-6 text-ink-muted font-medium">
                           {member.email}
                         </td>
                         <td className="py-4 px-6">
                           <span
-                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                              roleColors[member.role] || 'bg-slate-100'
+                            className={`whitespace-nowrap px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                              roleColors[member.role] || 'bg-canvas'
                             }`}
                           >
                             {roleLabels[member.role] || member.role}
                           </span>
                         </td>
-                        <td className="py-4 px-6 text-slate-600">
+                        <td className="py-4 px-6 text-ink-muted">
                           {linkedDoc ? (
                             <span className="font-semibold text-teal-800">
                               Dr. {linkedDoc.firstNameUz} {linkedDoc.lastNameUz}
@@ -196,7 +247,7 @@ export default function AdminStaffPage() {
                               Biriktirilmagan (Kirish cheklangan)
                             </span>
                           ) : (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-ink-subtle">—</span>
                           )}
                         </td>
                         <td className="py-4 px-6">
@@ -210,7 +261,7 @@ export default function AdminStaffPage() {
                             {member.isActive ? 'Faol' : 'Nofaol'}
                           </span>
                         </td>
-                        <td className="py-4 px-6 text-slate-400 text-[11px]">
+                        <td className="py-4 px-6 text-ink-subtle text-[11px]">
                           {member.lastLoginAt
                             ? new Date(member.lastLoginAt).toLocaleString('uz-UZ', {
                                 timeZone: 'Asia/Tashkent',
@@ -229,7 +280,7 @@ export default function AdminStaffPage() {
                               setEditDoctorId(member.doctorId || '');
                               setEditTelegramId(member.telegramUserId || '');
                             }}
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-[11px] transition-colors"
+                            className="px-3 py-1.5 bg-canvas hover:bg-line text-ink font-bold rounded-lg text-[11px] transition-colors"
                           >
                             Tahrirlash
                           </button>
@@ -247,7 +298,7 @@ export default function AdminStaffPage() {
         {showCreateModal && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4">
-              <h3 className="text-lg font-extrabold text-slate-900">
+              <h3 className="text-lg font-extrabold text-ink">
                 Yangi xodim hisobi yaratish
               </h3>
 
@@ -260,7 +311,7 @@ export default function AdminStaffPage() {
 
               <form onSubmit={handleCreate} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     To&apos;liq ism (F.I.SH)
                   </label>
                   <input
@@ -269,12 +320,12 @@ export default function AdminStaffPage() {
                     value={createFullName}
                     onChange={(e) => setCreateFullName(e.target.value)}
                     placeholder="Masalan: Sardor Aliyev"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Email manzil
                   </label>
                   <input
@@ -283,12 +334,12 @@ export default function AdminStaffPage() {
                     value={createEmail}
                     onChange={(e) => setCreateEmail(e.target.value)}
                     placeholder="xodim@dentacare.uz"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Boshlang&apos;ich parol (kamida 6 ta belgi)
                   </label>
                   <input
@@ -298,7 +349,7 @@ export default function AdminStaffPage() {
                     value={createPassword}
                     onChange={(e) => setCreatePassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
@@ -309,6 +360,7 @@ export default function AdminStaffPage() {
                       { value: 'OWNER', label: 'OWNER (To‘liq huquq)', badge: 'Owner' },
                       { value: 'ADMIN', label: 'ADMIN (Operatsion)', badge: 'Admin' },
                       { value: 'DOCTOR', label: 'DOCTOR (Shifokor)', badge: 'Doctor' },
+                      { value: 'RECEPTION', label: 'RECEPTION (Qabulxona / kassa)', badge: 'Reception' },
                       { value: 'EDITOR', label: 'EDITOR (CMS / Sharhlar)', badge: 'Editor' },
                     ]}
                     value={createRole}
@@ -332,11 +384,11 @@ export default function AdminStaffPage() {
                   )}
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-end gap-2 pt-4 border-t border-line">
                   <button
                     type="button"
                     onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-4 py-2 text-xs font-semibold text-ink-muted hover:bg-canvas rounded-xl"
                   >
                     Bekor qilish
                   </button>
@@ -357,7 +409,7 @@ export default function AdminStaffPage() {
         {editingStaff && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4">
-              <h3 className="text-lg font-extrabold text-slate-900">
+              <h3 className="text-lg font-extrabold text-ink">
                 Xodim ma&apos;lumotlarini tahrirlash: {editingStaff.email}
               </h3>
 
@@ -370,7 +422,7 @@ export default function AdminStaffPage() {
 
               <form onSubmit={handleUpdate} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     To&apos;liq ism (F.I.SH)
                   </label>
                   <input
@@ -378,7 +430,7 @@ export default function AdminStaffPage() {
                     required
                     value={editFullName}
                     onChange={(e) => setEditFullName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
@@ -389,6 +441,7 @@ export default function AdminStaffPage() {
                       { value: 'OWNER', label: 'OWNER (To‘liq huquq)', badge: 'Owner' },
                       { value: 'ADMIN', label: 'ADMIN (Operatsion)', badge: 'Admin' },
                       { value: 'DOCTOR', label: 'DOCTOR (Shifokor)', badge: 'Doctor' },
+                      { value: 'RECEPTION', label: 'RECEPTION (Qabulxona / kassa)', badge: 'Reception' },
                       { value: 'EDITOR', label: 'EDITOR (CMS / Sharhlar)', badge: 'Editor' },
                     ]}
                     value={editRole}
@@ -423,7 +476,7 @@ export default function AdminStaffPage() {
                 )}
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Telegram ID (ixtiyoriy)
                   </label>
                   <input
@@ -433,9 +486,9 @@ export default function AdminStaffPage() {
                     placeholder="Masalan: 123456789"
                     value={editTelegramId}
                     onChange={(e) => setEditTelegramId(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
-                  <p className="mt-1 text-[11px] text-slate-500">
+                  <p className="mt-1 text-[11px] text-ink-muted">
                     Xodim klinika botiga <code>/myid</code> yuborib raqamini oladi. Shifokorlar har kuni 08:00 da
                     o&apos;z qabullari jadvalini shu Telegram&apos;ga oladi. Bo&apos;sh qoldirilsa, bog&apos;lanish olib tashlanadi.
                   </p>
@@ -445,11 +498,11 @@ export default function AdminStaffPage() {
                   ⚠️ Eslatma: Rol o&apos;zgartirilsa yoki hisob bloklansa, xodimning joriy seanslari darhol bekor qilinadi.
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-end gap-2 pt-4 border-t border-line">
                   <button
                     type="button"
                     onClick={() => setEditingStaff(null)}
-                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-4 py-2 text-xs font-semibold text-ink-muted hover:bg-canvas rounded-xl"
                   >
                     Bekor qilish
                   </button>

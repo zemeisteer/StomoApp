@@ -556,7 +556,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
             </defs>
           </svg>
           {hasError ? (
-            <div className="mt-4 flex items-center gap-2 text-sm text-slate-700 bg-slate-100/90 px-3.5 py-1.5 rounded-full border border-slate-200">
+            <div className="mt-4 flex items-center gap-2 text-sm text-ink bg-canvas/90 px-3.5 py-1.5 rounded-full border border-line">
               <AlertCircle className="w-4 h-4 text-teal-700" />
               <span>{t.hero.toothStaticFallback || "3D modeli statik rejimda ko'rsatilmoqda"}</span>
             </div>
@@ -595,7 +595,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
                 if (shouldAnimateContinuous()) startAnimationLoop();
               }
             }}
-            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
+            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-line/80 shadow-xs text-[10px] font-semibold text-ink transition-colors cursor-pointer"
           >
             {isRu ? 'Спереди' : 'Old ko\'rinish'}
           </button>
@@ -609,7 +609,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
                 if (shouldAnimateContinuous()) startAnimationLoop();
               }
             }}
-            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
+            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-line/80 shadow-xs text-[10px] font-semibold text-ink transition-colors cursor-pointer"
           >
             {isRu ? 'Коронка (сверху)' : 'Toj (tepadan)'}
           </button>
@@ -623,7 +623,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
                 if (shouldAnimateContinuous()) startAnimationLoop();
               }
             }}
-            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-slate-200/80 shadow-xs text-[10px] font-semibold text-slate-700 transition-colors cursor-pointer"
+            className="px-2.5 py-1 bg-white/90 hover:bg-teal-50 hover:text-teal-800 backdrop-blur-md rounded-full border border-line/80 shadow-xs text-[10px] font-semibold text-ink transition-colors cursor-pointer"
           >
             {isRu ? 'Корень (снизу)' : 'Ildiz (pastdan)'}
           </button>
@@ -632,13 +632,13 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
 
       {/* Floating 3D Controls Hint Bar (Visible pause button removed as requested) */}
       {!isLoading && !hasError && (
-        <div className="absolute bottom-3 right-4 flex items-center gap-2 z-10 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-200/80 shadow-sm text-xs text-slate-800 pointer-events-none">
+        <div className="absolute bottom-3 right-4 flex items-center gap-2 z-10 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-line/80 shadow-sm text-xs text-ink pointer-events-none">
           <Rotate3d
             className={`w-3.5 h-3.5 text-teal-700 ${
               isDragging || reducedMotion ? '' : 'animate-spin-slow'
             }`}
           />
-          <span className="font-medium text-[11px] text-slate-700">
+          <span className="font-medium text-[11px] text-ink">
             {t.hero.rotateHint}
           </span>
         </div>

@@ -27,6 +27,13 @@ import { api } from '../../../lib/api';
 // Must match the Prisma ServiceCategory enum (shared with the public site)
 const CATEGORIES = SERVICE_CATEGORIES.map((c) => ({ value: c.value, label: c.uz }));
 
+/** recallDays from the API -> form controls (null = clinic default, 0 = never). */
+function recallFromDays(days: number | null | undefined): { recallMode: 'default' | 'never' | 'custom'; recallValue: number; recallUnit: 'days' | 'months' } {
+  if (days == null) return { recallMode: 'default', recallValue: 6, recallUnit: 'months' };
+  if (days === 0) return { recallMode: 'never', recallValue: 6, recallUnit: 'months' };
+  return days % 30 === 0 ? { recallMode: 'custom', recallValue: days / 30, recallUnit: 'months' } : { recallMode: 'custom', recallValue: days, recallUnit: 'days' };
+}
+
 export default function AdminServicesPage() {
   const [activeTab, setActiveTab] = useState<'catalog' | 'legacy'>('catalog');
   const [services, setServices] = useState<any[]>([]);
@@ -56,6 +63,9 @@ export default function AdminServicesPage() {
     requiresConsultation: boolean;
     isActive: boolean;
     doctorIds: string[];
+    recallMode: 'default' | 'never' | 'custom';
+    recallValue: number;
+    recallUnit: 'days' | 'months';
   }>({
     nameUz: '',
     nameRu: '',
@@ -71,6 +81,9 @@ export default function AdminServicesPage() {
     requiresConsultation: false,
     isActive: true,
     doctorIds: [],
+    recallMode: 'default',
+    recallValue: 6,
+    recallUnit: 'months',
   });
 
   // Legacy Review State
@@ -148,6 +161,9 @@ export default function AdminServicesPage() {
       requiresConsultation: false,
       isActive: true,
       doctorIds: [],
+      recallMode: 'default',
+      recallValue: 6,
+      recallUnit: 'months',
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -174,6 +190,7 @@ export default function AdminServicesPage() {
       requiresConsultation: service.requiresConsultation || false,
       isActive: service.isActive !== undefined ? service.isActive : true,
       doctorIds: linkedDocIds,
+      ...recallFromDays(service.recallDays),
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -191,6 +208,15 @@ export default function AdminServicesPage() {
         priceTo: formData.priceTo ? Math.round(Number(formData.priceTo) * 100) : undefined,
         durationMinutes: Number(formData.durationMinutes),
         doctorIds: formData.doctorIds,
+        recallDays:
+          formData.recallMode === 'default'
+            ? null
+            : formData.recallMode === 'never'
+              ? 0
+              : Math.max(1, Math.round(Number(formData.recallValue) * (formData.recallUnit === 'months' ? 30 : 1))),
+        recallMode: undefined,
+        recallValue: undefined,
+        recallUnit: undefined,
       };
 
       if (editingService) {
@@ -273,10 +299,10 @@ export default function AdminServicesPage() {
         {/* Header & Tabs */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
+            <h1 className="text-2xl font-extrabold text-ink">
               Xizmatlar va narxlar boshqaruvi
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               Stomatologik xizmatlar ro&apos;yxati, standart davomiylik, toifalar va tarixiy ma&apos;lumotlar taftishi
             </p>
           </div>
@@ -297,7 +323,7 @@ export default function AdminServicesPage() {
                 if (activeTab === 'catalog') loadServices();
                 else loadLegacyReview(legacyPage);
               }}
-              className="p-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 shadow-sm"
+              className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm"
               title="Yangilash"
             >
               <RefreshCw className="w-4 h-4" />
@@ -306,18 +332,18 @@ export default function AdminServicesPage() {
         </div>
 
         {/* Tab switcher */}
-        <div className="flex border-b border-slate-200 gap-4">
+        <div className="flex border-b border-line gap-4">
           <button
             onClick={() => setActiveTab('catalog')}
             className={`pb-3 text-xs font-extrabold flex items-center gap-2 border-b-2 transition-all ${
               activeTab === 'catalog'
                 ? 'border-teal-700 text-teal-700'
-                : 'border-transparent text-slate-400 hover:text-slate-700'
+                : 'border-transparent text-ink-subtle hover:text-ink'
             }`}
           >
             <Stethoscope className="w-4 h-4" />
             <span>Xizmatlar katalogi</span>
-            <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600">
+            <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-canvas text-ink-muted">
               {services.length}
             </span>
           </button>
@@ -330,7 +356,7 @@ export default function AdminServicesPage() {
             className={`pb-3 text-xs font-extrabold flex items-center gap-2 border-b-2 transition-all ${
               activeTab === 'legacy'
                 ? 'border-teal-700 text-teal-700'
-                : 'border-transparent text-slate-400 hover:text-slate-700'
+                : 'border-transparent text-ink-subtle hover:text-ink'
             }`}
           >
             <History className="w-4 h-4" />
@@ -354,15 +380,15 @@ export default function AdminServicesPage() {
         {activeTab === 'catalog' && (
           <>
             {/* Filters */}
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-3">
+            <div className="bg-white p-4 rounded-2xl border border-line shadow-sm flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[200px]">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <Search className="w-4 h-4 text-ink-subtle absolute left-3 top-2.5" />
                 <input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Xizmat nomi yoki slug bo'yicha qidirish..."
-                  className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 outline-none focus:ring-2 focus:ring-teal-600"
+                  className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-line text-xs bg-canvas outline-none focus:ring-2 focus:ring-teal-600"
                 />
               </div>
 
@@ -380,15 +406,15 @@ export default function AdminServicesPage() {
             </div>
 
             {/* Services Table */}
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-3xl border border-line shadow-sm overflow-hidden">
               {isLoading ? (
-                <div className="p-16 text-center text-slate-400 text-sm">Yuklanmoqda...</div>
+                <div className="p-16 text-center text-ink-subtle text-sm">Yuklanmoqda...</div>
               ) : filteredServices.length === 0 ? (
-                <div className="p-16 text-center text-slate-500 text-sm">Xizmatlar topilmadi.</div>
+                <div className="p-16 text-center text-ink-muted text-sm">Xizmatlar topilmadi.</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                    <thead className="bg-canvas border-b border-line text-ink-subtle font-bold uppercase tracking-wider">
                       <tr>
                         <th className="py-3.5 px-6">Xizmat nomi</th>
                         <th className="py-3.5 px-6">Kategoriya</th>
@@ -398,12 +424,12 @@ export default function AdminServicesPage() {
                         <th className="py-3.5 px-6 text-right">Amallar</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                    <tbody className="divide-y divide-line font-medium text-ink">
                       {filteredServices.map((service) => (
-                        <tr key={service.id} className="hover:bg-slate-50/80 transition-colors">
+                        <tr key={service.id} className="hover:bg-canvas/80 transition-colors">
                           <td className="py-4 px-6">
-                            <div className="font-bold text-slate-900">{service.nameUz}</div>
-                            <div className="text-[11px] text-slate-400">{service.nameRu}</div>
+                            <div className="font-bold text-ink">{service.nameUz}</div>
+                            <div className="text-[11px] text-ink-subtle">{service.nameRu}</div>
                           </td>
                           <td className="py-4 px-6">
                             <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-teal-50 text-teal-800">
@@ -411,17 +437,17 @@ export default function AdminServicesPage() {
                             </span>
                           </td>
                           <td className="py-4 px-6">
-                            <div className="flex items-center gap-1.5 text-slate-600">
-                              <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            <div className="flex items-center gap-1.5 text-ink-muted">
+                              <Clock className="w-3.5 h-3.5 text-ink-subtle" />
                               <span>{service.durationMinutes} daqiqa</span>
                             </div>
                           </td>
                           <td className="py-4 px-6">
-                            <div className="font-bold text-slate-900">
+                            <div className="font-bold text-ink">
                               {(service.priceFrom / 100).toLocaleString()} UZS
                             </div>
                             {service.priceTo ? (
-                              <div className="text-[10px] text-slate-400">
+                              <div className="text-[10px] text-ink-subtle">
                                 gacha {(service.priceTo / 100).toLocaleString()} UZS
                               </div>
                             ) : null}
@@ -442,7 +468,7 @@ export default function AdminServicesPage() {
                           <td className="py-4 px-6 text-right">
                             <button
                               onClick={() => openEditModal(service)}
-                              className="p-2 text-slate-400 hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-colors"
+                              className="p-2 text-ink-subtle hover:text-teal-700 hover:bg-teal-50 rounded-lg transition-colors"
                               title="Tahrirlash"
                             >
                               <Edit2 className="w-4 h-4" />
@@ -468,10 +494,10 @@ export default function AdminServicesPage() {
                   <AlertCircle className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="text-2xl font-black text-slate-900">
+                  <div className="text-2xl font-black text-ink">
                     {legacyData?.unresolvedCount ?? 0}
                   </div>
-                  <div className="text-xs font-semibold text-slate-500">
+                  <div className="text-xs font-semibold text-ink-muted">
                     Noaniq yoki ko&apos;p xizmatli bandlar (Ko&apos;rib chiqish talab etiladi)
                   </div>
                 </div>
@@ -482,10 +508,10 @@ export default function AdminServicesPage() {
                   <CheckCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="text-2xl font-black text-slate-900">
+                  <div className="text-2xl font-black text-ink">
                     {legacyData?.verifiedHistoricalCount ?? 0}
                   </div>
-                  <div className="text-xs font-semibold text-slate-500">
+                  <div className="text-xs font-semibold text-ink-muted">
                     Avtomatik tasdiqlangan yagona xizmatlar (VERIFIED_SINGLE)
                   </div>
                 </div>
@@ -493,17 +519,17 @@ export default function AdminServicesPage() {
             </div>
 
             {/* Legacy Records Table */}
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-3xl border border-line shadow-sm overflow-hidden">
               {legacyLoading ? (
-                <div className="p-16 text-center text-slate-400 text-sm">Yuklanmoqda...</div>
+                <div className="p-16 text-center text-ink-subtle text-sm">Yuklanmoqda...</div>
               ) : !legacyData?.records || legacyData.records.length === 0 ? (
-                <div className="p-16 text-center text-slate-500 text-sm">
+                <div className="p-16 text-center text-ink-muted text-sm">
                   Ko&apos;rib chiqish uchun noaniq tarixiy yozuvlar mavjud emas. Barcha bandlar tekshirilgan!
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                    <thead className="bg-canvas border-b border-line text-ink-subtle font-bold uppercase tracking-wider">
                       <tr>
                         <th className="py-3.5 px-6">Qabul sanasi & Bemor</th>
                         <th className="py-3.5 px-6">Shifokor</th>
@@ -513,33 +539,33 @@ export default function AdminServicesPage() {
                         <th className="py-3.5 px-6 text-right">Muvofiqlashtirish amallari</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                    <tbody className="divide-y divide-line font-medium text-ink">
                       {legacyData.records.map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                        <tr key={item.id} className="hover:bg-canvas/80 transition-colors">
                           <td className="py-4 px-6">
-                            <div className="font-bold text-slate-900">
+                            <div className="font-bold text-ink">
                               {item.appointment?.patient?.fullName || 'Noma\'lum bemor'}
                             </div>
-                            <div className="text-[11px] text-slate-400">
+                            <div className="text-[11px] text-ink-subtle">
                               {item.appointment?.startTime
                                 ? new Date(item.appointment.startTime).toLocaleString('uz-UZ')
                                 : 'Sana yo\'q'}
                             </div>
-                            <div className="text-[10px] text-slate-300">ID: {item.id}</div>
+                            <div className="text-[10px] text-ink-subtle">ID: {item.id}</div>
                           </td>
                           <td className="py-4 px-6">
-                            <div className="text-slate-800 font-semibold">
+                            <div className="text-ink font-semibold">
                               {item.appointment?.doctor
                                 ? `${item.appointment.doctor.firstNameUz} ${item.appointment.doctor.lastNameUz}`
                                 : 'Biriktirilmagan'}
                             </div>
                           </td>
                           <td className="py-4 px-6 max-w-[260px]">
-                            <div className="font-bold text-slate-900 break-words">
+                            <div className="font-bold text-ink break-words">
                               {item.serviceNameUz}
                             </div>
                             {item.serviceNameRu && (
-                              <div className="text-[11px] text-slate-400 break-words">
+                              <div className="text-[11px] text-ink-subtle break-words">
                                 {item.serviceNameRu}
                               </div>
                             )}
@@ -550,10 +576,10 @@ export default function AdminServicesPage() {
                             )}
                           </td>
                           <td className="py-4 px-6">
-                            <div className="text-slate-700 font-semibold">
+                            <div className="text-ink font-semibold">
                               {item.durationMinutes} daqiqa
                             </div>
-                            <div className="text-[11px] text-slate-400">
+                            <div className="text-[11px] text-ink-subtle">
                               {item.priceFrom ? `${(item.priceFrom / 100).toLocaleString()} UZS` : 'Narx yo\'q'}
                             </div>
                           </td>
@@ -573,7 +599,7 @@ export default function AdminServicesPage() {
 
                               <button
                                 onClick={() => openReconcileModal(item, 'KEEP_AMBIGUOUS_BUNDLE')}
-                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all"
+                                className="px-3 py-1.5 bg-canvas hover:bg-line text-ink rounded-lg text-xs font-bold transition-all"
                               >
                                 Paket deb saqlash
                               </button>
@@ -588,7 +614,7 @@ export default function AdminServicesPage() {
 
               {/* Pagination Controls */}
               {legacyData && legacyData.totalPages > 1 && (
-                <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-600">
+                <div className="p-4 bg-canvas border-t border-line flex items-center justify-between text-xs font-semibold text-ink-muted">
                   <div>
                     Jami: {legacyData.total} ta band, Sahifa {legacyData.page} / {legacyData.totalPages}
                   </div>
@@ -596,7 +622,7 @@ export default function AdminServicesPage() {
                     <button
                       onClick={() => loadLegacyReview(Math.max(1, legacyPage - 1))}
                       disabled={legacyPage <= 1 || legacyLoading}
-                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg flex items-center gap-1 hover:bg-slate-100 disabled:opacity-40"
+                      className="px-3 py-1.5 bg-white border border-line rounded-lg flex items-center gap-1 hover:bg-canvas disabled:opacity-40"
                     >
                       <ChevronLeft className="w-3.5 h-3.5" />
                       <span>Oldingi</span>
@@ -605,7 +631,7 @@ export default function AdminServicesPage() {
                     <button
                       onClick={() => loadLegacyReview(Math.min(legacyData.totalPages, legacyPage + 1))}
                       disabled={legacyPage >= legacyData.totalPages || legacyLoading}
-                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg flex items-center gap-1 hover:bg-slate-100 disabled:opacity-40"
+                      className="px-3 py-1.5 bg-white border border-line rounded-lg flex items-center gap-1 hover:bg-canvas disabled:opacity-40"
                     >
                       <span>Keyingi</span>
                       <ChevronRight className="w-3.5 h-3.5" />
@@ -621,13 +647,13 @@ export default function AdminServicesPage() {
       {/* RECONCILE MODAL */}
       {reconcileModalOpen && selectedItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-200">
-            <h2 className="text-lg font-black text-slate-900 mb-1">
+          <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-line">
+            <h2 className="text-lg font-black text-ink mb-1">
               {reconcileAction === 'RESOLVE_TO_SERVICE'
                 ? 'Eski qabuldagi xizmatni aniqlashtirish'
                 : 'Ko\'p xizmatli paket deb saqlash'}
             </h2>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-ink-muted mb-4">
               Tarixiy yozuvning asl ma&apos;lumotlari va narxlari o&apos;zgarmay saqlanadi. Qaror audit jurnaliga yoziladi.
             </p>
 
@@ -638,22 +664,22 @@ export default function AdminServicesPage() {
               </div>
             )}
 
-            <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl mb-4 space-y-1 text-xs">
+            <div className="p-3 bg-canvas border border-line rounded-xl mb-4 space-y-1 text-xs">
               <div>
-                <span className="text-slate-400 font-semibold">Tarixiy yozuv:</span>{' '}
-                <span className="font-bold text-slate-900">{selectedItem.serviceNameUz}</span>
+                <span className="text-ink-subtle font-semibold">Tarixiy yozuv:</span>{' '}
+                <span className="font-bold text-ink">{selectedItem.serviceNameUz}</span>
               </div>
               <div>
-                <span className="text-slate-400 font-semibold">Qabul sanasi:</span>{' '}
-                <span className="font-medium text-slate-700">
+                <span className="text-ink-subtle font-semibold">Qabul sanasi:</span>{' '}
+                <span className="font-medium text-ink">
                   {selectedItem.appointment?.startTime
                     ? new Date(selectedItem.appointment.startTime).toLocaleString('uz-UZ')
                     : 'Noma\'lum'}
                 </span>
               </div>
               <div>
-                <span className="text-slate-400 font-semibold">Davomiylik / Narx:</span>{' '}
-                <span className="font-medium text-slate-700">
+                <span className="text-ink-subtle font-semibold">Davomiylik / Narx:</span>{' '}
+                <span className="font-medium text-ink">
                   {selectedItem.durationMinutes} daqiqa / {(selectedItem.priceFrom / 100).toLocaleString()} UZS
                 </span>
               </div>
@@ -689,7 +715,7 @@ export default function AdminServicesPage() {
               )}
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label className="block font-bold text-ink mb-1">
                   Izoh: nima asosida o&apos;zgartiryapsiz? *
                 </label>
                 <textarea
@@ -698,16 +724,16 @@ export default function AdminServicesPage() {
                   onChange={(e) => setReconcileReason(e.target.value)}
                   placeholder="Masalan: Bemorning qog'oz kartasi tekshirildi, ushbu sanada faqat tish tozalash muolajasi o'tkazilganligi tasdiqlandi..."
                   required
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600 text-xs"
+                  className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600 text-xs"
                 />
-                <div className="text-[10px] text-slate-400 mt-0.5">Kamida 5 ta belgi.</div>
+                <div className="text-[10px] text-ink-subtle mt-0.5">Kamida 5 ta belgi.</div>
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+              <div className="pt-3 flex justify-end gap-2 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setReconcileModalOpen(false)}
-                  className="px-4 py-2 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 font-bold"
+                  className="px-4 py-2 border border-line rounded-xl text-ink-muted hover:bg-canvas font-bold"
                 >
                   Bekor qilish
                 </button>
@@ -727,8 +753,8 @@ export default function AdminServicesPage() {
       {/* CREATE / EDIT SERVICE MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-xl rounded-3xl p-6 shadow-2xl border border-slate-200 my-8">
-            <h2 className="text-xl font-extrabold text-slate-900 mb-4">
+          <div className="bg-white w-full max-w-xl rounded-3xl p-6 shadow-2xl border border-line my-8">
+            <h2 className="text-xl font-extrabold text-ink mb-4">
               {editingService ? 'Xizmatni tahrirlash' : 'Yangi xizmat qo\'shish'}
             </h2>
 
@@ -742,40 +768,40 @@ export default function AdminServicesPage() {
             <form onSubmit={handleSubmit} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Xizmat nomi (O&apos;zbekcha) *</label>
+                  <label className="block font-bold text-ink mb-1">Xizmat nomi (O&apos;zbekcha) *</label>
                   <input
                     type="text"
                     required
                     value={formData.nameUz}
                     onChange={(e) => setFormData({ ...formData, nameUz: e.target.value })}
                     placeholder="Masalan: Tish oqartirish"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Xizmat nomi (Ruscha) *</label>
+                  <label className="block font-bold text-ink mb-1">Xizmat nomi (Ruscha) *</label>
                   <input
                     type="text"
                     required
                     value={formData.nameRu}
                     onChange={(e) => setFormData({ ...formData, nameRu: e.target.value })}
                     placeholder="Например: Отбеливание зубов"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Slug (URL manzili) *</label>
+                  <label className="block font-bold text-ink mb-1">Slug (URL manzili) *</label>
                   <input
                     type="text"
                     required
                     value={formData.slug}
                     onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
                     placeholder="tish-oqartirish"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
@@ -790,9 +816,50 @@ export default function AdminServicesPage() {
                 </div>
               </div>
 
+              <div className="rounded-xl border border-line bg-canvas/60 p-3">
+                <label className="block font-bold text-ink mb-1">Qayta ko&apos;rikka chaqirish</label>
+                <p className="mb-2 text-[11px] text-ink-muted">
+                  Shu xizmatdan keyin bemor qancha vaqtdan so&apos;ng ko&apos;rikka chaqirilsin (Qayta chaqirish bo&apos;limi va avtomatik eslatma uchun).
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={formData.recallMode}
+                    onChange={(e) => setFormData({ ...formData, recallMode: e.target.value as any })}
+                    className="h-9 rounded-lg border border-line bg-white px-2 text-xs"
+                    aria-label="Qayta chaqirish turi"
+                  >
+                    <option value="default">Klinika standarti (Sozlamalar)</option>
+                    <option value="custom">O&apos;z muddati</option>
+                    <option value="never">Chaqirilmasin</option>
+                  </select>
+                  {formData.recallMode === 'custom' && (
+                    <>
+                      <input
+                        type="number"
+                        min={1}
+                        max={formData.recallUnit === 'months' ? 36 : 1095}
+                        value={formData.recallValue}
+                        onChange={(e) => setFormData({ ...formData, recallValue: Number(e.target.value) })}
+                        className="h-9 w-20 rounded-lg border border-line bg-white px-2 text-xs"
+                        aria-label="Muddat"
+                      />
+                      <select
+                        value={formData.recallUnit}
+                        onChange={(e) => setFormData({ ...formData, recallUnit: e.target.value as any })}
+                        className="h-9 rounded-lg border border-line bg-white px-2 text-xs"
+                        aria-label="Birlik"
+                      >
+                        <option value="days">kundan keyin</option>
+                        <option value="months">oydan keyin</option>
+                      </select>
+                    </>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Davomiyligi (daqiqa) *</label>
+                  <label className="block font-bold text-ink mb-1">Davomiyligi (daqiqa) *</label>
                   <input
                     type="number"
                     required
@@ -800,12 +867,12 @@ export default function AdminServicesPage() {
                     max={480}
                     value={formData.durationMinutes}
                     onChange={(e) => setFormData({ ...formData, durationMinutes: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Boshlang&apos;ich narx (UZS) *</label>
+                  <label className="block font-bold text-ink mb-1">Boshlang&apos;ich narx (UZS) *</label>
                   <input
                     type="number"
                     required
@@ -814,12 +881,12 @@ export default function AdminServicesPage() {
                     value={formData.priceFrom}
                     onChange={(e) => setFormData({ ...formData, priceFrom: Number(e.target.value) })}
                     placeholder="150000"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Maksimal narx (UZS)</label>
+                  <label className="block font-bold text-ink mb-1">Maksimal narx (UZS)</label>
                   <input
                     type="number"
                     min={0}
@@ -827,43 +894,43 @@ export default function AdminServicesPage() {
                     value={formData.priceTo || ''}
                     onChange={(e) => setFormData({ ...formData, priceTo: Number(e.target.value) })}
                     placeholder="300000"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Tavsif (O&apos;zbekcha)</label>
+                <label className="block font-bold text-ink mb-1">Tavsif (O&apos;zbekcha)</label>
                 <textarea
                   rows={2}
                   value={formData.descriptionUz}
                   onChange={(e) => setFormData({ ...formData, descriptionUz: e.target.value })}
                   placeholder="Xizmat haqida batafsil..."
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Muolajaga tayyorgarlik (O&apos;zbekcha)</label>
+                <label className="block font-bold text-ink mb-1">Muolajaga tayyorgarlik (O&apos;zbekcha)</label>
                 <textarea
                   rows={2}
                   value={formData.preparationUz}
                   onChange={(e) => setFormData({ ...formData, preparationUz: e.target.value })}
                   placeholder="Qabuldan oldin nimalarga e'tibor berish kerak..."
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
+                  className="w-full px-3 py-2 border border-line rounded-xl outline-none focus:ring-2 focus:ring-teal-600"
                 />
               </div>
 
               {/* Qualified Doctors Multi-Select */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label className="block font-bold text-ink mb-1">
                   Ushbu xizmatni ko&apos;rsatadigan malakali shifokorlar ({formData.doctorIds.length} ta tanlandi)
                 </label>
-                <div className="max-h-36 overflow-y-auto p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 scrollbar-thin">
+                <div className="max-h-36 overflow-y-auto p-2.5 bg-canvas border border-line rounded-xl space-y-1.5 scrollbar-thin">
                   {doctors.map((doc) => {
                     const isChecked = formData.doctorIds.includes(doc.id);
                     return (
-                      <label key={doc.id} className="flex items-center gap-2 cursor-pointer text-xs p-1 hover:bg-slate-100 rounded-lg">
+                      <label key={doc.id} className="flex items-center gap-2 cursor-pointer text-xs p-1 hover:bg-canvas rounded-lg">
                         <input
                           type="checkbox"
                           checked={isChecked}
@@ -876,8 +943,8 @@ export default function AdminServicesPage() {
                           }}
                           className="w-4 h-4 text-teal-600 rounded"
                         />
-                        <span className="font-semibold text-slate-800">Dr. {doc.firstNameUz} {doc.lastNameUz}</span>
-                        <span className="text-[10px] text-slate-400">({doc.titleUz || 'Mutaxassis'})</span>
+                        <span className="font-semibold text-ink">Dr. {doc.firstNameUz} {doc.lastNameUz}</span>
+                        <span className="text-[10px] text-ink-subtle">({doc.titleUz || 'Mutaxassis'})</span>
                       </label>
                     );
                   })}
@@ -885,7 +952,7 @@ export default function AdminServicesPage() {
               </div>
 
               <div className="flex items-center gap-6 pt-2">
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-ink">
                   <input
                     type="checkbox"
                     checked={formData.isActive}
@@ -895,7 +962,7 @@ export default function AdminServicesPage() {
                   <span>Xizmat faol (onlayn qabulga ochiq)</span>
                 </label>
 
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-ink">
                   <input
                     type="checkbox"
                     checked={formData.requiresConsultation}
@@ -906,11 +973,11 @@ export default function AdminServicesPage() {
                 </label>
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+              <div className="pt-3 flex justify-end gap-2 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 font-bold"
+                  className="px-4 py-2 border border-line rounded-xl text-ink-muted hover:bg-canvas font-bold"
                 >
                   Bekor qilish
                 </button>

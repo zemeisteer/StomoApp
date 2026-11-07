@@ -21,7 +21,7 @@ import {
 import { AdminLayout } from '../../components/AdminLayout';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DoctorWorkspace } from '../../components/admin/DoctorWorkspace';
-import { OwnerWorkspace } from '../../components/admin/OwnerWorkspace';
+import { ClinicDashboard } from '../../components/admin/ClinicDashboard';
 import { ReceptionWorkspace } from '../../components/admin/ReceptionWorkspace';
 import { api } from '../../lib/api';
 import { useAuth, StaffRole } from '../../lib/auth';
@@ -538,8 +538,8 @@ export default function AdminOverviewPage() {
     }
     if (appt.status === 'COMPLETED') {
       return (
-        <span className="ui-badge bg-slate-100 text-slate-700 border border-slate-300">
-          <FileCheck className="w-3 h-3 text-slate-600" />
+        <span className="ui-badge bg-canvas text-ink border border-line-strong">
+          <FileCheck className="w-3 h-3 text-ink-muted" />
           <span>{isUz ? 'Yakunlandi' : 'Завершено'}</span>
         </span>
       );
@@ -553,7 +553,7 @@ export default function AdminOverviewPage() {
       );
     }
     return (
-      <span className="ui-badge bg-slate-100 text-slate-700">
+      <span className="ui-badge bg-canvas text-ink">
         {appt.status}
       </span>
     );
@@ -790,55 +790,13 @@ export default function AdminOverviewPage() {
             handleOpenCancelModal={(appt) => setCancellationTarget(appt)}
           />
         ) : isOwner ? (
-          <div className="space-y-6">
-            <div className="p-4 bg-gradient-to-r from-brand-950 to-brand-900 rounded-2xl text-white border border-brand-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm animate-fade-in">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold">
-                  <BarChart3 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold">
-                    {isUz ? 'Klinika Rahbari boshqaruv markazi' : 'Центр управления руководителя клиники'}
-                  </h3>
-                  <p className="text-xs text-brand-200">
-                    {isUz
-                      ? 'Filiallar daromadi, shifokorlar samaradorligi va moliyaviy konversiya'
-                      : 'Доход филиалов, эффективность врачей и финансовая конверсия'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/admin/analytics"
-                  className="px-3.5 py-2 bg-brand-600 hover:bg-secondary-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-                >
-                  <Activity className="w-3.5 h-3.5" />
-                  <span>{isUz ? 'Batafsil CRM Analitika' : 'Подробная CRM аналитика'}</span>
-                </Link>
-                <Link
-                  href="/admin/staff"
-                  className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition-colors"
-                >
-                  {isUz ? 'Xodimlar' : 'Сотрудники'}
-                </Link>
-              </div>
-            </div>
-
-            <OwnerWorkspace
-              doctors={doctors}
-              isUz={isUz}
-              doctorCommissionRates={doctorCommissionRates}
-              handleUpdateDoctorCommissionRate={async (docId, rate) => {
-                setDoctorCommissionRates((prev) => ({ ...prev, [docId]: rate }));
-                try {
-                  await api.updateDoctorCommission(docId, { percentage: rate });
-                  setStatusFeedback(isUz ? "Shifokor komissiya foizi saqlandi" : 'Процент комиссии сохранен');
-                } catch {
-                  setStatusFeedback(isUz ? "Komissiyani saqlashda xatolik yuz berdi" : 'Ошибка сохранения комиссии');
-                }
-              }}
-              setStatusFeedback={setStatusFeedback}
-            />
+          <div className="space-y-4">
+            <ClinicDashboard lang={isUz ? 'uz' : 'ru'} />
+            <p className="text-right text-xs text-ink-subtle">
+              <Link href="/admin/analytics" className="font-semibold text-brand-700 hover:underline">
+                {isUz ? "Kengaytirilgan hisobot (filiallar, shifokor bandligi, murojaatlar) →" : 'Подробный отчёт (филиалы, загрузка врачей, заявки) →'}
+              </Link>
+            </p>
           </div>
         ) : (
           <ReceptionWorkspace
@@ -969,7 +927,7 @@ export default function AdminOverviewPage() {
                 <button
                   type="button"
                   onClick={() => setDebtModalOpen(false)}
-                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                  className="p-1 text-ink-subtle hover:text-ink-muted rounded-lg"
                 >
                   <X className="w-5 h-5" />
                 </button>

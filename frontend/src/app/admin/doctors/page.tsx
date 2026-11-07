@@ -1,5 +1,6 @@
 'use client';
 
+import { TimeSelect } from '../../../components/ui/TimeSelect';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   UserCheck,
@@ -30,7 +31,7 @@ import {
   translateName,
   translateSpecialty,
   generateDoctorSlug,
-  latinToCyrillic,
+  EDUCATION_DICTIONARY,
 } from '../../../lib/transliterate';
 
 const DAYS_OF_WEEK = [
@@ -344,9 +345,8 @@ export default function AdminDoctorsManagePage() {
       const payload = {
         ...doctorForm,
         slug: autoSlug,
+        // Empty Russian fields stay empty: the Russian site falls back to the Uzbek text
         titleRu: doctorForm.titleRu || translateSpecialty(doctorForm.titleUz).ru,
-        bioRu: doctorForm.bioRu || latinToCyrillic(doctorForm.bioUz),
-        educationRu: doctorForm.educationRu || latinToCyrillic(doctorForm.educationUz),
         experienceYears: Number(doctorForm.experienceYears) || 0,
         languages: langs,
         serviceIds: doctorForm.serviceIds,
@@ -664,10 +664,10 @@ export default function AdminDoctorsManagePage() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
+            <h1 className="text-2xl font-extrabold text-ink">
               Shifokorlar va ish jadvallari
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               Shifokorlar profili, xizmatlari, filiallari, ish vaqti va ta&apos;tillari
             </p>
           </div>
@@ -683,7 +683,7 @@ export default function AdminDoctorsManagePage() {
 
             <button
               onClick={() => loadDoctorScheduleData(selectedDoctorId)}
-              className="p-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 shadow-sm"
+              className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm"
               title="Yangilash"
             >
               <RefreshCw className="w-4 h-4" />
@@ -692,19 +692,19 @@ export default function AdminDoctorsManagePage() {
         </div>
 
         {/* Searchable Doctor Selector */}
-        <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <div className="bg-white rounded-3xl border border-line p-4 shadow-sm space-y-3">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="relative w-full sm:w-80">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-ink-subtle absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={doctorSearch}
                 onChange={(e) => setDoctorSearch(e.target.value)}
                 placeholder="Shifokor ismi yoki mutaxassisligi bo'yicha qidirish..."
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white"
+                className="w-full pl-9 pr-3 py-2 bg-canvas border border-line rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white"
               />
             </div>
-            <div className="text-xs text-slate-500 font-semibold w-full sm:w-auto text-right">
+            <div className="text-xs text-ink-muted font-semibold w-full sm:w-auto text-right">
               Topildi: {filteredDoctors.length} / {doctors.length} ta shifokor
             </div>
           </div>
@@ -723,7 +723,7 @@ export default function AdminDoctorsManagePage() {
                   className={`px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 transition-all flex items-center gap-1.5 ${
                     isSelected
                       ? 'bg-teal-700 text-white shadow-md'
-                      : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
+                      : 'bg-canvas text-ink border border-line hover:bg-canvas'
                   }`}
                 >
                   <span className={`w-2 h-2 rounded-full shrink-0 ${isReady ? 'bg-emerald-400' : 'bg-amber-400'}`} />
@@ -742,7 +742,7 @@ export default function AdminDoctorsManagePage() {
           const isReady = docServicesCount > 0 && docBranchesCount > 0 && docSchedulesCount > 0 && selectedDoctorObj.isActive;
 
           return (
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col sm:flex-row items-start justify-between gap-4">
+            <div className="bg-white rounded-3xl border border-line shadow-sm p-6 flex flex-col sm:flex-row items-start justify-between gap-4">
               <div className="flex items-start gap-4">
                 <div className="w-16 h-16 rounded-2xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-700 font-bold text-lg shrink-0">
                   {selectedDoctorObj.firstNameUz?.[0]}
@@ -750,7 +750,7 @@ export default function AdminDoctorsManagePage() {
                 </div>
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-bold text-slate-900">
+                    <h2 className="text-lg font-bold text-ink">
                       Dr. {selectedDoctorObj.firstNameUz} {selectedDoctorObj.lastNameUz}
                     </h2>
                     {isReady ? (
@@ -766,19 +766,19 @@ export default function AdminDoctorsManagePage() {
                     )}
                   </div>
                   <p className="text-xs text-teal-700 font-semibold">{selectedDoctorObj.titleUz || 'Mutaxassis'}</p>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-ink-muted">
                     Tajriba: {selectedDoctorObj.experienceYears || 0} yil • Slug: <code className="text-teal-700">/{selectedDoctorObj.slug}</code>
                   </p>
 
                   {/* Readiness Breakdown Badges */}
                   <div className="flex flex-wrap gap-2 pt-1">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docServicesCount > 0 ? 'bg-slate-100 text-slate-700' : 'bg-rose-100 text-rose-800'}`}>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docServicesCount > 0 ? 'bg-canvas text-ink' : 'bg-rose-100 text-rose-800'}`}>
                       {docServicesCount > 0 ? `Xizmatlar: ${docServicesCount} ta` : '⚠ Xizmat biriktirilmagan'}
                     </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docBranchesCount > 0 ? 'bg-slate-100 text-slate-700' : 'bg-rose-100 text-rose-800'}`}>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docBranchesCount > 0 ? 'bg-canvas text-ink' : 'bg-rose-100 text-rose-800'}`}>
                       {docBranchesCount > 0 ? `Filiallar: ${docBranchesCount} ta` : '⚠ Filial biriktirilmagan'}
                     </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docSchedulesCount > 0 ? 'bg-slate-100 text-slate-700' : 'bg-rose-100 text-rose-800'}`}>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${docSchedulesCount > 0 ? 'bg-canvas text-ink' : 'bg-rose-100 text-rose-800'}`}>
                       {docSchedulesCount > 0 ? `Ish jadvali: ${docSchedulesCount} kun` : '⚠ Ish jadvali belgilanmagan'}
                     </span>
                   </div>
@@ -789,7 +789,7 @@ export default function AdminDoctorsManagePage() {
                 <button
                   type="button"
                   onClick={() => openEditDoctor(selectedDoctorObj)}
-                  className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                  className="px-4 py-2 border border-line text-ink hover:bg-canvas rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
                 >
                   <Edit2 className="w-3.5 h-3.5 text-teal-700" />
                   <span>Profil va xizmatlarni tahrirlash</span>
@@ -811,9 +811,9 @@ export default function AdminDoctorsManagePage() {
         {/* Doctor Schedules & Exceptions Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Weekly Schedule */}
-          <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <div className="lg:col-span-7 bg-white rounded-3xl border border-line shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <h2 className="text-base font-bold text-ink flex items-center gap-2">
                 <Clock className="w-4 h-4 text-teal-700" />
                 <span>Haftalik ish jadvali</span>
               </h2>
@@ -838,7 +838,7 @@ export default function AdminDoctorsManagePage() {
                       }));
                     }
                   }}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
+                  className="px-3 py-1.5 bg-canvas hover:bg-line text-ink rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
                   title="Bir nechta kunga birdaniga jadval kiritish yoki boshqa shifokordan nusxalash"
                 >
                   <Layers className="w-3.5 h-3.5 text-teal-700" />
@@ -857,7 +857,7 @@ export default function AdminDoctorsManagePage() {
             </div>
 
             {schedules.length === 0 ? (
-              <p className="text-xs text-slate-500 py-6 text-center">
+              <p className="text-xs text-ink-muted py-6 text-center">
                 Ushbu shifokor uchun ish jadvali kiritilmagan.
               </p>
             ) : (
@@ -867,13 +867,13 @@ export default function AdminDoctorsManagePage() {
                   return (
                     <div
                       key={s.id}
-                      className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between text-xs"
+                      className="p-3.5 bg-canvas rounded-2xl border border-line flex items-center justify-between text-xs"
                     >
                       <div>
-                        <span className="font-bold text-slate-900 text-sm block">
+                        <span className="font-bold text-ink text-sm block">
                           {dayObj?.label || s.dayOfWeek}
                         </span>
-                        <span className="text-slate-500 text-[11px]">
+                        <span className="text-ink-muted text-[11px]">
                           Filial: {s.branch?.nameUz || 'Asosiy filial'}
                         </span>
                       </div>
@@ -883,7 +883,7 @@ export default function AdminDoctorsManagePage() {
                           {s.startTime} - {s.endTime}
                         </span>
                         {s.breakStart && s.breakEnd && (
-                          <span className="text-[11px] text-slate-400">
+                          <span className="text-[11px] text-ink-subtle">
                             Tanaffus: {s.breakStart} - {s.breakEnd}
                           </span>
                         )}
@@ -896,9 +896,9 @@ export default function AdminDoctorsManagePage() {
           </div>
 
           {/* Exceptions & Leaves */}
-          <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <div className="lg:col-span-5 bg-white rounded-3xl border border-line shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <h2 className="text-base font-bold text-ink flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-teal-700" />
                 <span>Ta&apos;tillar va band vaqtlar</span>
               </h2>
@@ -916,7 +916,7 @@ export default function AdminDoctorsManagePage() {
             </div>
 
             {exceptions.length === 0 ? (
-              <p className="text-xs text-slate-500 py-6 text-center">
+              <p className="text-xs text-ink-muted py-6 text-center">
                 Rejalashtirilgan ta&apos;tillar yoki band vaqtlar yo&apos;q.
               </p>
             ) : (
@@ -966,11 +966,11 @@ export default function AdminDoctorsManagePage() {
       {isScheduleModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-base">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="font-bold text-ink text-base">
                 Ish kuni jadvalini saqlash
               </h3>
-              <button onClick={() => setIsScheduleModalOpen(false)} className="p-1 text-slate-400">
+              <button onClick={() => setIsScheduleModalOpen(false)} className="p-1 text-ink-subtle">
                 ✕
               </button>
             </div>
@@ -1005,53 +1005,31 @@ export default function AdminDoctorsManagePage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Ish boshlanishi *</label>
-                  <input
-                    type="time"
-                    required
-                    value={scheduleForm.startTime}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, startTime: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                  />
+                  <label className="block font-bold text-ink mb-1">Ish boshlanishi *</label>
+                  <TimeSelect value={scheduleForm.startTime} onChange={(v) => setScheduleForm({ ...scheduleForm, startTime: v })} required />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Ish tugashi *</label>
-                  <input
-                    type="time"
-                    required
-                    value={scheduleForm.endTime}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, endTime: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                  />
+                  <label className="block font-bold text-ink mb-1">Ish tugashi *</label>
+                  <TimeSelect value={scheduleForm.endTime} onChange={(v) => setScheduleForm({ ...scheduleForm, endTime: v })} required />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Tanaffus boshi</label>
-                  <input
-                    type="time"
-                    value={scheduleForm.breakStart}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, breakStart: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                  />
+                  <label className="block font-bold text-ink mb-1">Tanaffus boshi</label>
+                  <TimeSelect value={scheduleForm.breakStart} onChange={(v) => setScheduleForm({ ...scheduleForm, breakStart: v })} />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Tanaffus oxiri</label>
-                  <input
-                    type="time"
-                    value={scheduleForm.breakEnd}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, breakEnd: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                  />
+                  <label className="block font-bold text-ink mb-1">Tanaffus oxiri</label>
+                  <TimeSelect value={scheduleForm.breakEnd} onChange={(v) => setScheduleForm({ ...scheduleForm, breakEnd: v })} />
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+              <div className="pt-2 flex justify-end gap-2 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setIsScheduleModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                  className="px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-bold"
                 >
                   Bekor qilish
                 </button>
@@ -1072,11 +1050,11 @@ export default function AdminDoctorsManagePage() {
       {isDoctorModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
           <div className="relative w-full max-w-xl bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-base">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="font-bold text-ink text-base">
                 {editingDoctor ? 'Shifokor profilini tahrirlash' : 'Yangi shifokor qo\'shish'}
               </h3>
-              <button onClick={() => setIsDoctorModalOpen(false)} className="p-1 text-slate-400">
+              <button onClick={() => setIsDoctorModalOpen(false)} className="p-1 text-ink-subtle">
                 ✕
               </button>
             </div>
@@ -1093,8 +1071,8 @@ export default function AdminDoctorsManagePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="block font-bold text-slate-700">Ism (O&apos;zbekcha) *</label>
-                    <span className="text-[10px] text-teal-600 font-semibold">Avto-tarjima</span>
+                    <label className="block font-bold text-ink">Ism (O&apos;zbekcha) *</label>
+                    <span className="text-[10px] text-teal-600 font-semibold">Ruscha yozuv avtomatik</span>
                   </div>
                   <input
                     type="text"
@@ -1111,13 +1089,13 @@ export default function AdminDoctorsManagePage() {
                         slug: editingDoctor ? prev.slug : generateDoctorSlug(uz || val, prev.lastNameUz),
                       }));
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                    className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="block font-bold text-slate-700">Familiya (O&apos;zbekcha) *</label>
-                    <span className="text-[10px] text-teal-600 font-semibold">Avto-tarjima</span>
+                    <label className="block font-bold text-ink">Familiya (O&apos;zbekcha) *</label>
+                    <span className="text-[10px] text-teal-600 font-semibold">Ruscha yozuv avtomatik</span>
                   </div>
                   <input
                     type="text"
@@ -1134,14 +1112,14 @@ export default function AdminDoctorsManagePage() {
                         slug: editingDoctor ? prev.slug : generateDoctorSlug(prev.firstNameUz, uz || val),
                       }));
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                    className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Ism (Ruscha) *</label>
+                  <label className="block font-bold text-ink mb-1">Ism (Ruscha) *</label>
                   <input
                     type="text"
                     required
@@ -1157,11 +1135,11 @@ export default function AdminDoctorsManagePage() {
                         slug: editingDoctor ? prev.slug : generateDoctorSlug(uz || prev.firstNameUz, prev.lastNameUz),
                       }));
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                    className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Familiya (Ruscha) *</label>
+                  <label className="block font-bold text-ink mb-1">Familiya (Ruscha) *</label>
                   <input
                     type="text"
                     required
@@ -1177,7 +1155,7 @@ export default function AdminDoctorsManagePage() {
                         slug: editingDoctor ? prev.slug : generateDoctorSlug(prev.firstNameUz, uz || prev.lastNameUz),
                       }));
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                    className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
               </div>
@@ -1185,7 +1163,7 @@ export default function AdminDoctorsManagePage() {
               {/* Tajriba and Tillar selection (Interactive Pill selector) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Tajriba (yil) *</label>
+                  <label className="block font-bold text-ink mb-1">Tajriba (yil) *</label>
                   <input
                     type="number"
                     required
@@ -1193,12 +1171,12 @@ export default function AdminDoctorsManagePage() {
                     max={60}
                     value={doctorForm.experienceYears}
                     onChange={(e) => setDoctorForm({ ...doctorForm, experienceYears: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                    className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Muloqot tillari *</label>
+                  <label className="block font-bold text-ink mb-1">Muloqot tillari *</label>
                   <div className="flex flex-wrap gap-1.5 pt-0.5">
                     {AVAILABLE_LANGUAGES.map((lang) => {
                       const isSelected = doctorForm.languages.includes(lang.code);
@@ -1221,7 +1199,7 @@ export default function AdminDoctorsManagePage() {
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
                             isSelected
                               ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
-                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                              : 'bg-canvas text-ink-muted border-line hover:bg-canvas'
                           }`}
                         >
                           <span>{lang.flag}</span>
@@ -1235,12 +1213,12 @@ export default function AdminDoctorsManagePage() {
               </div>
 
               {/* Mutaxassislik va Unvon */}
-              <div className="space-y-1.5 p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
+              <div className="space-y-1.5 p-3 bg-canvas rounded-2xl border border-line/80">
                 <div className="flex items-center justify-between">
-                  <label className="block font-bold text-slate-800">
+                  <label className="block font-bold text-ink">
                     Mutaxassislik va Unvon *
                   </label>
-                  <span className="text-[10px] text-slate-500">
+                  <span className="text-[10px] text-ink-muted">
                     💡 Shifokor yo&apos;nalishi va toifasi
                   </span>
                 </div>
@@ -1263,7 +1241,7 @@ export default function AdminDoctorsManagePage() {
                         className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
                           isCurrent
                             ? 'bg-teal-700 text-white'
-                            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                            : 'bg-white text-ink border border-line hover:bg-canvas'
                         }`}
                       >
                         {spec.uz}
@@ -1274,7 +1252,7 @@ export default function AdminDoctorsManagePage() {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-slate-500 block mb-0.5">O&apos;zbekcha</label>
+                    <label className="text-[10px] text-ink-muted block mb-0.5">O&apos;zbekcha</label>
                     <input
                       type="text"
                       placeholder="Stomatolog-terapevt"
@@ -1285,20 +1263,21 @@ export default function AdminDoctorsManagePage() {
                         setDoctorForm((prev) => ({
                           ...prev,
                           titleUz: val,
-                          titleRu: spec.ru || latinToCyrillic(val),
+                          // Known titles come with a real translation; others keep the typed Russian
+                          titleRu: spec.ru || (prev.titleRu && prev.titleRu !== translateSpecialty(prev.titleUz).ru ? prev.titleRu : ''),
                         }));
                       }}
-                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-white focus:border-teal-500"
+                      className="w-full px-3 py-1.5 rounded-xl border border-line bg-white focus:border-teal-500"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-500 block mb-0.5">Ruscha</label>
+                    <label className="text-[10px] text-ink-muted block mb-0.5">Ruscha</label>
                     <input
                       type="text"
                       placeholder="Стоматолог-терапевт"
                       value={doctorForm.titleRu}
                       onChange={(e) => setDoctorForm({ ...doctorForm, titleRu: e.target.value })}
-                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 bg-white focus:border-teal-500"
+                      className="w-full px-3 py-1.5 rounded-xl border border-line bg-white focus:border-teal-500"
                     />
                   </div>
                 </div>
@@ -1307,8 +1286,8 @@ export default function AdminDoctorsManagePage() {
               {/* Biografiya */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-slate-700">Biografiya</label>
-                  <span className="text-[10px] text-teal-600 font-semibold">Ruscha avto-sinxronlanadi</span>
+                  <label className="block font-bold text-ink">Biografiya</label>
+                  <span className="text-[10px] text-teal-600 font-semibold">Ruschasini o&apos;zingiz yozing</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -1318,13 +1297,10 @@ export default function AdminDoctorsManagePage() {
                       value={doctorForm.bioUz}
                       onChange={(e) => {
                         const val = e.target.value;
-                        setDoctorForm((prev) => ({
-                          ...prev,
-                          bioUz: val,
-                          bioRu: latinToCyrillic(val),
-                        }));
+                        // Free text is not transliterated: Cyrillic letters are not a Russian translation
+                        setDoctorForm((prev) => ({ ...prev, bioUz: val }));
                       }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
+                      className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500"
                     />
                   </div>
                   <div>
@@ -1333,7 +1309,7 @@ export default function AdminDoctorsManagePage() {
                       placeholder="Биография (Русский)"
                       value={doctorForm.bioRu}
                       onChange={(e) => setDoctorForm({ ...doctorForm, bioRu: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
+                      className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500"
                     />
                   </div>
                 </div>
@@ -1342,8 +1318,8 @@ export default function AdminDoctorsManagePage() {
               {/* Ta'lim ma'lumotlari */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-slate-700">Ta&apos;lim ma&apos;lumotlari</label>
-                  <span className="text-[10px] text-teal-600 font-semibold">Avto-tarjima</span>
+                  <label className="block font-bold text-ink">Ta&apos;lim ma&apos;lumotlari</label>
+                  <span className="text-[10px] text-teal-600 font-semibold">Ma&apos;lum institutlar ruschaga o&apos;tadi</span>
                 </div>
                 <div className="flex flex-wrap gap-1 mb-1.5">
                   {EDUCATION_PRESETS.map((uni) => (
@@ -1354,10 +1330,10 @@ export default function AdminDoctorsManagePage() {
                         setDoctorForm((prev) => ({
                           ...prev,
                           educationUz: uni,
-                          educationRu: latinToCyrillic(uni),
+                          educationRu: EDUCATION_DICTIONARY[uni] || prev.educationRu,
                         }));
                       }}
-                      className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600 hover:bg-teal-50 hover:text-teal-700 border border-slate-200"
+                      className="px-2 py-0.5 rounded text-[10px] bg-canvas text-ink-muted hover:bg-teal-50 hover:text-teal-700 border border-line"
                     >
                       {uni}
                     </button>
@@ -1373,31 +1349,32 @@ export default function AdminDoctorsManagePage() {
                       setDoctorForm((prev) => ({
                         ...prev,
                         educationUz: val,
-                        educationRu: latinToCyrillic(val),
+                        // Known universities get their official Russian name; anything else is typed by hand
+                        educationRu: EDUCATION_DICTIONARY[val.trim()] || prev.educationRu,
                       }));
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
+                    className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500"
                   />
                   <input
                     type="text"
                     placeholder="Ташкентский Государственный Стоматологический Институт (2012)"
                     value={doctorForm.educationRu}
                     onChange={(e) => setDoctorForm({ ...doctorForm, educationRu: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:border-teal-500"
+                    className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500"
                   />
                 </div>
               </div>
 
               {/* Connected Services */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label className="block font-bold text-ink mb-1">
                   Ko&apos;rsatadigan xizmatlari * ({doctorForm.serviceIds.length} ta tanlandi)
                 </label>
-                <div className="max-h-36 overflow-y-auto p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 scrollbar-thin">
+                <div className="max-h-36 overflow-y-auto p-2.5 bg-canvas border border-line rounded-xl space-y-1.5 scrollbar-thin">
                   {services.map((serv) => {
                     const isChecked = doctorForm.serviceIds.includes(serv.id);
                     return (
-                      <label key={serv.id} className="flex items-center gap-2 cursor-pointer text-xs p-1 hover:bg-slate-100 rounded-lg">
+                      <label key={serv.id} className="flex items-center gap-2 cursor-pointer text-xs p-1 hover:bg-canvas rounded-lg">
                         <input
                           type="checkbox"
                           checked={isChecked}
@@ -1410,8 +1387,8 @@ export default function AdminDoctorsManagePage() {
                           }}
                           className="w-4 h-4 text-teal-600 rounded"
                         />
-                        <span className="font-semibold text-slate-800">{serv.nameUz}</span>
-                        <span className="text-[10px] text-slate-400">({serv.durationMinutes} daq)</span>
+                        <span className="font-semibold text-ink">{serv.nameUz}</span>
+                        <span className="text-[10px] text-ink-subtle">({serv.durationMinutes} daq)</span>
                       </label>
                     );
                   })}
@@ -1420,14 +1397,14 @@ export default function AdminDoctorsManagePage() {
 
               {/* Connected Branches */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
+                <label className="block font-bold text-ink mb-1">
                   Ishlaydigan filiallari * ({doctorForm.branchIds.length} ta tanlandi)
                 </label>
-                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                <div className="p-2.5 bg-canvas border border-line rounded-xl space-y-1.5">
                   {branches.map((b) => {
                     const isChecked = doctorForm.branchIds.includes(b.id);
                     return (
-                      <label key={b.id} className="flex items-center gap-2 cursor-pointer text-xs p-1 hover:bg-slate-100 rounded-lg">
+                      <label key={b.id} className="flex items-center gap-2 cursor-pointer text-xs p-1 hover:bg-canvas rounded-lg">
                         <input
                           type="checkbox"
                           checked={isChecked}
@@ -1440,15 +1417,15 @@ export default function AdminDoctorsManagePage() {
                           }}
                           className="w-4 h-4 text-teal-600 rounded"
                         />
-                        <span className="font-semibold text-slate-800">{b.nameUz}</span>
-                        <span className="text-[10px] text-slate-400">({b.addressUz})</span>
+                        <span className="font-semibold text-ink">{b.nameUz}</span>
+                        <span className="text-[10px] text-ink-subtle">({b.addressUz})</span>
                       </label>
                     );
                   })}
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-between items-center border-t border-slate-100">
+              <div className="pt-2 flex justify-between items-center border-t border-line">
                 {editingDoctor ? (
                   <button
                     type="button"
@@ -1467,7 +1444,7 @@ export default function AdminDoctorsManagePage() {
                   <button
                     type="button"
                     onClick={() => setIsDoctorModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                    className="px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-bold"
                   >
                     Bekor qilish
                   </button>
@@ -1489,11 +1466,11 @@ export default function AdminDoctorsManagePage() {
       {showExceptionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-base">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="font-bold text-ink text-base">
                 Ta&apos;til yoki band vaqt qo&apos;shish
               </h3>
-              <button onClick={() => setShowExceptionModal(false)} className="p-1 text-slate-400">
+              <button onClick={() => setShowExceptionModal(false)} className="p-1 text-ink-subtle">
                 ✕
               </button>
             </div>
@@ -1548,7 +1525,7 @@ export default function AdminDoctorsManagePage() {
               )}
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Sana *</label>
+                <label className="block font-semibold text-ink mb-1">Sana *</label>
                 <CustomDatePicker
                   id="admin-doctor-exception-date"
                   required
@@ -1562,34 +1539,22 @@ export default function AdminDoctorsManagePage() {
               {(exceptionType === 'BLOCKED' || exceptionType === 'OVERTIME') && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">
+                    <label className="block font-semibold text-ink mb-1">
                       Boshlanish soati {exceptionType === 'OVERTIME' && '*'}
                     </label>
-                    <input
-                      type="time"
-                      required={exceptionType === 'OVERTIME'}
-                      value={exceptionStartTime}
-                      onChange={(e) => setExceptionStartTime(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                    />
+                    <TimeSelect value={exceptionStartTime} onChange={(v) => setExceptionStartTime(v)} required />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">
+                    <label className="block font-semibold text-ink mb-1">
                       Tugash soati {exceptionType === 'OVERTIME' && '*'}
                     </label>
-                    <input
-                      type="time"
-                      required={exceptionType === 'OVERTIME'}
-                      value={exceptionEndTime}
-                      onChange={(e) => setExceptionEndTime(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                    />
+                    <TimeSelect value={exceptionEndTime} onChange={(v) => setExceptionEndTime(v)} required />
                   </div>
                 </div>
               )}
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
+                <label className="block font-semibold text-ink mb-1">
                   Sabab (ixtiyoriy)
                 </label>
                 <input
@@ -1597,15 +1562,15 @@ export default function AdminDoctorsManagePage() {
                   value={exceptionReason}
                   onChange={(e) => setExceptionReason(e.target.value)}
                   placeholder="Xizmat safari, seminar, konsilium..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200"
+                  className="w-full px-3 py-2 rounded-xl border border-line"
                 />
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+              <div className="pt-2 flex justify-end gap-2 border-t border-line">
                 <button
                   type="button"
                   onClick={() => setShowExceptionModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
+                  className="px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-semibold"
                 >
                   Bekor qilish
                 </button>
@@ -1626,28 +1591,28 @@ export default function AdminDoctorsManagePage() {
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
           <div className="relative w-full max-w-xl bg-white rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                <h3 className="font-extrabold text-ink text-base flex items-center gap-2">
                   <Layers className="w-4 h-4 text-teal-700" />
                   <span>Ommaviy haftalik ish jadvali sozlamalari</span>
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-ink-muted mt-0.5">
                   Dr. {selectedDoctorObj?.firstNameUz} {selectedDoctorObj?.lastNameUz} uchun jadval
                 </p>
               </div>
-              <button onClick={() => setIsBulkModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+              <button onClick={() => setIsBulkModalOpen(false)} className="p-1 text-ink-subtle hover:text-ink-muted">
                 ✕
               </button>
             </div>
 
             {/* Mode Tabs */}
-            <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
+            <div className="flex rounded-xl bg-canvas p-1 text-xs font-bold">
               <button
                 type="button"
                 onClick={() => setBulkTab('batch')}
                 className={`flex-1 py-1.5 rounded-lg transition-all ${
-                  bulkTab === 'batch' ? 'bg-white text-teal-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  bulkTab === 'batch' ? 'bg-white text-teal-800 shadow-sm' : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 Tanlangan kunlarga kiritish
@@ -1656,7 +1621,7 @@ export default function AdminDoctorsManagePage() {
                 type="button"
                 onClick={() => setBulkTab('copy')}
                 className={`flex-1 py-1.5 rounded-lg transition-all ${
-                  bulkTab === 'copy' ? 'bg-white text-teal-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  bulkTab === 'copy' ? 'bg-white text-teal-800 shadow-sm' : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 Boshqa shifokordan nusxalash
@@ -1682,7 +1647,7 @@ export default function AdminDoctorsManagePage() {
                 {/* Doctor Multi-Select */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="font-bold text-slate-700">
+                    <label className="font-bold text-ink">
                       Shifokorlarni tanlang * ({bulkForm.doctorIds.length} ta tanlandi)
                     </label>
                     <div className="flex items-center gap-1.5">
@@ -1695,7 +1660,7 @@ export default function AdminDoctorsManagePage() {
                             doctorIds: doctors.filter((d) => d.isActive).map((d) => d.id),
                           }));
                         }}
-                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                        className="text-[10px] px-2 py-0.5 bg-canvas hover:bg-line rounded text-ink font-semibold"
                       >
                         Barchasi
                       </button>
@@ -1705,13 +1670,13 @@ export default function AdminDoctorsManagePage() {
                           setPreviewResult(null);
                           setBulkForm((prev) => ({ ...prev, doctorIds: [] }));
                         }}
-                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                        className="text-[10px] px-2 py-0.5 bg-canvas hover:bg-line rounded text-ink font-semibold"
                       >
                         Tozalash
                       </button>
                     </div>
                   </div>
-                  <div className="max-h-28 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap gap-1.5 scrollbar-thin">
+                  <div className="max-h-28 overflow-y-auto p-2 bg-canvas border border-line rounded-xl flex flex-wrap gap-1.5 scrollbar-thin">
                     {doctors.filter((d) => d.isActive).map((doc) => {
                       const isChecked = bulkForm.doctorIds.includes(doc.id);
                       return (
@@ -1720,7 +1685,7 @@ export default function AdminDoctorsManagePage() {
                           className={`px-2.5 py-1 rounded-lg border text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
                             isChecked
                               ? 'bg-teal-700 border-teal-700 text-white shadow-xs'
-                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                              : 'bg-white border-line text-ink hover:bg-canvas'
                           }`}
                         >
                           <input
@@ -1749,7 +1714,7 @@ export default function AdminDoctorsManagePage() {
                 {/* Weekdays Multi-select */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="font-bold text-slate-700">Hafta kunlarini tanlang *</label>
+                    <label className="font-bold text-ink">Hafta kunlarini tanlang *</label>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
@@ -1760,7 +1725,7 @@ export default function AdminDoctorsManagePage() {
                             daysOfWeek: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'],
                           }));
                         }}
-                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                        className="text-[10px] px-2 py-0.5 bg-canvas hover:bg-line rounded text-ink font-semibold"
                       >
                         Du-Ju
                       </button>
@@ -1773,7 +1738,7 @@ export default function AdminDoctorsManagePage() {
                             daysOfWeek: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'],
                           }));
                         }}
-                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                        className="text-[10px] px-2 py-0.5 bg-canvas hover:bg-line rounded text-ink font-semibold"
                       >
                         Du-Sha
                       </button>
@@ -1783,7 +1748,7 @@ export default function AdminDoctorsManagePage() {
                           setPreviewResult(null);
                           setBulkForm((prev) => ({ ...prev, daysOfWeek: DAYS_OF_WEEK.map((d) => d.value) }));
                         }}
-                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                        className="text-[10px] px-2 py-0.5 bg-canvas hover:bg-line rounded text-ink font-semibold"
                       >
                         Hammasi
                       </button>
@@ -1799,7 +1764,7 @@ export default function AdminDoctorsManagePage() {
                           className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition-all ${
                             isChecked
                               ? 'border-teal-500 bg-teal-50/50 text-teal-900 font-bold'
-                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              : 'border-line bg-white text-ink-muted hover:bg-canvas'
                           }`}
                         >
                           <input
@@ -1872,70 +1837,48 @@ export default function AdminDoctorsManagePage() {
                 {/* Working Interval */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Ish boshlanishi *</label>
-                    <input
-                      type="time"
-                      required
-                      value={bulkForm.startTime}
-                      onChange={(e) => {
+                    <label className="block font-bold text-ink mb-1">Ish boshlanishi *</label>
+                    <TimeSelect value={bulkForm.startTime} onChange={(v) => {
                         setPreviewResult(null);
-                        setBulkForm({ ...bulkForm, startTime: e.target.value });
-                      }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                    />
+                        setBulkForm({ ...bulkForm, startTime: v });
+                      }} required />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Ish tugashi *</label>
-                    <input
-                      type="time"
-                      required
-                      value={bulkForm.endTime}
-                      onChange={(e) => {
+                    <label className="block font-bold text-ink mb-1">Ish tugashi *</label>
+                    <TimeSelect value={bulkForm.endTime} onChange={(v) => {
                         setPreviewResult(null);
-                        setBulkForm({ ...bulkForm, endTime: e.target.value });
-                      }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                    />
+                        setBulkForm({ ...bulkForm, endTime: v });
+                      }} required />
                   </div>
                 </div>
 
                 {/* Break Interval */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Tanaffus boshlanishi</label>
-                    <input
-                      type="time"
-                      value={bulkForm.breakStart}
-                      onChange={(e) => {
+                    <label className="block font-bold text-ink mb-1">Tanaffus boshlanishi</label>
+                    <TimeSelect value={bulkForm.breakStart} onChange={(v) => {
                         setPreviewResult(null);
-                        setBulkForm({ ...bulkForm, breakStart: e.target.value });
-                      }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                    />
+                        setBulkForm({ ...bulkForm, breakStart: v });
+                      }} />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Tanaffus tugashi</label>
-                    <input
-                      type="time"
-                      value={bulkForm.breakEnd}
-                      onChange={(e) => {
+                    <label className="block font-bold text-ink mb-1">Tanaffus tugashi</label>
+                    <TimeSelect value={bulkForm.breakEnd} onChange={(v) => {
                         setPreviewResult(null);
-                        setBulkForm({ ...bulkForm, breakEnd: e.target.value });
-                      }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200"
-                    />
+                        setBulkForm({ ...bulkForm, breakEnd: v });
+                      }} />
                   </div>
                 </div>
 
                 {/* Mode: Replace vs Merge with Simple Bilingual Explanations */}
-                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
-                  <div className="font-bold text-slate-800 text-xs">Qo&apos;llash rejimi / Режим применения:</div>
+                <div className="p-3.5 bg-canvas border border-line rounded-2xl space-y-2.5">
+                  <div className="font-bold text-ink text-xs">Qo&apos;llash rejimi / Режим применения:</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <label
                       className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
                         bulkForm.mode === 'merge'
                           ? 'border-teal-500 bg-teal-50/50 shadow-xs'
-                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                          : 'border-line bg-white hover:bg-canvas'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -1950,9 +1893,9 @@ export default function AdminDoctorsManagePage() {
                           }}
                           className="text-teal-600"
                         />
-                        <span className="font-bold text-slate-900">Birlashtirish (Merge)</span>
+                        <span className="font-bold text-ink">Birlashtirish (Merge)</span>
                       </div>
-                      <p className="text-[11px] text-slate-600 leading-tight">
+                      <p className="text-[11px] text-ink-muted leading-tight">
                         <strong>UZ:</strong> Mavjud jadvallarni saqlab, faqat jadvali yo&apos;q kunlarga yangisini qo&apos;shadi.<br />
                         <strong>RU:</strong> Сохраняет существующие дни без изменений, добавляя график только на пустые дни.
                       </p>
@@ -1962,7 +1905,7 @@ export default function AdminDoctorsManagePage() {
                       className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
                         bulkForm.mode === 'replace'
                           ? 'border-teal-500 bg-teal-50/50 shadow-xs'
-                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                          : 'border-line bg-white hover:bg-canvas'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -1977,9 +1920,9 @@ export default function AdminDoctorsManagePage() {
                           }}
                           className="text-teal-600"
                         />
-                        <span className="font-bold text-slate-900">To&apos;liq almashtirish (Replace)</span>
+                        <span className="font-bold text-ink">To&apos;liq almashtirish (Replace)</span>
                       </div>
-                      <p className="text-[11px] text-slate-600 leading-tight">
+                      <p className="text-[11px] text-ink-muted leading-tight">
                         <strong>UZ:</strong> Tanlangan filial va kunlar bo&apos;yicha eski jadvallarni yangisiga almashtiradi.<br />
                         <strong>RU:</strong> Полностью заменяет графики на выбранные дни и филиал новыми часами.
                       </p>
@@ -2034,7 +1977,7 @@ export default function AdminDoctorsManagePage() {
                         {previewResult.conflicts.map((c: any, idx: number) => (
                           <div key={idx} className="p-2 bg-white rounded-xl border border-rose-200 text-[11px] text-rose-900">
                             <div className="font-bold">{c.doctorName}: {c.patientName} ({c.patientPhone || "Tel yo'q"})</div>
-                            <div className="text-slate-600">Vaqt: {c.formattedTime} • Filial: {c.branchName}</div>
+                            <div className="text-ink-muted">Vaqt: {c.formattedTime} • Filial: {c.branchName}</div>
                             <div className="text-rose-700 font-semibold">Sabab: {c.reason}</div>
                           </div>
                         ))}
@@ -2043,12 +1986,12 @@ export default function AdminDoctorsManagePage() {
                   </div>
                 )}
 
-                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-100">
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-line">
                   <button
                     type="button"
                     onClick={handlePreviewBulkSchedule}
                     disabled={isPreviewing || bulkForm.daysOfWeek.length === 0}
-                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center justify-center gap-1.5 transition-all"
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-canvas hover:bg-line text-ink font-bold flex items-center justify-center gap-1.5 transition-all"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isPreviewing ? 'animate-spin' : ''}`} />
                     <span>{isPreviewing ? 'Tekshirilmoqda...' : 'Ko\'rib chiqish (Preview)'}</span>
@@ -2058,7 +2001,7 @@ export default function AdminDoctorsManagePage() {
                     <button
                       type="button"
                       onClick={() => setIsBulkModalOpen(false)}
-                      className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                      className="px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-bold"
                     >
                       Bekor qilish
                     </button>
@@ -2099,7 +2042,7 @@ export default function AdminDoctorsManagePage() {
                 {/* Target Doctors Multi-select */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="font-bold text-slate-700">
+                    <label className="font-bold text-ink">
                       Maqsadli shifokorlar ({copyForm.toDoctorIds.length} ta tanlandi) *
                     </label>
                     <div className="flex items-center gap-1.5">
@@ -2114,7 +2057,7 @@ export default function AdminDoctorsManagePage() {
                               .map((d) => d.id),
                           }));
                         }}
-                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                        className="text-[10px] px-2 py-0.5 bg-canvas hover:bg-line rounded text-ink font-semibold"
                       >
                         Barchasi
                       </button>
@@ -2124,13 +2067,13 @@ export default function AdminDoctorsManagePage() {
                           setPreviewResult(null);
                           setCopyForm((prev) => ({ ...prev, toDoctorIds: [] }));
                         }}
-                        className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-semibold"
+                        className="text-[10px] px-2 py-0.5 bg-canvas hover:bg-line rounded text-ink font-semibold"
                       >
                         Tozalash
                       </button>
                     </div>
                   </div>
-                  <div className="max-h-28 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap gap-1.5 scrollbar-thin">
+                  <div className="max-h-28 overflow-y-auto p-2 bg-canvas border border-line rounded-xl flex flex-wrap gap-1.5 scrollbar-thin">
                     {doctors
                       .filter((d) => d.isActive && d.id !== copyForm.fromDoctorId)
                       .map((doc) => {
@@ -2141,7 +2084,7 @@ export default function AdminDoctorsManagePage() {
                             className={`px-2.5 py-1 rounded-lg border text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
                               isChecked
                                 ? 'bg-teal-700 border-teal-700 text-white shadow-xs'
-                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                                : 'bg-white border-line text-ink hover:bg-canvas'
                             }`}
                           >
                             <input
@@ -2188,14 +2131,14 @@ export default function AdminDoctorsManagePage() {
                 </div>
 
                 {/* Copy Mode */}
-                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
-                  <div className="font-bold text-slate-800 text-xs">Nusxalash rejimi / Режим копирования:</div>
+                <div className="p-3.5 bg-canvas border border-line rounded-2xl space-y-2.5">
+                  <div className="font-bold text-ink text-xs">Nusxalash rejimi / Режим копирования:</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <label
                       className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
                         copyForm.mode === 'merge'
                           ? 'border-teal-500 bg-teal-50/50 shadow-xs'
-                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                          : 'border-line bg-white hover:bg-canvas'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -2210,9 +2153,9 @@ export default function AdminDoctorsManagePage() {
                           }}
                           className="text-teal-600"
                         />
-                        <span className="font-bold text-slate-900">Birlashtirish (Merge)</span>
+                        <span className="font-bold text-ink">Birlashtirish (Merge)</span>
                       </div>
-                      <p className="text-[11px] text-slate-600 leading-tight">
+                      <p className="text-[11px] text-ink-muted leading-tight">
                         <strong>UZ:</strong> Mavjud jadvallarni saqlaydi, faqat bo&apos;sh kunlarga qo&apos;shadi.<br />
                         <strong>RU:</strong> Сохраняет существующие графики, добавляя только на свободные дни.
                       </p>
@@ -2222,7 +2165,7 @@ export default function AdminDoctorsManagePage() {
                       className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
                         copyForm.mode === 'replace'
                           ? 'border-teal-500 bg-teal-50/50 shadow-xs'
-                          : 'border-slate-200 bg-white hover:bg-slate-100'
+                          : 'border-line bg-white hover:bg-canvas'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
@@ -2237,9 +2180,9 @@ export default function AdminDoctorsManagePage() {
                           }}
                           className="text-teal-600"
                         />
-                        <span className="font-bold text-slate-900">Almashtirish (Replace)</span>
+                        <span className="font-bold text-ink">Almashtirish (Replace)</span>
                       </div>
-                      <p className="text-[11px] text-slate-600 leading-tight">
+                      <p className="text-[11px] text-ink-muted leading-tight">
                         <strong>UZ:</strong> Nusxalanayotgan kunlar va filial bo&apos;yicha eski jadvallarni almashtiradi.<br />
                         <strong>RU:</strong> Заменяет графики на целевых днях и филиалах новыми.
                       </p>
@@ -2291,7 +2234,7 @@ export default function AdminDoctorsManagePage() {
                         {previewResult.conflicts.map((c: any, idx: number) => (
                           <div key={idx} className="p-2 bg-white rounded-xl border border-rose-200 text-[11px] text-rose-900">
                             <div className="font-bold">{c.doctorName}: {c.patientName} ({c.patientPhone || "Tel yo'q"})</div>
-                            <div className="text-slate-600">Vaqt: {c.formattedTime} • Filial: {c.branchName}</div>
+                            <div className="text-ink-muted">Vaqt: {c.formattedTime} • Filial: {c.branchName}</div>
                             <div className="text-rose-700 font-semibold">Sabab: {c.reason}</div>
                           </div>
                         ))}
@@ -2300,12 +2243,12 @@ export default function AdminDoctorsManagePage() {
                   </div>
                 )}
 
-                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-100">
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-line">
                   <button
                     type="button"
                     onClick={handlePreviewCopySchedule}
                     disabled={isPreviewing || !copyForm.fromDoctorId}
-                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center justify-center gap-1.5 transition-all"
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-canvas hover:bg-line text-ink font-bold flex items-center justify-center gap-1.5 transition-all"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isPreviewing ? 'animate-spin' : ''}`} />
                     <span>{isPreviewing ? 'Tekshirilmoqda...' : 'Ko\'rib chiqish (Preview)'}</span>
@@ -2315,7 +2258,7 @@ export default function AdminDoctorsManagePage() {
                     <button
                       type="button"
                       onClick={() => setIsBulkModalOpen(false)}
-                      className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                      className="px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-bold"
                     >
                       Bekor qilish
                     </button>
@@ -2359,7 +2302,7 @@ export default function AdminDoctorsManagePage() {
       >
         <div className="space-y-4 text-xs">
           {isLoadingDoctorPreview ? (
-            <div className="p-8 text-center text-slate-500 space-y-2">
+            <div className="p-8 text-center text-ink-muted space-y-2">
               <RefreshCw className="w-5 h-5 animate-spin mx-auto text-teal-600" />
               <p>{isRu ? 'Проверка клинической истории и связей...' : 'Klinik tarix va bog\'liqliklar tekshirilmoqda...'}</p>
             </div>
@@ -2388,11 +2331,11 @@ export default function AdminDoctorsManagePage() {
               )}
 
               {deletingDoctor && (
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                  <h3 className="font-extrabold text-sm text-slate-900">
+                <div className="p-3 bg-canvas rounded-xl border border-line">
+                  <h3 className="font-extrabold text-sm text-ink">
                     Dr. {deletingDoctor.firstNameUz} {deletingDoctor.lastNameUz}
                   </h3>
-                  <p className="text-slate-500 text-[11px] mt-0.5">
+                  <p className="text-ink-muted text-[11px] mt-0.5">
                     {deletingDoctor.titleUz || deletingDoctor.titleRu || 'Stomatolog'}
                   </p>
                 </div>
@@ -2425,27 +2368,27 @@ export default function AdminDoctorsManagePage() {
 
                   {/* Impact Statistics Grid with robust fallbacks */}
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
-                      <strong className={`text-sm ${(doctorPreview.activeTreatmentsCount ?? doctorPreview.activeTreatmentCount ?? 0) > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+                    <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                      <span className="text-ink-muted block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
+                      <strong className={`text-sm ${(doctorPreview.activeTreatmentsCount ?? doctorPreview.activeTreatmentCount ?? 0) > 0 ? 'text-rose-600' : 'text-ink'}`}>
                         {doctorPreview.activeTreatmentsCount ?? doctorPreview.activeTreatmentCount ?? 0} ta
                       </strong>
                     </div>
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
-                      <strong className={`text-sm ${(doctorPreview.futureAppointmentsCount ?? doctorPreview.futureAppointmentCount ?? 0) > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
+                    <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                      <span className="text-ink-muted block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
+                      <strong className={`text-sm ${(doctorPreview.futureAppointmentsCount ?? doctorPreview.futureAppointmentCount ?? 0) > 0 ? 'text-amber-600' : 'text-ink'}`}>
                         {doctorPreview.futureAppointmentsCount ?? doctorPreview.futureAppointmentCount ?? 0} ta
                       </strong>
                     </div>
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
-                      <strong className="text-sm text-slate-800">
+                    <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                      <span className="text-ink-muted block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
+                      <strong className="text-sm text-ink">
                         {doctorPreview.historicalAppointmentsCount ?? doctorPreview.historicalAppointmentCount ?? 0} ta
                       </strong>
                     </div>
-                    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-slate-500 block">{isRu ? 'Записи расписания:' : 'Ish jadvallari:'}</span>
-                      <strong className="text-sm text-slate-800">
+                    <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                      <span className="text-ink-muted block">{isRu ? 'Записи расписания:' : 'Ish jadvallari:'}</span>
+                      <strong className="text-sm text-ink">
                         {doctorPreview.scheduleRecordsCount ?? 0} ta
                       </strong>
                     </div>
@@ -2460,8 +2403,8 @@ export default function AdminDoctorsManagePage() {
                       <div className="max-h-28 overflow-y-auto space-y-1">
                         {doctorPreview.activeTreatments.map((t: any) => (
                           <div key={t.id} className="p-1.5 bg-white rounded border border-rose-100 text-[10px]">
-                            <div className="font-bold text-slate-800">{t.patientName} ({t.chairName})</div>
-                            <div className="text-slate-500">{t.treatmentType} • {new Date(t.startedAt).toLocaleTimeString('uz-UZ')} dan buyon</div>
+                            <div className="font-bold text-ink">{t.patientName} ({t.chairName})</div>
+                            <div className="text-ink-muted">{t.treatmentType} • {new Date(t.startedAt).toLocaleTimeString('uz-UZ')} dan buyon</div>
                           </div>
                         ))}
                       </div>
@@ -2478,8 +2421,8 @@ export default function AdminDoctorsManagePage() {
                         {doctorPreview.futureAppointments.map((app: any) => (
                           <div key={app.id} className="p-1.5 bg-white rounded border border-amber-100 flex items-center justify-between text-[10px]">
                             <div>
-                              <div className="font-bold text-slate-800">{app.patientName}</div>
-                              <div className="text-slate-500">
+                              <div className="font-bold text-ink">{app.patientName}</div>
+                              <div className="text-ink-muted">
                                 {new Date(app.startTime).toLocaleString('uz-UZ')} {app.serviceName ? `• ${app.serviceName}` : ''}
                               </div>
                             </div>
@@ -2505,7 +2448,7 @@ export default function AdminDoctorsManagePage() {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
                     <button
                       type="button"
                       disabled={isDeletingDoctor}
@@ -2513,7 +2456,7 @@ export default function AdminDoctorsManagePage() {
                         setDeletingDoctor(null);
                         setDoctorPreview(null);
                       }}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
+                      className="px-4 py-2 bg-canvas hover:bg-line text-ink rounded-xl font-bold"
                     >
                       {isRu ? 'Отмена' : 'Bekor qilish'}
                     </button>
@@ -2561,17 +2504,17 @@ export default function AdminDoctorsManagePage() {
         size="sm"
       >
         <div className="space-y-4 text-xs">
-          <p className="text-slate-600">
+          <p className="text-ink-muted">
             {isRu
               ? 'Вы уверены, что хотите удалить эту запись графика/исключения?'
               : 'Haqiqatan ham ushbu ta\'til/istisno yozuvini o\'chirmoqchimisiz?'}
           </p>
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
             <button
               type="button"
               disabled={isDeletingException}
               onClick={() => setDeletingExceptionId(null)}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold"
+              className="px-4 py-2 bg-canvas hover:bg-line text-ink rounded-xl font-bold"
             >
               {isRu ? 'Отмена' : 'Bekor qilish'}
             </button>

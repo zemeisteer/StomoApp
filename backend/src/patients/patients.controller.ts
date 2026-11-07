@@ -89,7 +89,7 @@ export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
 
   @Get()
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   findAll(@Query() query: ListPatientsQueryDto, @CurrentUser() user: JwtPayload) {
     return this.patientsService.findAll(query, user);
   }
@@ -116,13 +116,13 @@ export class PatientsController {
   }
 
   @Get(':id')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   findById(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.patientsService.findById(id, user);
   }
 
   @Put(':id')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   update(@Param('id') id: string, @Body() dto: UpdatePatientDto) {
     return this.patientsService.update(id, dto);
   }

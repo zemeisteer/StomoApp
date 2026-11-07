@@ -492,7 +492,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
             <div>
               <div className="flex justify-between items-center text-[11px] font-bold text-ink-muted mb-2 px-2">
                 <span>{isUz ? "Yuqori jag' (Maxillary) • O'ng" : 'Верхняя челюсть • Справа'}</span>
-                <span className="text-[10px] bg-slate-200/70 text-slate-700 px-2 py-0.5 rounded-full uppercase">
+                <span className="text-[10px] bg-line/70 text-ink px-2 py-0.5 rounded-full uppercase">
                   {chartType}
                 </span>
                 <span>{isUz ? 'Chap' : 'Слева'}</span>
@@ -597,7 +597,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                   className={`p-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 border transition-all ${
                     isCurrent
                       ? 'ring-2 ring-slate-900 border-transparent shadow-sm scale-102'
-                      : 'bg-white hover:bg-slate-50 border-slate-200 text-ink'
+                      : 'bg-white hover:bg-canvas border-line text-ink'
                   }`}
                   style={{
                     backgroundColor: isCurrent ? meta.hexColor : undefined,
@@ -629,7 +629,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 className={`absolute top-0 left-6 right-6 h-8 rounded-t-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('V')
                     ? 'bg-brand-600 text-white border-brand-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                    : 'bg-white hover:bg-canvas text-ink border-line-strong'
                 }`}
                 title={isUz ? 'Vestibulyar (Daxliz) sirt' : 'Вестибулярная поверхность'}
               >
@@ -643,7 +643,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 className={`absolute top-6 bottom-6 left-0 w-8 rounded-l-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('M')
                     ? 'bg-brand-600 text-white border-brand-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                    : 'bg-white hover:bg-canvas text-ink border-line-strong'
                 }`}
                 title={isUz ? 'Mezial (Oldingi) sirt' : 'Медиальная поверхность'}
               >
@@ -657,7 +657,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 className={`absolute top-8 bottom-8 left-8 right-8 rounded-lg text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('O')
                     ? 'bg-brand-600 text-white border-brand-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                    : 'bg-white hover:bg-canvas text-ink border-line-strong'
                 }`}
                 title={isUz ? 'Okluzal (Chaynash) sirt' : 'Окклюзионная поверхность'}
               >
@@ -671,7 +671,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 className={`absolute top-6 bottom-6 right-0 w-8 rounded-r-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('D')
                     ? 'bg-brand-600 text-white border-brand-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                    : 'bg-white hover:bg-canvas text-ink border-line-strong'
                 }`}
                 title={isUz ? 'Distal (Orqa) sirt' : 'Дистальная поверхность'}
               >
@@ -685,7 +685,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 className={`absolute bottom-0 left-6 right-6 h-8 rounded-b-xl text-[10px] font-bold border transition-colors ${
                   currentRecord.surfaces.includes('L')
                     ? 'bg-brand-600 text-white border-brand-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                    : 'bg-white hover:bg-canvas text-ink border-line-strong'
                 }`}
                 title={isUz ? 'Lingval (Til tomoni) sirt' : 'Язычная поверхность'}
               >
@@ -716,7 +716,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
               }
               value={currentRecord.note || ''}
               onChange={(e) => handleUpdateNote(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:border-brand-600 focus:ring-1 focus:ring-brand-600 bg-white text-ink"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-line focus:border-brand-600 focus:ring-1 focus:ring-brand-600 bg-white text-ink"
             />
             {/* Quick Note Presets */}
             <div className="flex flex-wrap gap-1.5 pt-1">
@@ -734,7 +734,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                       currentRecord.note ? `${currentRecord.note}, ${chip}` : chip
                     )
                   }
-                  className="px-2 py-0.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-medium text-slate-700"
+                  className="px-2 py-0.5 rounded-lg bg-white hover:bg-canvas border border-line text-[10px] font-medium text-ink"
                 >
                   + {chip}
                 </button>
@@ -817,7 +817,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                 ? "Bemor tishlarida muolaja talab holatlar belgilanmagan (Barcha tishlar sog'lom)."
                 : 'В зубной карте нет назначенных процедур (Все зубы здоровы).'}
             </p>
-            <p className="text-[11px] mt-1 text-slate-400">
+            <p className="text-[11px] mt-1 text-ink-subtle">
               {isUz
                 ? 'Yuqoridagi tish xaritasidan tishni tanlab karies, plomba, kanal yoki koronka belgilang.'
                 : 'Выберите зуб на карте сверху, чтобы назначить лечение.'}
@@ -836,7 +836,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                   className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-brand-100/70 border-brand-600 ring-1 ring-brand-600/30 shadow-xs'
-                      : 'bg-white hover:bg-slate-50 border-slate-200'
+                      : 'bg-white hover:bg-canvas border-line'
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -871,7 +871,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                         value={item.costUzs}
                         onChange={(e) => handleUpdateCost(item.toothNum, Number(e.target.value))}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-24 text-right px-2 py-1 text-xs font-bold rounded-lg border border-slate-200 focus:border-brand-600 bg-white text-ink"
+                        className="w-24 text-right px-2 py-1 text-xs font-bold rounded-lg border border-line focus:border-brand-600 bg-white text-ink"
                       />
                       <span className="text-[10px] text-ink-muted font-semibold">{isUz ? "so'm" : 'сум'}</span>
                     </div>
@@ -906,7 +906,7 @@ export const InteractiveOdontogram: React.FC<InteractiveOdontogramProps> = ({
                         e.stopPropagation();
                         handleSetCondition('HEALTHY');
                       }}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
+                      className="p-1.5 text-ink-subtle hover:text-rose-600 rounded-lg transition-colors"
                       title={isUz ? "Rejadan o'chirish" : 'Удалить из плана'}
                     >
                       <Trash2 className="w-4 h-4" />

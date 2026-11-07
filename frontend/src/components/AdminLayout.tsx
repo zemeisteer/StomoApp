@@ -141,19 +141,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       href: '/admin',
       label: t.admin.dashboard,
       icon: LayoutDashboard,
-      roles: ['OWNER', 'ADMIN', 'DOCTOR'],
+      roles: ['OWNER', 'ADMIN', 'DOCTOR', 'RECEPTION'],
     },
     {
       href: '/admin/calendar',
       label: t.admin.calendar,
       icon: Calendar,
-      roles: ['OWNER', 'ADMIN', 'DOCTOR'],
+      roles: ['OWNER', 'ADMIN', 'DOCTOR', 'RECEPTION'],
     },
     {
       href: '/admin/patients',
       label: t.admin.patients,
       icon: Users,
-      roles: ['OWNER', 'ADMIN', 'DOCTOR'],
+      roles: ['OWNER', 'ADMIN', 'DOCTOR', 'RECEPTION'],
     },
     {
       href: '/admin/cashier',
@@ -183,7 +183,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       href: '/admin/leads',
       label: t.admin.leads,
       icon: PhoneCall,
-      roles: ['OWNER', 'ADMIN'],
+      roles: ['OWNER', 'ADMIN', 'RECEPTION'],
     },
     {
       href: '/admin/doctors',
@@ -257,7 +257,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const NAV_GROUPS: Array<{ key: string; label: string; hrefs: string[] }> = [
     { key: 'work', label: isRu ? 'Работа' : 'Ish', hrefs: ['/admin', '/admin/calendar', '/admin/patients', '/admin/cashier', '/admin/recall', '/admin/leads'] },
     { key: 'clinic', label: isRu ? 'Клиника' : 'Klinika', hrefs: ['/admin/doctors', '/admin/services', '/admin/inventory', '/admin/reviews', '/admin/cms'] },
-    { key: 'manage', label: isRu ? 'Управление' : 'Boshqaruv', hrefs: ['/admin/analytics', '/admin/payroll', '/admin/audit', '/admin/notifications', '/admin/staff', '/admin/settings'] },
+    { key: 'manage', label: isRu ? 'Управление' : 'Boshqaruv', hrefs: ['/admin/payroll', '/admin/audit', '/admin/notifications', '/admin/staff', '/admin/settings'] },
   ];
   const groupedNav = NAV_GROUPS.map((g) => ({
     ...g,

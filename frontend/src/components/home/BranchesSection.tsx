@@ -50,12 +50,12 @@ export const BranchesSection: React.FC<BranchesSectionProps> = ({
             >
               <div className="flex justify-between items-center mb-2">
                 <div className="w-12 h-12 rounded-2xl bg-brand-50" />
-                <div className="h-4 w-20 bg-slate-100 rounded" />
+                <div className="h-4 w-20 bg-canvas rounded" />
               </div>
-              <div className="h-7 w-3/5 bg-slate-100 rounded" />
-              <div className="h-4 w-4/5 bg-slate-100 rounded mb-4" />
+              <div className="h-7 w-3/5 bg-canvas rounded" />
+              <div className="h-4 w-4/5 bg-canvas rounded mb-4" />
               <div className="h-20 w-full bg-canvas rounded-2xl border border-line" />
-              <div className="h-12 w-full bg-slate-100 rounded-2xl pt-2" />
+              <div className="h-12 w-full bg-canvas rounded-2xl pt-2" />
             </div>
           ))}
         </div>

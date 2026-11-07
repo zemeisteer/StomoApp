@@ -298,14 +298,14 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
       ref={popoverRef}
       data-custom-select-popover="true"
       style={popoverStyle}
-      className="bg-white rounded-2xl shadow-2xl border border-slate-200 py-1.5 overflow-hidden animate-fade-in"
+      className="bg-white rounded-2xl shadow-2xl border border-line py-1.5 overflow-hidden animate-fade-in"
       onKeyDown={handleKeyDown}
     >
       {/* Optional Search */}
       {isSearchable && (
-        <div className="p-2 border-b border-slate-100">
+        <div className="p-2 border-b border-line">
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-ink-subtle absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               ref={searchInputRef}
               type="text"
@@ -313,7 +313,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={searchPlaceholderText}
               aria-label={searchPlaceholderText}
-              className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:bg-white"
+              className="w-full pl-8 pr-3 py-1.5 bg-canvas border border-line rounded-lg text-xs text-ink focus:outline-none focus:border-teal-600 focus:bg-white"
             />
           </div>
         </div>
@@ -328,7 +328,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         aria-activedescendant={activeOptionId}
         aria-labelledby={label ? labelId : selectId}
         style={{ maxHeight: `${maxListHeight}px` }}
-        className="overflow-y-auto py-1 divide-y divide-slate-50 scrollbar-thin"
+        className="overflow-y-auto py-1 divide-y divide-line scrollbar-thin"
       >
         {filteredOptions.length > 0 ? (
           filteredOptions.map((opt, index) => {
@@ -347,12 +347,12 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                 onMouseEnter={() => !opt.disabled && setHighlightedIndex(index)}
                 className={`min-h-[40px] px-3.5 py-2 text-xs flex items-center justify-between gap-2 cursor-pointer transition-colors ${
                   opt.disabled
-                    ? 'opacity-40 cursor-not-allowed bg-slate-50 text-slate-400'
+                    ? 'opacity-40 cursor-not-allowed bg-canvas text-ink-subtle'
                     : isSelected
                     ? 'bg-teal-50 font-bold text-teal-900'
                     : isHighlighted
-                    ? 'bg-slate-100 text-slate-900'
-                    : 'text-slate-700 hover:bg-slate-50'
+                    ? 'bg-canvas text-ink'
+                    : 'text-ink hover:bg-canvas'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
@@ -361,7 +361,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   {opt.badge && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-canvas text-ink-muted">
                       {opt.badge}
                     </span>
                   )}
@@ -371,7 +371,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
             );
           })
         ) : (
-          <li className="p-4 text-center text-xs text-slate-400">
+          <li className="p-4 text-center text-xs text-ink-subtle">
             {noResultsText}
           </li>
         )}
@@ -385,7 +385,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         <label
           id={labelId}
           htmlFor={selectId}
-          className="text-xs font-semibold text-slate-700 mb-1.5 block cursor-pointer"
+          className="text-xs font-semibold text-ink mb-1.5 block cursor-pointer"
         >
           {label}
         </label>
@@ -406,26 +406,26 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         onKeyDown={handleKeyDown}
         className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border text-sm text-left flex items-center justify-between gap-2.5 transition-all outline-none ${
           disabled
-            ? 'bg-slate-100/80 text-slate-400 border-slate-200 cursor-not-allowed'
+            ? 'bg-canvas/80 text-ink-subtle border-line cursor-not-allowed'
             : error
-            ? 'bg-red-50/40 border-red-300 text-slate-900 focus-visible:ring-2 focus-visible:ring-red-500'
+            ? 'bg-red-50/40 border-red-300 text-ink focus-visible:ring-2 focus-visible:ring-red-500'
             : isOpen
             ? 'bg-white border-teal-600 ring-2 ring-teal-600/20 shadow-sm'
-            : 'bg-white border-slate-200 hover:border-slate-300 text-slate-900 shadow-sm focus-visible:ring-2 focus-visible:ring-teal-700'
+            : 'bg-white border-line hover:border-line-strong text-ink shadow-sm focus-visible:ring-2 focus-visible:ring-teal-700'
         }`}
       >
         <div className="flex items-center gap-2 truncate">
           {loading ? (
-            <span className="flex items-center gap-2 text-slate-400">
+            <span className="flex items-center gap-2 text-ink-subtle">
               <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
               <span>{loadingText}</span>
             </span>
           ) : selectedOption ? (
-            <span className="font-medium text-slate-900 truncate">
+            <span className="font-medium text-ink truncate">
               {selectedOption.label}
             </span>
           ) : (
-            <span className="text-slate-400 truncate">{placeholder}</span>
+            <span className="text-ink-subtle truncate">{placeholder}</span>
           )}
         </div>
 
@@ -437,7 +437,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
           )}
           <ChevronDown
             className={`w-4 h-4 transition-transform duration-200 ${
-              disabled ? 'text-slate-300' : 'text-slate-400'
+              disabled ? 'text-ink-subtle' : 'text-ink-subtle'
             } ${isOpen ? 'rotate-180 text-teal-700' : ''}`}
           />
         </div>

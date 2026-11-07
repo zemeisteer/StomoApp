@@ -65,7 +65,7 @@ export default function AdminLeadsPage() {
     NEW: 'bg-amber-100 text-amber-900 border-amber-300',
     CONTACTED: 'bg-blue-100 text-blue-900 border-blue-300',
     BOOKED: 'bg-emerald-100 text-emerald-900 border-emerald-300',
-    CLOSED: 'bg-slate-100 text-slate-700 border-slate-300',
+    CLOSED: 'bg-canvas text-ink border-line-strong',
   };
 
   const statusLabels: Record<string, string> = {
@@ -76,14 +76,14 @@ export default function AdminLeadsPage() {
   };
 
   return (
-    <AdminLayout allowedRoles={['OWNER', 'ADMIN']}>
+    <AdminLayout allowedRoles={['OWNER', 'ADMIN', 'RECEPTION']}>
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
+            <h1 className="text-2xl font-extrabold text-ink">
               Qayta qo&apos;ng&apos;iroq murojaatlari
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               Saytdan yuborilgan murojaatlar monitoringi va aloqa holatini boshqarish
             </p>
           </div>
@@ -91,7 +91,7 @@ export default function AdminLeadsPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={loadLeads}
-              className="p-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 shadow-sm"
+              className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm"
               title="Yangilash"
             >
               <RefreshCw className="w-4 h-4" />
@@ -100,15 +100,15 @@ export default function AdminLeadsPage() {
         </div>
 
         {/* Filter & Search Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="bg-white p-4 rounded-2xl border border-line shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3.5 top-3 w-4 h-4 text-ink-subtle" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Mijoz ismi yoki telefon raqami bo'yicha qidirish..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-line text-xs focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
             />
           </div>
 
@@ -129,17 +129,17 @@ export default function AdminLeadsPage() {
         </div>
 
         {/* Leads Table */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-3xl border border-line shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="p-16 text-center text-slate-400 text-sm">Yuklanmoqda...</div>
+            <div className="p-16 text-center text-ink-subtle text-sm">Yuklanmoqda...</div>
           ) : leads.length === 0 ? (
-            <div className="p-16 text-center text-slate-500 text-sm bg-slate-50">
+            <div className="p-16 text-center text-ink-muted text-sm bg-canvas">
               Murojaatlar topilmadi.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                <thead className="bg-canvas border-b border-line text-ink-subtle font-bold uppercase tracking-wider">
                   <tr>
                     <th className="py-3.5 px-6">Mijoz</th>
                     <th className="py-3.5 px-6">Telefon</th>
@@ -150,29 +150,29 @@ export default function AdminLeadsPage() {
                     <th className="py-3.5 px-6 text-right">Amallar</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-line">
                   {leads.map((lead) => (
                     <tr key={lead.id} className="hover:bg-teal-50/30 transition-colors">
-                      <td className="py-4 px-6 font-bold text-slate-900">
+                      <td className="py-4 px-6 font-bold text-ink">
                         {lead.fullName}
                       </td>
                       <td className="py-4 px-6 text-teal-800 font-semibold font-mono">
                         {lead.phone}
                       </td>
-                      <td className="py-4 px-6 text-slate-600">
-                        <div className="font-medium text-slate-800">
+                      <td className="py-4 px-6 text-ink-muted">
+                        <div className="font-medium text-ink">
                           {lead.preferredBranch || 'Ixtiyoriy filial'}
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
+                        <div className="text-[11px] text-ink-subtle mt-0.5">
                           {lead.preferredTime || 'Tez orada'}
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-slate-600 max-w-xs">
-                        <p className="line-clamp-2 italic text-slate-700">
+                      <td className="py-4 px-6 text-ink-muted max-w-xs">
+                        <p className="line-clamp-2 italic text-ink">
                           &quot;{lead.notes || lead.message || 'Izoh qoldirilmagan'}&quot;
                         </p>
                         {lead.internalNotes && (
-                          <div className="mt-1 p-1.5 bg-slate-100 rounded-lg text-[10px] text-slate-700 border border-slate-200">
+                          <div className="mt-1 p-1.5 bg-canvas rounded-lg text-[10px] text-ink border border-line">
                             <strong>Qayd:</strong> {lead.internalNotes}
                           </div>
                         )}
@@ -180,13 +180,13 @@ export default function AdminLeadsPage() {
                       <td className="py-4 px-6">
                         <span
                           className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                            statusColors[lead.status] || 'bg-slate-100 text-slate-700'
+                            statusColors[lead.status] || 'bg-canvas text-ink'
                           }`}
                         >
                           {statusLabels[lead.status] || lead.status}
                         </span>
                       </td>
-                      <td className="py-4 px-6 text-slate-400 text-[11px]">
+                      <td className="py-4 px-6 text-ink-subtle text-[11px]">
                         {new Date(lead.createdAt).toLocaleString('uz-UZ', {
                           timeZone: 'Asia/Tashkent',
                         })}
@@ -200,7 +200,7 @@ export default function AdminLeadsPage() {
                               setNoteText(lead.internalNotes || '');
                               setNoteStatus(lead.status);
                             }}
-                            className="p-1.5 text-slate-500 hover:text-teal-700 hover:bg-slate-100 rounded-lg transition-colors"
+                            className="p-1.5 text-ink-muted hover:text-teal-700 hover:bg-canvas rounded-lg transition-colors"
                             title="Tahrirlash va izoh"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
@@ -222,7 +222,7 @@ export default function AdminLeadsPage() {
                               type="button"
                               disabled={updatingId === lead.id}
                               onClick={() => handleUpdateStatus(lead.id, 'CLOSED')}
-                              className="px-2.5 py-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg text-[11px]"
+                              className="px-2.5 py-1 text-ink-subtle hover:text-ink hover:bg-canvas rounded-lg text-[11px]"
                             >
                               Yopish
                             </button>
@@ -241,10 +241,10 @@ export default function AdminLeadsPage() {
         {selectedLead && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
-              <h3 className="text-base font-bold text-slate-900">
+              <h3 className="text-base font-bold text-ink">
                 Murojaat holati va xodim qaydi: {selectedLead.fullName}
               </h3>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-ink-muted">
                 Telefon: <span className="font-semibold text-teal-700">{selectedLead.phone}</span>
               </p>
 
@@ -263,7 +263,7 @@ export default function AdminLeadsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-ink mb-1">
                   Ichki xodim qaydlari
                 </label>
                 <textarea
@@ -271,7 +271,7 @@ export default function AdminLeadsPage() {
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
                   placeholder="Mijoz bilan suhbat natijasi yoki istaklar..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 outline-none"
+                  className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600 outline-none"
                 />
               </div>
 
@@ -279,7 +279,7 @@ export default function AdminLeadsPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedLead(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-ink-muted hover:bg-canvas rounded-xl"
                 >
                   Bekor qilish
                 </button>

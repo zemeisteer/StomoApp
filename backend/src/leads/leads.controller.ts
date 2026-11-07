@@ -142,28 +142,28 @@ export class LeadsController {
 
   @Get('admin/leads/stats')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   async getStats() {
     return this.leadsService.getStats();
   }
 
   @Get('admin/leads')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   async findAll(@Query() query: ListLeadsDto) {
     return this.leadsService.findAll(query);
   }
 
   @Get('admin/leads/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   async findById(@Param('id') id: string) {
     return this.leadsService.findById(id);
   }
 
   @Post('admin/leads')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   async createFromAdmin(@Body() dto: CreatePublicLeadDto) {
     return this.leadsService.create({
       ...dto,
@@ -173,7 +173,7 @@ export class LeadsController {
 
   @Patch('admin/leads/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   async update(@Param('id') id: string, @Body() dto: UpdateLeadDto) {
     return this.leadsService.update(id, dto);
   }

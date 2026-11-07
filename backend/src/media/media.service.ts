@@ -237,8 +237,9 @@ export class MediaService {
       fs.writeFileSync(localFilePath, processed.buffer);
       localWrittenPath = localFilePath;
 
-      const appUrl = this.configService.get<string>('APP_URL', 'http://localhost:4000');
-      fileUrl = `${appUrl}/api/admin/media/file/${safeFileName}`;
+      // Same-origin relative URL: the site and the API share a domain behind nginx (and the
+      // Next.js /api rewrite in dev), so images load without cross-origin blocking.
+      fileUrl = `/api/admin/media/file/${safeFileName}`;
     }
 
     // Atomic DB record creation with cleanup on failure

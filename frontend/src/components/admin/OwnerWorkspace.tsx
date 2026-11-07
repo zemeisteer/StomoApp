@@ -443,7 +443,7 @@ export function OwnerWorkspace({
                           <button
                             type="button"
                             onClick={() => handleDeductInventory(item.id, 1)}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition-colors cursor-pointer"
+                            className="px-2.5 py-1.5 bg-canvas hover:bg-line text-ink rounded-xl text-xs font-bold border border-line-strong transition-colors cursor-pointer"
                             title={isUz ? "1 ta sarflash" : 'Списать 1'}
                           >
                             -1
@@ -563,7 +563,7 @@ export function OwnerWorkspace({
                           <span className="font-bold text-xs text-emerald-700 block">
                             +{pay.amount.toLocaleString()} so&apos;m
                           </span>
-                          <span className="text-[10px] text-slate-500">{pay.note || (isUz ? 'Qabul' : 'Прием')}</span>
+                          <span className="text-[10px] text-ink-muted">{pay.note || (isUz ? 'Qabul' : 'Прием')}</span>
                         </div>
                         <button
                           type="button"
@@ -575,7 +575,7 @@ export function OwnerWorkspace({
                             invoiceId: pay.invoiceId,
                             note: pay.note,
                           })}
-                          className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-100 rounded-lg transition-colors cursor-pointer"
+                          className="p-1.5 text-ink-subtle hover:text-brand-600 hover:bg-brand-100 rounded-lg transition-colors cursor-pointer"
                           title={isUz ? 'Kvitansiyani chop etish' : 'Печать квитанции'}
                         >
                           <Printer className="w-3.5 h-3.5" />
@@ -609,7 +609,7 @@ export function OwnerWorkspace({
               <button
                 type="button"
                 onClick={() => setDebtModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+                className="text-ink-subtle hover:text-ink-muted text-sm font-bold"
               >
                 ✕
               </button>
@@ -676,7 +676,7 @@ export function OwnerWorkspace({
                       className={`p-2 rounded-xl border font-bold text-center transition-all ${
                         debtMethod === method
                           ? 'bg-brand-600 text-white border-brand-700'
-                          : 'bg-canvas text-ink-muted border-line hover:bg-slate-100'
+                          : 'bg-canvas text-ink-muted border-line hover:bg-canvas'
                       }`}
                     >
                       {method}
@@ -702,7 +702,7 @@ export function OwnerWorkspace({
                 <button
                   type="button"
                   onClick={() => setDebtModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-bold"
+                  className="px-4 py-2 bg-canvas text-ink hover:bg-line rounded-xl text-xs font-bold"
                 >
                   {isUz ? 'Bekor qilish' : 'Отмена'}
                 </button>

@@ -375,8 +375,10 @@ export default function AdminSettingsPage() {
         throw new Error('Qabullar orasidagi tanaffus 0 dan 120 daqiqagacha bo\'lishi lozim.');
       }
 
+      // Display-only fields from the GET response must not be sent back (the API rejects unknown fields)
+      const { pendingExpiryOutOfRange: _outOfRange, rawPendingExpiryMinutes: _raw, ...editable } = settings;
       const payload = {
-        ...settings,
+        ...editable,
         logo: logoUrl || null,
         phone: JSON.stringify(validatedPhones),
       };
@@ -535,10 +537,10 @@ export default function AdminSettingsPage() {
     <AdminLayout allowedRoles={['OWNER']}>
       <div className="space-y-8 max-w-5xl pb-16">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900">
+          <h1 className="text-2xl font-extrabold text-ink">
             Klinika Sozlamalari va Filiallar
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-ink-muted mt-0.5">
             Klinika brendi, logotipi, aloqa raqamlari, bronlash qoidalari va filiallar boshqaruvi (Faqat OWNER)
           </p>
         </div>
@@ -558,14 +560,14 @@ export default function AdminSettingsPage() {
         )}
 
         {/* 1. CLINIC LOGO & BRANDING MANAGEMENT (Req 16) */}
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
-          <div className="border-b border-slate-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="bg-white rounded-3xl border border-line p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="border-b border-line pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h2 className="text-base font-bold text-ink flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-teal-700" />
                 <span>Klinika Logotipi va Brending</span>
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-ink-muted mt-0.5">
                 Veb-sayt bosh sahifasi, yuqori menyu (header), pastki qism (footer) va admin panelda ko&apos;rinadi
               </p>
             </div>
@@ -607,12 +609,12 @@ export default function AdminSettingsPage() {
           )}
 
           {/* Guidelines Box */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 text-xs text-slate-600 space-y-1.5">
-            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+          <div className="p-4 rounded-2xl bg-canvas border border-line/70 text-xs text-ink-muted space-y-1.5">
+            <div className="font-bold text-ink flex items-center gap-1.5">
               <Info className="w-3.5 h-3.5 text-teal-700" />
               <span>Logotip uchun texnik talablar va tavsiyalar:</span>
             </div>
-            <ul className="list-disc list-inside space-y-1 pl-1 text-[11px] text-slate-600">
+            <ul className="list-disc list-inside space-y-1 pl-1 text-[11px] text-ink-muted">
               <li><strong>Format:</strong> Shaffof fonli <code>PNG</code> yoki <code>WebP</code> tavsiya etiladi (xavfsizlik sababli SVG qabul qilinmaydi).</li>
               <li><strong>Tavsiya etiladigan o&apos;lcham:</strong> Gorizontal logo uchun taxminan <code>600×200 px</code>; kvadrat belgi uchun <code>256×256 px</code>.</li>
               <li><strong>Ruxsat etilgan minimal o&apos;lcham:</strong> Sifat buzilmasligi uchun kamida <code>300×100 px</code>.</li>
@@ -622,17 +624,17 @@ export default function AdminSettingsPage() {
 
           {/* Live Previews: Desktop & Mobile Header placement */}
           <div className="space-y-3 pt-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-ink">
               Jonli ko&apos;rinish (Desktop va Mobile Prevyu)
             </h3>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
               {/* Desktop Header Simulation */}
-              <div className="lg:col-span-7 p-4 rounded-2xl border border-slate-200 bg-slate-100 flex flex-col justify-between space-y-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+              <div className="lg:col-span-7 p-4 rounded-2xl border border-line bg-canvas flex flex-col justify-between space-y-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-ink-muted">
                   <Monitor className="w-3.5 h-3.5 text-teal-700" />
                   <span>Kompyuter (Desktop) menyusi prevyusi:</span>
                 </div>
-                <div className="h-16 px-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div className="h-16 px-4 bg-white rounded-xl border border-line shadow-sm flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {logoUrl ? (
                       <Image
@@ -650,13 +652,13 @@ export default function AdminSettingsPage() {
                             <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
                           </svg>
                         </div>
-                        <span className="font-extrabold text-slate-900 text-sm tracking-tight">
+                        <span className="font-extrabold text-ink text-sm tracking-tight">
                           Denta<span className="text-teal-700">Care</span>
                         </span>
                       </div>
                     )}
                   </div>
-                  <div className="hidden sm:flex items-center gap-4 text-[11px] font-semibold text-slate-500">
+                  <div className="hidden sm:flex items-center gap-4 text-[11px] font-semibold text-ink-muted">
                     <span>Xizmatlar</span>
                     <span>Shifokorlar</span>
                     <span>Klinika</span>
@@ -665,18 +667,18 @@ export default function AdminSettingsPage() {
                     </span>
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-400">
+                <p className="text-[10px] text-ink-subtle">
                   {logoUrl ? 'Yuklangan logotip o\'z nisbatini saqlagan holda joylashadi' : 'Logotip yuklanmasa, standart toza DentaCare belgisi aks etadi'}
                 </p>
               </div>
 
               {/* Mobile Header Simulation */}
-              <div className="lg:col-span-5 p-4 rounded-2xl border border-slate-200 bg-slate-100 flex flex-col justify-between space-y-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+              <div className="lg:col-span-5 p-4 rounded-2xl border border-line bg-canvas flex flex-col justify-between space-y-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-ink-muted">
                   <Smartphone className="w-3.5 h-3.5 text-teal-700" />
                   <span>Mobil (Telefon 390px) prevyusi:</span>
                 </div>
-                <div className="h-14 px-3 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between max-w-[320px] mx-auto w-full">
+                <div className="h-14 px-3 bg-white rounded-xl border border-line shadow-sm flex items-center justify-between max-w-[320px] mx-auto w-full">
                   <div className="flex items-center gap-2">
                     {logoUrl ? (
                       <Image
@@ -694,15 +696,15 @@ export default function AdminSettingsPage() {
                             <path d="M18.8 4c-1.5-1.2-3.8-1-5.3.3l-.5.4-.5-.4C11 3 8.7 2.8 7.2 4 4.5 6.2 4 10.3 5.4 13.5l1.6 4.8c.4 1.2 1.5 2 2.8 2 1.5 0 2.8-1.2 2.8-2.7V15h.8v2.6c0 1.5 1.3 2.7 2.8 2.7 1.3 0 2.4-.8 2.8-2l1.6-4.8c1.4-3.2.9-7.3-1.9-9.5z" />
                           </svg>
                         </div>
-                        <span className="font-extrabold text-slate-900 text-xs">DentaCare</span>
+                        <span className="font-extrabold text-ink text-xs">DentaCare</span>
                       </div>
                     )}
                   </div>
-                  <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 text-[10px] font-bold">
+                  <div className="w-7 h-7 rounded-lg bg-canvas flex items-center justify-center text-ink-muted text-[10px] font-bold">
                     ☰
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-400 text-center">
+                <p className="text-[10px] text-ink-subtle text-center">
                   Mobil ekranda ixcham va toza sig&apos;im
                 </p>
               </div>
@@ -711,8 +713,8 @@ export default function AdminSettingsPage() {
         </div>
 
         {/* 2. CLINIC GENERAL & CONTACT PHONES FORM (Req 17) */}
-        <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
-          <h2 className="text-base font-bold text-slate-900 border-b border-slate-100 pb-3 flex items-center gap-2">
+        <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl border border-line p-6 sm:p-8 shadow-sm space-y-6">
+          <h2 className="text-base font-bold text-ink border-b border-line pb-3 flex items-center gap-2">
             <Building2 className="w-4 h-4 text-teal-700" />
             <span>Klinika Asosiy Ma&apos;lumotlari</span>
           </h2>
@@ -732,7 +734,7 @@ export default function AdminSettingsPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Klinika nomi (O&apos;zbekcha)
               </label>
               <input
@@ -748,12 +750,12 @@ export default function AdminSettingsPage() {
                     nameRu: shouldSyncRu ? val : settings.nameRu,
                   });
                 }}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Klinika nomi (Ruscha)
               </label>
               <input
@@ -761,45 +763,45 @@ export default function AdminSettingsPage() {
                 required
                 value={settings.nameRu}
                 onChange={(e) => setSettings({ ...settings, nameRu: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Email manzil
               </label>
               <input
                 type="email"
                 value={settings.email}
                 onChange={(e) => setSettings({ ...settings, email: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Rasmiy veb-sayt
               </label>
               <input
                 type="text"
                 value={settings.website}
                 onChange={(e) => setSettings({ ...settings, website: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                 placeholder="https://dentacare.uz"
               />
             </div>
           </div>
 
           {/* Repeatable Contact Phone Numbers List (Req 17) */}
-          <div className="pt-4 border-t border-slate-100 space-y-3">
+          <div className="pt-4 border-t border-line space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <h3 className="text-xs font-bold text-ink uppercase tracking-wider flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-teal-700" />
                   <span>Aloqa Telefon Raqamlari (Ko&apos;p tarmoqli kontaktlar)</span>
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
+                <p className="text-[11px] text-ink-muted mt-0.5">
                   Klinika bilan bog&apos;lanish uchun bir nechta raqam kiriting. Ulardan birini &quot;Asosiy&quot; qilib belgilang.
                 </p>
               </div>
@@ -822,10 +824,10 @@ export default function AdminSettingsPage() {
                 return (
                   <div
                     key={phoneItem.id}
-                    className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    className="p-3.5 rounded-2xl border border-line bg-canvas/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
                     <div className="flex items-center gap-3 shrink-0">
-                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-slate-700">
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-ink">
                         <input
                           type="radio"
                           name="primaryPhoneGroup"
@@ -849,7 +851,7 @@ export default function AdminSettingsPage() {
                           className={`w-full px-3 py-2 rounded-xl border text-xs focus:ring-2 focus:ring-teal-600 bg-white font-medium ${
                             phoneItem.number.trim() && !normCheck.isValid
                               ? 'border-rose-300 text-rose-800'
-                              : 'border-slate-200 text-slate-800'
+                              : 'border-line text-ink'
                           }`}
                         />
                       </div>
@@ -859,7 +861,7 @@ export default function AdminSettingsPage() {
                           placeholder="Tavsifi: masalan, Qabulxona yoki WhatsApp"
                           value={phoneItem.label}
                           onChange={(e) => handlePhoneChange(phoneItem.id, 'label', e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 bg-white"
+                          className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600 bg-white"
                         />
                       </div>
                     </div>
@@ -870,7 +872,7 @@ export default function AdminSettingsPage() {
                         disabled={index === 0}
                         onClick={() => handleMovePhone(index, 'up')}
                         title="Yuqoriga surish"
-                        className="p-1.5 text-slate-500 hover:text-slate-800 disabled:opacity-30 rounded-lg hover:bg-slate-200/50"
+                        className="p-1.5 text-ink-muted hover:text-ink disabled:opacity-30 rounded-lg hover:bg-line/50"
                       >
                         <ArrowUp className="w-3.5 h-3.5" />
                       </button>
@@ -879,7 +881,7 @@ export default function AdminSettingsPage() {
                         disabled={index === contactPhones.length - 1}
                         onClick={() => handleMovePhone(index, 'down')}
                         title="Pastga surish"
-                        className="p-1.5 text-slate-500 hover:text-slate-800 disabled:opacity-30 rounded-lg hover:bg-slate-200/50"
+                        className="p-1.5 text-ink-muted hover:text-ink disabled:opacity-30 rounded-lg hover:bg-line/50"
                       >
                         <ArrowDown className="w-3.5 h-3.5" />
                       </button>
@@ -901,7 +903,7 @@ export default function AdminSettingsPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Telegram havola
               </label>
               <input
@@ -909,12 +911,12 @@ export default function AdminSettingsPage() {
                 placeholder="https://t.me/..."
                 value={settings.telegramLink}
                 onChange={(e) => setSettings({ ...settings, telegramLink: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Instagram havola
               </label>
               <input
@@ -922,12 +924,12 @@ export default function AdminSettingsPage() {
                 placeholder="https://instagram.com/..."
                 value={settings.instagramLink}
                 onChange={(e) => setSettings({ ...settings, instagramLink: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-ink mb-1">
                 Facebook havola
               </label>
               <input
@@ -935,19 +937,19 @@ export default function AdminSettingsPage() {
                 placeholder="https://facebook.com/..."
                 value={settings.facebookLink}
                 onChange={(e) => setSettings({ ...settings, facebookLink: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
               />
             </div>
           </div>
 
           {/* 3. PLAIN-LANGUAGE BOOKING SETTINGS (Req 18) */}
-          <div className="pt-6 border-t border-slate-100 space-y-4">
+          <div className="pt-6 border-t border-line space-y-4">
             <div>
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <h3 className="text-xs font-bold text-ink uppercase tracking-wider flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 text-teal-700" />
                 <span>{isRu ? 'Правила онлайн-записи и расписания' : 'Bronlash va Vaqt Qoidalari'}</span>
               </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
+              <p className="text-[11px] text-ink-muted mt-0.5">
                 {isRu
                   ? 'Правила предварительной записи, допустимый горизонт, перерывы и авто-отмена неподтвержденных заявок'
                   : 'Bemorlar uchun qabulga yozilish qoidalari, oraliqlar va avtomatik bekor bo\'lish muddatlari'}
@@ -973,9 +975,9 @@ export default function AdminSettingsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Field 1: minBookingNoticeHours */}
-              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+              <div className="p-4 rounded-2xl border border-line bg-canvas/60 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800">
+                  <label className="text-xs font-bold text-ink">
                     {isRu ? 'Минимальное время предварительной записи' : 'Qabulga kamida necha soat oldin yozilish kerak?'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
@@ -990,9 +992,9 @@ export default function AdminSettingsPage() {
                   required
                   value={settings.minBookingNoticeHours}
                   onChange={(e) => setSettings({ ...settings, minBookingNoticeHours: Number(e.target.value) })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-line text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
-                <p className="text-[11px] text-slate-500 leading-relaxed">
+                <p className="text-[11px] text-ink-muted leading-relaxed">
                   {isRu ? (
                     <>
                       <strong>Например:</strong> 2 часа (0 часов разрешает запись сразу на ближайшее время). Если сейчас 10:00, пациент сможет записаться минимум на 12:00.
@@ -1006,9 +1008,9 @@ export default function AdminSettingsPage() {
               </div>
 
               {/* Field 2: maxBookingHorizonDays */}
-              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+              <div className="p-4 rounded-2xl border border-line bg-canvas/60 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800">
+                  <label className="text-xs font-bold text-ink">
                     {isRu ? 'На сколько дней вперед можно записаться?' : 'Necha kun oldingacha yozilish mumkin?'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
@@ -1023,9 +1025,9 @@ export default function AdminSettingsPage() {
                   required
                   value={settings.maxBookingHorizonDays}
                   onChange={(e) => setSettings({ ...settings, maxBookingHorizonDays: Number(e.target.value) })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-line text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
-                <p className="text-[11px] text-slate-500 leading-relaxed">
+                <p className="text-[11px] text-ink-muted leading-relaxed">
                   {isRu ? (
                     <>
                       <strong>Например:</strong> 60 дней. Пациент может выбрать дату в календаре максимум на 60 дней вперед от текущей даты.
@@ -1039,9 +1041,9 @@ export default function AdminSettingsPage() {
               </div>
 
               {/* Field 3: bufferMinutes */}
-              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+              <div className="p-4 rounded-2xl border border-line bg-canvas/60 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800">
+                  <label className="text-xs font-bold text-ink">
                     {isRu ? 'Перерыв между приемами (буфер)' : 'Qabullar orasidagi tanaffus'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
@@ -1056,9 +1058,9 @@ export default function AdminSettingsPage() {
                   required
                   value={settings.bufferMinutes}
                   onChange={(e) => setSettings({ ...settings, bufferMinutes: Number(e.target.value) })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-line text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
-                <p className="text-[11px] text-slate-500 leading-relaxed">
+                <p className="text-[11px] text-ink-muted leading-relaxed">
                   {isRu ? (
                     <>
                       <strong>Например:</strong> 5 или 10 минут (0 минут означает прием без перерыва). Время для проветривания кабинета, стерилизации инструментов и подготовки.
@@ -1072,9 +1074,9 @@ export default function AdminSettingsPage() {
               </div>
 
               {/* Field 4: pendingExpiryMinutes */}
-              <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2">
+              <div className="p-4 rounded-2xl border border-line bg-canvas/60 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800">
+                  <label className="text-xs font-bold text-ink">
                     {isRu ? 'Время на подтверждение заявки (удержание слота)' : 'Tasdiqlanmagan ariza uchun joy qancha vaqt saqlanadi?'}
                   </label>
                   <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
@@ -1089,9 +1091,9 @@ export default function AdminSettingsPage() {
                   required
                   value={settings.pendingExpiryMinutes}
                   onChange={(e) => setSettings({ ...settings, pendingExpiryMinutes: Number(e.target.value) })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-line text-xs font-semibold focus:ring-2 focus:ring-teal-600 bg-white"
                 />
-                <p className="text-[11px] text-slate-500 leading-relaxed">
+                <p className="text-[11px] text-ink-muted leading-relaxed">
                   {isRu ? (
                     <>
                       <strong>Например:</strong> 30 минут (допустимый диапазон: от 5 минут до 10080 минут / 7 дней). Если заявка не подтверждена за это время, слот автоматически освобождается для других пациентов.
@@ -1119,13 +1121,13 @@ export default function AdminSettingsPage() {
         </form>
 
         {/* 4. BRANCHES MANAGEMENT & LOCATION URLS (Req 17) */}
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div className="bg-white rounded-3xl border border-line p-6 sm:p-8 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-line pb-4">
             <div>
-              <h2 className="text-base font-bold text-slate-900">
+              <h2 className="text-base font-bold text-ink">
                 Klinika Filiallari va Xaritalar
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-ink-muted mt-0.5">
                 Mavjud filiallar manzillari, telefonlari, xarita havolalari va faollik holati
               </p>
             </div>
@@ -1143,11 +1145,11 @@ export default function AdminSettingsPage() {
             {branches.map((b) => (
               <div
                 key={b.id}
-                className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 flex flex-col justify-between space-y-3"
+                className="p-4 rounded-2xl border border-line bg-canvas/50 flex flex-col justify-between space-y-3"
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-900">{b.nameUz}</h3>
+                    <h3 className="text-sm font-bold text-ink">{b.nameUz}</h3>
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                         b.isActive
@@ -1158,13 +1160,13 @@ export default function AdminSettingsPage() {
                       {b.isActive ? 'Faol' : 'Nofaol'}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-600 mt-1">{b.addressUz}</p>
+                  <p className="text-xs text-ink-muted mt-1">{b.addressUz}</p>
                   <p className="text-xs text-teal-700 font-semibold mt-1">Tel: {b.phone}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Ish vaqti: {b.workHours}</p>
+                  <p className="text-[11px] text-ink-subtle mt-0.5">Ish vaqti: {b.workHours}</p>
 
                   {/* Branch Location URL */}
                   {b.mapUrl ? (
-                    <div className="mt-2.5 pt-2 border-t border-slate-200/50 flex items-center justify-between">
+                    <div className="mt-2.5 pt-2 border-t border-line/50 flex items-center justify-between">
                       <a
                         href={b.mapUrl.startsWith('http://') || b.mapUrl.startsWith('https://') ? b.mapUrl : `https://${b.mapUrl}`}
                         target="_blank"
@@ -1177,11 +1179,11 @@ export default function AdminSettingsPage() {
                       </a>
                     </div>
                   ) : (
-                    <p className="text-[10px] text-slate-400 italic mt-2">Xarita havolasi kiritilmagan</p>
+                    <p className="text-[10px] text-ink-subtle italic mt-2">Xarita havolasi kiritilmagan</p>
                   )}
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                <div className="flex items-center justify-between pt-2 border-t border-line/60">
                   <button
                     type="button"
                     onClick={() => promptDeleteBranch(b)}
@@ -1209,14 +1211,14 @@ export default function AdminSettingsPage() {
         {showBranchModal && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-              <h3 className="text-lg font-extrabold text-slate-900">
+              <h3 className="text-lg font-extrabold text-ink">
                 {editingBranch ? (isRu ? 'Редактировать филиал' : 'Filialni tahrirlash') : (isRu ? 'Добавить новый филиал' : 'Yangi filial qo\'shish')}
               </h3>
 
               <form onSubmit={handleSaveBranch} className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Nomi (UZ - Lotin)
                     </label>
                     <input
@@ -1232,11 +1234,11 @@ export default function AdminSettingsPage() {
                         }
                       }}
                       placeholder="Bektemir filiali"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Nomi (RU - Кирил)
                     </label>
                     <input
@@ -1251,14 +1253,14 @@ export default function AdminSettingsPage() {
                         }
                       }}
                       placeholder="Филиал Бектемир"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Manzili (UZ - Lotin)
                     </label>
                     <input
@@ -1274,11 +1276,11 @@ export default function AdminSettingsPage() {
                         }
                       }}
                       placeholder="Toshkent sh., Bektemir tumani"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Manzili (RU - Кирил)
                     </label>
                     <input
@@ -1293,13 +1295,13 @@ export default function AdminSettingsPage() {
                         }
                       }}
                       placeholder="г. Ташкент, Бектемирский район"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Telefon raqami
                   </label>
                   <input
@@ -1308,17 +1310,17 @@ export default function AdminSettingsPage() {
                     value={branchPhone}
                     onChange={(e) => setBranchPhone(e.target.value)}
                     placeholder="+998711234567"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 {/* Structured Working Hours with Quick Presets */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold text-slate-700">
+                    <label className="block text-xs font-semibold text-ink">
                       Ish tartibi (Ish kunlari va soatlari)
                     </label>
-                    <span className="text-[10px] text-slate-400">Tezkor namunalar:</span>
+                    <span className="text-[10px] text-ink-subtle">Tezkor namunalar:</span>
                   </div>
                   <input
                     type="text"
@@ -1326,7 +1328,7 @@ export default function AdminSettingsPage() {
                     value={branchWorkHours}
                     onChange={(e) => setBranchWorkHours(e.target.value)}
                     placeholder="Dushanba - Shanba: 08:00 - 20:00"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600 mb-1.5"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600 mb-1.5"
                   />
                   <div className="flex flex-wrap gap-1.5">
                     {[
@@ -1343,7 +1345,7 @@ export default function AdminSettingsPage() {
                         className={`text-[10px] px-2 py-0.5 rounded-lg border transition-colors cursor-pointer ${
                           branchWorkHours === preset
                             ? 'bg-teal-700 text-white border-teal-700 font-bold'
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            : 'bg-canvas text-ink-muted border-line hover:bg-canvas'
                         }`}
                       >
                         {preset}
@@ -1354,7 +1356,7 @@ export default function AdminSettingsPage() {
 
                 {/* Location URL */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Xarita havolasi (Google Maps, Yandex yoki 2GIS)
                   </label>
                   <input
@@ -1362,9 +1364,9 @@ export default function AdminSettingsPage() {
                     placeholder="https://maps.google.com/?q=... yoki https://yandex.uz/maps/..."
                     value={branchMapUrl}
                     onChange={(e) => setBranchMapUrl(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-ink-muted mt-1">
                     Faqat xavfsiz <code>http://</code> yoki <code>https://</code> havolalari qabul qilinadi.
                   </p>
                 </div>
@@ -1396,7 +1398,7 @@ export default function AdminSettingsPage() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between pt-4 border-t border-line">
                   {editingBranch ? (
                     <button
                       type="button"
@@ -1420,7 +1422,7 @@ export default function AdminSettingsPage() {
                         setBranchModalError(null);
                         setBranchModalSuccess(null);
                       }}
-                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                      className="px-4 py-2 text-xs font-semibold text-ink-muted hover:bg-canvas rounded-xl cursor-pointer"
                     >
                       Bekor qilish
                     </button>
@@ -1466,7 +1468,7 @@ export default function AdminSettingsPage() {
       >
         <div className="space-y-4 text-xs">
           {isLoadingBranchPreview ? (
-            <div className="p-8 text-center text-slate-500 space-y-2">
+            <div className="p-8 text-center text-ink-muted space-y-2">
               <div className="w-5 h-5 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto" />
               <p>{isRu ? 'Проверка клинической истории и привязанных врачей...' : 'Klinik tarix va biriktirilgan shifokorlar tekshirilmoqda...'}</p>
             </div>
@@ -1487,11 +1489,11 @@ export default function AdminSettingsPage() {
               )}
 
               {branchToDelete && (
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                  <h3 className="font-extrabold text-sm text-slate-900">
+                <div className="p-3 bg-canvas rounded-xl border border-line">
+                  <h3 className="font-extrabold text-sm text-ink">
                     {branchToDelete.nameUz} {branchToDelete.nameRu ? `(${branchToDelete.nameRu})` : ''}
                   </h3>
-                  <p className="text-slate-500 text-[11px] mt-0.5">
+                  <p className="text-ink-muted text-[11px] mt-0.5">
                     {branchToDelete.addressUz || branchToDelete.addressRu || 'Manzil ko\'rsatilmagan'}
                   </p>
                 </div>
@@ -1539,27 +1541,27 @@ export default function AdminSettingsPage() {
 
                         {/* Impact Statistics Grid */}
                         <div className="grid grid-cols-2 gap-2 text-[11px]">
-                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                            <span className="text-slate-500 block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
-                            <strong className={`text-sm ${activeCount > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+                          <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                            <span className="text-ink-muted block">{isRu ? 'Активное лечение (сейчас):' : 'Faol muolaja (hozir):'}</span>
+                            <strong className={`text-sm ${activeCount > 0 ? 'text-rose-600' : 'text-ink'}`}>
                               {activeCount} ta
                             </strong>
                           </div>
-                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                            <span className="text-slate-500 block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
-                            <strong className={`text-sm ${futureCount > 0 ? 'text-amber-600 font-extrabold' : 'text-slate-800'}`}>
+                          <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                            <span className="text-ink-muted block">{isRu ? 'Будущие приемы:' : 'Kelgusi qabullar:'}</span>
+                            <strong className={`text-sm ${futureCount > 0 ? 'text-amber-600 font-extrabold' : 'text-ink'}`}>
                               {futureCount} ta
                             </strong>
                           </div>
-                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                            <span className="text-slate-500 block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
-                            <strong className="text-sm text-slate-800">
+                          <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                            <span className="text-ink-muted block">{isRu ? 'Исторические приемы:' : 'Tarixiy qabullar:'}</span>
+                            <strong className="text-sm text-ink">
                               {historyCount} ta
                             </strong>
                           </div>
-                          <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-                            <span className="text-slate-500 block">{isRu ? 'Прикрепленные врачи:' : 'Biriktirilgan shifokorlar:'}</span>
-                            <strong className="text-sm text-slate-800">
+                          <div className="p-2.5 bg-canvas rounded-lg border border-line">
+                            <span className="text-ink-muted block">{isRu ? 'Прикрепленные врачи:' : 'Biriktirilgan shifokorlar:'}</span>
+                            <strong className="text-sm text-ink">
                               {assignedDocCount} ta
                             </strong>
                           </div>
@@ -1575,8 +1577,8 @@ export default function AdminSettingsPage() {
                               {branchPreview.futureAppointments.map((appt: any) => (
                                 <div key={appt.id} className="p-2 bg-white rounded-lg border border-amber-200/80 flex items-center justify-between text-[11px]">
                                   <div>
-                                    <strong className="text-slate-900 block">{appt.patientName}</strong>
-                                    <span className="text-slate-500 text-[10px]">
+                                    <strong className="text-ink block">{appt.patientName}</strong>
+                                    <span className="text-ink-muted text-[10px]">
                                       {new Date(appt.startTime).toLocaleString('uz-UZ', {
                                         year: 'numeric',
                                         month: '2-digit',
@@ -1596,7 +1598,7 @@ export default function AdminSettingsPage() {
                           </div>
                         )}
 
-                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
                           <button
                             type="button"
                             disabled={isDeletingBranch}
@@ -1604,7 +1606,7 @@ export default function AdminSettingsPage() {
                               setBranchToDelete(null);
                               setBranchPreview(null);
                             }}
-                            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer"
+                            className="px-4 py-2 bg-canvas hover:bg-line text-ink rounded-xl font-bold cursor-pointer"
                           >
                             {isRu ? 'Отмена' : 'Bekor qilish'}
                           </button>

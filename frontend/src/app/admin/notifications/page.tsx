@@ -213,7 +213,7 @@ export default function AdminNotificationsPage() {
         );
       default:
         return (
-          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700">
+          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-canvas text-ink">
             {channel}
           </span>
         );
@@ -260,13 +260,13 @@ export default function AdminNotificationsPage() {
         );
       case 'CANCELLED':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-canvas text-ink-muted border border-line">
             {isUz ? 'Bekor qilingan' : 'Отменено'}
           </span>
         );
       default:
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
+          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-canvas text-ink">
             {status}
           </span>
         );

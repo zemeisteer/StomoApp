@@ -337,13 +337,13 @@ export class AppointmentsController {
   ) {}
 
   @Get()
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   findAll(@Query() query: ListQueryDto, @CurrentUser() user: JwtPayload) {
     return this.service.findAll(query, user);
   }
 
   @Get('month-aggregates')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   getMonthAggregates(
     @Query('year') yearStr: string,
     @Query('month') monthStr: string,
@@ -364,19 +364,19 @@ export class AppointmentsController {
   }
 
   @Get('today')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   getToday(@CurrentUser() user: JwtPayload) {
     return this.service.getToday(undefined, user);
   }
 
   @Get(':id')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.service.findById(id, user);
   }
 
   @Post()
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async createFromAdmin(@Body() dto: PublicBookingDto, @CurrentUser() user: JwtPayload) {
     if (user.role === StaffRole.DOCTOR && dto.doctorId !== user.doctorId) {
       throw new ForbiddenException('Shifokor faqat o\'ziga qabul yarata oladi');
@@ -388,7 +388,7 @@ export class AppointmentsController {
   }
 
   @Post('expire-pending')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   @HttpCode(HttpStatus.OK)
   async triggerExpirePending() {
     const expiredCount = await this.service.expirePending();
@@ -396,7 +396,7 @@ export class AppointmentsController {
   }
 
   @Patch(':id/duration')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
   async overrideDuration(
     @Param('id') id: string,
     @Body() dto: OverrideDurationDto,
@@ -406,7 +406,7 @@ export class AppointmentsController {
   }
 
   @Patch(':id/status')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async changeStatus(
     @Param('id') id: string,
     @Body() dto: StatusChangeDto,
@@ -416,7 +416,7 @@ export class AppointmentsController {
   }
 
   @Post(':id/start-treatment')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   @HttpCode(HttpStatus.OK)
   async startTreatment(
     @Param('id') id: string,
@@ -426,7 +426,7 @@ export class AppointmentsController {
   }
 
   @Put(':id/reschedule')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async reschedule(
     @Param('id') id: string,
     @Body() dto: RescheduleDto,
@@ -436,7 +436,7 @@ export class AppointmentsController {
   }
 
   @Post(':id/reschedule')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   @HttpCode(HttpStatus.OK)
   async reschedulePost(
     @Param('id') id: string,
@@ -447,7 +447,7 @@ export class AppointmentsController {
   }
 
   @Get(':id/reschedule-slots')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async getAdminRescheduleSlots(
     @Param('id') id: string,
     @Query() query: QueryRescheduleSlotsDto,
@@ -462,7 +462,7 @@ export class AppointmentsController {
   }
 
   @Post(':id/delay')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   @HttpCode(HttpStatus.OK)
   async recordDelay(
     @Param('id') id: string,
@@ -474,7 +474,7 @@ export class AppointmentsController {
   }
 
   @Post(':id/clear-overrun')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   @HttpCode(HttpStatus.OK)
   async clearOverrun(
     @Param('id') id: string,

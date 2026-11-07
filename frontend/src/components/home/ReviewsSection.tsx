@@ -55,17 +55,17 @@ export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
             >
               <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map((s) => (
-                  <div key={s} className="w-4 h-4 bg-slate-100 rounded" />
+                  <div key={s} className="w-4 h-4 bg-canvas rounded" />
                 ))}
               </div>
               <div className="space-y-2">
-                <div className="h-4 bg-slate-100 rounded w-full" />
-                <div className="h-4 bg-slate-100 rounded w-5/6" />
-                <div className="h-4 bg-slate-100 rounded w-2/3" />
+                <div className="h-4 bg-canvas rounded w-full" />
+                <div className="h-4 bg-canvas rounded w-5/6" />
+                <div className="h-4 bg-canvas rounded w-2/3" />
               </div>
               <div className="pt-4 border-t border-line flex justify-between items-center">
-                <div className="h-4 w-28 bg-slate-100 rounded" />
-                <div className="h-3 w-16 bg-slate-100 rounded" />
+                <div className="h-4 w-28 bg-canvas rounded" />
+                <div className="h-3 w-16 bg-canvas rounded" />
               </div>
             </div>
           ))}

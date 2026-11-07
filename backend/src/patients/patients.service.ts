@@ -68,7 +68,53 @@ export class PatientsService {
       this.prisma.patient.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    // Per-row activity: last finished visit, completed visits and (for non-doctors) open balance
+    const ids = items.map((p) => p.id);
+    const visitWhere: Prisma.AppointmentWhereInput = {
+      patientId: { in: ids },
+      status: 'COMPLETED',
+      ...(user?.role === StaffRole.DOCTOR ? { doctorId: user.doctorId! } : {}),
+    };
+    const [visits, debts] = ids.length
+      ? await Promise.all([
+          this.prisma.appointment.groupBy({
+            by: ['patientId'],
+            where: visitWhere,
+            _count: { _all: true },
+            _max: { startTime: true, actualEndTime: true },
+          }),
+          user?.role === StaffRole.DOCTOR
+            ? Promise.resolve([] as Array<{ patient_id: string; debt: bigint }>)
+            : this.prisma.$queryRaw<Array<{ patient_id: string; debt: bigint }>>`
+                SELECT i.patient_id,
+                       SUM(GREATEST(0, i.total_amount - COALESCE(i.discount, 0) - COALESCE(p.paid, 0)))::bigint AS debt
+                FROM invoices i
+                LEFT JOIN (
+                  SELECT invoice_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) AS paid
+                  FROM payments WHERE invoice_id IS NOT NULL GROUP BY invoice_id
+                ) p ON p.invoice_id = i.id
+                WHERE i.status <> 'CANCELLED' AND i.patient_id IN (${Prisma.join(ids)})
+                GROUP BY i.patient_id`,
+        ])
+      : [[], []];
+    const visitMap = new Map(visits.map((v) => [v.patientId, v]));
+    const debtMap = new Map(debts.map((d) => [d.patient_id, Number(d.debt)]));
+
+    return {
+      items: items.map((p) => {
+        const v = visitMap.get(p.id);
+        const last = [v?._max.actualEndTime, v?._max.startTime].filter(Boolean).sort((a, b) => +b! - +a!)[0] || null;
+        return {
+          ...p,
+          completedVisits: v?._count._all || 0,
+          lastVisitAt: last,
+          debtUzs: user?.role === StaffRole.DOCTOR ? null : debtMap.get(p.id) || 0,
+        };
+      }),
+      total,
+      page,
+      limit,
+    };
   }
 
   async findById(id: string, user?: JwtPayload) {

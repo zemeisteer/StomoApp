@@ -258,6 +258,8 @@ model Service {
   photoUrl    String?         @map("photo_url")
   iconName    String?         @map("icon_name")
   
+  // Check-up recall after this service: days (null = clinic default, 0 = never)
+  recallDays  Int?            @map("recall_days")
   isActive    Boolean         @default(true) @map("is_active")
   isArchived  Boolean         @default(false) @map("is_archived")
   sortOrder   Int             @default(0) @map("sort_order")

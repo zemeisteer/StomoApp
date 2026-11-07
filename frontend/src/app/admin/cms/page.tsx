@@ -250,17 +250,17 @@ export default function AdminCmsPage() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
+            <h1 className="text-2xl font-extrabold text-ink">
               Sayt kontenti boshqaruvi (CMS)
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-ink-muted mt-0.5">
               Maqolalar, ko&apos;p so&apos;raladigan savollar va sahifalar matnlarini tahrirlash
             </p>
           </div>
 
           <button
             onClick={loadData}
-            className="p-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 shadow-sm"
+            className="p-2.5 bg-white border border-line text-ink rounded-xl hover:bg-canvas shadow-sm"
             title="Yangilash"
           >
             <RefreshCw className="w-4 h-4" />
@@ -285,14 +285,14 @@ export default function AdminCmsPage() {
         )}
 
         {/* Tab Buttons */}
-        <div className="flex items-center gap-3 border-b border-slate-200 pb-2">
+        <div className="flex items-center gap-3 border-b border-line pb-2">
           <button
             type="button"
             onClick={() => setActiveTab('articles')}
             className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all ${
               activeTab === 'articles'
                 ? 'bg-teal-700 text-white shadow-md'
-                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                : 'bg-white text-ink-muted hover:bg-canvas border border-line'
             }`}
           >
             <FileText className="w-4 h-4" />
@@ -305,7 +305,7 @@ export default function AdminCmsPage() {
             className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all ${
               activeTab === 'faqs'
                 ? 'bg-teal-700 text-white shadow-md'
-                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                : 'bg-white text-ink-muted hover:bg-canvas border border-line'
             }`}
           >
             <HelpCircle className="w-4 h-4" />
@@ -318,7 +318,7 @@ export default function AdminCmsPage() {
             className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all ${
               activeTab === 'policies'
                 ? 'bg-teal-700 text-white shadow-md'
-                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                : 'bg-white text-ink-muted hover:bg-canvas border border-line'
             }`}
           >
             <Shield className="w-4 h-4" />
@@ -328,9 +328,9 @@ export default function AdminCmsPage() {
 
         {/* Tab 1: Articles */}
         {activeTab === 'articles' && (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-700 uppercase">
+          <div className="bg-white rounded-3xl border border-line shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <span className="text-xs font-bold text-ink uppercase">
                 Maqolalar ro&apos;yxati (Barcha qoralama va e&apos;lon qilinganlar)
               </span>
               <button
@@ -359,9 +359,9 @@ export default function AdminCmsPage() {
             </div>
 
             {articles.length === 0 ? (
-              <div className="p-12 text-center text-xs text-slate-500">Maqolalar topilmadi.</div>
+              <div className="p-12 text-center text-xs text-ink-muted">Maqolalar topilmadi.</div>
             ) : (
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-line">
                 {articles.map((art) => (
                   <div key={art.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-4">
@@ -372,16 +372,16 @@ export default function AdminCmsPage() {
                           width={64}
                           height={48}
                           unoptimized
-                          className="w-16 h-12 object-cover rounded-xl border border-slate-200 shrink-0"
+                          className="w-16 h-12 object-cover rounded-xl border border-line shrink-0"
                         />
                       ) : (
-                        <div className="w-16 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 shrink-0">
+                        <div className="w-16 h-12 bg-canvas rounded-xl flex items-center justify-center text-ink-subtle shrink-0">
                           <FileText className="w-5 h-5" />
                         </div>
                       )}
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-bold text-slate-900">{art.titleUz}</h3>
+                          <h3 className="text-sm font-bold text-ink">{art.titleUz}</h3>
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                               art.status === 'PUBLISHED'
@@ -392,11 +392,11 @@ export default function AdminCmsPage() {
                             {art.status}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5">
+                        <p className="text-xs text-ink-muted mt-0.5">
                           Slug: <span className="font-mono text-teal-700">/{art.slug}</span> • Muallif: {art.authorName}
                         </p>
                         {art.excerptUz && (
-                          <p className="text-[11px] text-slate-600 line-clamp-1 mt-0.5">{art.excerptUz}</p>
+                          <p className="text-[11px] text-ink-muted line-clamp-1 mt-0.5">{art.excerptUz}</p>
                         )}
                       </div>
                     </div>
@@ -405,7 +405,7 @@ export default function AdminCmsPage() {
                       <button
                         type="button"
                         onClick={() => handleTogglePublishArticle(art)}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold"
+                        className="px-3 py-1.5 bg-canvas hover:bg-line text-ink rounded-lg text-xs font-semibold"
                       >
                         {art.status === 'PUBLISHED' ? 'Qoralamaga' : 'Nashr qilish'}
                       </button>
@@ -450,9 +450,9 @@ export default function AdminCmsPage() {
 
         {/* Tab 2: FAQs */}
         {activeTab === 'faqs' && (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-700 uppercase">
+          <div className="bg-white rounded-3xl border border-line shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <span className="text-xs font-bold text-ink uppercase">
                 Savol-Javoblar Ro&apos;yxati
               </span>
               <button
@@ -478,13 +478,13 @@ export default function AdminCmsPage() {
             </div>
 
             {faqs.length === 0 ? (
-              <div className="p-12 text-center text-xs text-slate-500">FAQlar topilmadi.</div>
+              <div className="p-12 text-center text-xs text-ink-muted">FAQlar topilmadi.</div>
             ) : (
               <div className="space-y-3">
                 {faqs.map((faq) => (
                   <div
                     key={faq.id}
-                    className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    className="p-4 rounded-2xl border border-line bg-canvas/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -493,15 +493,15 @@ export default function AdminCmsPage() {
                         </span>
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            faq.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                            faq.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-line text-ink-muted'
                           }`}
                         >
                           {faq.isActive ? 'Faol' : 'Nofaol'}
                         </span>
-                        <span className="text-[10px] text-slate-400">Tartib: #{faq.sortOrder}</span>
+                        <span className="text-[10px] text-ink-subtle">Tartib: #{faq.sortOrder}</span>
                       </div>
-                      <h4 className="text-sm font-bold text-slate-900">{faq.questionUz}</h4>
-                      <p className="text-xs text-slate-600 line-clamp-2">{faq.answerUz}</p>
+                      <h4 className="text-sm font-bold text-ink">{faq.questionUz}</h4>
+                      <p className="text-xs text-ink-muted line-clamp-2">{faq.answerUz}</p>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
@@ -541,29 +541,29 @@ export default function AdminCmsPage() {
 
         {/* Tab 3: Policies */}
         {activeTab === 'policies' && (
-          <form onSubmit={handleSavePolicies} className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-8">
-            <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <form onSubmit={handleSavePolicies} className="bg-white rounded-3xl border border-line shadow-sm p-6 sm:p-8 space-y-8">
+            <div className="border-b border-line pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h2 className="text-base font-bold text-ink flex items-center gap-2">
                 <Shield className="w-5 h-5 text-teal-700" />
                 <span>Maxfiylik va Qabul Qoidalari Matnlari</span>
               </h2>
-              <span className="text-xs text-slate-500 font-medium">
+              <span className="text-xs text-ink-muted font-medium">
                 Mijozlar saytda va bron qilishda ko&apos;radigan matnlar
               </span>
             </div>
 
             {/* 1. Maxfiylik Siyosati */}
-            <div className="p-5 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-4">
+            <div className="p-5 bg-canvas/70 rounded-2xl border border-line/80 space-y-4">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-teal-600" />
-                <h3 className="text-sm font-bold text-slate-900">
+                <h3 className="text-sm font-bold text-ink">
                   Maxfiylik Siyosati (Privacy Policy)
                 </h3>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <label className="block text-xs font-bold text-ink mb-1.5 flex items-center gap-1.5">
                     <span className="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-black">UZ</span>
                     <span>O&apos;zbekcha matn</span>
                   </label>
@@ -572,12 +572,12 @@ export default function AdminCmsPage() {
                     value={policies.privacyPolicyUz}
                     onChange={(e) => setPolicies({ ...policies, privacyPolicyUz: e.target.value })}
                     placeholder="DentaCare klinikasi bemorlarning shaxsiy ma'lumotlari xavfsizligini to'liq kafolatlaydi..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <label className="block text-xs font-bold text-ink mb-1.5 flex items-center gap-1.5">
                     <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-black">RU</span>
                     <span>Русский текст</span>
                   </label>
@@ -586,24 +586,24 @@ export default function AdminCmsPage() {
                     value={policies.privacyPolicyRu}
                     onChange={(e) => setPolicies({ ...policies, privacyPolicyRu: e.target.value })}
                     placeholder="Клиника DentaCare гарантирует полную безопасность персональных данных пациентов..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
                   />
                 </div>
               </div>
             </div>
 
             {/* 2. Qabul va Bronlash Qoidalari */}
-            <div className="p-5 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-4">
+            <div className="p-5 bg-canvas/70 rounded-2xl border border-line/80 space-y-4">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
-                <h3 className="text-sm font-bold text-slate-900">
+                <h3 className="text-sm font-bold text-ink">
                   Qabul va Bronlash Qoidalari (Booking Terms & Conditions)
                 </h3>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <label className="block text-xs font-bold text-ink mb-1.5 flex items-center gap-1.5">
                     <span className="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-black">UZ</span>
                     <span>O&apos;zbekcha matn</span>
                   </label>
@@ -612,12 +612,12 @@ export default function AdminCmsPage() {
                     value={policies.bookingPolicyUz}
                     onChange={(e) => setPolicies({ ...policies, bookingPolicyUz: e.target.value })}
                     placeholder="Qabulga kamida 2 soat oldin yozilish mumkin. Bekor qilish kamida 1 soat oldin..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <label className="block text-xs font-bold text-ink mb-1.5 flex items-center gap-1.5">
                     <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-black">RU</span>
                     <span>Русский текст</span>
                   </label>
@@ -626,7 +626,7 @@ export default function AdminCmsPage() {
                     value={policies.bookingPolicyRu}
                     onChange={(e) => setPolicies({ ...policies, bookingPolicyRu: e.target.value })}
                     placeholder="Запись на прием возможна минимум за 2 часа. Отмена приема должна производиться..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-teal-600 focus:bg-white bg-white leading-relaxed"
                   />
                 </div>
               </div>
@@ -647,14 +647,14 @@ export default function AdminCmsPage() {
         {showArticleModal && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl space-y-4">
-              <h3 className="text-lg font-extrabold text-slate-900">
+              <h3 className="text-lg font-extrabold text-ink">
                 {editingArticleId ? 'Maqolani tahrirlash' : 'Yangi maqola yaratish'}
               </h3>
 
               <form onSubmit={handleSaveArticle} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       URL Slug (masalan: toza-tishlar)
                     </label>
                     <input
@@ -662,11 +662,11 @@ export default function AdminCmsPage() {
                       required
                       value={articleForm.slug}
                       onChange={(e) => setArticleForm({ ...articleForm, slug: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Muallif
                     </label>
                     <input
@@ -674,14 +674,14 @@ export default function AdminCmsPage() {
                       required
                       value={articleForm.authorName}
                       onChange={(e) => setArticleForm({ ...articleForm, authorName: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Sarlavha (UZ)
                     </label>
                     <input
@@ -689,11 +689,11 @@ export default function AdminCmsPage() {
                       required
                       value={articleForm.titleUz}
                       onChange={(e) => setArticleForm({ ...articleForm, titleUz: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Sarlavha (RU)
                     </label>
                     <input
@@ -701,38 +701,38 @@ export default function AdminCmsPage() {
                       required
                       value={articleForm.titleRu}
                       onChange={(e) => setArticleForm({ ...articleForm, titleRu: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Qisqacha matn (UZ)
                     </label>
                     <textarea
                       rows={2}
                       value={articleForm.excerptUz}
                       onChange={(e) => setArticleForm({ ...articleForm, excerptUz: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Qisqacha matn (RU)
                     </label>
                     <textarea
                       rows={2}
                       value={articleForm.excerptRu}
                       onChange={(e) => setArticleForm({ ...articleForm, excerptRu: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     To&apos;liq maqola matni (UZ)
                   </label>
                   <textarea
@@ -740,12 +740,12 @@ export default function AdminCmsPage() {
                     required
                     value={articleForm.contentUz}
                     onChange={(e) => setArticleForm({ ...articleForm, contentUz: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     To&apos;liq maqola matni (RU)
                   </label>
                   <textarea
@@ -753,13 +753,13 @@ export default function AdminCmsPage() {
                     required
                     value={articleForm.contentRu}
                     onChange={(e) => setArticleForm({ ...articleForm, contentRu: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Muqova rasmi (URL yoki yuklash)
                     </label>
                     <div className="flex gap-2">
@@ -768,9 +768,9 @@ export default function AdminCmsPage() {
                         value={articleForm.coverImageUrl}
                         onChange={(e) => setArticleForm({ ...articleForm, coverImageUrl: e.target.value })}
                         placeholder="https://..."
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                        className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                       />
-                      <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer shrink-0 text-xs font-bold flex items-center gap-1">
+                      <label className="px-3 py-2 bg-canvas hover:bg-line text-ink rounded-xl cursor-pointer shrink-0 text-xs font-bold flex items-center gap-1">
                         <Upload className="w-3.5 h-3.5" />
                         <span>{isUploadingCover ? '...' : 'Yuklash'}</span>
                         <input type="file" accept="image/*" onChange={handleCoverUpload} className="hidden" />
@@ -793,11 +793,11 @@ export default function AdminCmsPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-end gap-2 pt-4 border-t border-line">
                   <button
                     type="button"
                     onClick={() => setShowArticleModal(false)}
-                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-4 py-2 text-xs font-semibold text-ink-muted hover:bg-canvas rounded-xl"
                   >
                     Bekor qilish
                   </button>
@@ -817,13 +817,13 @@ export default function AdminCmsPage() {
         {showFaqModal && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4">
-              <h3 className="text-lg font-extrabold text-slate-900">
+              <h3 className="text-lg font-extrabold text-ink">
                 {editingFaqId ? 'FAQni tahrirlash' : 'Yangi FAQ qo\'shish'}
               </h3>
 
               <form onSubmit={handleSaveFaq} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Savol (UZ)
                   </label>
                   <input
@@ -831,12 +831,12 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.questionUz}
                     onChange={(e) => setFaqForm({ ...faqForm, questionUz: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Savol (RU)
                   </label>
                   <input
@@ -844,12 +844,12 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.questionRu}
                     onChange={(e) => setFaqForm({ ...faqForm, questionRu: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Javob (UZ)
                   </label>
                   <textarea
@@ -857,12 +857,12 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.answerUz}
                     onChange={(e) => setFaqForm({ ...faqForm, answerUz: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-ink mb-1">
                     Javob (RU)
                   </label>
                   <textarea
@@ -870,31 +870,31 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.answerRu}
                     onChange={(e) => setFaqForm({ ...faqForm, answerRu: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Kategoriya
                     </label>
                     <input
                       type="text"
                       value={faqForm.category}
                       onChange={(e) => setFaqForm({ ...faqForm, category: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-ink mb-1">
                       Tartib (#)
                     </label>
                     <input
                       type="number"
                       value={faqForm.sortOrder}
                       onChange={(e) => setFaqForm({ ...faqForm, sortOrder: Number(e.target.value) })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-teal-600"
+                      className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                     />
                   </div>
                   <div>
@@ -911,11 +911,11 @@ export default function AdminCmsPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-end gap-2 pt-4 border-t border-line">
                   <button
                     type="button"
                     onClick={() => setShowFaqModal(false)}
-                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-4 py-2 text-xs font-semibold text-ink-muted hover:bg-canvas rounded-xl"
                   >
                     Bekor qilish
                   </button>

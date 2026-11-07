@@ -112,7 +112,7 @@ export const TelegramLinkModal: React.FC<Props> = ({ isOpen, onClose, language }
             className={`p-3 rounded-xl border font-semibold ${
               status.linked
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                : 'bg-slate-50 border-slate-200 text-slate-700'
+                : 'bg-canvas border-line text-ink'
             }`}
           >
             {status.linked ? `✅ ${t.linked} (ID: ${status.telegramUserId})` : t.notLinked}
@@ -143,24 +143,24 @@ export const TelegramLinkModal: React.FC<Props> = ({ isOpen, onClose, language }
               </a>
             )}
             <div>
-              <p className="text-slate-600 mb-1">{t.orSend}</p>
+              <p className="text-ink-muted mb-1">{t.orSend}</p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-slate-100 rounded-lg break-all text-[11px]">{link.command}</code>
+                <code className="flex-1 px-3 py-2 bg-canvas rounded-lg break-all text-[11px]">{link.command}</code>
                 <button
                   type="button"
                   onClick={() => copy(link.command)}
-                  className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200"
+                  className="p-2 rounded-lg bg-canvas hover:bg-line"
                   aria-label="Copy"
                 >
                   {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
             </div>
-            <p className="text-slate-500">{t.expires}</p>
+            <p className="text-ink-muted">{t.expires}</p>
             <button
               type="button"
               onClick={refresh}
-              className="w-full px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl"
+              className="w-full px-4 py-2 bg-canvas hover:bg-line text-ink font-semibold rounded-xl"
             >
               {t.checkAgain}
             </button>

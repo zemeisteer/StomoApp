@@ -527,7 +527,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
                 isSelected
                   ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30 scale-105 font-extrabold'
                   : isDisabled
-                  ? 'text-slate-300 cursor-not-allowed opacity-40 line-through'
+                  ? 'text-ink-subtle cursor-not-allowed opacity-40 line-through'
                   : isToday
                   ? 'bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white ring-1 ring-brand-600/40'
                   : 'text-ink hover:bg-brand-50 hover:text-brand-600'
@@ -551,7 +551,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
             onClick={selectToday}
             className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
               isTodayDisabled
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
+                ? 'bg-canvas text-ink-subtle cursor-not-allowed opacity-50'
                 : 'bg-brand-50 hover:bg-brand-100 text-brand-600'
             }`}
           >
@@ -563,7 +563,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
             onClick={selectTomorrow}
             className={`px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
               isTomorrowDisabled
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
+                ? 'bg-canvas text-ink-subtle cursor-not-allowed opacity-50'
                 : 'bg-brand-50 hover:bg-brand-50 text-ink-muted hover:text-brand-600'
             }`}
           >
@@ -625,7 +625,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
           onClick={() => setIsOpen((prev) => !prev)}
           className={`w-full pl-10 pr-10 py-2.5 sm:py-3 text-left rounded-2xl border text-xs sm:text-sm font-medium transition-all flex items-center justify-between cursor-pointer focus:outline-none ${
             disabled
-              ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+              ? 'bg-canvas text-ink-subtle border-line cursor-not-allowed'
               : isOpen
               ? 'border-brand-600 ring-2 ring-brand-600/15 bg-white text-ink shadow-sm'
               : 'border-line bg-canvas hover:bg-white text-ink hover:border-brand-600/40 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/15'
@@ -654,7 +654,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
               onChange('');
               triggerRef.current?.focus();
             }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-ink-muted hover:text-rose-600 p-1 rounded-full hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer"
+            className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-ink-muted hover:text-rose-600 p-1 rounded-full hover:bg-canvas transition-colors focus:outline-none focus:ring-2 focus:ring-brand-600 cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>

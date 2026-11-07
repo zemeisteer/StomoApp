@@ -137,6 +137,44 @@
     background-color: var(--primary);
     color: #ffffff;
   }
+
+  /* Native form controls follow the brand: checkboxes, radios, range sliders */
+  :root {
+    accent-color: rgb(var(--brand-600));
+  }
+
+  /* One look for every native <select>: custom chevron, no OS bevel */
+  select:not([multiple]):not([size]) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: #fff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23848f9b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    background-size: 1rem;
+    padding-right: 2rem;
+    cursor: pointer;
+  }
+  select:disabled {
+    cursor: not-allowed;
+    background-color: rgb(var(--canvas));
+  }
+
+  /* Date / month / time inputs: brand-tinted picker icon, consistent text */
+  input[type='date'],
+  input[type='month'],
+  input[type='datetime-local'] {
+    color-scheme: light;
+    font-variant-numeric: tabular-nums;
+  }
+  input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 120ms;
+  }
+  input::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
 }
 
 /* StomoApp Component Utilities */

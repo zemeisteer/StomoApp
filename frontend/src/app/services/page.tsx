@@ -108,13 +108,13 @@ export default function ServicesPage() {
             <div key={n} className="bg-white rounded-2xl p-6 border border-line animate-pulse space-y-4">
               <div className="flex justify-between items-center">
                 <div className="h-6 w-20 bg-brand-50 rounded-full" />
-                <div className="h-4 w-16 bg-slate-100 rounded" />
+                <div className="h-4 w-16 bg-canvas rounded" />
               </div>
-              <div className="h-6 w-3/4 bg-slate-100 rounded" />
-              <div className="h-10 bg-slate-100 rounded" />
+              <div className="h-6 w-3/4 bg-canvas rounded" />
+              <div className="h-10 bg-canvas rounded" />
               <div className="pt-4 border-t border-line flex justify-between">
-                <div className="h-6 w-24 bg-slate-100 rounded" />
-                <div className="h-8 w-24 bg-slate-100 rounded" />
+                <div className="h-6 w-24 bg-canvas rounded" />
+                <div className="h-8 w-24 bg-canvas rounded" />
               </div>
             </div>
           ))}

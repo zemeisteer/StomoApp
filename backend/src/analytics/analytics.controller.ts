@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Query, UseGuards, Req } from '@nestjs/common';
 import { Request } from 'express';
 import { AnalyticsService } from './analytics.service';
+import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -31,7 +32,10 @@ export class RecordAnalyticsEventDto {
 
 @Controller()
 export class AnalyticsController {
-  constructor(private readonly analyticsService: AnalyticsService) {}
+  constructor(
+    private readonly analyticsService: AnalyticsService,
+    private readonly dashboardService: DashboardService,
+  ) {}
 
   @Post('analytics/event')
   @Public()
@@ -44,6 +48,14 @@ export class AnalyticsController {
       dto.metadata,
     );
     return { ok: true };
+  }
+
+  /** Owner dashboard: money, visits, patients, daily series, top services and doctors. */
+  @Get('admin/dashboard')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  async getDashboard(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.dashboardService.summary(from, to);
   }
 
   @Get('admin/analytics/overview')

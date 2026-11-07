@@ -177,7 +177,7 @@ export default function AdminReviewsPage() {
         );
       default:
         return (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-canvas text-ink border border-line">
             {status}
           </span>
         );
@@ -310,7 +310,7 @@ export default function AdminReviewsPage() {
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
                             r.consentDisplayName
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-slate-50 text-slate-600 border-slate-200'
+                              : 'bg-canvas text-ink-muted border-line'
                           }`}
                         >
                           {r.consentDisplayName
@@ -448,7 +448,7 @@ export default function AdminReviewsPage() {
               </h2>
               <button
                 onClick={() => setNoteModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
+                className="text-ink-subtle hover:text-ink-muted font-bold"
               >
                 ✕
               </button>
@@ -476,7 +476,7 @@ export default function AdminReviewsPage() {
                 }
                 className="w-full text-xs p-3 rounded-xl border border-line focus:outline-none focus:ring-2 focus:ring-brand-600 bg-canvas"
               />
-              <span className="text-[10px] text-slate-400 block text-right">
+              <span className="text-[10px] text-ink-subtle block text-right">
                 {adminNote.length} / 500
               </span>
             </div>

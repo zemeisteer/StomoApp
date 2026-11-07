@@ -44,7 +44,7 @@ export default function ArticleDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="py-32 text-center text-slate-400 font-semibold text-sm">
+      <div className="py-32 text-center text-ink-subtle font-semibold text-sm">
         {t.common.loading}
       </div>
     );
@@ -56,10 +56,10 @@ export default function ArticleDetailPage() {
         <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto">
           <FileText className="w-8 h-8" />
         </div>
-        <h1 className="text-xl font-bold text-slate-900">
+        <h1 className="text-xl font-bold text-ink">
           {language === 'uz' ? 'Maqola topilmadi' : 'Статья не найдена'}
         </h1>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-muted">
           {language === 'uz'
             ? 'Ushbu maqola hali e\'lon qilinmagan yoki o\'chirilgan.'
             : 'Данная статья еще не опубликована или удалена.'}
@@ -119,7 +119,7 @@ export default function ArticleDetailPage() {
           </div>
 
           {article.coverImageUrl && (
-            <div className="w-full h-64 sm:h-96 rounded-2xl overflow-hidden bg-slate-100 border border-line">
+            <div className="w-full h-64 sm:h-96 rounded-2xl overflow-hidden bg-canvas border border-line">
               <Image
                 src={article.coverImageUrl}
                 alt={title}

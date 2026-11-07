@@ -151,16 +151,16 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
-        className={`relative w-full ${sizeClasses} bg-white rounded-3xl p-6 sm:p-7 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto outline-none ${className}`}
+        className={`relative w-full ${sizeClasses} bg-white rounded-3xl p-6 sm:p-7 shadow-2xl border border-line max-h-[90vh] overflow-y-auto outline-none ${className}`}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4 mb-4">
+        <div className="flex items-start justify-between gap-4 border-b border-line pb-4 mb-4">
           <div>
-            <h2 id={titleId} className="text-lg font-extrabold text-slate-900">
+            <h2 id={titleId} className="text-lg font-extrabold text-ink">
               {title}
             </h2>
             {description && (
-              <p id={descId} className="text-xs text-slate-500 mt-0.5">
+              <p id={descId} className="text-xs text-ink-muted mt-0.5">
                 {description}
               </p>
             )}
@@ -171,7 +171,7 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Yopish"
-              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors shrink-0"
+              className="p-1.5 text-ink-subtle hover:text-ink-muted rounded-xl hover:bg-canvas transition-colors shrink-0"
             >
               <X className="w-4 h-4" />
             </button>

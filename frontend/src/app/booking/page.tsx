@@ -1685,7 +1685,7 @@ function BookingContent() {
                       return (
                         <div
                           key={d.id}
-                          className="p-3.5 rounded-2xl border border-dashed border-line bg-slate-50/70 text-left flex items-center justify-between"
+                          className="p-3.5 rounded-2xl border border-dashed border-line bg-canvas/70 text-left flex items-center justify-between"
                         >
                           <div>
                             <p className="font-semibold text-xs text-ink">Dr. {fullName}</p>
@@ -1915,7 +1915,7 @@ function BookingContent() {
                           onClick={() => handleSelectSlot(slot)}
                           className={`py-3 px-2 rounded-2xl text-xs font-bold transition-all flex flex-col items-center justify-center cursor-pointer ${
                             !slot.available
-                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed line-through opacity-60'
+                              ? 'bg-canvas text-ink-subtle cursor-not-allowed line-through opacity-60'
                               : isSelected
                               ? 'bg-brand-600 text-white ring-2 ring-brand-600 shadow-md shadow-brand-600/25 scale-[1.02]'
                               : 'bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white hover:scale-[1.01]'
@@ -2561,7 +2561,7 @@ function BookingContent() {
                     <h3 id="quote-change-title" className="text-xl font-bold text-ink">
                       {language === 'ru' ? 'Условия приема обновлены' : 'Qabul shartlari yangilandi'}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <p className="text-xs text-ink-muted mt-0.5">
                       {language === 'ru'
                         ? 'Стоимость или длительность услуги была скорректирована'
                         : 'Xizmat narxi yoki davomiyligi tizimda yangilandi'}
@@ -2573,14 +2573,14 @@ function BookingContent() {
                   {/* Price comparison */}
                   {quoteChangeNotice.materialChanges?.priceChanged && (
                     <div className="flex items-center justify-between pb-3 border-b border-line">
-                      <span className="text-sm font-medium text-slate-600">
+                      <span className="text-sm font-medium text-ink-muted">
                         {language === 'ru' ? 'Стоимость приема:' : 'Qabul narxi:'}
                       </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm line-through text-slate-400">
+                        <span className="text-sm line-through text-ink-subtle">
                           {formatPrice(quoteChangeNotice.expectedQuote.priceFrom)}
                         </span>
-                        <span className="text-xs text-slate-400">→</span>
+                        <span className="text-xs text-ink-subtle">→</span>
                         <span className="text-base font-bold text-brand-600 bg-brand-50 px-2.5 py-0.5 rounded-full border border-secondary-600/30">
                           {formatPrice(quoteChangeNotice.currentQuote.priceFrom)}
                         </span>
@@ -2591,14 +2591,14 @@ function BookingContent() {
                   {/* Duration comparison */}
                   {quoteChangeNotice.materialChanges?.durationChanged && (
                     <div className="flex items-center justify-between pb-3 border-b border-line">
-                      <span className="text-sm font-medium text-slate-600">
+                      <span className="text-sm font-medium text-ink-muted">
                         {language === 'ru' ? 'Длительность:' : 'Davomiyligi:'}
                       </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm line-through text-slate-400">
+                        <span className="text-sm line-through text-ink-subtle">
                           {quoteChangeNotice.expectedQuote.durationMinutes} {language === 'ru' ? 'мин' : 'daq'}
                         </span>
-                        <span className="text-xs text-slate-400">→</span>
+                        <span className="text-xs text-ink-subtle">→</span>
                         <span className="text-base font-bold text-brand-600 bg-brand-50 px-2.5 py-0.5 rounded-full border border-secondary-600/30">
                           {quoteChangeNotice.currentQuote.durationMinutes} {language === 'ru' ? 'мин' : 'daq'}
                         </span>
@@ -2606,7 +2606,7 @@ function BookingContent() {
                     </div>
                   )}
 
-                  <p className="text-xs text-slate-600 leading-relaxed">
+                  <p className="text-xs text-ink-muted leading-relaxed">
                     {language === 'ru'
                       ? 'Все ваши данные (ФИО, телефон, выбранный врач и филиал) сохранены. Нажмите «Принять новые условия», чтобы подтвердить запись по актуальным условиям.'
                       : 'Barcha ma\'lumotlaringiz (ism, telefon, shifokor va filial) saqlanib qoldi. Yangilangan shartlar bilan qabulni yakunlash uchun «Yangi shartlarni qabul qilish» tugmasini bosing.'}
@@ -2618,7 +2618,7 @@ function BookingContent() {
                     id="cancel-quote-update-btn"
                     type="button"
                     onClick={() => setQuoteChangeNotice(null)}
-                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium text-sm transition-colors cursor-pointer"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-line text-ink-muted hover:bg-canvas font-medium text-sm transition-colors cursor-pointer"
                   >
                     {language === 'ru' ? 'Отмена' : 'Bekor qilish'}
                   </button>
@@ -2652,7 +2652,7 @@ export default function BookingPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen py-24 flex items-center justify-center text-slate-500 font-medium">
+        <div className="min-h-screen py-24 flex items-center justify-center text-ink-muted font-medium">
           Yuklanmoqda...
         </div>
       }

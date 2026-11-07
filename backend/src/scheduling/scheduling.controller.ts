@@ -187,7 +187,7 @@ export class SchedulingController {
   // Admin endpoints
   @Get(['doctor/:doctorId', 'schedules/:doctorId'])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async getDoctorSchedules(@Param('doctorId') doctorId: string) {
     return this.service.getDoctorSchedules(doctorId);
   }
@@ -252,7 +252,7 @@ export class SchedulingController {
 
   @Get('exceptions/:doctorId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async getExceptions(
     @Param('doctorId') doctorId: string,
     @Query('dateFrom') dateFrom?: string,
