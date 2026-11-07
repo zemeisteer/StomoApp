@@ -1,10 +1,125 @@
-import { Controller, Get, Post, Put, Param, Body, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { PartialType } from '@nestjs/swagger';
 import { DoctorsService } from './doctors.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { StaffRole } from '@prisma/client';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsInt,
+  IsArray,
+  Length,
+  Min,
+} from 'class-validator';
+
+export class CreateDoctorDto {
+  @IsString()
+  @Length(2, 50)
+  firstNameUz!: string;
+
+  @IsString()
+  @Length(2, 50)
+  firstNameRu!: string;
+
+  @IsString()
+  @Length(2, 50)
+  lastNameUz!: string;
+
+  @IsString()
+  @Length(2, 50)
+  lastNameRu!: string;
+
+  @IsString()
+  @Length(2, 100)
+  slug!: string;
+
+  @IsOptional()
+  @IsString()
+  photoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  titleUz?: string;
+
+  @IsOptional()
+  @IsString()
+  titleRu?: string;
+
+  @IsOptional()
+  @IsString()
+  bioUz?: string;
+
+  @IsOptional()
+  @IsString()
+  bioRu?: string;
+
+  @IsOptional()
+  @IsString()
+  educationUz?: string;
+
+  @IsOptional()
+  @IsString()
+  educationRu?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  experienceYears?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  languages?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  specialtyIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  branchIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serviceIds?: string[];
+}
+
+export class UpdateDoctorDto extends PartialType(CreateDoctorDto) {}
+
+export class SpecialtyDto {
+  @IsString()
+  nameUz!: string;
+
+  @IsString()
+  nameRu!: string;
+
+  @IsString()
+  slug!: string;
+
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
 
 @Controller('doctors')
 export class DoctorsController {
@@ -46,35 +161,53 @@ export class DoctorsController {
   @Post('admin')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  create(@Body() data: any) {
-    return this.doctorsService.create(data);
+  create(@Body() dto: CreateDoctorDto) {
+    return this.doctorsService.create(dto);
   }
 
   @Put('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  update(@Param('id') id: string, @Body() data: any) {
-    return this.doctorsService.update(id, data);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDoctorDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.doctorsService.update(id, dto, user);
   }
 
   @Put('admin/:id/archive')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  archive(@Param('id') id: string) {
-    return this.doctorsService.archive(id);
+  archive(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.doctorsService.archive(id, user);
+  }
+
+  @Get('admin/:id/lifecycle-preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  lifecyclePreview(@Param('id') id: string) {
+    return this.doctorsService.getLifecyclePreview(id);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  delete(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.doctorsService.delete(id, user);
   }
 
   @Post('admin/specialties')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  createSpecialty(@Body() data: any) {
-    return this.doctorsService.createSpecialty(data);
+  createSpecialty(@Body() dto: SpecialtyDto) {
+    return this.doctorsService.createSpecialty(dto);
   }
 
   @Put('admin/specialties/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  updateSpecialty(@Param('id') id: string, @Body() data: any) {
-    return this.doctorsService.updateSpecialty(id, data);
+  updateSpecialty(@Param('id') id: string, @Body() dto: Partial<SpecialtyDto>) {
+    return this.doctorsService.updateSpecialty(id, dto);
   }
 }

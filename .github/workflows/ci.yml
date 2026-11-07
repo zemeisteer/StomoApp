@@ -1,0 +1,311 @@
+name: StomoApp Production CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-verification:
+    name: Backend Lint, Build & Integration Suite
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public
+      TEST_DATABASE_URL: postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: test_jwt_secret_ci_key_2026_dev_secure
+      JWT_REFRESH_SECRET: test_jwt_refresh_ci_key_2026_dev_secure
+      DEFAULT_TIMEZONE: Asia/Tashkent
+      DEFAULT_LOCALE: uz
+      SERVICE_TOKEN: ci_service_token_random_secure_32_chars_minimum_length_abcdef
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dentacare
+          POSTGRES_PASSWORD: dentacare_dev_password
+          POSTGRES_DB: dentacare_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Prisma Schema Validation & Client Generation
+        working-directory: ./backend
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Backend Lint Check
+        working-directory: ./backend
+        run: npm run lint
+
+      - name: Backend Build Compilation
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Apply Database Migrations (dentacare_test)
+        working-directory: ./backend
+        run: npx prisma migrate deploy
+
+      - name: Seed Test Fixtures (dentacare_test)
+        working-directory: ./backend
+        run: npx prisma db seed
+
+      - name: Run Jest E2E Test Suite
+        working-directory: ./backend
+        run: npx jest --config ./test/jest-e2e.json --runInBand
+
+      - name: Run Comprehensive Verification Checks
+        working-directory: ./backend
+        run: npx ts-node scripts/verify-all-priorities.ts
+
+  frontend-verification:
+    name: Frontend Typecheck, Lint & Production Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: TypeScript Typecheck
+        working-directory: ./frontend
+        run: npx tsc -p tsconfig.json --noEmit
+
+      - name: Frontend Lint Check
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Next.js Production Build
+        working-directory: ./frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+        run: npm run build
+
+      - name: Production Bundle Has No Seed Credentials
+        working-directory: ./frontend
+        run: |
+          if grep -rlE "DentacareAdmin2026|Doctor2026" .next/static .next/server; then
+            echo "Seed/demo passwords found in the production build"; exit 1
+          fi
+
+  bot-verification:
+    name: Telegram Bot Flow Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Bot Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r bot/requirements.txt pytest pytest-asyncio anyio
+
+      - name: Run Bot Suite
+        env:
+          ENVIRONMENT: test
+          SERVICE_TOKEN: ci_service_token_random_secure_32_chars_minimum_length_abcdef
+        run: pytest bot/test_bot_suite.py
+
+
+  gateway-verification:
+    name: Nginx Gateway & Compose Config Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Production Compose File
+        env:
+          DOMAIN: example.test
+          TELEGRAM_BOT_TOKEN: ci_dummy_token
+          TELEGRAM_CHAT_ID: '-1000000000000'
+          POSTGRES_PASSWORD: ci_dummy
+          REDIS_PASSWORD: ci_dummy
+          JWT_SECRET: ci_dummy
+          JWT_REFRESH_SECRET: ci_dummy
+          SERVICE_TOKEN: ci_dummy
+        run: |
+          docker compose -f docker-compose.prod.yml config --quiet
+          # Must refuse to render without required secrets
+          if POSTGRES_PASSWORD= docker compose -f docker-compose.prod.yml config --quiet 2>/dev/null; then
+            echo 'compose accepted an empty POSTGRES_PASSWORD'; exit 1
+          fi
+
+      - name: Build Bot Image & Import Smoke Test
+        run: |
+          docker build -t stomo-bot:ci ./bot
+          docker run --rm \
+            -e SERVICE_TOKEN=ci_service_token_random_secure_32_chars_minimum_length_abcdef \
+            stomo-bot:ci python -c "import bot.main; print('bot image OK')"
+
+      - name: Validate Ops Script Syntax
+        run: for f in scripts/*.sh backend/scripts/*.sh; do bash -n "$f" && echo "ok $f"; done
+
+      - name: Generate Env & Preflight (DNS skipped)
+        run: |
+          ./scripts/generate-env.sh example.test ci@example.test
+          # Provider values a human fills in after generation
+          sed -i -e 's/^TELEGRAM_BOT_TOKEN=.*/TELEGRAM_BOT_TOKEN=123456:ci_dummy/' \
+                 -e 's/^TELEGRAM_CHAT_ID=.*/TELEGRAM_CHAT_ID=-1000000000000/' .env.production
+          PREFLIGHT_SKIP_DNS=1 ./scripts/preflight.sh
+          # Placeholder secrets must be rejected
+          cp .env.production.example /tmp/bad.env
+          if ENV_FILE=/tmp/bad.env PREFLIGHT_SKIP_DNS=1 ./scripts/preflight.sh; then
+            echo "preflight accepted template placeholders"; exit 1
+          fi
+          rm -f .env.production
+
+      - name: Render Templates & Run nginx -t
+        run: |
+          mkdir -p /tmp/le/live/example.test
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout /tmp/le/live/example.test/privkey.pem \
+            -out /tmp/le/live/example.test/fullchain.pem -subj /CN=example.test
+          docker run --rm \
+            --add-host frontend:127.0.0.1 --add-host backend:127.0.0.1 \
+            -e DOMAIN=example.test -e EXTRA_DOMAINS=www.example.test \
+            -e NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/sites --tmpfs /etc/nginx/sites \
+            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/nginx/templates:/etc/nginx/templates:ro" \
+            -v "$PWD/nginx/snippets:/etc/nginx/snippets:ro" \
+            -v /tmp/le:/etc/letsencrypt:ro \
+            nginx:1.25-alpine nginx -T > /tmp/nginx-T.txt
+          # nginx -t passes even with zero server blocks: assert the site was rendered
+          grep -q "server_name example.test www.example.test" /tmp/nginx-T.txt
+          grep -q "listen 443 ssl" /tmp/nginx-T.txt
+
+  production-stack-smoke:
+    name: Production Stack Smoke Test (backend image, migrations, health)
+    runs-on: ubuntu-latest
+    env:
+      DOMAIN: example.test
+      TELEGRAM_BOT_TOKEN: ci_dummy_token
+      TELEGRAM_CHAT_ID: '-1000000000000'
+      POSTGRES_PASSWORD: ci_smoke_pg_password_0123456789abcdef
+      REDIS_PASSWORD: ci_smoke_redis_password_0123456789abcd
+      JWT_SECRET: ci_smoke_jwt_secret_0123456789abcdef0123
+      JWT_REFRESH_SECRET: ci_smoke_jwt_refresh_secret_0123456789ab
+      SERVICE_TOKEN: ci_smoke_service_token_0123456789abcdef0123
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build & Start postgres, redis, backend
+        run: docker compose -f docker-compose.prod.yml up -d --build --wait --wait-timeout 300 postgres redis backend
+
+      - name: Backend Health (migrations applied, DB reachable)
+        run: |
+          docker compose -f docker-compose.prod.yml exec -T backend wget -qO- http://127.0.0.1:4000/api/health | tee /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          docker compose -f docker-compose.prod.yml exec -T backend npx prisma migrate status
+
+      - name: Owner Bootstrap Script
+        run: |
+          docker compose -f docker-compose.prod.yml run --rm \
+            -e OWNER_EMAIL=owner@example.test -e OWNER_NAME="CI Owner" -e OWNER_PASSWORD=ci-owner-password-123 \
+            backend node scripts/create-owner.js
+
+      - name: Scheduled Backup Service Produces Verified Archives
+        run: |
+          mkdir -p backups
+          docker compose -f docker-compose.prod.yml up -d backup
+          for i in $(seq 1 30); do
+            if ls backups/dentacare_*.dump >/dev/null 2>&1 && ls backups/uploads_*.tar.gz >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker compose -f docker-compose.prod.yml logs backup
+          ls -la backups
+          ls backups/dentacare_*.dump && ls backups/uploads_*.tar.gz
+          docker compose -f docker-compose.prod.yml exec -T backup sh -c 'pg_restore --list /var/backups/dentacare/dentacare_*.dump | grep -q "TABLE public staff_users"'
+
+      - name: Frontend Image & HTTPS Gateway (self-signed, same path as init-letsencrypt.sh)
+        run: |
+          docker compose -f docker-compose.prod.yml run --rm --no-deps --entrypoint sh certbot -c '
+            mkdir -p /etc/letsencrypt/live/example.test &&
+            openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+              -keyout /etc/letsencrypt/live/example.test/privkey.pem \
+              -out /etc/letsencrypt/live/example.test/fullchain.pem -subj /CN=example.test'
+          docker compose -f docker-compose.prod.yml up -d --build --wait --wait-timeout 600 frontend nginx
+          R="--resolve example.test:443:127.0.0.1 --resolve example.test:80:127.0.0.1"
+          # HTTP redirects to HTTPS
+          test "$(curl -s -o /dev/null -w '%{http_code}' $R http://example.test/)" = "301"
+          # Frontend through the gateway, with HSTS
+          test "$(curl -sk -o /dev/null -w '%{http_code}' $R https://example.test/)" = "200"
+          curl -skI $R https://example.test/ | grep -qi '^strict-transport-security'
+          # API through the gateway
+          curl -sk $R https://example.test/api/health | grep -q '"status":"ok"'
+
+      - name: Owner Login over HTTPS (Secure cookies)
+        run: |
+          R="--resolve example.test:443:127.0.0.1"
+          curl -sk $R -D /tmp/login.headers -o /tmp/login.json -H 'Content-Type: application/json' \
+            -d '{"email":"owner@example.test","password":"ci-owner-password-123"}' https://example.test/api/auth/login
+          head -1 /tmp/login.headers
+          grep -qE '^HTTP/[0-9.]+ 20[01]' /tmp/login.headers
+          grep -q '"accessToken"' /tmp/login.json
+          grep -i '^set-cookie: refresh_token=' /tmp/login.headers | grep -qi 'secure'
+
+      - name: Logs on Failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail 200 backend postgres backup frontend nginx
+
+      - name: Tear Down
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v

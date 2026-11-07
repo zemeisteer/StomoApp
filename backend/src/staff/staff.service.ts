@@ -1,7 +1,7 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
-import { StaffRole } from '@prisma/client';
+import { StaffRole, Prisma } from '@prisma/client';
 
 @Injectable()
 export class StaffService {
@@ -16,6 +16,7 @@ export class StaffService {
     fullName: string;
     role: StaffRole;
     doctorId?: string;
+    telegramUserId?: string | null;
   }) {
     const existing = await this.prisma.staffUser.findUnique({
       where: { email: data.email.toLowerCase() },
@@ -23,6 +24,8 @@ export class StaffService {
     if (existing) {
       throw new ConflictException('Bu email allaqachon ro\'yxatdan o\'tgan');
     }
+
+    await this.assertTelegramIdFree(this.prisma, data.telegramUserId);
 
     const passwordHash = await this.authService.hashPassword(data.password);
 
@@ -33,6 +36,7 @@ export class StaffService {
         fullName: data.fullName,
         role: data.role,
         doctorId: data.doctorId,
+        telegramUserId: data.telegramUserId || null,
       },
       select: {
         id: true,
@@ -45,6 +49,21 @@ export class StaffService {
     });
   }
 
+  private async assertTelegramIdFree(
+    client: Prisma.TransactionClient | PrismaService,
+    telegramUserId: string | null | undefined,
+    excludeId?: string,
+  ) {
+    if (!telegramUserId) return;
+    const other = await client.staffUser.findFirst({
+      where: { telegramUserId, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+      select: { id: true },
+    });
+    if (other) {
+      throw new ConflictException('Bu Telegram ID boshqa xodimga biriktirilgan');
+    }
+  }
+
   async findAll() {
     return this.prisma.staffUser.findMany({
       select: {
@@ -55,6 +74,7 @@ export class StaffService {
         isActive: true,
         lastLoginAt: true,
         doctorId: true,
+        telegramUserId: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -72,6 +92,7 @@ export class StaffService {
         isActive: true,
         lastLoginAt: true,
         doctorId: true,
+        telegramUserId: true,
         createdAt: true,
       },
     });
@@ -84,18 +105,65 @@ export class StaffService {
     role?: StaffRole;
     isActive?: boolean;
     doctorId?: string | null;
+    telegramUserId?: string | null;
   }) {
-    return this.prisma.staffUser.update({
-      where: { id },
-      data,
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-        doctorId: true,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      // Transactional advisory lock to serialize concurrent staff owner demotions/updates
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('staff_owner_mutex'))`;
+
+      const user = await tx.staffUser.findUnique({ where: { id } });
+      if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+      // Prevent removing or disabling the last active owner
+      const isTargetActiveOwner = user.role === StaffRole.OWNER && user.isActive === true;
+      const isBeingDemotedOrDisabled =
+        (data.isActive === false && user.isActive === true) ||
+        (data.role !== undefined && data.role !== StaffRole.OWNER && user.role === StaffRole.OWNER);
+
+      if (isTargetActiveOwner && isBeingDemotedOrDisabled) {
+        const activeOwners = await tx.staffUser.count({
+          where: { role: StaffRole.OWNER, isActive: true },
+        });
+        if (activeOwners <= 1) {
+          throw new BadRequestException(
+            'Klinikada kamida bitta faol Egasi (OWNER) qolishi shart. Oxirgi egasini o\'chirib yoki rolini o\'zgartirib bo\'lmaydi',
+          );
+        }
+      }
+
+      // If doctor role, validate doctorId if supplied
+      if (data.role === StaffRole.DOCTOR && data.doctorId) {
+        const doctor = await tx.doctor.findUnique({ where: { id: data.doctorId } });
+        if (!doctor) throw new BadRequestException('Biriktirilayotgan shifokor topilmadi');
+      }
+
+      await this.assertTelegramIdFree(tx, data.telegramUserId, id);
+
+      // Invalidate sessions immediately if role changed or staff disabled
+      const roleChanged = data.role !== undefined && data.role !== user.role;
+      const deactivated = data.isActive === false && user.isActive === true;
+      const shouldInvalidate = roleChanged || deactivated;
+
+      return tx.staffUser.update({
+        where: { id },
+        data: {
+          ...data,
+          tokenVersion: shouldInvalidate ? { increment: 1 } : undefined,
+          refreshTokenHash: shouldInvalidate ? null : undefined,
+        },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          isActive: true,
+          doctorId: true,
+          telegramUserId: true,
+        },
+      });
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      timeout: 10000,
     });
   }
 
@@ -103,7 +171,11 @@ export class StaffService {
     const passwordHash = await this.authService.hashPassword(newPassword);
     await this.prisma.staffUser.update({
       where: { id },
-      data: { passwordHash, refreshTokenHash: null },
+      data: {
+        passwordHash,
+        refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
+      },
     });
   }
 }

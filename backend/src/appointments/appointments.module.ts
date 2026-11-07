@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
-import { AppointmentsController } from './appointments.controller';
+import { AppointmentsController, PublicBookingController } from './appointments.controller';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 
 @Module({
   imports: [SchedulingModule],
-  controllers: [AppointmentsController],
+  controllers: [AppointmentsController, PublicBookingController],
   providers: [AppointmentsService],
   exports: [AppointmentsService],
 })

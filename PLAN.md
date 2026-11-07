@@ -1,60 +1,402 @@
-# DentaCare - Dental Clinic Application
+# DentaCare - Dental Clinic Application Implementation Plan
 
-## Implementation Checklist
+> **Audit Status**: Audited against actual repository contents. Phases 1 and 2 are fully implemented, verified, and backed by a 10-point PostgreSQL integration suite.
 
-### Phase 1: Foundation
-- [x] Project structure (monorepo: frontend + backend)
-- [x] Docker Compose (PostgreSQL, Redis, MinIO)
-- [x] Prisma schema with full data model
-- [x] Database migrations and seed
-- [x] NestJS backend scaffolding with modules
-- [x] Authentication (JWT + HttpOnly cookies)
-- [x] Role-based authorization
+---
 
-### Phase 2: Backend API
-- [x] Staff/Auth module
-- [x] Clinic settings & branches
-- [x] Doctors & specialties
-- [x] Services & pricing
-- [x] Scheduling (working hours, exceptions)
-- [x] Booking engine with concurrency safety
-- [x] Patients module
-- [x] Leads & callbacks
-- [x] Reviews with moderation
-- [x] CMS (articles, FAQ, content)
-- [x] Media upload (S3/MinIO)
-- [x] Analytics aggregation
-- [x] Notification jobs
+## Phase 1: Runnable Foundation & Core Architecture (COMPLETED)
+- [x] Project structure: Monorepo root + NestJS backend (**Verified**)
+- [x] Docker Compose configuration for Postgres, Redis, MinIO (**Verified**)
+- [x] Prisma schema with comprehensive clinic data model (**Verified**)
+- [x] Schema refinement: Doctor schedule required branch relation, StaffUser tokenVersion, Appointment tokenExpiresAt/tokenRevokedAt (**Verified**)
+- [x] Database initial migration committed and applied (`20261014103549_init`) (**Verified**)
+- [x] Database idempotent seed script (`prisma/seed.ts`) with clinic demo data, staff users with bcrypt hashes, branches, services, CMS items (**Verified**)
+- [x] Redis and Storage configuration via environment variables with graceful local fallback (**Verified**)
+- [x] Basic Health check endpoint (`/api/health`) with DB connectivity, latency, and timezone checks (**Verified**)
+- [x] Environment configuration (`.env.example` & expanded `.gitignore`) (**Verified**)
+- [x] Dependency lockfiles established (**Verified**)
+- [x] Concise README with setup instructions and architectural overview (**Verified**)
 
-### Phase 3: Public Website (Next.js)
-- [x] Layout, navigation, footer
-- [x] i18n (Uzbek + Russian)
-- [x] Home page with animations
-- [x] About page
-- [x] Services listing & detail
-- [x] Specialists listing & detail
-- [x] Prices page
-- [x] Reviews page
-- [x] FAQ & Articles
-- [x] Contacts page
-- [x] Booking flow (multi-step)
-- [x] Privacy/policy pages
+---
 
-### Phase 4: Admin Dashboard
-- [x] Login & auth
-- [x] Dashboard overview
-- [x] Appointment calendar
-- [x] Patient management
-- [x] Leads management
-- [x] Doctor/schedule management
-- [x] CMS editor
-- [x] Analytics charts
-- [x] Settings
+## Phase 2: Complete and Secure Backend API (COMPLETED)
+### 1. Authentication & Session Management
+- [x] JWT issuance, validation, and local strategy (**Verified**)
+- [x] Fix broken token refresh: shared `issueTokens()` token issuance flow (**Verified**)
+- [x] Token rotation, SHA-256 digest hashing (eliminating bcrypt 72-byte truncation) (**Verified**)
+- [x] Refresh token revocation and replay detection (**Verified**)
+- [x] Strict cookie path handling (`/api/auth/refresh`) and CSRF protection for cookie mutations (**Verified**)
+- [x] Reject missing or placeholder production secrets; enforce session invalidation on role changes/deactivation/logout via `tokenVersion` (**Verified**)
 
-### Phase 5: Polish
-- [ ] Animations (Framer Motion)
-- [ ] SEO & structured data
-- [ ] Accessibility audit
-- [ ] Mobile responsive
-- [ ] Tests
-- [ ] Documentation
+### 2. Role-Based Authorization & Scope Enforcement
+- [x] Role decorator and Guards (**Verified**)
+- [x] Doctor ownership scoping: fail closed for doctors without linked profiles (**Verified**)
+- [x] Doctor scoping on `GET /admin/appointments/today` and `GET /admin/appointments/:id` (**Verified**)
+- [x] Patient detail cross-doctor access control: doctors only view authorized patients with doctor-specific appointment history (**Verified**)
+
+### 3. Scheduling & Timezone Correctness
+- [x] Slot availability logic with explicit `Asia/Tashkent` conversions and UTC persistence (**Verified**)
+- [x] Validate branch existence, branch activity, doctor branch assignment, and branch-specific schedules (**Verified**)
+- [x] Validate doctor-service eligibility and active status in availability and booking (**Verified**)
+- [x] Respect zero-valued configuration (use `??` instead of `||`) (**Verified**)
+- [x] Handle or explicitly reject cross-midnight schedules (**Verified**)
+- [x] Honor minimum notice, booking horizon, breaks, leaves, and buffers consistently (**Verified**)
+
+### 4. Concurrency-Safe Booking & Idempotency
+- [x] PostgreSQL advisory lock structure (`pg_advisory_xact_lock`) with serializable isolation (**Verified**)
+- [x] Idempotency payload binding: reject key reuse with altered payload, prevent double submission (**Verified**)
+- [x] Concurrency-safe reservation mechanism across booking and rescheduling (**Verified**)
+- [x] Durable background expiry for abandoned pending appointments with scheduled task (`@Cron`) (**Verified**)
+- [x] Separate expiry and revocation policy for self-service tokens; minimal public response without PII (**Verified**)
+- [x] Patient identity resolution: safe duplicate matching without silent overwriting of shared family phone numbers (**Verified**)
+
+### 5. Backend Modules Completed
+- [x] `ReviewsModule`: Public submission, admin moderation, consent for display name (**Verified**)
+- [x] `CmsModule`: Articles, FAQ, homepage sections, privacy/booking policy management (**Verified**)
+- [x] `MediaModule`: Validated file upload (MIME check, size limit, sanitized names, MinIO/S3 or local fallback) (**Verified**)
+- [x] `AnalyticsModule`: Database-level aggregations (statuses, doctors, utilization, conversion, payments) (**Verified**)
+- [x] `NotificationsModule`: Multi-channel (email, SMS, Telegram) with console dev sink, job retries, deduplication (**Verified**)
+- [x] `PublicModule`: Publicly exposed read endpoints (specialists, services, articles, clinic info, reviews) (**Verified**)
+- [x] `LeadsModule`: Callback submission and admin management (**Verified**)
+- [x] `AuditModule`: Audit logging for sensitive administrative actions with PII sanitization (**Verified**)
+- [x] Data validation DTOs with strict class-validator and RFC 4180 / CSV injection-safe patient export (**Verified**)
+- [x] All 10 backend integration regression tests passing (**Verified**)
+
+---
+
+## Phase 3: Public Website (Next.js App Router) (COMPLETED)
+- [x] Next.js App Router setup with TypeScript and TailwindCSS (**Verified**)
+- [x] Uzbek (default) and Russian localization (`uz`, `ru`) (**Verified**)
+- [x] Responsive navigation header with language switch, mobile drawer, contact CTA (**Verified**)
+- [x] Dynamic, interactive 3D hero section:
+  - Believable, realistic molar anatomy with 4 cusps, cervical neck, bifurcated roots, and ivory enamel
+  - Three.js implementation with fallback SVG poster
+  - Pointer interaction on desktop & mobile with preserved touch scrolling
+  - Reduced-motion support and pause control (**Verified**)
+- [x] Home page: Hero, advantages, popular services, doctor spotlights, testimonials, location/map (**Verified**)
+- [x] About page: Clinic philosophy, sterilization standards, equipment, team (**Verified**)
+- [x] Services catalog & single service detail pages (**Verified**)
+- [x] Doctors listing & detailed doctor profiles (**Verified**)
+- [x] Transparent price list with category filtering (**Verified**)
+- [x] Reviews page with moderated list and submission form (**Verified**)
+- [x] Articles/Blog and FAQ sections (**Verified**)
+- [x] Contacts page with interactive branch tabs, working hours, and callback form (**Verified**)
+- [x] Multi-step appointment booking wizard connected to live backend APIs (**Verified**)
+- [x] Self-service booking management page (view status, reschedule, cancel) (**Verified**)
+- [x] Editable privacy policy and booking policy pages (**Verified**)
+
+---
+
+## Phase 4: Admin Dashboard (COMPLETED)
+- [x] Secure admin authentication flow with session persistence (**Verified**)
+- [x] Dashboard overview with key metrics and live activity feed (**Verified**)
+- [x] Appointment calendar (Day / Week / Month view) with doctor, branch, and status filters (**Verified**)
+- [x] Appointment workflow actions (confirm, check-in, complete, cancel, reschedule) (**Verified**)
+- [x] Patient directory with contact history, duplicate review tool, and CSV export (**Verified**)
+- [x] Callback lead management with assignment, status updates, and conversion linking (**Verified**)
+- [x] Doctor management: working hours, branch assignments, leaves, and blocked time (**Verified**)
+- [x] Service and pricing management with category grouping and duration settings (**Verified**)
+- [x] Review moderation queue (approve/reject/archive) (**Verified**)
+- [x] CMS content editor for articles, FAQs, and homepage copy (**Verified**)
+
+---
+
+## Phase 5: Deep Hardening & Core Defect Elimination (COMPLETED)
+- [x] **Media API & Image Security**:
+  - Aligned routes to `/api/admin/media/upload` and `/api/admin/media` with paginated responses.
+  - Implemented magic bytes signature validation (JPEG, PNG, WebP) and strict SVG rejection.
+  - Added Sharp raster image re-encoding with dimension bounds (4096px, 16MP) and stripping of active scripting/metadata.
+  - Enforced file size limits before full buffering (HTTP 413 / 400).
+  - Explicit storage driver selection (`s3` vs `local`) with fail-closed production checks and cleanup on partial failures.
+  - Added secure static serving with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'`. (**Verified**)
+- [x] **Durable Booking Idempotency**:
+  - Implemented SHA-256 request fingerprinting binding service, doctor, branch, exact start time, patient name, normalized phone, email, note, consent, and request scope.
+  - Reused key with altered payload strictly returns 409 Conflict; identical payload returns stable existing booking.
+  - Concurrent racing insertions catch `P2002` and deduplicate safely. (**Verified**)
+- [x] **Scheduling & Rescheduling Consistency**:
+  - Snapshot booking-time `bufferMinutes` into the `Appointment` model.
+  - Transactional working hours and doctor/branch/service eligibility checks inside advisory locks.
+  - Rescheduling increments `revision`, extends `tokenExpiresAt`, and transactionally records audit/outbox entries.
+  - Bounded retry with jitter for serializable conflicts. (**Verified**)
+- [x] **Doctor Utilization Analytics**:
+  - Replaced weekly approximation with exact minute interval math (`TimeInterval`, `subtractInterval`, `mergeIntervals`).
+  - Iterates clinic-local dates, applies weekday schedules, subtracts breaks, leaves, holidays, and accounts for overtime.
+  - Clips intervals to date boundaries and includes eligible doctors with zero bookings.
+  - Whitelisted allowed event types and metadata fields to prevent PII leakage. (**Verified**)
+- [x] **Concurrency-Safe Owner Protection**:
+  - Protected with `pg_advisory_xact_lock(hashtext('staff_owner_mutex'))` + row locking inside serializable transaction.
+  - Rechecks active owner count inside transaction; prevents simultaneous demotions.
+  - Cleaned up frontend forms to use supported `StaffRole` enum values (`OWNER`, `ADMIN`, `DOCTOR`, `RECEPTION`, `EDITOR`). (**Verified**)
+- [x] **Runtime Validation for Update Endpoints**:
+  - Replaced TypeScript `Partial<Dto>` with `@nestjs/swagger` `PartialType` classes.
+  - Added bounded validations (`@Min`, `@Max`, `@Matches`, `@IsEnum`, URL scheme validation).
+  - Audited and updated doctors, services, CMS articles, FAQs, clinic settings, and scheduling routes. (**Verified**)
+- [x] **Notification Reliability & Worker Leasing**:
+  - Atomic job claiming with unique UUID lease tokens and conditional completion (`WHERE id = :id AND lease_token = :token`).
+  - Preflight checks against appointment revision and start time.
+  - Preserves cancellation notifications; formats timestamps in clinic timezone. (**Verified**)
+- [x] **Test Database Safety & Verification**:
+  - Safe URL parser validating database name without printing credentials.
+  - Explicit runtime database identity verification (`SELECT current_database()`).
+  - 19/19 backend regression tests passing against isolated `dentacare_test`. (**Verified**)
+
+- [x] Clinic settings & branch management (**Verified**)
+- [x] Audit log viewer for tracking staff actions (**Verified**)
+- [x] Role-based access control (OWNER, ADMIN, DOCTOR, EDITOR) (**Verified**)
+
+---
+
+## Phase 5: Real Analytics Engine (Frontend Dashboard) (COMPLETED)
+- [x] Appointment volume and status distributions (**Verified**)
+- [x] Completed appointments, cancellations, and no-show rates (**Verified**)
+- [x] Popular services by booking demand (**Verified**)
+- [x] Doctor utilization and workload metrics (**Verified**)
+- [x] New vs. returning patient retention (**Verified**)
+- [x] Lead acquisition channels and lead-to-booking conversion rates (**Verified**)
+- [x] Operational payments ledger: recorded payments minus refunds (**Verified**)
+
+---
+
+## Phase 6: Automated Testing & Verification (COMPLETED)
+- [x] Backend TypeScript build and lint verification (`npm run build`, `npm run lint` - 0 errors) (**Verified**)
+- [x] Dedicated test database isolation (`dentacare_test` PostgreSQL 18) (**Verified**)
+- [x] Fail-closed test database environment verification (**Verified**)
+- [x] Comprehensive integration suite against dedicated test database (21/21 passed) (`npm run test:e2e`) (**Verified**)
+- [x] Frontend build and lint verification (Next.js 28/28 routes prerendered) (`npm run build`, `npm run lint` - 0 errors) (**Verified**)
+- [x] Final handoff documentation (`README.md`, `PROGRESS.md`, `PLAN.md`) (**Verified**)
+
+---
+
+## Phase 7: Historical Data, Transactional Consistency, Notification Outbox & Browser Evidence (COMPLETED & VERIFIED)
+- [x] **Forward Migration for Historical Buffer & Revision Backfill**:
+  - `backend/prisma/migrations/20261015121500_backfill_historical_buffers_and_revisions` applied.
+  - Reconstructs historical `buffer_minutes = ROUND(EXTRACT(EPOCH FROM (end_time - start_time)) / 60)::integer - duration_minutes` where reliable (0..120 mins).
+  - Backfills `notification_jobs.appointment_revision` from `Appointment.revision`. (**Verified**)
+- [x] **Transactional & Consistent Scheduling**:
+  - `SchedulingService.isDoctorWorkingAt` and `isTimeSlotAvailable` accept transaction client `tx`.
+  - Advisory locks serialize booking, rescheduling, and doctor schedule/exception mutations.
+  - Adding blocked/leave periods checks active bookings and rejects with 409 Conflict.
+  - Deterministic exception precedence (Weekly -> Breaks -> Overtime -> Blocked -> Leaves/Holidays).
+  - Overtime supported on days without regular weekly schedules. (**Verified**)
+- [x] **Strict Legacy Idempotency Key Policy**:
+  - Canonical sorted JSON serialization for request fingerprints.
+  - Explicit policy rejecting unverifiable legacy keys without fingerprints (409 Conflict).
+  - Racing `P2002` catches and advisory locks enforce fingerprint matching. (**Verified**)
+- [x] **Transactional Notification Outbox**:
+  - Intent persisted inside the appointment mutation transaction (`enqueueBookingCreated`, `enqueueAppointmentConfirmed`, `enqueueAppointmentCancelled`, `enqueueAppointmentRescheduled`).
+  - Worker lease re-check (`status = PROCESSING AND lease_token = :token`) before delivery initiation.
+  - Bounded 5s timeouts on external channels.
+  - Stale reminder cancellation policy matching appointment revision. (**Verified**)
+- [x] **Analytics Calculations**:
+  - Count overtime availability even when `daySchedules` is empty.
+  - Deterministic exception precedence and UTC date enumeration.
+  - Added `totalBufferMinutes` and `totalOccupiedMinutes`. (**Verified**)
+- [x] **Replaced Misleading Regression Coverage**:
+  - Regression 16: True concurrent `Promise.all` submissions, fingerprint verification.
+  - Regression 18: Concurrency-safe dual owner protection, active owner remains.
+  - Regression 19: Isolated fixture doctor with exact date-level available minute calculations.
+  - Regression 20: Historical buffer preservation on reschedule.
+  - Regression 21: Transactional outbox notification intent persistence.
+  - 21/21 tests passing in 29.6s. (**Verified**)
+- [x] **Browser Workflow & Responsive Verification**:
+  - Local Chrome puppeteer-core automation across 1440px desktop, 768px tablet, and 390px mobile.
+  - Connected visitor booking -> admin calendar verification.
+  - 12 screenshots captured in artifact directory. (**Verified**)
+
+---
+
+## Phase 8: Multi-Service Booking Architecture, Server-Authoritative Duration, Persistence, Idempotency, and Verification (COMPLETED & VERIFIED)
+- [x] **Server-Authoritative Duration**:
+  - Removed `customDurationMinutes` from public booking DTO and public slot queries.
+  - Duration calculated on the backend from selected services and doctor-specific duration overrides (`calculateAuthoritativeServiceDuration`).
+  - Clinic buffer added exactly once per appointment.
+  - Duration bounds and audit records for staff override (`PATCH /admin/appointments/:id/duration`).
+  - Slots endpoint (`GET /api/scheduling/slots`) returns authoritative duration and price metadata. (**Verified**)
+- [x] **Multi-Service Selection Contract & Validation**:
+  - 1 to 3 unique active services accepted (`resolveServiceIds`).
+  - Doctor eligibility: Doctor must provide every selected service and be assigned to the chosen branch.
+  - Dual validation: In availability slot calculation and again inside the serializable booking transaction.
+  - Consistent error responses for missing, inactive, duplicate, or incompatible selections. (**Verified**)
+- [x] **Service Item Model & Forward Migration**:
+  - Added `AppointmentServiceItem` model in `schema.prisma` with ordered duration and price snapshots.
+  - Forward migration `20261015150000_appointment_service_items` created and applied to dev and test databases without reset.
+  - Historical single-service appointments backfilled cleanly.
+  - Service analytics counts individual service items without double-counting appointment totals or presenting estimates as revenue. (**Verified**)
+- [x] **Cryptographic Idempotency & Unified Serialization**:
+  - Request fingerprint includes canonical sorted `serviceIds` and all semantic parameters.
+  - Fingerprint match verified across all 4 return paths (initial lookup, retry loop lookup, lock lookup, P2002 recovery).
+  - Unified serializer (`serializeAppointmentResponse`) provides consistent fields across all paths.
+  - Frontend generates and reuses stable idempotency key on network retry; generates new key on intent change. (**Verified**)
+- [x] **Frontend Honesty & Timezone Handling**:
+  - Removed fake Mon/Wed/Fri fallback and cross-branch leaking; honest unavailable state displayed.
+  - Pure calendar dates constructed at noon UTC to prevent date shifting in `Asia/Tashkent`.
+  - Cascading selection resets (branch -> service -> doctor -> slot) with generation check protecting against out-of-order slot responses.
+  - 409 conflict handling preserves patient details and redirects visitor to select a new slot.
+  - Strict phone formatting (`+998` followed by 9 digits) across booking and callback forms.
+  - Dual language support (Uzbek / Russian) with full localized keys. (**Verified**)
+- [x] **Comprehensive Testing & Verification**:
+  - Added Regressions 22–31 in `app.e2e-spec.ts`.
+  - All 31/31 backend tests passing (100%).
+  - Live end-to-end integration verified on running servers.
+  - Full frontend and backend production builds passing with zero errors. (**Verified**)
+
+---
+
+## Phase 9: Transactional Duration & End-Time Consistency, Concurrency-Safe Overrides, Appointment-Aware Rescheduling, Repaired Legacy Bundles, and Full E2E & Browser Verification (COMPLETED & VERIFIED)
+- [x] **Consistent Booking Duration, Buffer, and End-Time Inside Transaction**:
+  - Inside the protected transaction with advisory locks, `createBooking` derives final duration, buffer, and `txEndTimeUtc` strictly from transaction-level service reads.
+  - Snapshot items and totals stored consistently; eliminates race conditions where concurrent catalog edits altered duration between pre-flight check and commit. (**Verified**)
+- [x] **Concurrency-Safe Admin Duration Overrides & Reminder Preservation**:
+  - Doctor advisory lock (`doc_${doctorId}`) + row lock (`FOR UPDATE`) inside a serializable transaction.
+  - Rejects completed/cancelled/no-show terminal states.
+  - Validates working hours and slot overlap through transaction client `tx` using newly computed end time.
+  - Transactionally updates pending reminder jobs with the incremented revision to prevent worker lease drops.
+  - Records previous duration, new duration, service items total, duration adjustment, and reason in audit logs. (**Verified**)
+- [x] **Appointment-Aware Rescheduling Availability**:
+  - `SchedulingService.getRescheduleSlotsForAppointment` uses stored duration and buffer snapshots from the appointment itself.
+  - Excludes the appointment being rescheduled from overlap calculations (`id: { not: appointmentId }`), allowing moving within existing slots.
+  - Re-evaluates active status for doctor, assigned branch, and all service items.
+  - Exposed via public route `GET /api/booking/reschedule/:token/slots` (and alias `/api/booking/status/:token/slots`) and staff route `GET /api/admin/appointments/:id/reschedule-slots`. (**Verified**)
+- [x] **Historical Service-Item Migration Repairs**:
+  - Migration `20261015170000_repair_historical_service_items` preserves original snapshot names in `service_name_uz`.
+  - Clears fabricated Russian translations if historical snapshot differed from catalog service.
+  - Detects unresolved multi-service comma bundles (`LIKE '%,%'`), sets `is_legacy_bundle = true`, and disassociates `service_id` to prevent false analytics attribution to single catalog services.
+  - Applied to `dentacare` and `dentacare_test` databases. (**Verified**)
+- [x] **Frontend Calendar Accuracy & Dual Localization**:
+  - Public booking and self-service status pages fully localized in Uzbek and Russian (`uz`, `ru`).
+  - Doctor schedule display handles per-weekday intervals, lunch breaks, and overtime exceptions.
+  - Admin calendar displays duration adjustment badges and integrates appointment-aware slot selection. (**Verified**)
+- [x] **Full E2E Regression Suite & Real Browser Verification**:
+  - Regressions 1–36 all passing (100% green, 36/36 passed in 17.7s).
+  - Production builds (`npm run build`) passing with zero errors in both backend and frontend (28/28 static pages).
+  - Strict ESLint checks passing (`npm run lint` - 0 errors).
+  - 12 high-resolution browser verification screenshots captured across Desktop (1440px), Tablet (768px), and Mobile (390px) using local Chrome `puppeteer-core`. (**Verified**)
+
+---
+
+## Phase 10: Stale Read Elimination on Reschedule, Transactional Reminder Lifecycle During Duration Overrides, Reschedule Availability vs Execution Agreement, Strict Query DTO Validation, Honest Provenance Classification & Forward Repair Migration, and Frontend Availability Guidance (COMPLETED & VERIFIED)
+- [x] **Elimination of Stale Reads During Rescheduling**:
+  - Inside `AppointmentsService.reschedule`, acquires doctor advisory lock (`pg_advisory_xact_lock`) and appointment row lock (`SELECT id FROM appointments WHERE id = :id FOR UPDATE`) before reading appointment data.
+  - Re-reads complete current appointment and relevant `serviceItems` through `tx` inside the locked transaction.
+  - Calculates `txNewEndTime` strictly from current stored duration and buffer (`currentAppt.durationMinutes + txBufferMinutes`).
+  - Recomputes end time, schedule validation, conflict detection, persistence, token expiry, notification intent, and audit history on every transaction retry.
+  - Records actual prior start time in `appointmentStatusHistory` and `auditLog` (`details.oldStartTime` -> `details.newStartTime`).
+  - Re-applies current booking-window rules (`minBookingNoticeHours`, `maxBookingHorizonDays`) inside `tx`.
+  - Added deterministic concurrent tests for override versus reschedule in both execution orders (Regression 37). (**Verified**)
+- [x] **Transactional Reminder Lifecycle During Duration Overrides**:
+  - In `notifications.service.ts`: Updated worker preflight check in `deliverJob` so in-flight `PROCESSING` reminders are NOT rejected as stale if `startTime` is unchanged (duration override).
+  - Re-scheduling with actual `startTime` change or newer delivered reminder triggers clean obsolete cancellation.
+  - Preserves worker lease ownership checks (`leaseToken`) and idempotency deduplication keys.
+  - In `appointments.service.ts`: `overrideDuration` updates `PENDING` reminder jobs with incremented revision. If no active or delivered reminder exists and appointment is upcoming (`startTime > now`), enqueues a replacement reminder with `scheduledFor = max(startTime - 2h, nowUtc)` and deduplication key `reminder_${currentAppt.id}_rev${newRevision}`.
+  - Documented delivery limitations when an external provider call is already in flight across the wire.
+  - Added race test with controlled fake provider and explicit synchronization (Regression 38). (**Verified**)
+- [x] **Reschedule Availability & Execution Agreement**:
+  - Unified eligibility rules across `getRescheduleSlotsForAppointment` and `reschedule`:
+    - Doctor activity and archive status.
+    - Branch activity and doctor branch assignment.
+    - Every known service's activity and doctor assignment.
+    - Exclusion of the appointment's own reservation from conflict checks.
+    - Stored duration and buffer snapshots.
+  - Explicit policy for unresolved legacy bundles: if `isLegacyBundle: true` or `legacyProvenance === 'AMBIGUOUS_BUNDLE'`, both availability and mutation fail closed with a controlled 400 Bad Request requiring staff review (`'Tarixiy ko\'p xizmatli qabul tarkibi noaniq bo\'lganligi sababli qayta rejalashtirish xodimlar ko\'rib chiqishini talab qiladi'`).
+  - Added Regression 39 testing that removing a doctor's secondary-service assignment affects both availability and rescheduling consistently. (**Verified**)
+- [x] **Strict Reschedule Slot & Booking Slot Query Validation**:
+  - Implemented `validateCalendarDate` and `validateTimezone`:
+    - Enforces exact `YYYY-MM-DD` format.
+    - Rejects impossible calendar dates (February 30, Month 13, April 31) with controlled 400 Bad Request.
+    - Validates timezone using `Intl.DateTimeFormat`.
+    - Applied configured booking horizon (`maxBookingHorizonDays`) consistently.
+  - Created `IsStrictCalendarDate` and `IsValidTimezone` class-validator decorators used across `QuerySlotsDto` and `QueryRescheduleSlotsDto`.
+  - Added Regression 40 covering impossible dates, malformed inputs, invalid timezones, and horizon limits. (**Verified**)
+- [x] **Honest Historical Classification Without Guessing & Forward Repair Migration**:
+  - Added `original_service_id` and `legacy_provenance` (`MODERN`, `VERIFIED_SINGLE`, `AMBIGUOUS_BUNDLE`, `RESOLVED_MANUAL`) to `AppointmentServiceItem` model.
+  - Created forward migration `20261016180000_repair_legacy_provenance` applied to `dentacare` and `dentacare_test`.
+  - Reclassified legitimate comma-containing catalog services as `VERIFIED_SINGLE`, preserving `service_id` and catalog linkage.
+  - Added Admin Legacy Review endpoint (`GET /api/services/admin/legacy-review`) and Reconciliation endpoint (`POST /api/services/admin/reconcile-legacy`).
+  - Added `unresolvedRecords` transparency object to `getOverview` in `analytics.service.ts`.
+  - Added Regression 41 testing legitimate comma-containing services, renamed services, bundles, review, and reconciliation. (**Verified**)
+- [x] **Frontend Availability Guidance**:
+  - Public doctor API (`getDoctors`, `getDoctorBySlug`) now provides sanitized `exceptions` (`type`, `date`, `startTime`, `endTime`) without leaking internal notes.
+  - Frontend booking UI computes date availability based on doctor exceptions (overtime-only, holidays, full-day leaves) and working schedules.
+  - Clean warning and date jumping guidance when dates are fully booked or off-schedule. (**Verified**)
+- [x] **Full Test Suite & Browser Verification**:
+  - All 41/41 backend integration & regression tests passing (`npm run test:e2e` in 33.3s).
+  - Backend build (`nest build`) and ESLint passing (0 errors, 0 warnings).
+  - Frontend build (`next build`) passing (28/28 static pages prerendered) and ESLint passing.
+  - Real browser workflows executed in Google Chrome via Chrome DevTools Protocol across Desktop (1440px) and Mobile (390px) in Uzbek and Russian with screenshots captured in artifact directory. (**Verified**)
+
+---
+
+## Phase 11: Reminder Identity & Rescheduling Lifecycle, Authoritative Clinic Timezone, Safe Legacy Reconciliation, Deterministic Repair Migration, and Synchronized Verification (COMPLETED & VERIFIED)
+- [x] **Reminder Identity & Rescheduling Lifecycle**:
+  - Added `scheduleRevision` to `Appointment` (default 1) and `NotificationJob` (indexed with `appointmentId`, `jobType`, `scheduleRevision`).
+  - Forward migration `20261016200000_schedule_revision_and_repair_matching` applied to dev and test databases.
+  - Rescheduling increments `scheduleRevision`, cleanly invalidating obsolete reminders for previous times.
+  - Delivered reminder for time A does NOT suppress reminder for time B.
+  - Duration overrides preserve `scheduleRevision` without creating unnecessary duplicates or dropping valid reminders.
+  - Safe malformed reminder payload handling (gracefully rejects invalid or missing start times).
+  - Worker lease checks preserved (`leaseToken` match).
+  - Explicit handling for sequence A → B → A (each step receives an incremented revision, ensuring no false suppression).
+  - Documented in-flight wire limitation when provider request is already in transmission. (**Verified**)
+- [x] **Authoritative Clinic Timezone**:
+  - Resolved scheduling timezone strictly from `clinicSettings` in `SchedulingService.resolveClinicTimezone(tx)`.
+  - `Asia/Tashkent` used strictly as a fallback when no configured clinic timezone exists.
+  - Public callers' requested display timezone does NOT reinterpret clinic working hours; physical slots are fixed to the clinic's local timezone.
+  - Pure calendar dates constructed at noon UTC to prevent UTC day boundary shifts.
+  - Verified with non-Tashkent timezone (`Europe/Samara`) across booking slots, reschedule slots, mutations, exceptions, and frontend labels. (**Verified**)
+- [x] **Safe Legacy Reconciliation Contract**:
+  - Implemented strict contract in `ServicesService.reconcileLegacyRecord`:
+    - Only eligible unresolved records (`AMBIGUOUS_BUNDLE` or `isLegacyBundle: true`) can be resolved.
+    - Modern items and already verified records rejected with 400 Bad Request.
+    - Requires supported action (`RESOLVE_TO_SERVICE` or `KEEP_AMBIGUOUS_BUNDLE`) and review reason (min 5 characters).
+    - Anti-collapse protection: If historical name contains comma-separated multi-service text, collapsing to a single service without an exact name match is rejected with 400 Bad Request.
+    - Atomically updates record and writes audit log (`service.legacy_reconciled`) inside serializable transaction with `FOR UPDATE` row lock.
+    - Preserves historical names, duration, and price snapshots.
+  - Complete, paginated admin review interface implemented at `/admin/services` with summary metrics, table, and reconciliation modal. (**Verified**)
+- [x] **Deterministic Historical Repair**:
+  - Forward migration `20261016200000_schedule_revision_and_repair_matching` preserves `original_service_id` and appointment snapshots.
+  - Multi-candidate name matches and legacy bundles preserved as `AMBIGUOUS_BUNDLE` rather than guessing.
+  - Valid modern records and legitimate comma-containing services remain `VERIFIED_SINGLE`.
+  - Never edited already-applied migrations. (**Verified**)
+- [x] **Synchronized Concurrency & Test Suite Hardening**:
+  - Renamed sequential race test to `Regression 38: Sequential duration override with leased reminder preserves valid reminder`.
+  - Added `Regression 38b: Truly synchronized concurrent worker and override test using controlled fake provider barrier` with controlled promise barriers.
+  - Added `Regression 42: Reminder identity across rescheduling (A delivered -> B delivered), A -> B -> A, and safe payload handling`.
+  - Added `Regression 43: Authoritative clinic timezone from settings with non-Tashkent timezone and UTC day boundaries`.
+  - 44/44 backend regression & e2e tests passing (100% green).
+  - Automated browser test script `backend/test/browser-workflow.js` validating all 5 assertions and responsive viewports with screenshots saved in artifacts directory. (**Verified**)
+
+---
+
+## Phase 12: Production Hardening, Database Isolation, Robust Legacy Upgrade, Atomic Reminder Recovery, and Progressive Legacy Review (COMPLETED & VERIFIED)
+- [x] **Enforce Actual Browser-Test Database Isolation**:
+  - `TEST_DATABASE_URL` strictly required by `backend/test/browser-workflow.js` and test harness `backend/test/run-browser-tests.js`.
+  - Ambient development (`dentacare`) or production (`postgres`) databases rejected before mutations.
+  - Verified backend server (`http://localhost:4000/api/health`) and direct Prisma client use the same `dentacare_test` database.
+  - Run-scoped isolated fixtures created for branch, services, doctor, schedules, and patient.
+  - Fixed phone fixture to 12-digit normalized Uzbekistan format (`+99890` + 7 digits), populated safely via masked input, and asserted normalized submitted value.
+  - Independent teardown cleaning up run's appointment audit records and all run-scoped fixtures without deleting unrelated records. (**Verified**)
+- [x] **Robust & Executable Legacy Reminder Upgrade**:
+  - Calendar-safe ISO timestamp parser (`parseSafeIsoTimestamp`) prevents database crashes on malformed dates (e.g. Feb 30).
+  - Handles missing payloads, null/orphaned appointments, terminal appointments, historical A → B → A rescheduling, duplicate legacy jobs, and active leases (< 5m).
+  - Provided executable repair tool `backend/scripts/repair-reminders.ts` and npm scripts `npm run repair:reminders` and `npm run repair:reminders:dry` with bounded batching and dry-run reporting. (**Verified**)
+- [x] **Atomic Reminder Recovery in All Call Paths**:
+  - Transaction-scoped atomic recovery in `recoverOrEnqueueCurrentReminder` with consistent lock ordering (`appointments` FOR UPDATE before `notification_jobs` FOR UPDATE).
+  - Preserves failure/cancellation history.
+  - Atomically archives expired leases (>= 5m) or terminal jobs and creates replacement canonical job.
+  - Conflict-safe handling avoiding continuing queries inside aborted PostgreSQL transactions. (**Verified**)
+- [x] **Progressive Review of Unresolved Legacy Records**:
+  - Optimistic concurrency control using `expectedAuditCount` in `reconcileLegacyRecord`.
+  - Allows staff to review records previously saved as `KEEP_AMBIGUOUS_BUNDLE` when new clinical evidence is available, keeping resolved records protected and audit logs append-only.
+  - Stale concurrent submissions rejected with 409 Conflict; admin interface reloads state and submits expected version. (**Verified**)
+- [x] **Reconciled Proxy Configuration**:
+  - Configured `backend/src/main.ts` with restricted `trust proxy` setting (`TRUST_PROXY` env or loopback in production; no unrestricted `true`).
+  - Production login throttling (5 attempts/min) verified active. (**Verified**)
+- [x] **Full Test Suite & Browser Verification**:
+  - All 51/51 backend e2e tests passing (`npm run test:e2e`).
+  - Backend lint & build passing with 0 errors.
+  - Frontend lint & build passing with 0 errors.
+  - Browser test suite passing all 7 workflows with screenshots saved in artifact directory. (**Verified**)
+
+
+
+

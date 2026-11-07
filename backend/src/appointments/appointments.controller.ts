@@ -1,9 +1,10 @@
 import {
   Controller, Get, Post, Put, Patch, Body, Param, Query,
-  UseGuards, HttpCode, HttpStatus,
+  UseGuards, HttpCode, HttpStatus, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { AppointmentsService, CreateBookingDto } from './appointments.service';
+import { AppointmentsService } from './appointments.service';
+import { SchedulingService, IsStrictCalendarDate, IsValidTimezone } from '../scheduling/scheduling.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -12,19 +13,45 @@ import { Public } from '../auth/public.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { AppointmentStatus, StaffRole } from '@prisma/client';
 import {
-  IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min,
+  IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min, Max, IsArray, Matches, IsEmail, ValidateIf,
+  IsNotEmpty, ValidateNested, IsIn,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
-class PublicBookingDto {
+export class ExpectedQuoteDto {
+  @IsOptional()
+  @IsInt()
+  priceFrom?: number;
+
+  @IsOptional()
+  @IsInt()
+  price?: number;
+
+  @IsOptional()
+  @IsInt()
+  durationMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  bufferMinutes?: number;
+}
+
+export class PublicBookingDto {
+  @IsOptional()
   @IsString()
-  serviceId!: string;
+  serviceId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serviceIds?: string[];
 
   @IsString()
   doctorId!: string;
 
-  @IsOptional()
-  @IsString()
-  branchId?: string;
+  @IsString({ message: 'Filial tanlanishi shart' })
+  @IsNotEmpty({ message: 'Filial tanlanishi shart' })
+  branchId!: string;
 
   @IsDateString()
   startTime!: string;
@@ -33,10 +60,14 @@ class PublicBookingDto {
   patientName!: string;
 
   @IsString()
+  @Matches(/^\+998(\s?\(?\d{2}\)?\s?\d{3}[-\s]?\d{2}[-\s]?\d{2}|\d{9})$/, {
+    message: 'Telefon raqami O\'zbekiston formati (+998XXXXXXXXX)da bo\'lishi kerak',
+  })
   patientPhone!: string;
 
   @IsOptional()
-  @IsString()
+  @ValidateIf((o) => o.patientEmail !== undefined && o.patientEmail !== null && o.patientEmail !== '')
+  @IsEmail({}, { message: 'Elektron pochta manzili formati noto\'g\'ri' })
   patientEmail?: string;
 
   @IsOptional()
@@ -47,11 +78,31 @@ class PublicBookingDto {
   consentGiven!: boolean;
 
   @IsOptional()
+  @IsIn(['uz', 'ru'], { message: 'Til faqat uz yoki ru bo\'lishi mumkin' })
+  lang?: 'uz' | 'ru';
+
+  @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ExpectedQuoteDto)
+  expectedQuote?: ExpectedQuoteDto;
 }
 
-class StatusChangeDto {
+export class OverrideDurationDto {
+  @IsInt()
+  @Min(5)
+  @Max(480)
+  durationMinutes!: number;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
+export class StatusChangeDto {
   @IsEnum(AppointmentStatus)
   status!: AppointmentStatus;
 
@@ -60,12 +111,45 @@ class StatusChangeDto {
   reason?: string;
 }
 
-class RescheduleDto {
+export class RecordDelayDto {
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(240)
+  delayMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(240)
+  extraMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  mode?: 'REPLACE' | 'ADD';
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
+export class RescheduleDto {
   @IsDateString()
   startTime!: string;
 }
 
-class ListQueryDto {
+export class QueryRescheduleSlotsDto {
+  @IsString()
+  @IsStrictCalendarDate()
+  date!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsValidTimezone()
+  timezone?: string;
+}
+
+export class ListQueryDto {
   @IsOptional()
   @IsEnum(AppointmentStatus)
   status?: AppointmentStatus;
@@ -99,6 +183,10 @@ class ListQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 // ============================================================
@@ -107,24 +195,51 @@ class ListQueryDto {
 
 @Controller('booking')
 export class PublicBookingController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(
+    private readonly service: AppointmentsService,
+    private readonly schedulingService: SchedulingService,
+  ) {}
 
   @Post()
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: process.env.NODE_ENV === 'test' ? 1000 : 20, ttl: 60000 } })
   @HttpCode(HttpStatus.CREATED)
   async createBooking(@Body() dto: PublicBookingDto) {
     const result = await this.service.createBooking({
       ...dto,
       source: 'website',
     });
+    const aptId = (result as any).id || (result as any).appointmentId;
     return {
-      message: 'Qabulga so\'rov qabul qilindi. Tez orada tasdiqlaymiz.',
-      appointmentId: result.id,
+      message: "Qabulga so'rov qabul qilindi. Tez orada tasdiqlaymiz.",
+      ...result,
+      id: aptId,
+      appointmentId: aptId,
       publicToken: result.publicToken,
+      token: (result as any).token || result.publicToken,
       status: result.status,
       startTime: result.startTime,
       endTime: result.endTime,
+      serviceName: result.serviceName,
+      servicePriceFrom: result.servicePriceFrom,
+      price: result.servicePriceFrom,
+      priceFrom: result.servicePriceFrom,
+      durationMinutes: result.durationMinutes,
+      bufferMinutes: (result as any).bufferMinutes ?? 0,
+      branchId: (result as any).branchId,
+      doctorId: (result as any).doctorId,
+      serviceId: (result as any).serviceId,
+      doctorName: result.doctorName,
+      doctorNameUz: (result as any).doctorNameUz || result.doctorName,
+      doctorNameRu: (result as any).doctorNameRu || result.doctorName,
+      branchName: result.branchName,
+      branchNameUz: (result as any).branchNameUz || result.branchName,
+      branchNameRu: (result as any).branchNameRu || result.branchName,
+      branchAddressUz: (result as any).branchAddressUz || '',
+      branchAddressRu: (result as any).branchAddressRu || '',
+      serviceItems: (result as any).serviceItems,
+      doctor: (result as any).doctor,
+      branch: (result as any).branch,
     };
   }
 
@@ -136,11 +251,76 @@ export class PublicBookingController {
 
   @Post('cancel/:token')
   @Public()
-  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async cancelByToken(@Param('token') token: string) {
-    await this.service.cancelByToken(token);
-    return { message: 'Qabul bekor qilindi' };
+    return this.service.cancelByToken(token);
+  }
+
+  @Post('reschedule/:token')
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  async rescheduleByToken(
+    @Param('token') token: string,
+    @Body() dto: RescheduleDto,
+  ) {
+    const updated = await this.service.rescheduleByToken(token, dto.startTime);
+    const aptId = (updated as any).id || (updated as any).appointmentId;
+    return {
+      message: 'Qabul muvaffaqiyatli qayta rejalashtirildi',
+      ...updated,
+      id: aptId,
+      appointmentId: aptId,
+      publicToken: updated.publicToken,
+      token: (updated as any).token || updated.publicToken,
+      status: updated.status,
+      startTime: updated.startTime,
+      endTime: updated.endTime,
+      serviceName: updated.serviceName,
+      servicePriceFrom: updated.servicePriceFrom,
+      price: updated.servicePriceFrom,
+      priceFrom: updated.servicePriceFrom,
+      durationMinutes: updated.durationMinutes,
+      bufferMinutes: (updated as any).bufferMinutes ?? 0,
+      branchId: (updated as any).branchId,
+      doctorId: (updated as any).doctorId,
+      serviceId: (updated as any).serviceId,
+      doctorName: updated.doctorName,
+      doctorNameUz: (updated as any).doctorNameUz || updated.doctorName,
+      doctorNameRu: (updated as any).doctorNameRu || updated.doctorName,
+      branchName: updated.branchName,
+      branchNameUz: (updated as any).branchNameUz || updated.branchName,
+      branchNameRu: (updated as any).branchNameRu || updated.branchName,
+      branchAddressUz: (updated as any).branchAddressUz || '',
+      branchAddressRu: (updated as any).branchAddressRu || '',
+      serviceItems: (updated as any).serviceItems,
+      doctor: (updated as any).doctor,
+      branch: (updated as any).branch,
+    };
+  }
+
+  @Get('reschedule/:token/slots')
+  @Public()
+  async getRescheduleSlots(
+    @Param('token') token: string,
+    @Query() query: QueryRescheduleSlotsDto,
+  ) {
+    const appointment = await this.service.findRawByToken(token);
+    return this.schedulingService.getRescheduleSlotsForAppointment(
+      appointment.id,
+      query.date,
+      query.timezone,
+    );
+  }
+
+  @Get('status/:token/slots')
+  @Public()
+  async getStatusRescheduleSlots(
+    @Param('token') token: string,
+    @Query() query: QueryRescheduleSlotsDto,
+  ) {
+    return this.getRescheduleSlots(token, query);
   }
 }
 
@@ -151,56 +331,155 @@ export class PublicBookingController {
 @Controller('admin/appointments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(
+    private readonly service: AppointmentsService,
+    private readonly schedulingService: SchedulingService,
+  ) {}
 
   @Get()
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   findAll(@Query() query: ListQueryDto, @CurrentUser() user: JwtPayload) {
-    // Doctors can only see their own appointments
-    if (user.role === StaffRole.DOCTOR && user.doctorId) {
-      query.doctorId = user.doctorId;
-    }
-    return this.service.findAll(query);
+    return this.service.findAll(query, user);
+  }
+
+  @Get('month-aggregates')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
+  getMonthAggregates(
+    @Query('year') yearStr: string,
+    @Query('month') monthStr: string,
+    @Query('doctorId') doctorId?: string,
+    @Query('branchId') branchId?: string,
+    @Query('status') status?: AppointmentStatus,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    const year = parseInt(yearStr, 10) || new Date().getFullYear();
+    const month = parseInt(monthStr, 10) || (new Date().getMonth() + 1);
+    return this.service.getMonthAggregates({
+      year,
+      month,
+      doctorId,
+      branchId,
+      status,
+    }, user);
   }
 
   @Get('today')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   getToday(@CurrentUser() user: JwtPayload) {
-    return this.service.getToday();
+    return this.service.getToday(undefined, user);
   }
 
   @Get(':id')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR)
-  findOne(@Param('id') id: string) {
-    return this.service.findById(id);
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
+  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.service.findById(id, user);
   }
 
   @Post()
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async createFromAdmin(@Body() dto: PublicBookingDto, @CurrentUser() user: JwtPayload) {
+    if (user.role === StaffRole.DOCTOR && dto.doctorId !== user.doctorId) {
+      throw new ForbiddenException('Shifokor faqat o\'ziga qabul yarata oladi');
+    }
     return this.service.createBooking({
       ...dto,
       source: 'admin',
     });
   }
 
+  @Post('expire-pending')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
+  @HttpCode(HttpStatus.OK)
+  async triggerExpirePending() {
+    const expiredCount = await this.service.expirePending();
+    return { success: true, expiredCount };
+  }
+
+  @Patch(':id/duration')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.RECEPTION)
+  async overrideDuration(
+    @Param('id') id: string,
+    @Body() dto: OverrideDurationDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.overrideDuration(id, dto.durationMinutes, user.sub, dto.reason, user);
+  }
+
   @Patch(':id/status')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async changeStatus(
     @Param('id') id: string,
     @Body() dto: StatusChangeDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.changeStatus(id, dto.status, user.sub, dto.reason);
+    return this.service.changeStatus(id, dto.status, user.sub, dto.reason, user);
+  }
+
+  @Post(':id/start-treatment')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
+  @HttpCode(HttpStatus.OK)
+  async startTreatment(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.startTreatment(id, user);
   }
 
   @Put(':id/reschedule')
-  @Roles(StaffRole.OWNER, StaffRole.ADMIN)
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
   async reschedule(
     @Param('id') id: string,
     @Body() dto: RescheduleDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.reschedule(id, dto.startTime, user.sub);
+    return this.service.reschedule(id, dto.startTime, user.sub, user);
+  }
+
+  @Post(':id/reschedule')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
+  @HttpCode(HttpStatus.OK)
+  async reschedulePost(
+    @Param('id') id: string,
+    @Body() dto: RescheduleDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.reschedule(id, dto.startTime, user.sub, user);
+  }
+
+  @Get(':id/reschedule-slots')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
+  async getAdminRescheduleSlots(
+    @Param('id') id: string,
+    @Query() query: QueryRescheduleSlotsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const appointment = await this.service.findById(id, user);
+    return this.schedulingService.getRescheduleSlotsForAppointment(
+      appointment.id,
+      query.date,
+      query.timezone,
+    );
+  }
+
+  @Post(':id/delay')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
+  @HttpCode(HttpStatus.OK)
+  async recordDelay(
+    @Param('id') id: string,
+    @Body() dto: RecordDelayDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const delay = dto.extraMinutes || dto.delayMinutes || 15;
+    return this.service.recordDelay(id, delay, dto.reason, user, dto.mode || 'REPLACE');
+  }
+
+  @Post(':id/clear-overrun')
+  @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
+  @HttpCode(HttpStatus.OK)
+  async clearOverrun(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.clearOverrun(id, user);
   }
 }

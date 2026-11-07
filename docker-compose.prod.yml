@@ -1,0 +1,243 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dentacare-prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dentacare}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-dentacare}
+      TZ: UTC
+      PGTZ: UTC
+    # Stored timestamps are UTC; keep the server default zone UTC as well
+    command: ['postgres', '-c', 'timezone=UTC', '-c', 'log_timezone=UTC']
+    volumes:
+      - prod_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-dentacare}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dentacare-internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: dentacare-prod-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    volumes:
+      - prod_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:?REDIS_PASSWORD must be set}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dentacare-internal
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dentacare-prod-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      APP_URL: ${APP_URL:-https://${DOMAIN}}
+      FRONTEND_URL: ${FRONTEND_URL:-https://${DOMAIN}}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dentacare}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-dentacare}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-uz}
+      SMS_PROVIDER: ${SMS_PROVIDER:-eskiz}
+      SMS_API_KEY: ${SMS_API_KEY:-}
+      SMS_API_URL: ${SMS_API_URL:-}
+      # Eskiz (notify.eskiz.uz): used when both login values are set
+      ESKIZ_EMAIL: ${ESKIZ_EMAIL:-}
+      ESKIZ_PASSWORD: ${ESKIZ_PASSWORD:-}
+      ESKIZ_FROM: ${ESKIZ_FROM:-4546}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      # Patient-facing bot (portal login codes go to Telegram-linked patients)
+      PATIENT_BOT_TOKEN: ${BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?SERVICE_TOKEN must be set}
+      # Uploads (X-rays, OPG, logos): "local" = prod_backend_uploads volume (backed up
+      # by the backup service), or "s3" with the S3_* settings below
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-dentacare}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://localhost:9000/dentacare}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      # Optional separate chat for technical alerts (failed notifications); defaults to TELEGRAM_CHAT_ID
+      OPS_TELEGRAM_CHAT_ID: ${OPS_TELEGRAM_CHAT_ID:-}
+      # Online payments (enabled only when all keys of a provider are set)
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://${DOMAIN}}
+      PAYME_MERCHANT_ID: ${PAYME_MERCHANT_ID:-}
+      PAYME_KEY: ${PAYME_KEY:-}
+      PAYME_TEST_MODE: ${PAYME_TEST_MODE:-false}
+      CLICK_SERVICE_ID: ${CLICK_SERVICE_ID:-}
+      CLICK_MERCHANT_ID: ${CLICK_MERCHANT_ID:-}
+      CLICK_SECRET_KEY: ${CLICK_SECRET_KEY:-}
+      # Exactly one reverse proxy (nginx) sits in front of the backend;
+      # without this every client shares nginx's IP for rate limiting.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    volumes:
+      - prod_backend_uploads:/app/uploads
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:4000/api/health | grep -q "\"status\":\"ok\""']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Migrations run before the server starts
+      start_period: 90s
+    networks:
+      - dentacare-internal
+      # Outbound access for SMS gateway and Telegram API (internal network has no egress)
+      - dentacare-public
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dentacare-prod-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+      # Server-side rendering fetches clinic branding directly from the backend container
+      INTERNAL_API_URL: http://backend:4000
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q --spider http://127.0.0.1:3000/ || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - dentacare-internal
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: dentacare-prod-bot
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      # Same bot can serve patients and receive backend staff alerts (backend only calls sendMessage)
+      BOT_TOKEN: ${BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:?BOT_TOKEN or TELEGRAM_BOT_TOKEN must be set}}
+      STAFF_GROUP_CHAT_ID: ${STAFF_GROUP_CHAT_ID:-${TELEGRAM_CHAT_ID:?STAFF_GROUP_CHAT_ID or TELEGRAM_CHAT_ID must be set}}
+      BACKEND_API_URL: http://backend:4000/api
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?SERVICE_TOKEN must be set}
+      CLINIC_NAME: ${CLINIC_NAME:-DentaCare Stomatologiya Klinikasi}
+      CLINIC_PHONE: ${CLINIC_PHONE:-+998 71 200 55 44}
+      CLINIC_LOCATION_URL: ${CLINIC_LOCATION_URL:-https://maps.google.com/?q=41.311081,69.240562}
+      CLINIC_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
+      CLINIC_WEBSITE: ${CLINIC_WEBSITE:-https://${DOMAIN}}
+    networks:
+      # internal: reach the backend; public: reach api.telegram.org
+      - dentacare-internal
+      - dentacare-public
+
+  backup:
+    image: postgres:16-alpine
+    container_name: dentacare-prod-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dentacare}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-dentacare}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      TZ: ${DEFAULT_TIMEZONE:-Asia/Tashkent}
+    entrypoint: ['sh', '/opt/backup/backup-loop.sh']
+    volumes:
+      - ./scripts/backup-loop.sh:/opt/backup/backup-loop.sh:ro
+      - ./backend/scripts/backup-database.sh:/opt/backup/backup-database.sh:ro
+      - prod_backend_uploads:/uploads:ro
+      # Host directory: sync it offsite (rclone/rsync) from the host
+      - ${BACKUP_HOST_DIR:-./backups}:/var/backups/dentacare
+    networks:
+      - dentacare-internal
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: dentacare-prod-nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set, e.g. dentacare.uz}
+      EXTRA_DOMAINS: ${EXTRA_DOMAINS:-}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/sites
+    # Writable target for the rendered templates (not present in the image)
+    tmpfs:
+      - /etc/nginx/sites
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+      # Periodic reload for renewed certificates (runs via the image entrypoint)
+      - ./nginx/reload-certs.sh:/docker-entrypoint.d/99-reload-certs.sh:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1/nginx-health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - dentacare-internal
+      - dentacare-public
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: dentacare-prod-certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Try renewal twice a day; certbot only renews within 30 days of expiry.
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    networks:
+      - dentacare-public
+
+networks:
+  dentacare-internal:
+    internal: true
+  dentacare-public:
+    driver: bridge
+
+volumes:
+  prod_postgres_data:
+  prod_redis_data:
+  prod_backend_uploads:
+  certbot_conf:
+  certbot_www:
