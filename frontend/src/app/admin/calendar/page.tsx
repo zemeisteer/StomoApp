@@ -306,7 +306,7 @@ export default function AdminCalendarPage() {
       }
     }
     loadFixtures();
-  }, [user]);
+  }, [user, lockedBranchId]);
 
   // Compute timezone-authoritative date range for viewMode
   const getDateRange = useCallback(() => {
