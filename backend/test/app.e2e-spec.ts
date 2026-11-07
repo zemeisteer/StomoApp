@@ -80,10 +80,12 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   const testPhonePrefix = `+99800${runId}`;
 
   function getNextWorkingSlot(daysAhead = 2, hourTashkent = 10, minuteTashkent = 0): Date {
-    const d = new Date();
-    d.setDate(d.getDate() + daysAhead);
-    while (d.getDay() === 0 || d.getDay() === 6) {
-      d.setDate(d.getDate() + 1);
+    // Work on the clinic calendar (Asia/Tashkent, UTC+5), whatever the runner's time zone or hour.
+    const todayTashkent = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date());
+    const d = new Date(`${todayTashkent}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + daysAhead);
+    while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+      d.setUTCDate(d.getUTCDate() + 1);
     }
     d.setUTCHours(hourTashkent - 5, minuteTashkent, 0, 0);
     return d;
@@ -2672,7 +2674,10 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       });
     }
 
-    const testSlot1 = getNextWorkingSlot(5, 9, 0);
+    // Slot 2 is the next day, so slot 1 must be Monday-Thursday for both to be working days
+    let ahead = 5;
+    let testSlot1 = getNextWorkingSlot(ahead, 9, 0);
+    while (testSlot1.getUTCDay() === 5) testSlot1 = getNextWorkingSlot(++ahead, 9, 0);
     const patientConc = await prisma.patient.create({
       data: { fullName: 'Concurrent Patient', phone: `${testPhonePrefix}91` },
     });
@@ -8362,7 +8367,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       // Payroll: payments on a plan invoice (no appointment) count for the plan's doctor
       const plan = await prisma.treatmentPlan.create({ data: { patientId: due.id, doctorId: testDoctorAId, title: 'Reg75', status: 'ACCEPTED' } });
       const inv = await prisma.invoice.create({ data: { patientId: due.id, planId: plan.id, totalAmount: 750075 } });
-      const day = new Date().toISOString().slice(0, 10);
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()); // clinic-local day
       const beforePay = (await http().get(`/api/admin/commissions?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body.find((d: any) => d.doctorId === testDoctorAId).totalCollected;
       await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: inv.id, amount: 750075, method: 'CARD' }).expect(201);
       const afterPay = (await http().get(`/api/admin/commissions?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body.find((d: any) => d.doctorId === testDoctorAId).totalCollected;
@@ -8477,7 +8482,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await http().get('/api/admin/dashboard').set(auth(recToken)).expect(403);
       await http().get('/api/admin/staff').set(auth(recToken)).expect(403);
 
-      const day = new Date().toISOString().slice(0, 10);
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()); // clinic-local day
       const before = (await http().get(`/api/admin/dashboard?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
 
       await http().patch(`/api/admin/appointments/${appt.id}/status`).set(auth(recToken)).send({ status: 'COMPLETED' }).expect(200);
@@ -8528,7 +8533,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     const http = () => request(app.getHttpServer());
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const tag = `reg78_${Date.now()}`;
-    const day = new Date().toISOString().slice(0, 10);
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()); // clinic-local day
     const savedCommission = await prisma.doctorCommission.findUnique({ where: { doctorId: testDoctorAId } });
     const patient = await prisma.patient.create({ data: { fullName: 'Reg78 Bemor', phone: '+998900007878' } });
     const recUser = await prisma.staffUser.create({
