@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
@@ -50,6 +50,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // Each admin page mounts its own layout, so keep the sidebar where the user left it.
+  const navRef = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    try {
+      const saved = Number(sessionStorage.getItem('admin-nav-scroll') || 0);
+      if (saved > 0) el.scrollTop = saved;
+    } catch {}
+  }, []);
   const [telegramOpen, setTelegramOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const brand = useBrand();
@@ -175,7 +183,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
     },
     {
       href: '/admin/payroll',
-      label: language === 'ru' ? 'Зарплата врачей' : 'Shifokor maoshi',
+      label: language === 'ru' ? 'Зарплата' : 'Xodimlar maoshi',
       icon: HandCoins,
       roles: ['OWNER'],
     },
@@ -360,7 +368,15 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
           </Link>
         </div>
 
-        <nav className={`flex-1 overflow-y-auto py-4 ${isCollapsed ? 'px-2' : 'px-3'}`}>{navList(isCollapsed)}</nav>
+        <nav
+          ref={navRef}
+          onScroll={(e) => {
+            try {
+              sessionStorage.setItem('admin-nav-scroll', String(e.currentTarget.scrollTop));
+            } catch {}
+          }}
+          className={`flex-1 overflow-y-auto py-4 ${isCollapsed ? 'px-2' : 'px-3'}`}
+        >{navList(isCollapsed)}</nav>
 
         <div className={`border-t border-line py-3 space-y-0.5 ${isCollapsed ? 'px-2' : 'px-3'}`}>
           <Link href="/" target="_blank" className={`${footerBtn(isCollapsed)} text-ink-muted hover:bg-canvas hover:text-ink`} title={siteLabel}>

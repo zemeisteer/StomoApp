@@ -657,6 +657,10 @@ export const api = {
       scheduleRecordsCount: number;
     }>(`/api/clinic/branches/${id}/lifecycle-preview`),
 
+  // Machine translation (uz <-> ru) for admin content
+  translate: (text: string, from: 'uz' | 'ru', to: 'uz' | 'ru') =>
+    fetcher<{ text: string }>('/api/admin/translate', { method: 'POST', body: JSON.stringify({ text, from, to }) }),
+
   // Media Management
   uploadMedia: (file: File, category?: string) => {
     const formData = new FormData();
@@ -773,7 +777,8 @@ export const api = {
     }),
 
   // Owner dashboard (money, visits, patients, daily series, top services and doctors)
-  getDashboardSummary: (from: string, to: string) => fetcher<any>(`/api/admin/dashboard?from=${from}&to=${to}`),
+  getDashboardSummary: (from: string, to: string, branchId?: string) =>
+    fetcher<any>(`/api/admin/dashboard?from=${from}&to=${to}${branchId ? `&branchId=${branchId}` : ''}`),
 
   // Cash desk, refunds, online payment links, plan invoicing
   getCashierSummary: (date?: string) => fetcher<any>(`/api/admin/cashier/summary${date ? `?date=${date}` : ''}`),
@@ -834,8 +839,25 @@ export const api = {
 
   // Commissions & Doctor Earnings
   getDoctorCommissions: () => fetcher<any[]>('/api/admin/commissions'),
-  updateDoctorCommission: (doctorId: string, payload: { percentage: number; fixedBonus?: number; notes?: string }) =>
+  updateDoctorCommission: (
+    doctorId: string,
+    payload: { percentage: number; fixedBonus?: number; notes?: string; payType?: 'PERCENT' | 'SALARY' | 'MIXED'; monthlySalary?: number },
+  ) =>
     fetcher<any>(`/api/admin/commissions/${doctorId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  getStaffPay: (from?: string, to?: string) => {
+    const q = new URLSearchParams();
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    return fetcher<any[]>(`/api/admin/commissions/staff${q.toString() ? `?${q}` : ''}`);
+  },
+  updateStaffPay: (
+    staffUserId: string,
+    payload: { payType: 'PERCENT' | 'SALARY' | 'MIXED'; monthlySalary?: number; percentage?: number; fixedBonus?: number; notes?: string },
+  ) =>
+    fetcher<any>(`/api/admin/commissions/staff/${staffUserId}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),

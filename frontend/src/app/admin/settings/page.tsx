@@ -1108,7 +1108,15 @@ export default function AdminSettingsPage() {
             </div>
           </div>
 
-          <div className="flex justify-end pt-3">
+          <div className="flex flex-wrap items-center justify-end gap-3 pt-3">
+            {errorMsg && !isSaving && (
+              <span role="alert" className="text-xs font-semibold text-rose-700">{errorMsg}</span>
+            )}
+            {successMsg && !errorMsg && !isSaving && (
+              <span role="status" className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" /> {successMsg}
+              </span>
+            )}
             <button
               type="submit"
               disabled={isSaving}

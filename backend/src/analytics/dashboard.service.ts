@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -14,7 +15,12 @@ const MAX_DAYS = 366;
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async summary(fromStr?: string, toStr?: string) {
+  /**
+   * With `branchId`, everything is limited to that branch: visits by their branch, money by the
+   * branch of the visit it pays for. Patients stay one clinic-wide card; "patients" then means
+   * people who had a visit in this branch. Without it, a per-branch comparison is added.
+   */
+  async summary(fromStr?: string, toStr?: string, branchId?: string) {
     const settings = await this.prisma.clinicSettings.findFirst({ select: { timezone: true } });
     const tz = settings?.timezone || 'Asia/Tashkent';
     const today = formatInTimeZone(new Date(), tz, 'yyyy-MM-dd');
@@ -26,19 +32,26 @@ export class DashboardService {
     const days = Math.round((to.getTime() - from.getTime()) / DAY_MS);
     if (days < 1 || days > MAX_DAYS) throw new BadRequestException("Davr 1 kundan 366 kungacha bo'lishi kerak");
 
+    const b = branchId || undefined;
+    const paymentBranch: Prisma.PaymentWhereInput = b
+      ? { OR: [{ appointment: { branchId: b } }, { invoice: { appointment: { branchId: b } } }] }
+      : {};
+    const branchSql = b ? Prisma.sql`AND a.branch_id = ${b}` : Prisma.empty;
+
     const [payments, invoices, appointmentsRaw, newPatients, totalPatients, outstanding, pendingNow] = await Promise.all([
       this.prisma.payment.findMany({
-        where: { recordedAt: { gte: from, lt: to } },
+        where: { recordedAt: { gte: from, lt: to }, ...paymentBranch },
         select: { amount: true, isRefund: true, method: true, recordedAt: true },
       }),
       this.prisma.invoice.findMany({
-        where: { createdAt: { gte: from, lt: to }, status: { not: 'CANCELLED' } },
+        where: { createdAt: { gte: from, lt: to }, status: { not: 'CANCELLED' }, ...(b ? { appointment: { branchId: b } } : {}) },
         select: { totalAmount: true, discount: true },
       }),
       // Completed visits count on the day they were actually finished (a visit can be closed early)
       this.prisma.appointment.findMany({
-        where: { OR: [{ startTime: { gte: from, lt: to } }, { actualEndTime: { gte: from, lt: to } }] },
+        where: { OR: [{ startTime: { gte: from, lt: to } }, { actualEndTime: { gte: from, lt: to } }], ...(b ? { branchId: b } : {}) },
         select: {
+          branchId: true,
           status: true,
           startTime: true,
           actualEndTime: true,
@@ -47,8 +60,8 @@ export class DashboardService {
           serviceItems: { select: { serviceId: true, serviceNameUz: true, serviceNameRu: true, priceFrom: true } },
         },
       }),
-      this.prisma.patient.count({ where: { createdAt: { gte: from, lt: to } } }),
-      this.prisma.patient.count({ where: { isActive: true } }),
+      this.prisma.patient.count({ where: { createdAt: { gte: from, lt: to }, ...(b ? { appointments: { some: { branchId: b } } } : {}) } }),
+      this.prisma.patient.count({ where: { isActive: true, ...(b ? { appointments: { some: { branchId: b } } } : {}) } }),
       this.prisma.$queryRaw<Array<{ debt: bigint | null }>>`
         SELECT COALESCE(SUM(GREATEST(0, i.total_amount - COALESCE(i.discount, 0) - COALESCE(p.paid, 0))), 0)::bigint AS debt
         FROM invoices i
@@ -56,8 +69,9 @@ export class DashboardService {
           SELECT invoice_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) AS paid
           FROM payments WHERE invoice_id IS NOT NULL GROUP BY invoice_id
         ) p ON p.invoice_id = i.id
-        WHERE i.status <> 'CANCELLED'`,
-      this.prisma.appointment.count({ where: { status: 'PENDING', startTime: { gte: new Date() } } }),
+        LEFT JOIN appointments a ON a.id = i.appointment_id
+        WHERE i.status <> 'CANCELLED' ${branchSql}`,
+      this.prisma.appointment.count({ where: { status: 'PENDING', startTime: { gte: new Date() }, ...(b ? { branchId: b } : {}) } }),
     ]);
 
     // Money
@@ -124,8 +138,34 @@ export class DashboardService {
       LEFT JOIN invoices inv ON inv.id = p.invoice_id
       LEFT JOIN appointments a ON a.id = COALESCE(p.appointment_id, inv.appointment_id)
       LEFT JOIN treatment_plans tp ON tp.id = inv.plan_id
-      WHERE p.recorded_at >= ${from} AND p.recorded_at < ${to} AND COALESCE(a.doctor_id, tp.doctor_id) IS NOT NULL
+      WHERE p.recorded_at >= ${from} AND p.recorded_at < ${to} AND COALESCE(a.doctor_id, tp.doctor_id) IS NOT NULL ${branchSql}
       GROUP BY COALESCE(a.doctor_id, tp.doctor_id)`;
+
+    // Branch comparison (all-branches view only)
+    let branches: Array<{ id: string; nameUz: string; nameRu: string | null; collectedUzs: number; completed: number; newPatients: number }> = [];
+    if (!b) {
+      const [branchRows, branchMoney] = await Promise.all([
+        this.prisma.branch.findMany({ where: { isActive: true }, select: { id: true, nameUz: true, nameRu: true }, orderBy: { createdAt: 'asc' } }),
+        this.prisma.$queryRaw<Array<{ branch_id: string | null; total: bigint }>>`
+          SELECT a.branch_id, SUM(CASE WHEN p.is_refund THEN -p.amount ELSE p.amount END)::bigint AS total
+          FROM payments p
+          LEFT JOIN invoices inv ON inv.id = p.invoice_id
+          LEFT JOIN appointments a ON a.id = COALESCE(p.appointment_id, inv.appointment_id)
+          WHERE p.recorded_at >= ${from} AND p.recorded_at < ${to}
+          GROUP BY a.branch_id`,
+      ]);
+      const money = new Map(branchMoney.map((r) => [r.branch_id, Number(r.total)]));
+      const firstVisit = new Map<string, string | null>();
+      for (const a of [...completed].sort((x, y) => visitDay(x).getTime() - visitDay(y).getTime())) {
+        if (!firstVisit.has(a.patientId)) firstVisit.set(a.patientId, a.branchId);
+      }
+      branches = branchRows.map((br) => ({
+        ...br,
+        collectedUzs: money.get(br.id) || 0,
+        completed: completed.filter((a) => a.branchId === br.id).length,
+        newPatients: [...firstVisit.values()].filter((id) => id === br.id).length,
+      }));
+    }
     const collectedMap = new Map(collected.map((r) => [r.doctor_id, Number(r.total)]));
     const visitsByDoctor = new Map<string, number>();
     for (const a of completed) visitsByDoctor.set(a.doctorId, (visitsByDoctor.get(a.doctorId) || 0) + 1);
@@ -166,6 +206,8 @@ export class DashboardService {
       series,
       topServices,
       topDoctors,
+      branchId: b || null,
+      branches,
     };
   }
 }

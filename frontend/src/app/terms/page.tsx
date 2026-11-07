@@ -4,7 +4,7 @@ import { ArrowLeft, ShieldCheck } from 'lucide-react';
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-canvas via-white to-canvas py-12 sm:py-16">
+    <div className="min-h-screen bg-gradient-to-b from-canvas via-white to-canvas py-8 sm:py-12">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
         <Link
           href="/"

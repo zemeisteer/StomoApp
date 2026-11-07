@@ -65,14 +65,14 @@ export const ClinicSection: React.FC<ClinicSectionProps> = ({ sectionData }) => 
 
   return (
     <Section id="clinic" className="bg-white">
-      <div className="grid gap-14 lg:grid-cols-12 lg:gap-16">
+      <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
         <div className="lg:col-span-5">
           <p className="mb-4 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
             <span className="tabular-nums text-brand-600">03</span>
             <span className="h-px w-8 bg-line-strong" aria-hidden="true" />
             {isRu ? 'О клинике' : 'Klinika haqida'}
           </p>
-          <h2 className="text-3xl font-semibold leading-[1.12] tracking-[-0.025em] text-ink sm:text-4xl">{heading}</h2>
+          <h2 className="text-2xl font-semibold leading-[1.15] tracking-[-0.02em] text-ink sm:text-3xl">{heading}</h2>
           <p className="mt-6 text-lg leading-relaxed text-ink-muted">{description}</p>
         </div>
         <ol className="lg:col-span-7 lg:pt-10">

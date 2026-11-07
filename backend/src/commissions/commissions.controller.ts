@@ -15,7 +15,7 @@ import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { StaffRole } from '@prisma/client';
 import { JwtPayload } from '../auth/auth.service';
-import { UpdateCommissionDto } from './dto/commission.dto';
+import { UpdateCommissionDto, UpdateStaffPayDto } from './dto/commission.dto';
 
 @Controller('admin/commissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -29,6 +29,22 @@ export class CommissionsController {
     @Query('to') to?: string,
   ) {
     return await this.commissionsService.listAllCommissions(from, to);
+  }
+
+  @Get('staff')
+  @Roles(StaffRole.OWNER)
+  async listStaffPay(@Query('from') from?: string, @Query('to') to?: string) {
+    return await this.commissionsService.listStaffPay(from, to);
+  }
+
+  @Put('staff/:staffUserId')
+  @Roles(StaffRole.OWNER)
+  async updateStaffPay(
+    @Param('staffUserId') staffUserId: string,
+    @Body() dto: UpdateStaffPayDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.commissionsService.updateStaffPay(staffUserId, dto, user);
   }
 
   @Get('my-earnings')

@@ -20,6 +20,7 @@ import {
 import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect } from '../../../components/CustomSelect';
 import { api } from '../../../lib/api';
+import { fillIfEmpty } from '../../../lib/autoTranslate';
 
 export default function AdminCmsPage() {
   const [activeTab, setActiveTab] = useState<'articles' | 'faqs' | 'policies'>('articles');
@@ -60,6 +61,17 @@ export default function AdminCmsPage() {
   // FAQ Modal State
   const [showFaqModal, setShowFaqModal] = useState(false);
   const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
+  const faqRef = React.useRef<any>(null);
+  const [translating, setTranslating] = useState(false);
+  // Write in either language: on leaving a field the empty twin is translated automatically.
+  const autoFill = async (field: 'question' | 'answer', from: 'uz' | 'ru') => {
+    const to = from === 'uz' ? 'ru' : 'uz';
+    const src = faqRef.current?.[`${field}${from === 'uz' ? 'Uz' : 'Ru'}`] || '';
+    const key = `${field}${to === 'uz' ? 'Uz' : 'Ru'}`;
+    setTranslating(true);
+    await fillIfEmpty(src, from, to, () => faqRef.current?.[key] || '', (v) => setFaqForm((prev: any) => ({ ...prev, [key]: v })));
+    setTranslating(false);
+  };
   const [faqForm, setFaqForm] = useState({
     questionUz: '',
     questionRu: '',
@@ -69,6 +81,7 @@ export default function AdminCmsPage() {
     sortOrder: 0,
     isActive: true,
   });
+  faqRef.current = faqForm;
 
   const loadData = async () => {
     try {
@@ -823,6 +836,10 @@ export default function AdminCmsPage() {
 
               <form onSubmit={handleSaveFaq} className="space-y-3">
                 <div>
+                  <p className="mb-2 rounded-xl bg-canvas px-3 py-2 text-[11px] text-ink-muted">
+                    Bitta tilda yozing — ikkinchi til maydoni avtomatik tarjima qilinadi (keyin tuzatishingiz mumkin).
+                    {translating && <span className="ml-1 font-semibold text-teal-700">Tarjima qilinmoqda…</span>}
+                  </p>
                   <label className="block text-xs font-semibold text-ink mb-1">
                     Savol (UZ)
                   </label>
@@ -831,6 +848,7 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.questionUz}
                     onChange={(e) => setFaqForm({ ...faqForm, questionUz: e.target.value })}
+                    onBlur={() => autoFill('question', 'uz')}
                     className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
@@ -844,6 +862,7 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.questionRu}
                     onChange={(e) => setFaqForm({ ...faqForm, questionRu: e.target.value })}
+                    onBlur={() => autoFill('question', 'ru')}
                     className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
@@ -857,6 +876,7 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.answerUz}
                     onChange={(e) => setFaqForm({ ...faqForm, answerUz: e.target.value })}
+                    onBlur={() => autoFill('answer', 'uz')}
                     className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>
@@ -870,6 +890,7 @@ export default function AdminCmsPage() {
                     required
                     value={faqForm.answerRu}
                     onChange={(e) => setFaqForm({ ...faqForm, answerRu: e.target.value })}
+                    onBlur={() => autoFill('answer', 'ru')}
                     className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
                   />
                 </div>

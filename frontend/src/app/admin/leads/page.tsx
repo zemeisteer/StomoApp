@@ -5,6 +5,7 @@ import { PhoneCall, CheckCircle2, Clock, MessageSquare, AlertCircle, RefreshCw, 
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
 import { CustomSelect } from '../../../components/CustomSelect';
+import Link from 'next/link';
 
 export default function AdminLeadsPage() {
   const [leads, setLeads] = useState<any[]>([]);
@@ -84,7 +85,8 @@ export default function AdminLeadsPage() {
               Qayta qo&apos;ng&apos;iroq murojaatlari
             </h1>
             <p className="text-xs text-ink-muted mt-0.5">
-              Saytdan yuborilgan murojaatlar monitoringi va aloqa holatini boshqarish
+              Saytdagi &quot;Qayta qo&apos;ng&apos;iroq&quot; formasidan avtomatik tushadi — qo&apos;lda yozish shart emas. Telefon raqami
+              bo&apos;yicha bemorlar bazasi bilan avtomatik solishtiriladi: allaqachon qabulga yozilgan bo&apos;lsa, yashil belgi chiqadi.
             </p>
           </div>
 
@@ -155,6 +157,28 @@ export default function AdminLeadsPage() {
                     <tr key={lead.id} className="hover:bg-teal-50/30 transition-colors">
                       <td className="py-4 px-6 font-bold text-ink">
                         {lead.fullName}
+                        {lead.match?.upcomingAppointment ? (
+                          <span className="mt-1 block w-max rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                            Qabulga yozilgan:{' '}
+                            {new Date(lead.match.upcomingAppointment.startTime).toLocaleString('ru-RU', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        ) : lead.match ? (
+                          <Link
+                            href={`/admin/patients/${lead.match.patientId}`}
+                            className="mt-1 block w-max rounded-md bg-canvas px-2 py-0.5 text-[11px] font-semibold text-ink-muted hover:text-ink"
+                          >
+                            Bazada bor bemor →
+                          </Link>
+                        ) : (
+                          <span className="mt-1 block w-max rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                            Yangi odam
+                          </span>
+                        )}
                       </td>
                       <td className="py-4 px-6 text-teal-800 font-semibold font-mono">
                         {lead.phone}

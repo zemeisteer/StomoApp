@@ -94,7 +94,7 @@ export default function ServiceDetailPage() {
         }
       />
 
-      <Container className="py-14 sm:py-20">
+      <Container className="py-10 sm:py-14">
         <nav className="mb-12 flex items-center gap-2 text-sm text-ink-subtle" aria-label="breadcrumb">
           <Link href="/" className="hover:text-ink">{t.nav.home}</Link>
           <span aria-hidden="true">/</span>

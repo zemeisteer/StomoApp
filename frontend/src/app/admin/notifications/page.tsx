@@ -171,7 +171,9 @@ export default function AdminNotificationsPage() {
     if (
       job.status === 'SENT' ||
       job.status === 'SIMULATED' ||
-      job.status === 'CANCELLED'
+      job.status === 'CANCELLED' ||
+      // Queued jobs go out on their own at the planned time; retrying them only errors.
+      job.status === 'PENDING'
     ) {
       return false;
     }
@@ -287,6 +289,11 @@ export default function AdminNotificationsPage() {
               {isUz
                 ? 'Bemorlarga yuborilgan SMS, Email va Telegram xabarlari, integratsiya holati va xavfsiz qayta yuborish'
                 : 'Отправка SMS, Email и Telegram уведомлений пациентам, статус шлюзов и безопасный повтор'}
+            </p>
+            <p className="mt-2 max-w-2xl rounded-xl bg-canvas px-3 py-2 text-xs text-ink-muted">
+              {isUz
+                ? "Bu yerga hech narsa yozish shart emas: tasdiqlash, eslatma va tabrik xabarlari avtomatik yaratiladi va o'z vaqtida yuboriladi. Bu sahifa faqat nazorat uchun — xato bo'lsa “Qayta urinish” bosiladi."
+                : 'Здесь ничего не нужно заполнять: подтверждения, напоминания и поздравления создаются и отправляются автоматически. Страница только для контроля — при ошибке нажмите «Повтор».'}
             </p>
           </div>
 

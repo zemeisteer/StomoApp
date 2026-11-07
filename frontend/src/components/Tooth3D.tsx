@@ -8,6 +8,8 @@ import { useI18n } from '../lib/i18n';
 
 interface Tooth3DProps {
   className?: string;
+  /** Hide the view-angle buttons (used in the calm hero). */
+  chromeless?: boolean;
 }
 
 function computeCameraFitDistance(radius: number, fovDegrees: number, aspect: number): number {
@@ -24,7 +26,7 @@ function computeCameraFitDistance(radius: number, fovDegrees: number, aspect: nu
   return Math.max(distV, distH) * 1.28;
 }
 
-export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
+export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '', chromeless = false }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { t, language } = useI18n();
@@ -523,7 +525,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-[360px] sm:h-[420px] md:h-[500px] flex items-center justify-center select-none overflow-hidden ${className}`}
+      className={`relative w-full ${className.includes('h-') ? '' : 'h-[360px] sm:h-[420px] md:h-[500px]'} flex items-center justify-center select-none overflow-hidden ${className}`}
     >
       {/* Fallback & Loading Poster */}
       {(isLoading || hasError) && (
@@ -583,7 +585,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '' }) => {
       />
 
       {/* View Angle Preset Pills for complete 360 inspection from every side */}
-      {!isLoading && !hasError && (
+      {!chromeless && !isLoading && !hasError && (
         <div className="absolute top-3 left-4 flex flex-wrap items-center gap-1.5 z-10 pointer-events-auto">
           <button
             type="button"

@@ -164,7 +164,7 @@ export default function PricesPage() {
   const row = (s: any) => {
     const name = isRu && s.nameRu ? s.nameRu : s.nameUz;
     return (
-      <li key={s.id} className="group grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-1 border-b border-line py-5 sm:grid-cols-[1fr_8rem_11rem_auto]">
+      <li key={s.id} className="group grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-1 border-b border-line py-4 sm:grid-cols-[1fr_6rem_14rem_auto]">
         <div className="min-w-0">
           <Link href={`/services/${s.slug}`} className="text-base font-medium text-ink hover:text-brand-700">
             {name}
@@ -174,7 +174,7 @@ export default function PricesPage() {
         <span className="hidden text-sm text-ink-subtle sm:block">
           {s.durationMinutes} {L('daqiqa', 'мин')}
         </span>
-        <span className="text-right text-base tabular-nums text-ink sm:text-left">
+        <span className="text-right text-base tabular-nums text-ink sm:whitespace-nowrap sm:text-left">
           {s.priceTo ? (
             <>
               {formatSom(s.priceFrom)} – {formatSom(s.priceTo)}
@@ -209,7 +209,7 @@ export default function PricesPage() {
         aside={<SearchField value={search} onChange={setSearch} placeholder={L('Muolajani qidirish', 'Поиск процедуры')} />}
       />
 
-      <Container className="py-12 sm:py-16">
+      <Container className="py-8 sm:py-12">
         <div className="mb-10 space-y-5">
           <FilterPills options={categoryOptions} value={selectedCategory} onChange={setSelectedCategory} label={L('Kategoriya', 'Категория')} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
@@ -272,19 +272,42 @@ export default function PricesPage() {
             {L('Mos muolaja topilmadi.', 'Подходящих процедур не найдено.')}
           </p>
         ) : grouped ? (
-          <div className="space-y-14">
-            {groups.map(([cat, list]) => (
-              <section key={cat}>
-                <h2 className="text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{serviceCategoryLabel(cat, language)}</h2>
-                <ul className="mt-3 border-t border-line">{list.map(row)}</ul>
-              </section>
-            ))}
+          <div className="grid gap-8 lg:grid-cols-[13rem_1fr]">
+            {/* Category index: each group is its own card, so categories never blur together */}
+            <nav className="hidden lg:block" aria-label={L('Kategoriyalar', 'Категории')}>
+              <ul className="sticky top-24 space-y-1">
+                {groups.map(([cat, list]) => (
+                  <li key={cat}>
+                    <a
+                      href={`#cat-${cat}`}
+                      className="flex items-center justify-between rounded-xl px-3 py-2 text-sm text-ink-muted transition-colors hover:bg-white hover:text-ink"
+                    >
+                      <span className="truncate">{serviceCategoryLabel(cat, language)}</span>
+                      <span className="ml-2 text-xs tabular-nums text-ink-subtle">{list.length}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+            <div className="space-y-6">
+              {groups.map(([cat, list]) => (
+                <section key={cat} id={`cat-${cat}`} className="scroll-mt-24 overflow-hidden rounded-3xl border border-line bg-white">
+                  <div className="flex items-baseline justify-between border-b border-line bg-canvas/60 px-5 py-4 sm:px-6">
+                    <h2 className="text-lg font-semibold tracking-[-0.01em] text-ink">{serviceCategoryLabel(cat, language)}</h2>
+                    <span className="text-xs text-ink-subtle">
+                      {list.length} {L('ta', 'шт.')}
+                    </span>
+                  </div>
+                  <ul className="px-5 sm:px-6 [&>li:last-child]:border-b-0">{list.map(row)}</ul>
+                </section>
+              ))}
+            </div>
           </div>
         ) : (
-          <ul className="border-t border-line">{filteredAndSortedServices.map(row)}</ul>
+          <ul className="rounded-3xl border border-line bg-white px-5 sm:px-6 [&>li:last-child]:border-b-0">{filteredAndSortedServices.map(row)}</ul>
         )}
 
-        <p className="mt-14 max-w-2xl text-sm leading-relaxed text-ink-subtle">
+        <p className="mt-10 max-w-2xl text-sm leading-relaxed text-ink-subtle">
           {L(
             'Narxlar “dan” ko‘rinishida: yakuniy summa tishlar soni va murakkablikka bog‘liq. Birinchi ko‘rikda shifokor reja va smeta tuzib beradi.',
             'Цены указаны «от»: итог зависит от количества зубов и сложности. На первом осмотре врач составит план и смету.',

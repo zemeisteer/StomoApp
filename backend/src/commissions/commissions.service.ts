@@ -2,9 +2,23 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/auth.service';
-import { UpdateCommissionDto } from './dto/commission.dto';
+import { UpdateCommissionDto, UpdateStaffPayDto } from './dto/commission.dto';
 import { fromZonedTime } from 'date-fns-tz';
-import { Prisma } from '@prisma/client';
+import { PayType, Prisma } from '@prisma/client';
+
+/** Pay for one period: share of collected money, fixed salary, or both, plus any bonus. */
+export function computeEarned(
+  payType: PayType,
+  percentage: number,
+  monthlySalary: number,
+  fixedBonus: number,
+  collected: number,
+): number {
+  const share = Math.max(0, Math.round(collected * (percentage / 100)));
+  const salary = monthlySalary || 0;
+  const base = payType === PayType.SALARY ? salary : payType === PayType.MIXED ? salary + share : share;
+  return base + (fixedBonus || 0);
+}
 
 @Injectable()
 export class CommissionsService {
@@ -101,12 +115,16 @@ export class CommissionsService {
 
       // When unconfigured, do not silently default to 30%. Show unconfigured with totalEarned = 0.
       // fixedBonus is applied per requested reporting period.
+      const payType = doc.commission?.payType ?? PayType.PERCENT;
+      const monthlySalary = doc.commission?.monthlySalary ?? 0;
       const totalEarned = isConfigured
-        ? Math.max(0, Math.round(totalCollected * (percentage! / 100))) + (fixedBonus || 0)
+        ? computeEarned(payType, percentage!, monthlySalary, fixedBonus, totalCollected)
         : 0;
 
       return {
         doctorId: doc.id,
+        payType,
+        monthlySalary,
         doctorName: `${doc.lastNameUz} ${doc.firstNameUz}`,
         slug: doc.slug,
         isActive: doc.isActive,
@@ -187,12 +205,16 @@ export class CommissionsService {
     const percentage = isConfigured ? doc.commission!.percentage : null;
     const fixedBonus = isConfigured ? doc.commission!.fixedBonus : 0;
 
+    const payType = doc.commission?.payType ?? PayType.PERCENT;
+    const monthlySalary = doc.commission?.monthlySalary ?? 0;
     const totalEarned = isConfigured
-      ? Math.max(0, Math.round(totalCollected * (percentage! / 100))) + (fixedBonus || 0)
+      ? computeEarned(payType, percentage!, monthlySalary, fixedBonus, totalCollected)
       : 0;
 
     return {
       doctorId: doc.id,
+      payType,
+      monthlySalary,
       doctorName: `${doc.lastNameUz} ${doc.firstNameUz}`,
       isConfigured,
       percentage,
@@ -215,10 +237,14 @@ export class CommissionsService {
           doctorId,
           percentage: dto.percentage,
           fixedBonus: dto.fixedBonus || 0,
+          payType: dto.payType ?? PayType.PERCENT,
+          monthlySalary: dto.monthlySalary ?? 0,
           notes: dto.notes || null,
         },
         update: {
           percentage: dto.percentage,
+          payType: dto.payType,
+          monthlySalary: dto.monthlySalary,
           fixedBonus: dto.fixedBonus !== undefined ? dto.fixedBonus : undefined,
           notes: dto.notes !== undefined ? dto.notes : undefined,
         },
@@ -234,11 +260,88 @@ export class CommissionsService {
           doctorId,
           percentage: dto.percentage,
           fixedBonus: dto.fixedBonus,
+          payType: dto.payType,
+          monthlySalary: dto.monthlySalary,
           notes: dto.notes,
         },
       });
 
       return commission;
+    });
+  }
+
+  /**
+   * Pay report for every active staff account. "Collected at desk" is money the person took
+   * (payments they recorded, refunds subtracted): the base for a staff percentage, and a
+   * useful "who took how much" figure on its own.
+   */
+  async listStaffPay(from?: string, to?: string) {
+    const clinicSettings = await this.prisma.clinicSettings.findFirst();
+    const timezone = clinicSettings?.timezone || 'Asia/Tashkent';
+    const { fromDate, toDate } = this.parseDateBoundaries(timezone, from, to);
+    const conditions: Prisma.Sql[] = [Prisma.sql`p.recorded_by_id IS NOT NULL`];
+    if (fromDate) conditions.push(Prisma.sql`p.recorded_at >= ${fromDate}`);
+    if (toDate) conditions.push(Prisma.sql`p.recorded_at <= ${toDate}`);
+    const rows = await this.prisma.$queryRaw<Array<{ staff_id: string; collected: bigint }>>`
+      SELECT p.recorded_by_id AS staff_id,
+             COALESCE(SUM(CASE WHEN p.is_refund = true THEN -p.amount ELSE p.amount END), 0)::bigint AS collected
+      FROM payments p
+      WHERE ${Prisma.join(conditions, ' AND ')}
+      GROUP BY p.recorded_by_id
+    `;
+    const collected = new Map(rows.map((r) => [r.staff_id, Number(r.collected)]));
+
+    const staff = await this.prisma.staffUser.findMany({
+      where: { isActive: true },
+      include: { compensation: true },
+      orderBy: { fullName: 'asc' },
+    });
+
+    return staff.map((u) => {
+      const c = u.compensation;
+      const took = collected.get(u.id) || 0;
+      return {
+        staffUserId: u.id,
+        fullName: u.fullName,
+        role: u.role,
+        doctorId: u.doctorId,
+        isConfigured: !!c,
+        payType: c?.payType ?? PayType.SALARY,
+        monthlySalary: c?.monthlySalary ?? 0,
+        percentage: c?.percentage ?? 0,
+        fixedBonus: c?.fixedBonus ?? 0,
+        notes: c?.notes ?? null,
+        collectedAtDesk: took,
+        totalEarned: c ? computeEarned(c.payType, c.percentage, c.monthlySalary, c.fixedBonus, took) : 0,
+      };
+    });
+  }
+
+  async updateStaffPay(staffUserId: string, dto: UpdateStaffPayDto, user: JwtPayload) {
+    const staff = await this.prisma.staffUser.findUnique({ where: { id: staffUserId } });
+    if (!staff) throw new NotFoundException('Xodim topilmadi');
+    return this.prisma.$transaction(async (tx) => {
+      const data = {
+        payType: dto.payType,
+        monthlySalary: dto.monthlySalary ?? 0,
+        percentage: dto.percentage ?? 0,
+        fixedBonus: dto.fixedBonus ?? 0,
+        notes: dto.notes ?? null,
+      };
+      const row = await tx.staffCompensation.upsert({
+        where: { staffUserId },
+        create: { staffUserId, ...data },
+        update: data,
+      });
+      await this.auditService.logTransactional({
+        tx,
+        userId: user.sub,
+        action: 'staff.pay_updated',
+        entity: 'StaffCompensation',
+        entityId: row.id,
+        details: { staffUserId, ...data },
+      });
+      return row;
     });
   }
 }

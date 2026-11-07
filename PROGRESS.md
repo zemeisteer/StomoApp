@@ -248,6 +248,19 @@ A new CI job builds the production images and runs the stack; it found the image
 - Prices: menu-style list grouped by category, branch/doctor selects, sort toggle; booking link keeps the chosen doctor and branch.
 - Contacts: branch switcher, address/phone/hours list, per-branch booking, quiet callback form. Reviews: honest average, quote list, sticky form. FAQ: smooth accordion. Articles: editorial list. About: numbered values, equipment grid, closing call to action.
 
+### Phase 20: Feedback round 2 — pay terms, branch view, booking help (2026-11-09)
+- Fixed: visit card showed prices in tiyin (100 000 so'm appeared as 10 000 000); the reception quote had the same bug.
+- Visit card: after "Yakunlash" a "To'ladi" button takes payment for the visit's invoice right there; paid visits show "To'langan".
+- Online booking: each service shows which doctors work on the chosen day; if nobody can do the selection, the nearest working day is offered.
+- Pay terms for everyone: doctors (in the doctor form) and other staff (in the staff form) are paid by percent, fixed monthly salary, or both. Payroll page is now one monthly report for all staff, with "money taken at the desk" per person. Migration `20261109120000_staff_pay_terms`.
+- Doctor form split into three steps (basics + photo upload, specialty, services/branches/pay).
+- Auto-translate uz <-> ru for FAQ and doctor bio (`/api/admin/translate`; DeepL or Google key in production, public endpoint in dev).
+- Leads are matched to patients by phone: "booked for …", "already a patient" or "new person".
+- Dashboard: branch filter and a per-branch comparison table.
+- Admin polish: sidebar keeps its scroll position, settings save message next to the button, recall dropdowns replaced by segmented buttons, readable audit log (names and plain-language actions), notifications page explains it is automatic and no longer offers retry for queued messages.
+- Public site: rotating 3D tooth back in the hero (loaded after the page), tighter spacing and smaller headings, price list grouped in category cards with a side index, 4-column doctor grid.
+- Tests: Regression 78 added; 93/93 passing.
+
 ---
 
 ## 2. Test Verification Matrix

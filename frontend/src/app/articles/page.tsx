@@ -43,7 +43,7 @@ export default function ArticlesPage() {
         )}
       />
 
-      <Container className="py-12 sm:py-16">
+      <Container className="py-8 sm:py-12">
         {isLoading ? (
           <SkeletonCards count={3} />
         ) : articles.length === 0 ? (

@@ -59,7 +59,7 @@ export const DoctorsSection: React.FC<DoctorsSectionProps> = ({ doctors, isLoadi
             const initials = `${first?.[0] || ''}${last?.[0] || ''}`.toUpperCase();
             return (
               <Link key={doc.id} href={`/doctors/${doc.slug}`} className="group block">
-                <div className="relative aspect-[4/5] overflow-hidden rounded-3xl bg-white">
+                <div className="relative aspect-[4/5] max-h-[380px] overflow-hidden rounded-3xl bg-white">
                   {doc.photoUrl && !failed[doc.id] ? (
                     <Image
                       src={doc.photoUrl}

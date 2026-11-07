@@ -101,7 +101,7 @@ export default function ContactsPage() {
         )}
       />
 
-      <Container className="py-12 sm:py-16">
+      <Container className="py-8 sm:py-12">
         {branchOptions.length > 1 && (
           <div className="mb-10">
             <FilterPills options={branchOptions} value={activeBranch?.id || ''} onChange={setActiveBranchId} label={L('Filial', 'Филиал')} />

@@ -1,7 +1,7 @@
 'use client';
 
 import { TimeSelect } from '../../../components/ui/TimeSelect';
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   UserCheck,
   Clock,
@@ -19,12 +19,17 @@ import {
   CheckCircle2,
   XCircle,
   HelpCircle,
+  Upload,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect } from '../../../components/CustomSelect';
 import { CustomDatePicker } from '../../../components/CustomDatePicker';
 import { ModalDialog } from '../../../components/ModalDialog';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../lib/auth';
+import { fillIfEmpty } from '../../../lib/autoTranslate';
 import { formatClinicDate } from '../../../lib/dateFormat';
 import { useI18n } from '../../../lib/i18n';
 import {
@@ -106,6 +111,16 @@ export default function AdminDoctorsManagePage() {
   const [isDoctorModalOpen, setIsDoctorModalOpen] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<any | null>(null);
   const [isSavingDoctor, setIsSavingDoctor] = useState(false);
+  // The doctor form is split into three short steps instead of one long scroll.
+  const [doctorStep, setDoctorStep] = useState(1);
+  const stepRefs = [useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null), useRef<HTMLDivElement>(null)];
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const { user: authUser } = useAuth();
+  const canSetPay = authUser?.role === 'OWNER';
+  const emptyPay = { payType: 'PERCENT' as 'PERCENT' | 'SALARY' | 'MIXED', percentage: '30', monthlySalary: '0' };
+  const [doctorPay, setDoctorPay] = useState(emptyPay);
+  const bioUzRef = useRef('');
+  const bioRuRef = useRef('');
   const [doctorError, setDoctorError] = useState<string | null>(null);
   const [doctorForm, setDoctorForm] = useState<{
     firstNameUz: string;
@@ -144,6 +159,8 @@ export default function AdminDoctorsManagePage() {
     serviceIds: [],
     branchIds: [],
   });
+  bioUzRef.current = doctorForm.bioUz;
+  bioRuRef.current = doctorForm.bioRu;
 
   // Bulk Schedule Modal State
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
@@ -293,6 +310,8 @@ export default function AdminDoctorsManagePage() {
       branchIds: branches.length > 0 ? [branches[0].id] : [],
     });
     setDoctorError(null);
+    setDoctorStep(1);
+    setDoctorPay(emptyPay);
     setIsDoctorModalOpen(true);
   };
 
@@ -326,11 +345,66 @@ export default function AdminDoctorsManagePage() {
       branchIds: existingBranchIds,
     });
     setDoctorError(null);
+    setDoctorStep(1);
+    setDoctorPay(emptyPay);
+    if (canSetPay) {
+      api
+        .getDoctorCommissions()
+        .then((rows) => {
+          const c = (rows || []).find((r: any) => r.doctorId === doc.id);
+          if (c?.isConfigured) {
+            setDoctorPay({
+              payType: c.payType || 'PERCENT',
+              percentage: String(c.percentage ?? 0),
+              monthlySalary: String(c.monthlySalary ?? 0),
+            });
+          }
+        })
+        .catch(() => {});
+    }
     setIsDoctorModalOpen(true);
+  };
+
+  /** Checks the required fields of one step; shows the browser hint on the first bad one. */
+  const stepIsValid = (idx: number) => {
+    const el = stepRefs[idx].current;
+    if (!el) return true;
+    const fields = Array.from(el.querySelectorAll('input, textarea, select')) as HTMLInputElement[];
+    for (const f of fields) {
+      if (!f.checkValidity()) {
+        setDoctorStep(idx + 1);
+        setTimeout(() => f.reportValidity(), 0);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const uploadDoctorPhoto = async (file: File) => {
+    try {
+      setPhotoUploading(true);
+      setDoctorError(null);
+      const res = await api.uploadMedia(file, 'doctors');
+      const url = res?.url || res?.data?.url;
+      if (url) setDoctorForm((prev) => ({ ...prev, photoUrl: url }));
+    } catch (err: any) {
+      setDoctorError(err?.message || 'Rasmni yuklab bo‘lmadi');
+    } finally {
+      setPhotoUploading(false);
+    }
   };
 
   const handleSaveDoctor = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (doctorStep < 3) {
+      if (stepIsValid(doctorStep - 1)) setDoctorStep(doctorStep + 1);
+      return;
+    }
+    if (!stepIsValid(0) || !stepIsValid(1) || !stepIsValid(2)) return;
+    if (doctorForm.serviceIds.length === 0 || doctorForm.branchIds.length === 0) {
+      setDoctorError('Kamida bitta xizmat va bitta filial tanlang');
+      return;
+    }
     try {
       setIsSavingDoctor(true);
       setDoctorError(null);
@@ -353,10 +427,19 @@ export default function AdminDoctorsManagePage() {
         branchIds: doctorForm.branchIds,
       };
 
+      let savedId: string | undefined = editingDoctor?.id;
       if (editingDoctor) {
         await api.updateDoctorAdmin(editingDoctor.id, payload);
       } else {
-        await api.createDoctorAdmin(payload);
+        const created: any = await api.createDoctorAdmin(payload);
+        savedId = created?.id || created?.data?.id;
+      }
+      if (canSetPay && savedId) {
+        await api.updateDoctorCommission(savedId, {
+          payType: doctorPay.payType,
+          percentage: doctorPay.payType === 'SALARY' ? 0 : Math.min(100, Number(doctorPay.percentage) || 0),
+          monthlySalary: doctorPay.payType === 'PERCENT' ? 0 : Number(doctorPay.monthlySalary) || 0,
+        });
       }
 
       setIsDoctorModalOpen(false);
@@ -1066,7 +1149,67 @@ export default function AdminDoctorsManagePage() {
               </div>
             )}
 
-            <form onSubmit={handleSaveDoctor} className="space-y-4 text-xs">
+            <form onSubmit={handleSaveDoctor} noValidate className="space-y-4 text-xs">
+              <ol className="grid grid-cols-3 gap-2">
+                {['Asosiy', 'Mutaxassislik', 'Xizmat va maosh'].map((label, i) => (
+                  <li key={label}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (i + 1 < doctorStep || stepIsValid(doctorStep - 1)) setDoctorStep(i + 1);
+                      }}
+                      className={`w-full rounded-xl border px-2 py-2 text-left transition-colors ${
+                        doctorStep === i + 1 ? 'border-teal-600 bg-teal-50 text-teal-900' : 'border-line text-ink-muted hover:bg-canvas'
+                      }`}
+                    >
+                      <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70">{i + 1}-qadam</span>
+                      <span className="block truncate font-bold">{label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+
+              <div ref={stepRefs[0]} className={doctorStep === 1 ? 'space-y-4' : 'hidden'}>
+              {/* Photo */}
+              <div className="flex items-center gap-4 rounded-2xl border border-line p-3">
+                <div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-xl bg-canvas">
+                  {doctorForm.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={doctorForm.photoUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full items-center justify-center text-lg font-bold text-ink-subtle">
+                      {(doctorForm.firstNameUz[0] || '') + (doctorForm.lastNameUz[0] || '')}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <p className="font-bold text-ink">Rasm</p>
+                  <div className="flex flex-wrap gap-2">
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 font-semibold text-ink hover:bg-canvas">
+                      <Upload className="h-3.5 w-3.5" />
+                      {photoUploading ? 'Yuklanmoqda...' : doctorForm.photoUrl ? 'Almashtirish' : 'Rasm yuklash'}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        disabled={photoUploading}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) uploadDoctorPhoto(f);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                    {doctorForm.photoUrl && (
+                      <button type="button" onClick={() => setDoctorForm((prev) => ({ ...prev, photoUrl: '' }))} className="rounded-lg px-2 py-1.5 font-semibold text-rose-600 hover:bg-rose-50">
+                        O‘chirish
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-ink-subtle">JPG, PNG yoki WEBP, 5 MB gacha. Tik (portret) rasm yaxshi ko‘rinadi.</p>
+                </div>
+              </div>
+
               {/* Names: Uzbek Latin and Russian Cyrillic with bidirectional auto-sync */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1212,6 +1355,9 @@ export default function AdminDoctorsManagePage() {
                 </div>
               </div>
 
+              </div>
+
+              <div ref={stepRefs[1]} className={doctorStep === 2 ? 'space-y-4' : 'hidden'}>
               {/* Mutaxassislik va Unvon */}
               <div className="space-y-1.5 p-3 bg-canvas rounded-2xl border border-line/80">
                 <div className="flex items-center justify-between">
@@ -1287,7 +1433,7 @@ export default function AdminDoctorsManagePage() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block font-bold text-ink">Biografiya</label>
-                  <span className="text-[10px] text-teal-600 font-semibold">Ruschasini o&apos;zingiz yozing</span>
+                  <span className="text-[10px] text-teal-600 font-semibold">Ikkinchi til avtomatik tarjima qilinadi</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -1300,6 +1446,10 @@ export default function AdminDoctorsManagePage() {
                         // Free text is not transliterated: Cyrillic letters are not a Russian translation
                         setDoctorForm((prev) => ({ ...prev, bioUz: val }));
                       }}
+                      onBlur={(e) => {
+                        const src = e.target.value;
+                        fillIfEmpty(src, 'uz', 'ru', () => bioRuRef.current, (v) => setDoctorForm((prev) => ({ ...prev, bioRu: v })));
+                      }}
                       className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500"
                     />
                   </div>
@@ -1309,6 +1459,10 @@ export default function AdminDoctorsManagePage() {
                       placeholder="Биография (Русский)"
                       value={doctorForm.bioRu}
                       onChange={(e) => setDoctorForm({ ...doctorForm, bioRu: e.target.value })}
+                      onBlur={(e) => {
+                        const src = e.target.value;
+                        fillIfEmpty(src, 'ru', 'uz', () => bioUzRef.current, (v) => setDoctorForm((prev) => ({ ...prev, bioUz: v })));
+                      }}
                       className="w-full px-3 py-2 rounded-xl border border-line focus:border-teal-500"
                     />
                   </div>
@@ -1365,6 +1519,9 @@ export default function AdminDoctorsManagePage() {
                 </div>
               </div>
 
+              </div>
+
+              <div ref={stepRefs[2]} className={doctorStep === 3 ? 'space-y-4' : 'hidden'}>
               {/* Connected Services */}
               <div>
                 <label className="block font-bold text-ink mb-1">
@@ -1425,6 +1582,60 @@ export default function AdminDoctorsManagePage() {
                 </div>
               </div>
 
+
+              {canSetPay && (
+                <div className="space-y-2 rounded-2xl border border-line p-3">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-ink">Maosh</label>
+                    <span className="text-[10px] text-ink-muted">Hisobot: Xodimlar maoshi</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 rounded-xl bg-canvas p-1">
+                    {([
+                      ['PERCENT', 'Foiz'],
+                      ['SALARY', 'Oylik'],
+                      ['MIXED', 'Oylik + foiz'],
+                    ] as const).map(([v, label]) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setDoctorPay((prev) => ({ ...prev, payType: v }))}
+                        className={`h-8 rounded-lg font-semibold ${doctorPay.payType === v ? 'bg-white text-ink shadow-sm' : 'text-ink-muted'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {doctorPay.payType !== 'SALARY' && (
+                      <label className="block">
+                        <span className="mb-1 block text-ink-muted">Foiz (tushumdan), %</span>
+                        <input
+                          inputMode="numeric"
+                          value={doctorPay.percentage}
+                          onChange={(e) => setDoctorPay((prev) => ({ ...prev, percentage: e.target.value.replace(/\D/g, '').slice(0, 3) }))}
+                          className="w-full rounded-xl border border-line px-3 py-2"
+                        />
+                      </label>
+                    )}
+                    {doctorPay.payType !== 'PERCENT' && (
+                      <label className="block">
+                        <span className="mb-1 block text-ink-muted">Oylik maosh, so‘m</span>
+                        <input
+                          inputMode="numeric"
+                          value={doctorPay.monthlySalary}
+                          onChange={(e) => setDoctorPay((prev) => ({ ...prev, monthlySalary: e.target.value.replace(/\D/g, '') }))}
+                          className="w-full rounded-xl border border-line px-3 py-2"
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-ink-subtle">
+                    Foiz shifokor bemorlaridan tushgan puldan (qaytarishlar ayrilgan) hisoblanadi.
+                  </p>
+                </div>
+              )}
+              </div>
+
               <div className="pt-2 flex justify-between items-center border-t border-line">
                 {editingDoctor ? (
                   <button
@@ -1441,19 +1652,37 @@ export default function AdminDoctorsManagePage() {
                 ) : <div />}
 
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsDoctorModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-bold"
-                  >
-                    Bekor qilish
-                  </button>
+                  {doctorStep > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => setDoctorStep(doctorStep - 1)}
+                      className="inline-flex items-center gap-1 px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-bold"
+                    >
+                      <ChevronLeft className="h-4 w-4" /> Orqaga
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsDoctorModalOpen(false)}
+                      className="px-4 py-2 rounded-xl text-ink-muted hover:bg-canvas font-bold"
+                    >
+                      Bekor qilish
+                    </button>
+                  )}
                   <button
                     type="submit"
-                    disabled={isSavingDoctor}
-                    className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
+                    disabled={isSavingDoctor || photoUploading}
+                    className="inline-flex items-center gap-1 px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold shadow-md disabled:opacity-50"
                   >
-                    {isSavingDoctor ? 'Saqlanmoqda...' : 'Saqlash'}
+                    {doctorStep < 3 ? (
+                      <>
+                        Keyingisi <ChevronRight className="h-4 w-4" />
+                      </>
+                    ) : isSavingDoctor ? (
+                      'Saqlanmoqda...'
+                    ) : (
+                      'Saqlash'
+                    )}
                   </button>
                 </div>
               </div>

@@ -90,10 +90,10 @@ export default function AboutPage() {
         )}
       />
 
-      <section className="bg-white py-16 sm:py-24">
+      <section className="bg-white py-12 sm:py-16">
         <Container>
           <div className="grid gap-12 lg:grid-cols-12">
-            <h2 className="text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl lg:col-span-4">
+            <h2 className="text-2xl font-semibold tracking-[-0.025em] text-ink sm:text-3xl lg:col-span-4">
               {L('Biz nimaga tayanamiz', 'На чём мы стоим')}
             </h2>
             <ol className="border-t border-line lg:col-span-8">
@@ -116,11 +116,11 @@ export default function AboutPage() {
         </Container>
       </section>
 
-      <section className="py-16 sm:py-24">
+      <section className="py-12 sm:py-16">
         <Container>
           <div className="max-w-2xl">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">{L('Texnologiyalar', 'Оснащение')}</p>
-            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl">
+            <h2 className="mt-4 text-2xl font-semibold tracking-[-0.025em] text-ink sm:text-3xl">
               {L('Zamonaviy jihozlar va sertifikatlangan materiallar', 'Современное оборудование и сертифицированные материалы')}
             </h2>
           </div>
@@ -135,7 +135,7 @@ export default function AboutPage() {
         </Container>
       </section>
 
-      <section className="bg-brand-950 py-16 sm:py-20">
+      <section className="bg-brand-950 py-12 sm:py-14">
         <Container className="flex flex-col items-start justify-between gap-8 sm:flex-row sm:items-center">
           <h2 className="max-w-xl text-3xl font-semibold tracking-[-0.03em] text-white sm:text-4xl">
             {L('Birinchi ko‘rikdan boshlang', 'Начните с первого осмотра')}

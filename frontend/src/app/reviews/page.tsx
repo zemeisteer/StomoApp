@@ -106,7 +106,7 @@ export default function ReviewsPage() {
         }
       />
 
-      <Container className="py-12 sm:py-16">
+      <Container className="py-8 sm:py-12">
         <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-7">
             {isLoading ? (

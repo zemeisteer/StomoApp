@@ -93,21 +93,26 @@ export default function RecallPage() {
               disabled={!isOwner || busy === 'settings'}
               onChange={(v) => saveSettings({ recallEnabled: v })}
               extra={
-                <label className="mt-2 flex items-center gap-2 text-xs text-ink-muted">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
                   {L('Standart muddat (oy)', 'Интервал по умолчанию (мес.)')}
-                  <select
-                    value={settings.recallMonths}
-                    disabled={!isOwner}
-                    onChange={(e) => saveSettings({ recallMonths: Number(e.target.value) })}
-                    className="h-8 rounded-lg border border-line bg-white px-2 text-sm text-ink"
-                  >
+                  <div className="inline-flex rounded-xl border border-line bg-canvas p-0.5" role="radiogroup">
                     {[3, 4, 6, 9, 12].map((m) => (
-                      <option key={m} value={m}>
+                      <button
+                        key={m}
+                        type="button"
+                        role="radio"
+                        aria-checked={settings.recallMonths === m}
+                        disabled={!isOwner}
+                        onClick={() => saveSettings({ recallMonths: m })}
+                        className={`h-8 min-w-[2.25rem] rounded-lg px-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${
+                          settings.recallMonths === m ? 'bg-white text-ink shadow-sm' : 'text-ink-muted hover:text-ink'
+                        }`}
+                      >
                         {m}
-                      </option>
+                      </button>
                     ))}
-                  </select>
-                </label>
+                  </div>
+                </div>
               }
             />
             <Toggle
@@ -153,10 +158,22 @@ export default function RecallPage() {
           <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
             <div className="flex items-center justify-between gap-2 border-b border-line px-5 py-3">
               <p className="text-sm text-ink-muted">{L('Oxirgi tashrifi eski va qabulga yozilmaganlar', 'Давно не были и не записаны')}</p>
-              <select value={filter} onChange={(e) => setFilter(e.target.value as any)} className="h-8 rounded-lg border border-line bg-white px-2 text-xs">
-                <option value="todo">{L('Bog‘lanish kerak', 'Нужно связаться')}</option>
-                <option value="all">{L('Hammasi', 'Все')}</option>
-              </select>
+              <div className="inline-flex rounded-xl border border-line bg-canvas p-0.5">
+                {([
+                  ['todo', L('Bog‘lanish kerak', 'Нужно связаться')],
+                  ['all', L('Hammasi', 'Все')],
+                ] as const).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={filter === v}
+                    onClick={() => setFilter(v as any)}
+                    className={`h-8 rounded-lg px-3 text-xs font-semibold transition-colors ${filter === v ? 'bg-white text-ink shadow-sm' : 'text-ink-muted hover:text-ink'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             {!recall ? (
               <p className="flex items-center gap-2 p-5 text-sm text-ink-muted">

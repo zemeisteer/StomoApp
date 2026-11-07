@@ -47,7 +47,7 @@ export default function DoctorsPage() {
         )}
       />
 
-      <Container className="py-12 sm:py-16">
+      <Container className="py-8 sm:py-12">
         {titles.length > 2 && (
           <div className="mb-10">
             <FilterPills options={titles} value={title} onChange={setTitle} label={L('Yo‘nalish', 'Специализация')} />
@@ -55,7 +55,7 @@ export default function DoctorsPage() {
         )}
 
         {isLoading ? (
-          <div className="grid grid-cols-2 gap-6 lg:grid-cols-3" aria-busy="true">
+          <div className="grid grid-cols-2 gap-5 lg:grid-cols-4" aria-busy="true">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="aspect-[4/5] animate-pulse rounded-3xl bg-white" />
             ))}
@@ -65,7 +65,7 @@ export default function DoctorsPage() {
             {L('Shifokorlar ro‘yxati hozircha bo‘sh.', 'Список врачей пока пуст.')}
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-x-6 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-4">
             {visible.map((doc) => {
               const first = isRu && doc.firstNameRu ? doc.firstNameRu : doc.firstNameUz;
               const last = isRu && doc.lastNameRu ? doc.lastNameRu : doc.lastNameUz;
@@ -93,9 +93,9 @@ export default function DoctorsPage() {
                       )}
                     </div>
                   </Link>
-                  <div className="mt-5 flex items-start justify-between gap-4">
+                  <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0">
-                      <h2 className="text-lg font-medium tracking-[-0.01em] text-ink">
+                      <h2 className="text-base font-medium tracking-[-0.01em] text-ink sm:text-lg">
                         <Link href={`/doctors/${doc.slug}`} className="hover:text-brand-700">
                           {first} {last}
                         </Link>

@@ -77,7 +77,7 @@ export default function FaqPage() {
         aside={<SearchField value={search} onChange={setSearch} placeholder={L('Savol qidirish', 'Поиск по вопросам')} />}
       />
 
-      <Container className="py-12 sm:py-16">
+      <Container className="py-8 sm:py-12">
         <div className="mx-auto max-w-3xl">
           {isLoading ? (
             <SkeletonCards count={4} className="grid-cols-1" />

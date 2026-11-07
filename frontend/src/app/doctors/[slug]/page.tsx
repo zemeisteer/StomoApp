@@ -151,7 +151,7 @@ export default function DoctorDetailPage() {
       </Container>
 
       {services.length > 0 && (
-        <section className="border-t border-line bg-white py-16 sm:py-20">
+        <section className="border-t border-line bg-white py-12 sm:py-14">
           <Container>
             <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-3xl">{L('Ko‘rsatadigan xizmatlari', 'Услуги врача')}</h2>
             <ul className="mt-8 border-t border-line">

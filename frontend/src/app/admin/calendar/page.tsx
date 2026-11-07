@@ -27,6 +27,7 @@ import { AdminLayout } from '../../../components/AdminLayout';
 import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
 import { CustomDatePicker } from '../../../components/CustomDatePicker';
 import { ModalDialog } from '../../../components/ModalDialog';
+import { TakePaymentDialog } from '../../../components/admin/billing/BillingDialogs';
 import { PhoneInput } from '../../../components/PhoneInput';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
@@ -941,6 +942,27 @@ export default function AdminCalendarPage() {
 
   const validTransitions = selectedAppt ? ALLOWED_TRANSITIONS[selectedAppt.status] || [] : [];
 
+  // Invoice of a completed visit, so the desk can take payment right from the visit card.
+  const [apptInvoice, setApptInvoice] = useState<any | null>(null);
+  const [payingInvoice, setPayingInvoice] = useState<any | null>(null);
+  const apptId = selectedAppt?.id;
+  const apptStatus = selectedAppt?.status;
+  const loadApptInvoice = useCallback(async () => {
+    if (!apptId || apptStatus !== 'COMPLETED') {
+      setApptInvoice(null);
+      return;
+    }
+    try {
+      const list = await api.getInvoices({ appointmentId: apptId });
+      setApptInvoice(list?.[0] || null);
+    } catch {
+      setApptInvoice(null);
+    }
+  }, [apptId, apptStatus]);
+  useEffect(() => {
+    loadApptInvoice();
+  }, [loadApptInvoice]);
+
   // Options for CustomSelect filters
   const doctorOptions: SelectOption[] = [
     { value: '', label: isRu ? 'Все врачи' : 'Barcha shifokorlar' },
@@ -1773,6 +1795,14 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
+      <TakePaymentDialog
+        invoice={payingInvoice}
+        lang={isRu ? 'ru' : 'uz'}
+        onClose={() => setPayingInvoice(null)}
+        onDone={() => {
+          loadApptInvoice();
+        }}
+      />
       {/* Appointment Detail & Status Transition Modal */}
       {selectedAppt && (
         <ModalDialog
@@ -1835,7 +1865,7 @@ export default function AdminCalendarPage() {
                           <span>{item.durationMinutes} daq</span>
                           <span>•</span>
                           <span className="font-bold text-teal-700">
-                            {item.price?.toLocaleString('uz-UZ')} so&apos;m
+                            {Math.round((item.price || 0) / 100).toLocaleString('uz-UZ')} so&apos;m
                           </span>
                         </div>
                       </div>
@@ -1844,7 +1874,7 @@ export default function AdminCalendarPage() {
                       <div className="flex justify-between items-center pt-1 border-t border-line/60 text-xs font-bold text-ink">
                         <span>Jami summa:</span>
                         <span className="text-teal-800">
-                          {Number(selectedAppt.price).toLocaleString('uz-UZ')} so&apos;m
+                          {Math.round(Number(selectedAppt.price) / 100).toLocaleString('uz-UZ')} so&apos;m
                         </span>
                       </div>
                     )}
@@ -1856,7 +1886,7 @@ export default function AdminCalendarPage() {
                     </span>
                     {selectedAppt.price && (
                       <span className="font-bold text-teal-800">
-                        {Number(selectedAppt.price).toLocaleString('uz-UZ')} so&apos;m
+                        {Math.round(Number(selectedAppt.price) / 100).toLocaleString('uz-UZ')} so&apos;m
                       </span>
                     )}
                   </div>
@@ -1983,6 +2013,22 @@ export default function AdminCalendarPage() {
                       ? 'Yakunlanmoqda...'
                       : 'Yakunlash'}
                   </button>
+                )}
+                {selectedAppt.status === 'COMPLETED' && apptInvoice && apptInvoice.debtAmount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPayingInvoice(apptInvoice)}
+                    className="py-2 px-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    {isRu ? 'Оплатил' : "To'ladi"} · {apptInvoice.debtAmount.toLocaleString('uz-UZ')} {isRu ? 'сум' : "so'm"}
+                  </button>
+                )}
+                {selectedAppt.status === 'COMPLETED' && apptInvoice && apptInvoice.debtAmount === 0 && (
+                  <span className="py-1 px-2.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    {isRu ? 'Оплачено' : "To'langan"}
+                  </span>
                 )}
                 {validTransitions.includes('NO_SHOW') && (
                   <button

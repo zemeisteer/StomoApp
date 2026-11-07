@@ -1,3 +1,4 @@
+import { TranslateModule } from './translate/translate.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -101,6 +102,7 @@ const redisImports = process.env.REDIS_ENABLED === 'true'
     InventoryModule,
     CommissionsModule,
     BotModule,
+    TranslateModule,
   ],
   providers: [
     {

@@ -8523,4 +8523,86 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.staffUser.delete({ where: { id: recUser.id } }).catch(() => {});
     }
   });
+
+  it('Regression 78: Pay terms for every staff member (salary / percent / both), leads matched to booked patients, branch dashboard', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg78_${Date.now()}`;
+    const day = new Date().toISOString().slice(0, 10);
+    const savedCommission = await prisma.doctorCommission.findUnique({ where: { doctorId: testDoctorAId } });
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg78 Bemor', phone: '+998900007878' } });
+    const recUser = await prisma.staffUser.create({
+      data: { email: `${tag}@reception.local`, passwordHash: await bcrypt.hash('Reception2026!x', 10), fullName: 'Reg78 Kassir', role: StaffRole.RECEPTION },
+    });
+    const invoice = await prisma.invoice.create({ data: { patientId: patient.id, totalAmount: 200000 } });
+    const start = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `${tag}_1`, patientId: patient.id, doctorId: testDoctorAId, serviceId: testServiceId, branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg78', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+      },
+    });
+    const lead = await prisma.lead.create({ data: { fullName: 'Reg78 Lead', phone: '+998900007878', source: 'callback' } });
+    try {
+      const recToken = (await http().post('/api/auth/login').send({ email: recUser.email, password: 'Reception2026!x' }).expect(200)).body.accessToken;
+
+      // Staff pay: owner only; MIXED = salary + percent of money the person took at the desk
+      await http().put(`/api/admin/commissions/staff/${recUser.id}`).set(auth(recToken)).send({ payType: 'SALARY', monthlySalary: 1 }).expect(403);
+      await http().put(`/api/admin/commissions/staff/${recUser.id}`).set(auth(adminToken)).send({ payType: 'BOGUS' }).expect(400);
+      await http()
+        .put(`/api/admin/commissions/staff/${recUser.id}`)
+        .set(auth(adminToken))
+        .send({ payType: 'MIXED', monthlySalary: 1_000_000, percentage: 10 })
+        .expect(200);
+      await http().post('/api/admin/billing/payments').set(auth(recToken)).send({ invoiceId: invoice.id, amount: 200000, method: 'CASH' }).expect(201);
+      const staff = (await http().get(`/api/admin/commissions/staff?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      expect(staff.find((r: any) => r.staffUserId === recUser.id)).toMatchObject({
+        payType: 'MIXED',
+        collectedAtDesk: 200000,
+        totalEarned: 1_000_000 + 20000,
+      });
+      await http().get('/api/admin/commissions/staff').set(auth(recToken)).expect(403);
+
+      // Doctor on a fixed salary is paid the salary regardless of takings
+      await http()
+        .put(`/api/admin/commissions/${testDoctorAId}`)
+        .set(auth(adminToken))
+        .send({ percentage: 0, fixedBonus: 0, payType: 'SALARY', monthlySalary: 5_000_000 })
+        .expect(200);
+      const docs = (await http().get(`/api/admin/commissions?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      expect(docs.find((d: any) => d.doctorId === testDoctorAId)).toMatchObject({ payType: 'SALARY', monthlySalary: 5_000_000, totalEarned: 5_000_000 });
+
+      // A callback request from someone who already booked shows the booking
+      const leads = (await http().get('/api/admin/leads?search=7878').set(auth(adminToken)).expect(200)).body.items;
+      expect(leads.find((l: any) => l.id === lead.id).match).toMatchObject({ patientId: patient.id, upcomingAppointment: { id: appt.id } });
+
+      // Dashboard per branch, plus a comparison when looking at all branches
+      const all = (await http().get(`/api/admin/dashboard?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      expect(all.branchId).toBeNull();
+      expect(Array.isArray(all.branches)).toBe(true);
+      const one = (await http().get(`/api/admin/dashboard?from=${day}&to=${day}&branchId=${testBranchId}`).set(auth(adminToken)).expect(200)).body;
+      expect(one.branchId).toBe(testBranchId);
+      expect(one.branches).toEqual([]);
+
+      // Translation endpoint is for content editors only
+      await http().get('/api/admin/translate/status').set(auth(adminToken)).expect(200);
+      await http().get('/api/admin/translate/status').set(auth(recToken)).expect(403);
+    } finally {
+      if (savedCommission) {
+        await prisma.doctorCommission.update({
+          where: { doctorId: testDoctorAId },
+          data: { percentage: savedCommission.percentage, fixedBonus: savedCommission.fixedBonus, payType: savedCommission.payType, monthlySalary: savedCommission.monthlySalary },
+        });
+      } else {
+        await prisma.doctorCommission.deleteMany({ where: { doctorId: testDoctorAId } });
+      }
+      await prisma.lead.delete({ where: { id: lead.id } }).catch(() => {});
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.invoice.deleteMany({ where: { patientId: patient.id } });
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+      await prisma.staffUser.delete({ where: { id: recUser.id } }).catch(() => {});
+    }
+  });
 });

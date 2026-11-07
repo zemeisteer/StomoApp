@@ -5,6 +5,7 @@ import { UserCheck, Plus, Shield, User, RefreshCw, AlertCircle, CheckCircle2, Lo
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
 import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
+import { PayTermsFields, PayTerms, emptyStaffPay, payPayload } from '../../../components/admin/PayTermsFields';
 
 export default function AdminStaffPage() {
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -28,6 +29,9 @@ export default function AdminStaffPage() {
   const [editIsActive, setEditIsActive] = useState(true);
   const [editDoctorId, setEditDoctorId] = useState('');
   const [editTelegramId, setEditTelegramId] = useState('');
+  const [createPay, setCreatePay] = useState<PayTerms>(emptyStaffPay);
+  const [editPay, setEditPay] = useState<PayTerms>(emptyStaffPay);
+  const PERCENT_HINT = 'Foiz shu xodim kassada qabul qilgan puldan hisoblanadi.';
 
   const loadData = async () => {
     try {
@@ -54,14 +58,17 @@ export default function AdminStaffPage() {
     try {
       setIsSubmitting(true);
       setErrorMessage(null);
-      await api.createStaff({
+      const created: any = await api.createStaff({
         email: createEmail.trim(),
         password: createPassword,
         fullName: createFullName.trim(),
         role: createRole,
         doctorId: createRole === 'DOCTOR' && createDoctorId ? createDoctorId : undefined,
       });
+      const newId = created?.id || created?.data?.id;
+      if (newId && createRole !== 'DOCTOR') await api.updateStaffPay(newId, payPayload(createPay));
       setShowCreateModal(false);
+      setCreatePay(emptyStaffPay);
       setCreateEmail('');
       setCreatePassword('');
       setCreateFullName('');
@@ -87,6 +94,7 @@ export default function AdminStaffPage() {
         doctorId: editRole === 'DOCTOR' ? (editDoctorId || null) : null,
         telegramUserId: editTelegramId.trim() || null,
       });
+      if (editRole !== 'DOCTOR') await api.updateStaffPay(editingStaff.id, payPayload(editPay));
       setEditingStaff(null);
       await loadData();
     } catch (err: any) {
@@ -279,6 +287,15 @@ export default function AdminStaffPage() {
                               setEditIsActive(member.isActive);
                               setEditDoctorId(member.doctorId || '');
                               setEditTelegramId(member.telegramUserId || '');
+                              setEditPay(emptyStaffPay);
+                              api
+                                .getStaffPay()
+                                .then((rows) => {
+                                  const r = (rows || []).find((x: any) => x.staffUserId === member.id);
+                                  if (r?.isConfigured)
+                                    setEditPay({ payType: r.payType, percentage: String(r.percentage), monthlySalary: String(r.monthlySalary) });
+                                })
+                                .catch(() => {});
                             }}
                             className="px-3 py-1.5 bg-canvas hover:bg-line text-ink font-bold rounded-lg text-[11px] transition-colors"
                           >
@@ -383,6 +400,12 @@ export default function AdminStaffPage() {
                     />
                   )}
                 </div>
+
+                {createRole === 'DOCTOR' ? (
+                  <p className="rounded-xl bg-canvas p-3 text-[11px] text-ink-muted">Shifokor maoshi (foiz yoki oylik) Shifokorlar bo‘limida, shifokor profilida belgilanadi.</p>
+                ) : (
+                  <PayTermsFields value={createPay} onChange={setCreatePay} percentHint={PERCENT_HINT} />
+                )}
 
                 <div className="flex items-center justify-end gap-2 pt-4 border-t border-line">
                   <button
@@ -493,6 +516,12 @@ export default function AdminStaffPage() {
                     o&apos;z qabullari jadvalini shu Telegram&apos;ga oladi. Bo&apos;sh qoldirilsa, bog&apos;lanish olib tashlanadi.
                   </p>
                 </div>
+
+                {editRole === 'DOCTOR' ? (
+                  <p className="rounded-xl bg-canvas p-3 text-[11px] text-ink-muted">Shifokor maoshi (foiz yoki oylik) Shifokorlar bo‘limida, shifokor profilida belgilanadi.</p>
+                ) : (
+                  <PayTermsFields value={editPay} onChange={setEditPay} percentHint={PERCENT_HINT} />
+                )}
 
                 <div className="p-3 bg-amber-50 rounded-xl text-[11px] text-amber-800 border border-amber-200">
                   ⚠️ Eslatma: Rol o&apos;zgartirilsa yoki hisob bloklansa, xodimning joriy seanslari darhol bekor qilinadi.

@@ -54,8 +54,8 @@ export class AnalyticsController {
   @Get('admin/dashboard')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  async getDashboard(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.dashboardService.summary(from, to);
+  async getDashboard(@Query('from') from?: string, @Query('to') to?: string, @Query('branchId') branchId?: string) {
+    return this.dashboardService.summary(from, to, branchId);
   }
 
   @Get('admin/analytics/overview')

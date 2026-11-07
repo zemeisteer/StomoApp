@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { LeadStatus, Prisma } from '@prisma/client';
+import { AppointmentStatus, LeadStatus, Prisma } from '@prisma/client';
 
 @Injectable()
 export class LeadsService {
@@ -60,7 +60,48 @@ export class LeadsService {
       this.prisma.lead.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    return { items: await this.attachPatientMatch(items), total, page, limit };
+  }
+
+  /**
+   * Same person often both leaves a callback request and books online. Match leads to patients
+   * by phone and show the next booked visit, so reception does not call someone already booked.
+   */
+  private async attachPatientMatch<T extends { phone: string }>(items: T[]) {
+    const phones = Array.from(new Set(items.map((l) => l.phone).filter(Boolean)));
+    if (phones.length === 0) return items.map((l) => ({ ...l, match: null }));
+    const patients = await this.prisma.patient.findMany({
+      where: { phone: { in: phones } },
+      select: {
+        id: true,
+        fullName: true,
+        phone: true,
+        appointments: {
+          where: { status: { notIn: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] } },
+          select: { id: true, startTime: true, status: true },
+          orderBy: { startTime: 'desc' },
+          take: 5,
+        },
+      },
+    });
+    const byPhone = new Map(patients.map((p) => [p.phone, p]));
+    const now = Date.now();
+    return items.map((l) => {
+      const p = byPhone.get(l.phone);
+      if (!p) return { ...l, match: null };
+      const upcoming = [...p.appointments]
+        .filter((a) => a.startTime.getTime() >= now)
+        .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())[0];
+      return {
+        ...l,
+        match: {
+          patientId: p.id,
+          patientName: p.fullName,
+          upcomingAppointment: upcoming || null,
+          lastAppointment: p.appointments.find((a) => a.startTime.getTime() < now) || null,
+        },
+      };
+    });
   }
 
   async findById(id: string) {

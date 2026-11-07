@@ -531,6 +531,40 @@ function BookingContent() {
     return { doctorsWorkingOnDate: working, doctorsOtherDays: other };
   }, [doctors, selectedDate, selectedBranchId, doctorProvidesSelectedServices]);
 
+  // Step 2 helpers: which doctors can do a service on the chosen day, and the next day
+  // when someone can do the whole selection, so patients never hit a dead end at step 3.
+  const doctorShortName = (d: any) => {
+    const ru = language === 'ru';
+    const last = ru && d.lastNameRu ? d.lastNameRu : d.lastNameUz;
+    const first = ru && d.firstNameRu ? d.firstNameRu : d.firstNameUz;
+    return `${first || ''} ${last ? last[0] + '.' : ''}`.trim();
+  };
+  const doctorsForServiceOnDate = useCallback(
+    (serviceId: string) =>
+      selectedDate
+        ? doctors.filter(
+            (d) =>
+              d.isActive !== false &&
+              Array.isArray(d.services) &&
+              d.services.some((ds: any) => ds.serviceId === serviceId) &&
+              isDoctorWorkingOnDate(selectedDate, d, selectedBranchId || undefined),
+          )
+        : [],
+    [doctors, selectedDate, selectedBranchId],
+  );
+  const nextDateWithDoctor = useMemo(() => {
+    if (!selectedDate || selectedServiceIds.length === 0 || doctorsWorkingOnDate.length > 0) return null;
+    const candidates = doctors.filter((d) => d.isActive !== false && doctorProvidesSelectedServices(d));
+    if (candidates.length === 0) return null;
+    const base = parseCalendarDate(selectedDate);
+    for (let i = 1; i <= 45; i++) {
+      const dt = new Date(base.getTime() + i * 86400000);
+      const key = dt.toISOString().split('T')[0];
+      if (candidates.some((d) => isDoctorWorkingOnDate(key, d, selectedBranchId || undefined))) return key;
+    }
+    return null;
+  }, [selectedDate, selectedServiceIds, doctorsWorkingOnDate, doctors, doctorProvidesSelectedServices, selectedBranchId]);
+
   // Recommended branch calculation: derived from selected slot or doctor schedules
   const recommendedBranchObj = useMemo(() => {
     if (!selectedDoctorObj || !selectedDate) {
@@ -1469,6 +1503,20 @@ function BookingContent() {
                           </div>
                         </div>
                         <p className="font-bold text-sm text-ink pr-4">{name}</p>
+                        {selectedDate && (() => {
+                          const docs = doctorsForServiceOnDate(s.id);
+                          return docs.length > 0 ? (
+                            <p className="mt-1 text-[11px] text-ink-muted truncate">
+                              {language === 'ru' ? 'В этот день: ' : 'Bu kuni: '}
+                              {docs.slice(0, 2).map(doctorShortName).join(', ')}
+                              {docs.length > 2 ? ` +${docs.length - 2}` : ''}
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-[11px] font-medium text-amber-700">
+                              {language === 'ru' ? 'В этот день нет врача' : "Bu kuni shifokor yo'q"}
+                            </p>
+                          );
+                        })()}
                       </div>
                       <div className="mt-3 pt-2 border-t border-line/60 flex items-center justify-between">
                         <span className="text-[11px] text-ink-muted">
@@ -1519,6 +1567,45 @@ function BookingContent() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {selectedServiceIds.length > 0 && selectedDate && (
+                doctorsWorkingOnDate.length > 0 ? (
+                  <div className="flex items-start gap-2 rounded-2xl border border-line bg-white p-4 text-xs text-ink">
+                    <User className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+                    <span>
+                      <b>{formattedSelectedDate}</b> {language === 'ru' ? '— принимают: ' : '— qabul qiladi: '}
+                      {doctorsWorkingOnDate.map(doctorShortName).join(', ')}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+                    <span>
+                      {language === 'ru'
+                        ? 'В выбранный день нет врача для этих услуг.'
+                        : "Tanlangan kunda bu xizmatlar uchun shifokor yo'q."}
+                    </span>
+                    <div className="flex shrink-0 gap-2">
+                      {nextDateWithDoctor && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDate(nextDateWithDoctor)}
+                          className="rounded-xl bg-amber-600 px-3 py-2 font-bold text-white hover:bg-amber-700"
+                        >
+                          {language === 'ru' ? 'Ближайшая дата: ' : 'Eng yaqin kun: '}
+                          {nextDateWithDoctor.split('-').reverse().join('.')}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => goToStep(1)}
+                        className="rounded-xl border border-amber-300 px-3 py-2 font-semibold hover:bg-amber-100"
+                      >
+                        {language === 'ru' ? 'Другой день' : 'Boshqa kun'}
+                      </button>
+                    </div>
+                  </div>
+                )
               )}
 
               <div className="pt-4 flex items-center justify-between">

@@ -56,7 +56,7 @@ export default function ServicesPage() {
         aside={<SearchField value={query} onChange={setQuery} placeholder={L('Xizmatni qidirish', 'Поиск услуги')} />}
       />
 
-      <Container className="py-12 sm:py-16">
+      <Container className="py-8 sm:py-12">
         <div className="mb-10">
           <FilterPills options={categories} value={category} onChange={setCategory} label={L('Kategoriya', 'Категория')} />
         </div>

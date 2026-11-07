@@ -63,6 +63,15 @@ export function ClinicDashboard({ lang }: { lang: Lang }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [branchId, setBranchId] = useState('');
+  const [branchList, setBranchList] = useState<any[]>([]);
+
+  useEffect(() => {
+    api
+      .getBranches()
+      .then((rows: any[]) => setBranchList((rows || []).filter((b) => b.isActive !== false)))
+      .catch(() => {});
+  }, []);
 
   const range = preset === 'custom' ? custom : rangeFor(preset, today);
 
@@ -70,14 +79,14 @@ export function ClinicDashboard({ lang }: { lang: Lang }) {
     setLoading(true);
     setError(null);
     try {
-      setData(await api.getDashboardSummary(range.from, range.to));
+      setData(await api.getDashboardSummary(range.from, range.to, branchId || undefined));
     } catch (e: any) {
       setError(e?.message || L("Ma'lumotlarni yuklab bo'lmadi", 'Не удалось загрузить данные'));
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range.from, range.to]);
+  }, [range.from, range.to, branchId]);
 
   useEffect(() => {
     load();
@@ -125,6 +134,25 @@ export function ClinicDashboard({ lang }: { lang: Lang }) {
           </p>
         )}
       </div>
+
+      {branchList.length > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={L('Filial', 'Филиал')}>
+          {[{ id: '', nameUz: 'Barcha filiallar', nameRu: 'Все филиалы' }, ...branchList].map((b) => (
+            <button
+              key={b.id || 'all'}
+              type="button"
+              role="tab"
+              aria-selected={branchId === b.id}
+              onClick={() => setBranchId(b.id)}
+              className={`h-8 rounded-full px-3.5 text-[13px] font-medium transition-colors ${
+                branchId === b.id ? 'bg-ink text-white' : 'border border-line bg-white text-ink-muted hover:text-ink'
+              }`}
+            >
+              {lang === 'ru' && b.nameRu ? b.nameRu : b.nameUz}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <p role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
@@ -201,6 +229,33 @@ export function ClinicDashboard({ lang }: { lang: Lang }) {
               />
             </section>
           </div>
+          {!branchId && data.branches?.length > 1 && (
+            <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
+              <h2 className="px-5 pt-4 text-sm font-semibold text-ink">{L('Filiallar bo‘yicha', 'По филиалам')}</h2>
+              <div className="overflow-x-auto">
+                <table className="mt-2 w-full min-w-[520px] text-sm">
+                  <thead className="text-left text-[11px] uppercase tracking-wider text-ink-subtle">
+                    <tr>
+                      <th className="px-5 py-2 font-semibold">{L('Filial', 'Филиал')}</th>
+                      <th className="px-5 py-2 text-right font-semibold">{L('Tushum', 'Выручка')}</th>
+                      <th className="px-5 py-2 text-right font-semibold">{L('Yakunlangan qabul', 'Завершённые приёмы')}</th>
+                      <th className="px-5 py-2 text-right font-semibold">{L('Yangi bemorlar', 'Новые пациенты')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {data.branches.map((b: any) => (
+                      <tr key={b.id} className="cursor-pointer hover:bg-canvas" onClick={() => setBranchId(b.id)}>
+                        <td className="px-5 py-3 font-medium text-ink">{lang === 'ru' && b.nameRu ? b.nameRu : b.nameUz}</td>
+                        <td className="px-5 py-3 text-right tabular-nums">{formatUzs(b.collectedUzs, lang)}</td>
+                        <td className="px-5 py-3 text-right tabular-nums">{b.completed}</td>
+                        <td className="px-5 py-3 text-right tabular-nums">{b.newPatients}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </div>
       )}
     </div>

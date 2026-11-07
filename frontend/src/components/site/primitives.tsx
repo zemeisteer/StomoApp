@@ -13,7 +13,7 @@ export function Container({ children, className = '' }: { children: React.ReactN
 
 export function Section({ id, children, className = '' }: { id?: string; children: React.ReactNode; className?: string }) {
   return (
-    <section id={id} className={`py-20 sm:py-28 ${className}`}>
+    <section id={id} className={`py-14 sm:py-20 ${className}`}>
       <Container>{children}</Container>
     </section>
   );
@@ -36,15 +36,15 @@ export function SectionHeading({
   align?: 'split' | 'stack';
 }) {
   return (
-    <div className={`mb-12 sm:mb-16 ${align === 'split' ? 'flex flex-col gap-6 md:flex-row md:items-end md:justify-between' : ''}`}>
+    <div className={`mb-8 sm:mb-10 ${align === 'split' ? 'flex flex-col gap-6 md:flex-row md:items-end md:justify-between' : ''}`}>
       <div className="max-w-2xl">
         <p className="mb-4 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           {index && <span className="tabular-nums text-brand-600">{index}</span>}
           <span className="h-px w-8 bg-line-strong" aria-hidden="true" />
           {eyebrow}
         </p>
-        <h2 className="text-3xl font-semibold leading-[1.1] tracking-[-0.025em] text-ink sm:text-4xl lg:text-[2.75rem]">{title}</h2>
-        {lead && <p className="mt-5 max-w-xl text-base leading-relaxed text-ink-muted sm:text-lg">{lead}</p>}
+        <h2 className="text-2xl font-semibold leading-[1.15] tracking-[-0.02em] text-ink sm:text-3xl lg:text-[2.25rem]">{title}</h2>
+        {lead && <p className="mt-3 max-w-xl text-base leading-relaxed text-ink-muted">{lead}</p>}
       </div>
       {action && <TextLink href={action.href}>{action.label}</TextLink>}
     </div>
@@ -55,7 +55,7 @@ export function PrimaryLink({ href, children, className = '' }: { href: string; 
   return (
     <Link
       href={href}
-      className={`inline-flex h-12 items-center justify-center gap-2 rounded-full bg-brand-600 px-6 text-[15px] font-medium text-white transition-colors duration-300 hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/25 ${className}`}
+      className={`inline-flex h-11 items-center justify-center gap-2 rounded-full bg-brand-600 px-6 text-[15px] font-medium text-white transition-colors duration-300 hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/25 ${className}`}
     >
       {children}
     </Link>
@@ -66,7 +66,7 @@ export function SecondaryLink({ href, children, className = '' }: { href: string
   return (
     <Link
       href={href}
-      className={`inline-flex h-12 items-center justify-center gap-2 rounded-full border border-line-strong px-6 text-[15px] font-medium text-ink transition-colors duration-300 hover:border-ink hover:bg-white ${className}`}
+      className={`inline-flex h-11 items-center justify-center gap-2 rounded-full border border-line-strong px-6 text-[15px] font-medium text-ink transition-colors duration-300 hover:border-ink hover:bg-white ${className}`}
     >
       {children}
     </Link>
@@ -123,7 +123,7 @@ export function PageIntro({
   aside?: React.ReactNode;
 }) {
   return (
-    <header className="border-b border-line pb-12 pt-14 sm:pb-16 sm:pt-20">
+    <header className="border-b border-line pb-8 pt-10 sm:pb-10 sm:pt-12">
       <Container>
         <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
@@ -131,8 +131,8 @@ export function PageIntro({
               <span className="h-px w-8 bg-line-strong" aria-hidden="true" />
               {eyebrow}
             </p>
-            <h1 className="text-4xl font-semibold leading-[1.05] tracking-[-0.035em] text-ink sm:text-5xl lg:text-6xl">{title}</h1>
-            {lead && <p className="mt-6 max-w-2xl text-lg leading-relaxed text-ink-muted">{lead}</p>}
+            <h1 className="text-3xl font-semibold leading-[1.1] tracking-[-0.03em] text-ink sm:text-4xl lg:text-[2.75rem]">{title}</h1>
+            {lead && <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink-muted sm:text-lg">{lead}</p>}
           </div>
           {aside && <div className="w-full lg:w-80">{aside}</div>}
         </div>

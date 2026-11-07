@@ -56,6 +56,7 @@ To'ldiriladigan qatorlar:
 | `TELEGRAM_CHAT_ID` | Xodimlar guruhi ID'si |
 | `OPS_TELEGRAM_CHAT_ID` | Ixtiyoriy: texnik ogohlantirishlar (SMS yuborilmadi, ombor kam) uchun alohida guruh |
 | `ESKIZ_EMAIL`, `ESKIZ_PASSWORD`, `ESKIZ_FROM` | Eskiz kabineti |
+| `DEEPL_API_KEY` yoki `GOOGLE_TRANSLATE_API_KEY` | Admin paneldagi avtomatik tarjima (uz ↔ ru). Kalit bo'lmasa productionda tarjima tugmasi o'chadi |
 | `CLINIC_NAME`, `CLINIC_PHONE`, `CLINIC_LOCATION_URL` | Bot ko'rsatadigan klinika ma'lumotlari |
 
 Qolgan parol va kalitlarni (`POSTGRES_PASSWORD`, `JWT_*`, `SERVICE_TOKEN`) o'zgartirmang, ular avtomatik yaratilgan.

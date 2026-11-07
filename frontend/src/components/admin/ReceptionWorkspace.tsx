@@ -573,7 +573,7 @@ export function ReceptionWorkspace({
                     </span>
                   </span>
                   <span className="font-bold text-ink">
-                    {((regSlotQuote?.priceFrom ?? selectedServiceObj.priceFrom) || 0).toLocaleString()} {isUz ? "so'm" : 'сум'}
+                    {Math.round(((regSlotQuote?.priceFrom ?? selectedServiceObj.priceFrom) || 0) / 100).toLocaleString()} {isUz ? "so'm" : 'сум'}
                   </span>
                 </div>
               )}
