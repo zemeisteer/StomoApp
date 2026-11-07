@@ -1,197 +1,112 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Calendar, Search, Sparkles, Clock, ArrowRight } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
-import { serviceCategoryLabel } from '../../lib/serviceCategories';
+import { SERVICE_CATEGORIES, serviceCategoryLabel } from '../../lib/serviceCategories';
 import { api } from '../../lib/api';
+import { Container, FilterPills, PageIntro, SearchField, SkeletonCards, formatSom } from '../../components/site/primitives';
 
 export default function ServicesPage() {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
   const [services, setServices] = useState<any[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [category, setCategory] = useState<string>('ALL');
+  const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadServices() {
-      try {
-        setIsLoading(true);
-        const data = await api.getServices();
-        if (isMounted) setServices(data || []);
-      } catch (e) {
-        console.error('Failed to load services', e);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    }
-    loadServices();
+    let alive = true;
+    api
+      .getServices()
+      .then((data) => alive && setServices(data || []))
+      .catch(() => {})
+      .finally(() => alive && setIsLoading(false));
     return () => {
-      isMounted = false;
+      alive = false;
     };
   }, []);
 
-  const categories = [
-    { key: 'ALL', label: isRu ? 'Все услуги' : 'Barcha xizmatlar' },
-    { key: 'PREVENTIVE', label: isRu ? 'Профилактика и гигиена' : 'Profilaktika va gigiyena' },
-    { key: 'THERAPY', label: isRu ? 'Терапия и кариес' : 'Terapiya va karies' },
-    { key: 'ORTHODONTICS', label: isRu ? 'Ортодонтия (Брекеты)' : 'Ortodontiya (Breketlar)' },
-    { key: 'IMPLANTS', label: isRu ? 'Имплантация' : 'Implantatsiya' },
-    { key: 'PEDIATRIC', label: isRu ? 'Детская стоматология' : 'Bolalar stomatologiyasi' },
-  ];
+  // Only categories that actually have services
+  const categories = useMemo(() => {
+    const present = new Set(services.map((s) => s.category));
+    return [
+      { value: 'ALL', label: L('Hammasi', 'Все') },
+      ...SERVICE_CATEGORIES.filter((c) => present.has(c.value)).map((c) => ({ value: c.value as string, label: isRu ? c.ru : c.uz })),
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [services, isRu]);
 
-  const filteredServices = services.filter((s) => {
-    const matchesCategory = selectedCategory === 'ALL' || s.category === selectedCategory;
+  const filtered = services.filter((s) => {
     const name = (isRu && s.nameRu ? s.nameRu : s.nameUz).toLowerCase();
-    const matchesSearch = name.includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
+    return (category === 'ALL' || s.category === category) && name.includes(query.trim().toLowerCase());
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-10">
-      {/* Page Header */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>{t.nav.services}</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
-          {isRu ? 'Стоматологические услуги и цены' : 'Klinikamiz xizmatlari va narxlari'}
-        </h1>
-        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-          {isRu
-            ? 'Передовые технологии безболезненного лечения, 3D компьютерная томография и качественные европейские материалы.'
-            : 'Ilg\'or kompyuter anesteziyasi, zamonaviy mikroskopiya va Germaniya materiallari asosida sifatli muolaja.'}
-        </p>
-      </div>
+    <div className="bg-canvas">
+      <PageIntro
+        eyebrow={t.nav.services}
+        title={L('Xizmatlar va narxlar', 'Услуги и цены')}
+        lead={L(
+          'Har bir xizmatning davomiyligi va boshlang‘ich narxi ko‘rsatilgan. Aniq narx ko‘rikdan keyin davolash rejasida yoziladi.',
+          'Для каждой услуги указаны длительность и цена «от». Точная стоимость фиксируется в плане лечения после осмотра.',
+        )}
+        aside={<SearchField value={query} onChange={setQuery} placeholder={L('Xizmatni qidirish', 'Поиск услуги')} />}
+      />
 
-      {/* Category Pills & Search Bar */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-        {/* Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
-          {categories.map((c) => (
-            <button
-              type="button"
-              key={c.key}
-              onClick={() => setSelectedCategory(c.key)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-all ${
-                selectedCategory === c.key
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'bg-white text-ink border border-line hover:bg-brand-50'
-              }`}
-            >
-              {c.label}
-            </button>
-          ))}
+      <Container className="py-12 sm:py-16">
+        <div className="mb-10">
+          <FilterPills options={categories} value={category} onChange={setCategory} label={L('Kategoriya', 'Категория')} />
         </div>
 
-        {/* Search */}
-        <div className="relative w-full md:w-72">
-          <Search className="absolute left-3.5 top-3 w-4 h-4 text-ink-muted" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={isRu ? 'Поиск услуги...' : 'Xizmat nomini qidirish...'}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-line text-xs font-medium text-ink focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white shadow-sm"
-          />
-        </div>
-      </div>
-
-      {/* Services Grid */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3, 4, 5, 6].map((n) => (
-            <div key={n} className="bg-white rounded-2xl p-6 border border-line animate-pulse space-y-4">
-              <div className="flex justify-between items-center">
-                <div className="h-6 w-20 bg-brand-50 rounded-full" />
-                <div className="h-4 w-16 bg-canvas rounded" />
-              </div>
-              <div className="h-6 w-3/4 bg-canvas rounded" />
-              <div className="h-10 bg-canvas rounded" />
-              <div className="pt-4 border-t border-line flex justify-between">
-                <div className="h-6 w-24 bg-canvas rounded" />
-                <div className="h-8 w-24 bg-canvas rounded" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : filteredServices.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-line p-8">
-          <p className="text-ink-muted text-sm">
-            {isRu ? 'По вашему запросу услуг не найдено.' : 'Qidiruv bo\'yicha mos xizmatlar topilmadi.'}
+        {isLoading ? (
+          <SkeletonCards count={6} />
+        ) : filtered.length === 0 ? (
+          <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+            {L('Qidiruv bo‘yicha xizmat topilmadi.', 'По запросу ничего не найдено.')}
           </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredServices.map((service) => {
-            const name = isRu && service.nameRu ? service.nameRu : service.nameUz;
-            const desc = isRu && service.descriptionRu ? service.descriptionRu : service.descriptionUz;
-            const priceFromFormatted = (service.priceFrom / 100).toLocaleString('uz-UZ');
-
-            return (
-              <div
-                key={service.id}
-                className="bg-white rounded-2xl p-6 sm:p-7 border border-line hover:border-brand-600/40 transition-all flex flex-col justify-between group"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-3.5">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>{service.durationMinutes} {isRu ? 'мин' : 'daqiqa'}</span>
-                    </span>
-                    <span className="text-[11px] font-bold text-ink-muted uppercase tracking-wider">
-                      {serviceCategoryLabel(service.category, isRu ? 'ru' : 'uz')}
-                    </span>
-                  </div>
-
-                  <Link href={`/services/${service.slug}`}>
-                    <h3 className="text-lg font-bold text-ink group-hover:text-brand-600 transition-colors mb-2 leading-snug">
+        ) : (
+          <div className="grid gap-px overflow-hidden rounded-3xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((service) => {
+              const name = isRu && service.nameRu ? service.nameRu : service.nameUz;
+              const desc = isRu && service.descriptionRu ? service.descriptionRu : service.descriptionUz;
+              return (
+                <article key={service.id} className="group flex min-h-[260px] flex-col bg-white p-8 transition-colors duration-500 hover:bg-brand-50/40">
+                  <p className="text-xs uppercase tracking-[0.14em] text-ink-subtle">{serviceCategoryLabel(service.category, language)}</p>
+                  <h2 className="mt-6 text-xl font-medium leading-snug tracking-[-0.01em] text-ink">
+                    <Link href={`/services/${service.slug}`} className="after:absolute after:inset-0 relative">
                       {name}
-                    </h3>
-                  </Link>
-
-                  <p className="text-sm text-ink-muted line-clamp-3 mb-6 leading-relaxed">
-                    {desc || (isRu ? 'Профессиональное лечение от ведущих специалистов клиники.' : 'Klinikamiz mutaxassislari tomonidan xavfsiz va og\'riqsiz muolaja.')}
-                  </p>
-                </div>
-
-                <div className="pt-4 border-t border-line flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-ink-muted block uppercase font-semibold">
-                      {t.common.price}
-                    </span>
-                    <span className="text-base font-semibold text-ink">
-                      {priceFromFormatted} {t.common.uzs}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Link
-                      href={`/services/${service.slug}`}
-                      className="px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-50 rounded-xl transition-colors"
-                    >
-                      {t.common.viewDetails}
                     </Link>
-
-                    <Link
-                      href={`/booking?serviceId=${service.id}`}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl transition-all font-semibold text-xs shadow-sm"
-                      title={t.common.bookAppointment}
-                    >
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{isRu ? 'Записаться' : 'Yozilish'}</span>
-                    </Link>
+                  </h2>
+                  {desc && <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-ink-muted">{desc}</p>}
+                  <div className="mt-auto flex items-end justify-between gap-4 pt-8">
+                    <p className="text-sm">
+                      <span className="text-ink-subtle">{L('dan', 'от')} </span>
+                      <span className="font-medium tabular-nums text-ink">
+                        {formatSom(service.priceFrom)} {t.common.uzs}
+                      </span>
+                      <span className="block text-ink-subtle">
+                        {service.durationMinutes} {L('daqiqa', 'минут')}
+                      </span>
+                    </p>
+                    <div className="relative z-10 flex items-center gap-3">
+                      <Link
+                        href={`/booking?serviceId=${service.id}`}
+                        className="inline-flex h-10 items-center rounded-full bg-brand-600 px-4 text-[13px] font-medium text-white transition-colors duration-300 hover:bg-brand-700"
+                      >
+                        {L('Yozilish', 'Записаться')}
+                      </Link>
+                      <ArrowUpRight className="h-5 w-5 text-ink-subtle transition-all duration-500 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-brand-600" aria-hidden="true" />
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </Container>
     </div>
   );
 }

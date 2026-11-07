@@ -1,188 +1,126 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Calendar, Clock, Building2, Globe, Stethoscope, ArrowRight, Award } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { Container, FilterPills, PageIntro } from '../../components/site/primitives';
 
 export default function DoctorsPage() {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [failed, setFailed] = useState<Record<string, boolean>>({});
+  const [title, setTitle] = useState('ALL');
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadDoctors() {
-      try {
-        setIsLoading(true);
-        const data = await api.getDoctors();
-        if (isMounted) setDoctors(data || []);
-      } catch (e) {
-        console.error('Failed to load doctors', e);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    }
-    loadDoctors();
+    let alive = true;
+    api
+      .getDoctors()
+      .then((data) => alive && setDoctors(data || []))
+      .catch(() => {})
+      .finally(() => alive && setIsLoading(false));
     return () => {
-      isMounted = false;
+      alive = false;
     };
   }, []);
 
+  const titleOf = (d: any) => (isRu ? d.titleRu || d.titleUz : d.titleUz) || '';
+  const titles = useMemo(() => {
+    const set = Array.from(new Set(doctors.map(titleOf).filter(Boolean)));
+    return [{ value: 'ALL', label: L('Hammasi', 'Все') }, ...set.map((v) => ({ value: v, label: v }))];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doctors, isRu]);
+  const visible = doctors.filter((d) => title === 'ALL' || titleOf(d) === title);
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-10">
-      {/* Header */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
-          <Stethoscope className="w-3.5 h-3.5" />
-          <span>{t.nav.doctors}</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
-          {isRu ? 'Врачи и специалисты клиники' : 'Klinikamiz malakali shifokorlari'}
-        </h1>
-        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-          {isRu
-            ? 'Сертифицированные стоматологи с многолетним опытом работы, регулярно проходящие повышение квалификации.'
-            : 'Xalqaro malaka oshirgan, zamonaviy uskunalar bilan ishlovchi 15 yildan ortiq tajribaga ega shifokorlar jamoasi.'}
-        </p>
-      </div>
+    <div className="bg-canvas">
+      <PageIntro
+        eyebrow={t.nav.doctors}
+        title={L('Bizning shifokorlar', 'Наши врачи')}
+        lead={L(
+          'Har bir shifokorning yo‘nalishi va tajribasi ochiq. Profilni ochib, to‘g‘ridan-to‘g‘ri shu shifokorga yoziling.',
+          'Специализация и опыт каждого врача открыты. Откройте профиль и запишитесь напрямую к этому врачу.',
+        )}
+      />
 
-      {/* Loading Skeleton */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {[1, 2, 3, 4].map((n) => (
-            <div key={n} className="bg-white rounded-3xl p-6 border border-line animate-pulse space-y-4">
-              <div className="flex gap-4">
-                <div className="w-24 h-28 bg-brand-50 rounded-2xl" />
-                <div className="space-y-2 flex-1">
-                  <div className="h-5 w-3/4 bg-canvas rounded" />
-                  <div className="h-4 w-1/2 bg-canvas rounded" />
-                  <div className="h-4 w-1/3 bg-canvas rounded" />
-                </div>
-              </div>
-              <div className="h-12 bg-canvas rounded-xl" />
-            </div>
-          ))}
-        </div>
-      ) : doctors.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-line p-8">
-          <p className="text-ink-muted text-sm">
-            {isRu ? 'Список врачей временно недоступен.' : 'Shifokorlar ro\'yxati mavjud emas.'}
+      <Container className="py-12 sm:py-16">
+        {titles.length > 2 && (
+          <div className="mb-10">
+            <FilterPills options={titles} value={title} onChange={setTitle} label={L('Yo‘nalish', 'Специализация')} />
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="grid grid-cols-2 gap-6 lg:grid-cols-3" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="aspect-[4/5] animate-pulse rounded-3xl bg-white" />
+            ))}
+          </div>
+        ) : visible.length === 0 ? (
+          <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+            {L('Shifokorlar ro‘yxati hozircha bo‘sh.', 'Список врачей пока пуст.')}
           </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {doctors.map((doc) => {
-            const firstName = isRu && doc.firstNameRu ? doc.firstNameRu : doc.firstNameUz;
-            const lastName = isRu && doc.lastNameRu ? doc.lastNameRu : doc.lastNameUz;
-            const title = isRu && doc.titleRu ? doc.titleRu : (doc.titleUz || (isRu ? 'Стоматолог' : 'Stomatolog'));
-            const bio = isRu && doc.bioRu ? doc.bioRu : doc.bioUz;
-            const initials = `${firstName?.[0] || 'D'}${lastName?.[0] || ''}`.toUpperCase();
-
-            return (
-              <div
-                key={doc.id}
-                className="bg-white rounded-3xl p-7 border border-line hover:border-brand-600/40 transition-all flex flex-col justify-between group"
-              >
-                <div>
-                  <div className="flex items-start gap-5 mb-5">
-                    {/* Doctor Photo or dignified initials avatar */}
-                    <Link
-                      href={`/doctors/${doc.slug}`}
-                      className="w-24 h-28 rounded-2xl overflow-hidden bg-gradient-to-tr from-brand-50 to-line shrink-0 relative block"
-                    >
-                      {doc.photoUrl ? (
+        ) : (
+          <div className="grid grid-cols-1 gap-x-6 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((doc) => {
+              const first = isRu && doc.firstNameRu ? doc.firstNameRu : doc.firstNameUz;
+              const last = isRu && doc.lastNameRu ? doc.lastNameRu : doc.lastNameUz;
+              const bio = isRu && doc.bioRu ? doc.bioRu : doc.bioUz;
+              return (
+                <article key={doc.id} className="group">
+                  <Link href={`/doctors/${doc.slug}`} className="block">
+                    <div className="relative aspect-[4/5] overflow-hidden rounded-3xl bg-white">
+                      {doc.photoUrl && !failed[doc.id] ? (
                         <Image
                           src={doc.photoUrl}
-                          alt={`Dr. ${firstName} ${lastName}`}
-                          width={96}
-                          height={112}
+                          alt={`${first} ${last}`}
+                          fill
                           unoptimized
-                          className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform"
+                          sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                          onError={() => setFailed((f) => ({ ...f, [doc.id]: true }))}
+                          className="object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-brand-600 font-bold text-2xl">
-                          {initials}
+                        <div className="flex h-full items-center justify-center bg-gradient-to-b from-brand-50 to-white">
+                          <span className="text-5xl font-light tracking-tight text-brand-700/70">
+                            {`${first?.[0] || ''}${last?.[0] || ''}`.toUpperCase()}
+                          </span>
                         </div>
                       )}
+                    </div>
+                  </Link>
+                  <div className="mt-5 flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h2 className="text-lg font-medium tracking-[-0.01em] text-ink">
+                        <Link href={`/doctors/${doc.slug}`} className="hover:text-brand-700">
+                          {first} {last}
+                        </Link>
+                      </h2>
+                      {titleOf(doc) && <p className="text-sm text-ink-muted">{titleOf(doc)}</p>}
+                      {doc.experienceYears > 0 && (
+                        <p className="mt-1 text-xs text-ink-subtle">
+                          {doc.experienceYears} {L('yillik tajriba', 'лет опыта')}
+                        </p>
+                      )}
+                    </div>
+                    <Link
+                      href={`/booking?doctorId=${doc.id}`}
+                      className="inline-flex h-9 shrink-0 items-center rounded-full border border-line-strong px-4 text-[13px] font-medium text-ink transition-colors duration-300 hover:border-ink hover:bg-white"
+                    >
+                      {L('Yozilish', 'Записаться')}
                     </Link>
-
-                    {/* Basic Info */}
-                    <div className="flex-1 min-w-0">
-                      <Link href={`/doctors/${doc.slug}`}>
-                        <h2 className="text-xl font-bold text-ink group-hover:text-brand-600 transition-colors leading-snug">
-                          Dr. {firstName} {lastName}
-                        </h2>
-                      </Link>
-                      <p className="text-xs text-brand-600 font-semibold mt-1 mb-2.5">
-                        {title}
-                      </p>
-
-                      <div className="flex items-center gap-3 text-xs text-ink-muted flex-wrap">
-                        {doc.experienceYears > 0 && (
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 text-brand-600" />
-                            {doc.experienceYears}+ {isRu ? 'лет опыта' : 'yil tajriba'}
-                          </span>
-                        )}
-                        {doc.languages && doc.languages.length > 0 && (
-                          <span className="inline-flex items-center gap-1">
-                            <Globe className="w-3.5 h-3.5 text-brand-600" />
-                            {doc.languages.join(', ').toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                    </div>
                   </div>
-
-                  {/* Bio */}
-                  {bio && (
-                    <p className="text-xs sm:text-sm text-ink-muted leading-relaxed mb-4 line-clamp-3">
-                      {bio}
-                    </p>
-                  )}
-
-                  {/* Branches */}
-                  {doc.branches && doc.branches.length > 0 && (
-                    <div className="text-xs text-ink-muted mb-6 flex items-center gap-1.5 flex-wrap bg-canvas px-3.5 py-2 rounded-xl border border-line">
-                      <Building2 className="w-3.5 h-3.5 text-brand-600 shrink-0" />
-                      <span className="font-semibold text-ink">{isRu ? 'Филиалы:' : 'Filiallar:'}</span>
-                      <span>
-                        {doc.branches
-                          .map((b: any) => (isRu && b.branch?.nameRu ? b.branch.nameRu : (b.branch?.nameUz || b.nameUz)))
-                          .filter(Boolean)
-                          .join(', ')}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Bottom Actions */}
-                <div className="pt-4 border-t border-line flex items-center justify-between gap-3">
-                  <Link
-                    href={`/doctors/${doc.slug}`}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-ink-muted hover:text-brand-600 transition-colors"
-                  >
-                    <span>{isRu ? 'Подробнее о враче' : 'Shifokor haqida'}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </Link>
-
-                  <Link
-                    href={`/booking?doctorId=${doc.id}`}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold rounded-xl text-center shadow-md shadow-brand-600/20 transition-all"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>{t.common.bookAppointment}</span>
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                  {bio && <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-ink-muted">{bio}</p>}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </Container>
     </div>
   );
 }

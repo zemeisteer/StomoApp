@@ -109,3 +109,93 @@ export function SectionError({ message, onRetry, retryLabel }: { message: string
     </div>
   );
 }
+
+/** Top of an inner page: eyebrow, large heading, lead; optional right-side slot (e.g. search). */
+export function PageIntro({
+  eyebrow,
+  title,
+  lead,
+  aside,
+}: {
+  eyebrow: string;
+  title: React.ReactNode;
+  lead?: React.ReactNode;
+  aside?: React.ReactNode;
+}) {
+  return (
+    <header className="border-b border-line pb-12 pt-14 sm:pb-16 sm:pt-20">
+      <Container>
+        <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-3xl">
+            <p className="mb-5 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
+              <span className="h-px w-8 bg-line-strong" aria-hidden="true" />
+              {eyebrow}
+            </p>
+            <h1 className="text-4xl font-semibold leading-[1.05] tracking-[-0.035em] text-ink sm:text-5xl lg:text-6xl">{title}</h1>
+            {lead && <p className="mt-6 max-w-2xl text-lg leading-relaxed text-ink-muted">{lead}</p>}
+          </div>
+          {aside && <div className="w-full lg:w-80">{aside}</div>}
+        </div>
+      </Container>
+    </header>
+  );
+}
+
+/** Horizontal, scrollable filter chips with one active value. */
+export function FilterPills<T extends string>({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: Array<{ value: T; label: string }>;
+  value: T;
+  onChange: (v: T) => void;
+  label: string;
+}) {
+  return (
+    <div className="-mx-5 overflow-x-auto px-5 sm:mx-0 sm:px-0" role="tablist" aria-label={label}>
+      <div className="flex w-max gap-2">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            aria-selected={value === o.value}
+            onClick={() => onChange(o.value)}
+            className={`h-9 shrink-0 rounded-full px-4 text-[13px] font-medium transition-colors duration-300 ${
+              value === o.value ? 'bg-ink text-white' : 'border border-line text-ink-muted hover:border-line-strong hover:text-ink'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Quiet search field for list pages. */
+export function SearchField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <label className="relative block">
+      <span className="sr-only">{placeholder}</span>
+      <svg className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.5-3.5" />
+      </svg>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-12 w-full rounded-full border border-line bg-white pl-11 pr-4 text-sm text-ink placeholder:text-ink-subtle focus:border-ink focus:outline-none"
+      />
+    </label>
+  );
+}
+
+export const formatSom = (tiyin: number | null | undefined) =>
+  Math.round((tiyin || 0) / 100)
+    .toLocaleString('ru-RU')
+    .replace(/ /g, ' ');

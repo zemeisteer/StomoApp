@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MapPin, Phone, Mail, Clock, Send, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { PhoneInput } from '../../components/PhoneInput';
 import { normalizeUzPhone } from '../../lib/phone';
 import { formatWorkingHours } from '../../lib/dateFormat';
+import { Container, FilterPills, PageIntro, PrimaryLink } from '../../components/site/primitives';
 
 export default function ContactsPage() {
   const { t, language } = useI18n();
@@ -78,208 +79,158 @@ export default function ContactsPage() {
 
   const activeBranch = branches.find((b) => b.id === activeBranchId) || branches[0];
 
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
+  const branchOptions = branches.map((b) => ({ value: b.id, label: isRu && b.nameRu ? b.nameRu : b.nameUz }));
+  const hours = activeBranch ? formatWorkingHours(activeBranch.workingHours, language) : '';
+  const mapHref = activeBranch?.mapUrl
+    ? activeBranch.mapUrl.startsWith('http://') || activeBranch.mapUrl.startsWith('https://')
+      ? activeBranch.mapUrl
+      : `https://${activeBranch.mapUrl}`
+    : '';
+  const field =
+    'w-full rounded-2xl border border-line bg-white px-4 py-3 text-[15px] text-ink placeholder:text-ink-subtle transition-colors focus:border-ink focus:outline-none';
+
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-12">
-      {/* Header */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
-          <Phone className="w-3.5 h-3.5" />
-          <span>{t.nav.contacts}</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
-          {isRu ? 'Контакты и филиалы клиники' : 'Klinikamiz bilan bog\'lanish'}
-        </h1>
-        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-          {isRu
-            ? 'Есть вопросы или хотите записаться на прием? Свяжитесь с нами удобным способом.'
-            : 'Savollaringiz bormi yoki qabulga yozilmoqchimisiz? Bizga qo\'ng\'iroq qiling yoki qayta qo\'ng\'iroq qoldiring.'}
-        </p>
-      </div>
+    <div className="bg-canvas">
+      <PageIntro
+        eyebrow={t.nav.contacts}
+        title={L('Bog‘lanish', 'Контакты')}
+        lead={L(
+          'Qo‘ng‘iroq qiling, filialga keling yoki raqamingizni qoldiring — administrator 15 daqiqa ichida qayta qo‘ng‘iroq qiladi.',
+          'Позвоните, приходите в филиал или оставьте номер — администратор перезвонит в течение 15 минут.',
+        )}
+      />
 
-      {/* Branch Tabs */}
-      {branches.length > 1 && (
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          {branches.map((b) => {
-            const name = isRu && b.nameRu ? b.nameRu : b.nameUz;
-            const isActive = b.id === activeBranchId;
-
-            return (
-              <button
-                type="button"
-                key={b.id}
-                onClick={() => setActiveBranchId(b.id)}
-                className={`px-6 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition-all ${
-                  isActive
-                    ? 'bg-brand-600 text-white shadow-md shadow-brand-600/25'
-                    : 'bg-white text-ink border border-line hover:bg-brand-50'
-                }`}
-              >
-                {name}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Active Branch Info & Contact Form Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left: Branch Details Card */}
-        {activeBranch && (
-          <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 border border-line space-y-6">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-brand-600 bg-brand-50 px-3 py-1 rounded-full border border-line">
-                {isRu ? 'Филиал и график работы' : 'Filial manzili va ish vaqti'}
-              </span>
-              <h2 className="text-2xl font-semibold text-ink mt-2.5">
-                {isRu && activeBranch.nameRu ? activeBranch.nameRu : activeBranch.nameUz}
-              </h2>
-            </div>
-
-            <div className="space-y-4 text-sm text-ink-muted">
-              <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
-                <MapPin className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-ink block text-xs uppercase tracking-wider">
-                    {t.common.address}
-                  </strong>
-                  <p className="mt-0.5 text-xs sm:text-sm text-ink">
-                    {isRu && activeBranch.addressRu ? activeBranch.addressRu : activeBranch.addressUz}
-                  </p>
-                  {activeBranch.mapUrl && (
-                    <a
-                      href={activeBranch.mapUrl.startsWith('http://') || activeBranch.mapUrl.startsWith('https://') ? activeBranch.mapUrl : `https://${activeBranch.mapUrl}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 mt-2 text-xs font-bold text-brand-600 hover:underline"
-                    >
-                      <MapPin className="w-3.5 h-3.5" />
-                      <span>{isRu ? 'Посмотреть на карте' : 'Xaritada ko\'rish'}</span>
-                    </a>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
-                <Phone className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-ink block text-xs uppercase tracking-wider">
-                    {t.common.phone}
-                  </strong>
-                  {activeBranch.phone ? (
-                    <a
-                      href={`tel:${activeBranch.phone.replace(/\s+/g, '')}`}
-                      className="mt-0.5 block text-xs sm:text-sm text-ink font-bold hover:text-brand-600 transition-colors"
-                    >
-                      {activeBranch.phone}
-                    </a>
-                  ) : (
-                    <span className="mt-0.5 block text-xs sm:text-sm text-ink-muted">—</span>
-                  )}
-                </div>
-              </div>
-
-              {formatWorkingHours(activeBranch.workingHours, language) && (
-                <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
-                  <Clock className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="text-ink block text-xs uppercase tracking-wider">
-                      {t.common.workingHours}
-                    </strong>
-                    <p className="mt-0.5 text-xs sm:text-sm text-ink">
-                      {formatWorkingHours(activeBranch.workingHours, language)}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {activeBranch.email && (
-                <div className="flex items-start gap-3.5 p-4 bg-canvas rounded-2xl border border-line">
-                  <Mail className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="text-ink block text-xs uppercase tracking-wider">
-                      {isRu ? 'Электронная почта' : 'Elektron pochta'}
-                    </strong>
-                    <a
-                      href={`mailto:${activeBranch.email}`}
-                      className="mt-0.5 block text-xs sm:text-sm text-ink font-semibold hover:text-brand-600 transition-colors"
-                    >
-                      {activeBranch.email}
-                    </a>
-                  </div>
-                </div>
-              )}
-            </div>
+      <Container className="py-12 sm:py-16">
+        {branchOptions.length > 1 && (
+          <div className="mb-10">
+            <FilterPills options={branchOptions} value={activeBranch?.id || ''} onChange={setActiveBranchId} label={L('Filial', 'Филиал')} />
           </div>
         )}
 
-        {/* Right: Callback / Contact Form */}
-        <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 border border-line">
-          <h2 className="text-xl font-semibold text-ink mb-1">{t.callback.title}</h2>
-          <p className="text-xs text-ink-muted mb-6">{t.callback.subtitle}</p>
+        <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
+          <div className="lg:col-span-6">
+            {activeBranch ? (
+              <>
+                <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-3xl">
+                  {isRu && activeBranch.nameRu ? activeBranch.nameRu : activeBranch.nameUz}
+                </h2>
+                <dl className="mt-8 border-t border-line">
+                  <div className="grid gap-1 border-b border-line py-5 sm:grid-cols-[10rem_1fr]">
+                    <dt className="text-sm text-ink-subtle">{t.common.address}</dt>
+                    <dd className="text-base text-ink">
+                      {isRu && activeBranch.addressRu ? activeBranch.addressRu : activeBranch.addressUz}
+                      {mapHref && (
+                        <a href={mapHref} target="_blank" rel="noopener noreferrer" className="mt-1.5 flex w-max items-center gap-1 text-sm font-medium text-brand-700 hover:text-brand-800">
+                          {L('Xaritada ochish', 'Открыть на карте')} <ArrowUpRight className="h-3.5 w-3.5" />
+                        </a>
+                      )}
+                    </dd>
+                  </div>
+                  <div className="grid gap-1 border-b border-line py-5 sm:grid-cols-[10rem_1fr]">
+                    <dt className="text-sm text-ink-subtle">{t.common.phone}</dt>
+                    <dd className="text-base text-ink">
+                      {activeBranch.phone ? (
+                        <a href={`tel:${activeBranch.phone.replace(/\s+/g, '')}`} className="tabular-nums hover:text-brand-700">
+                          {activeBranch.phone}
+                        </a>
+                      ) : (
+                        '—'
+                      )}
+                    </dd>
+                  </div>
+                  {hours && (
+                    <div className="grid gap-1 border-b border-line py-5 sm:grid-cols-[10rem_1fr]">
+                      <dt className="text-sm text-ink-subtle">{t.common.workingHours}</dt>
+                      <dd className="text-base text-ink">{hours}</dd>
+                    </div>
+                  )}
+                  {activeBranch.email && (
+                    <div className="grid gap-1 border-b border-line py-5 sm:grid-cols-[10rem_1fr]">
+                      <dt className="text-sm text-ink-subtle">{L('Elektron pochta', 'Эл. почта')}</dt>
+                      <dd className="text-base text-ink">
+                        <a href={`mailto:${activeBranch.email}`} className="hover:text-brand-700">
+                          {activeBranch.email}
+                        </a>
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <div className="mt-8">
+                  <PrimaryLink href={`/booking?branchId=${activeBranch.id}`}>
+                    {L('Shu filialga yozilish', 'Записаться в этот филиал')} <ArrowRight className="h-4 w-4" />
+                  </PrimaryLink>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4" aria-busy="true">
+                <div className="h-8 w-1/2 animate-pulse rounded bg-white" />
+                <div className="h-40 animate-pulse rounded-3xl bg-white" />
+              </div>
+            )}
+          </div>
 
-          {success && (
-            <div className="mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 flex items-center gap-2 animate-fade-in">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{t.callback.success}</span>
+          <div className="lg:col-span-6">
+            <div className="rounded-[2rem] border border-line bg-white p-7 sm:p-10">
+              <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t.callback.title}</h2>
+              <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.callback.subtitle}</p>
+
+              {success ? (
+                <div className="mt-8 rounded-2xl bg-canvas p-6" role="status">
+                  <CheckCircle2 className="h-6 w-6 text-brand-700" />
+                  <p className="mt-3 text-base text-ink">{t.callback.success}</p>
+                  <button type="button" onClick={() => setSuccess(false)} className="mt-4 text-sm font-medium text-ink-muted hover:text-ink">
+                    {L('Yana so‘rov yuborish', 'Отправить ещё заявку')}
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+                  <div>
+                    <label htmlFor="lead-name" className="mb-2 block text-sm font-medium text-ink">
+                      {t.common.name}
+                    </label>
+                    <input
+                      id="lead-name"
+                      type="text"
+                      required
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder={t.callback.namePlaceholder}
+                      className={field}
+                    />
+                  </div>
+                  <PhoneInput label={t.common.phone} required value={phone} locale={language} onChange={(canonical) => setPhone(canonical)} />
+                  <div>
+                    <label htmlFor="lead-notes" className="mb-2 block text-sm font-medium text-ink">
+                      {L('Izoh', 'Комментарий')} <span className="font-normal text-ink-subtle">({L('ixtiyoriy', 'необязательно')})</span>
+                    </label>
+                    <textarea
+                      id="lead-notes"
+                      rows={3}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder={L('Savolingiz yoki qulay vaqt', 'Ваш вопрос или удобное время')}
+                      className={`${field} resize-none`}
+                    />
+                  </div>
+                  {error && (
+                    <p className="flex items-center gap-2 text-sm text-red-700" role="alert">
+                      <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="inline-flex h-12 w-full items-center justify-center rounded-full bg-ink px-6 text-[15px] font-medium text-white transition-colors duration-300 hover:bg-brand-800 disabled:opacity-50"
+                  >
+                    {isSubmitting ? t.common.loading : t.callback.submit}
+                  </button>
+                </form>
+              )}
             </div>
-          )}
-
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-ink mb-1.5">
-                {t.common.name} *
-              </label>
-              <input
-                type="text"
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder={t.callback.namePlaceholder}
-                className="w-full px-4 py-2.5 rounded-xl border border-line text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
-              />
-            </div>
-
-            <div>
-              <PhoneInput
-                label={t.common.phone}
-                required
-                value={phone}
-                locale={language}
-                onChange={(canonical) => setPhone(canonical)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-ink mb-1.5">
-                {isRu ? 'Дополнительный вопрос или пожелание (необязательно)' : 'Qo\'shimcha savol yoki istak (ixtiyoriy)'}
-              </label>
-              <textarea
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder={isRu ? 'Ваш вопрос или удобное время для звонка...' : 'Savolingiz yoki sizga qulay vaqt...'}
-                className="w-full px-4 py-2.5 rounded-xl border border-line text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full py-3.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-bold rounded-2xl shadow-md shadow-brand-600/25 text-sm transition-all flex items-center justify-center gap-2 transform active:scale-95"
-            >
-              <Send className="w-4 h-4" />
-              <span>{isSubmitting ? t.common.loading : t.callback.submit}</span>
-            </button>
-          </form>
+          </div>
         </div>
-      </div>
+      </Container>
     </div>
   );
 }

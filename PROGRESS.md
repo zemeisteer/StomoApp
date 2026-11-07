@@ -241,6 +241,13 @@ A new CI job builds the production images and runs the stack; it found the image
 - Header: slimmer, quiet links, pill CTA; footer: light, hairline-separated columns with branches, contacts and policy links.
 - Inner pages (services, doctors, prices, contacts, about, reviews, FAQ, articles, booking, legal) use the same calm headings, lighter weights and no heavy shadows.
 
+### Phase 19: Inner pages in the calm style (2026-11-08)
+- Shared page intro, filter pills and search field across services, doctors, prices, contacts, about, reviews, FAQ and articles.
+- Services: filters show only categories that exist; detail page shows the category name (not the raw code) and the correct price.
+- Doctors: portrait grid with specialty filter and direct booking; profile with facts, bio, education and bookable services.
+- Prices: menu-style list grouped by category, branch/doctor selects, sort toggle; booking link keeps the chosen doctor and branch.
+- Contacts: branch switcher, address/phone/hours list, per-branch booking, quiet callback form. Reviews: honest average, quote list, sticky form. FAQ: smooth accordion. Articles: editorial list. About: numbered values, equipment grid, closing call to action.
+
 ---
 
 ## 2. Test Verification Matrix

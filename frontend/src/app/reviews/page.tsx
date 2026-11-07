@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Star, MessageSquare, Send, CheckCircle2, AlertCircle, User } from 'lucide-react';
+import { Star, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { formatClinicDate } from '../../lib/dateFormat';
+import { Container, PageIntro, SkeletonCards } from '../../components/site/primitives';
 
 export default function ReviewsPage() {
   const { t, language } = useI18n();
@@ -73,189 +74,140 @@ export default function ReviewsPage() {
     ? (reviews.reduce((acc, r) => acc + (r.rating || 5), 0) / reviews.length).toFixed(1)
     : null;
 
-  return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-12">
-      {/* Header */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
-          <MessageSquare className="w-3.5 h-3.5" />
-          <span>{t.reviews.title}</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
-          {isRu ? 'Отзывы наших пациентов' : 'Bemorlarimiz bildirgan fikrlar'}
-        </h1>
-        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-          {isRu
-            ? 'Реальные впечатления и отзывы пациентов, прошедших лечение в нашей клинике.'
-            : 'Klinikamizda muolaja olgan bemorlarning samimiy va xolis fikrlari.'}
-        </p>
-      </div>
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
+  const field =
+    'w-full rounded-2xl border border-line bg-white px-4 py-3 text-[15px] text-ink placeholder:text-ink-subtle transition-colors focus:border-ink focus:outline-none';
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Reviews List */}
-        <div className="lg:col-span-7 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-line">
-            <h2 className="text-base font-bold text-ink">
-              {isRu ? 'Опубликованные отзывы' : 'Tasdiqlangan sharhlar'} ({totalCount})
-            </h2>
-            {avgRating && (
-              <div className="flex items-center gap-1 text-amber-500 font-semibold text-sm">
-                <Star className="w-4 h-4 fill-current" />
-                <span>{avgRating} / 5.0</span>
+  return (
+    <div className="bg-canvas">
+      <PageIntro
+        eyebrow={t.reviews.title}
+        title={L('Bemorlar fikri', 'Отзывы пациентов')}
+        lead={L(
+          'Faqat haqiqiy bemorlarning moderatsiyadan o‘tgan sharhlari. Ball ham faqat shulardan hisoblanadi.',
+          'Только реальные отзывы пациентов после модерации. Оценка считается только по ним.',
+        )}
+        aside={
+          avgRating ? (
+            <div className="flex items-end gap-4">
+              <span className="text-6xl font-semibold tabular-nums tracking-[-0.04em] text-ink">{avgRating}</span>
+              <div className="pb-2">
+                <div className="flex gap-0.5 text-amber-500" aria-hidden="true">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Star key={i} className="h-4 w-4 fill-current" />
+                  ))}
+                </div>
+                <p className="mt-1 text-sm text-ink-muted">
+                  {totalCount} {L('ta sharh', 'отзывов')}
+                </p>
               </div>
+            </div>
+          ) : undefined
+        }
+      />
+
+      <Container className="py-12 sm:py-16">
+        <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
+          <div className="lg:col-span-7">
+            {isLoading ? (
+              <SkeletonCards count={3} className="grid-cols-1" />
+            ) : reviews.length === 0 ? (
+              <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+                {L('Hozircha sharhlar yo‘q. Birinchi bo‘lib fikr qoldiring.', 'Пока нет отзывов. Оставьте первый.')}
+              </p>
+            ) : (
+              <ul className="border-t border-line">
+                {reviews.map((r) => {
+                  const author = r.authorName || L('Klinika bemori', 'Пациент клиники');
+                  const stars = Math.min(5, Math.max(1, r.rating || 5));
+                  return (
+                    <li key={r.id} className="border-b border-line py-8">
+                      <div className="flex gap-0.5 text-amber-500" aria-label={`${stars} / 5`}>
+                        {Array.from({ length: stars }).map((_, i) => (
+                          <Star key={i} className="h-3.5 w-3.5 fill-current" />
+                        ))}
+                      </div>
+                      <blockquote className="mt-4 text-lg leading-relaxed text-ink">&ldquo;{r.text}&rdquo;</blockquote>
+                      <p className="mt-4 text-sm text-ink-muted">
+                        {author}
+                        {r.createdAt && <span className="text-ink-subtle"> · {formatClinicDate(r.createdAt, isRu ? 'ru' : 'uz')}</span>}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
 
-          {isLoading ? (
-            <div className="p-10 text-center text-ink-muted text-sm">{t.common.loading}</div>
-          ) : reviews.length === 0 ? (
-            <div className="p-10 text-center text-ink-muted text-sm bg-white rounded-2xl border border-dashed border-line">
-              {isRu ? 'Пока нет опубликованных отзывов. Будьте первыми!' : 'Hozircha e\'lon qilingan fikrlar yo\'q. Birinchi bo\'lib fikr qoldiring!'}
-            </div>
-          ) : (
-            reviews.map((r) => {
-              const author = r.authorName || (isRu ? 'Пациент клиники' : 'Klinika bemori');
-              const dateStr = r.createdAt
-                ? formatClinicDate(r.createdAt, isRu ? 'ru' : 'uz')
-                : '';
+          <div className="lg:col-span-5">
+            <div className="rounded-[2rem] border border-line bg-white p-7 sm:p-9 lg:sticky lg:top-24">
+              <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t.reviews.writeReview}</h2>
+              <p className="mt-2 text-sm text-ink-muted">
+                {L('Sharh moderator tekshiruvidan so‘ng chiqadi.', 'Отзыв появится после проверки модератором.')}
+              </p>
 
-              return (
-                <div
-                  key={r.id}
-                  className="bg-white rounded-2xl p-6 border border-line space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 font-bold text-xs text-ink">
-                      <div className="w-7 h-7 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 text-xs">
-                        <User className="w-3.5 h-3.5" />
-                      </div>
-                      <span>{author}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1 text-amber-500">
-                      {[...Array(Math.min(5, Math.max(1, r.rating || 5)))].map((_, i) => (
-                        <Star key={i} className="w-3.5 h-3.5 fill-current" />
+              {submitSuccess ? (
+                <div className="mt-8 rounded-2xl bg-canvas p-6" role="status">
+                  <CheckCircle2 className="h-6 w-6 text-brand-700" />
+                  <p className="mt-3 text-base text-ink">{L('Rahmat! Sharhingiz qabul qilindi.', 'Спасибо! Отзыв принят.')}</p>
+                  <button type="button" onClick={() => setSubmitSuccess(false)} className="mt-4 text-sm font-medium text-ink-muted hover:text-ink">
+                    {L('Yana yozish', 'Написать ещё')}
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+                  <div>
+                    <label htmlFor="rv-name" className="mb-2 block text-sm font-medium text-ink">
+                      {t.common.name}
+                    </label>
+                    <input id="rv-name" type="text" required value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder={L('Masalan: Aziz', 'Например: Азиз')} className={field} />
+                  </div>
+                  <div>
+                    <span className="mb-2 block text-sm font-medium text-ink">{t.reviews.rating}</span>
+                    <div className="flex gap-1" role="radiogroup" aria-label={t.reviews.rating}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          role="radio"
+                          aria-checked={rating === star}
+                          aria-label={`${star} / 5`}
+                          onClick={() => setRating(star)}
+                          className="rounded-full p-1 transition-transform hover:scale-110"
+                        >
+                          <Star className={`h-6 w-6 ${star <= rating ? 'fill-current text-amber-500' : 'text-line-strong'}`} />
+                        </button>
                       ))}
                     </div>
                   </div>
-
-                  <p className="text-xs sm:text-sm text-ink leading-relaxed italic">
-                    &ldquo;{r.text}&rdquo;
-                  </p>
-
-                  <div className="pt-2 text-[11px] text-ink-muted text-right">
-                    <span>{dateStr}</span>
+                  <div>
+                    <label htmlFor="rv-text" className="mb-2 block text-sm font-medium text-ink">
+                      {t.reviews.comment}
+                    </label>
+                    <textarea id="rv-text" rows={4} required value={text} onChange={(e) => setText(e.target.value)} placeholder={L('Muolaja va xizmat haqida', 'О лечении и сервисе')} className={`${field} resize-none`} />
                   </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Right Column: Submit Review Form */}
-        <div className="lg:col-span-5 bg-white rounded-3xl p-7 sm:p-8 border border-line space-y-5">
-          <div>
-            <h3 className="text-lg font-bold text-ink">{t.reviews.writeReview}</h3>
-            <p className="text-xs text-ink-muted mt-0.5">
-              {isRu ? 'Поделитесь вашим впечатлением о лечении в DentaCare' : 'DentaCare klinikasidagi tajribangiz haqida xolis fikr bildiring'}
-            </p>
-          </div>
-
-          {submitSuccess && (
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 flex items-start gap-2.5 animate-fade-in">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <span>
-                {isRu
-                  ? 'Спасибо за ваш отзыв! Он появится на сайте после проверки модератором.'
-                  : 'Fikringiz uchun rahmat! Moderator tekshiruvidan so\'ng saytda e\'lon qilinadi.'}
-              </span>
-            </div>
-          )}
-
-          {errorMessage && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-ink mb-1.5">
-                {t.common.name} *
-              </label>
-              <input
-                type="text"
-                required
-                value={authorName}
-                onChange={(e) => setAuthorName(e.target.value)}
-                placeholder={isRu ? 'Например: Азиз Рахимов' : 'Masalan: Aziz Rahimov'}
-                className="w-full px-4 py-2.5 rounded-xl border border-line text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-ink mb-1.5">
-                {t.reviews.rating}
-              </label>
-              <div className="flex items-center gap-1.5">
-                {[1, 2, 3, 4, 5].map((star) => (
+                  <label className="flex cursor-pointer items-start gap-3 text-sm text-ink-muted">
+                    <input type="checkbox" checked={consentDisplayName} onChange={(e) => setConsentDisplayName(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-line-strong text-ink focus:ring-ink" />
+                    {L('Ismim sharh yonida ko‘rsatilsin', 'Показывать моё имя рядом с отзывом')}
+                  </label>
+                  {errorMessage && (
+                    <p className="flex items-center gap-2 text-sm text-red-700" role="alert">
+                      <AlertCircle className="h-4 w-4 shrink-0" /> {errorMessage}
+                    </p>
+                  )}
                   <button
-                    key={star}
-                    type="button"
-                    onClick={() => setRating(star)}
-                    className="p-1 hover:scale-110 transition-transform focus:outline-none"
-                    aria-label={`${star} yulduz`}
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="inline-flex h-12 w-full items-center justify-center rounded-full bg-ink px-6 text-[15px] font-medium text-white transition-colors duration-300 hover:bg-brand-800 disabled:opacity-50"
                   >
-                    <Star
-                      className={`w-6 h-6 ${
-                        star <= rating ? 'text-amber-500 fill-current' : 'text-slate-200'
-                      }`}
-                    />
+                    {isSubmitting ? t.common.loading : t.common.submit}
                   </button>
-                ))}
-              </div>
+                </form>
+              )}
             </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-ink mb-1.5">
-                {t.reviews.comment} *
-              </label>
-              <textarea
-                rows={4}
-                required
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder={isRu ? 'Напишите ваш отзыв...' : 'Muolaja va xizmat haqida fikringiz...'}
-                className="w-full px-4 py-2.5 rounded-xl border border-line text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-600 bg-white text-ink"
-              />
-            </div>
-
-            <label className="flex items-start gap-2.5 cursor-pointer text-xs text-ink-muted">
-              <input
-                type="checkbox"
-                checked={consentDisplayName}
-                onChange={(e) => setConsentDisplayName(e.target.checked)}
-                className="mt-0.5 rounded border-line text-brand-600 focus:ring-brand-600"
-              />
-              <span>
-                {isRu
-                  ? 'Согласен на отображение моего имени рядом с отзывом'
-                  : 'Fikrim yonida ismim ko\'rsatilishiga roziman'}
-              </span>
-            </label>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full py-3.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-bold rounded-2xl shadow-md shadow-brand-600/25 text-xs transition-all flex items-center justify-center gap-2 transform active:scale-95"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>{isSubmitting ? t.common.loading : t.common.submit}</span>
-            </button>
-          </form>
+          </div>
         </div>
-      </div>
+      </Container>
     </div>
   );
 }

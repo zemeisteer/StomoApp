@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ShieldCheck, Award, Sparkles, CheckCircle2, Heart, Calendar } from 'lucide-react';
+import { ShieldCheck, Sparkles, Heart, ArrowRight } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { Container, PageIntro } from '../../components/site/primitives';
 
 export default function AboutPage() {
   const { t, language } = useI18n();
@@ -76,88 +77,77 @@ export default function AboutPage() {
     },
   ];
 
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
+
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-14">
-      {/* Header */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
-          <Award className="w-3.5 h-3.5" />
-          <span>{t.nav.about}</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
-          {clinicName} — {isRu ? 'стандарты современной стоматологии' : 'Ishonchli stomatologiya xizmati'}
-        </h1>
-        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-          {isRu
-            ? 'Наша главная цель — предоставить каждому пациенту качественную, безопасную и эстетичную стоматологическую помощь.'
-            : 'Bizning asosiy maqsadimiz — har bir bemorga sifatli, xavfsiz va qulay stomatologik yordam ko\'rsatishdir.'}
-        </p>
-      </div>
+    <div className="bg-canvas">
+      <PageIntro
+        eyebrow={t.nav.about}
+        title={`${clinicName} — ${L('ishonchli stomatologiya', 'стоматология, которой доверяют')}`}
+        lead={L(
+          'Maqsadimiz oddiy: har bir bemorga sifatli, xavfsiz va og‘riqsiz yordam ko‘rsatish — va har bir qadamni oldindan tushuntirish.',
+          'Наша цель проста: качественная, безопасная и безболезненная помощь каждому пациенту — и понятное объяснение каждого шага.',
+        )}
+      />
 
-      {/* Values Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {values.map((v, i) => {
-          const IconComp = v.icon;
-          return (
-            <div
-              key={i}
-              className="bg-white rounded-3xl p-7 border border-line space-y-3 hover:border-brand-600/40 transition-all"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-brand-50 flex items-center justify-center text-brand-600">
-                <IconComp className="w-6 h-6" />
+      <section className="bg-white py-16 sm:py-24">
+        <Container>
+          <div className="grid gap-12 lg:grid-cols-12">
+            <h2 className="text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl lg:col-span-4">
+              {L('Biz nimaga tayanamiz', 'На чём мы стоим')}
+            </h2>
+            <ol className="border-t border-line lg:col-span-8">
+              {values.map((v, i) => {
+                const Icon = v.icon;
+                return (
+                  <li key={v.title} className="grid gap-4 border-b border-line py-8 sm:grid-cols-[4rem_1fr]">
+                    <span className="text-sm tabular-nums text-ink-subtle">{String(i + 1).padStart(2, '0')}</span>
+                    <div>
+                      <h3 className="flex items-center gap-2.5 text-xl font-medium tracking-[-0.01em] text-ink">
+                        <Icon className="h-5 w-5 text-brand-700" strokeWidth={1.75} /> {v.title}
+                      </h3>
+                      <p className="mt-2 max-w-xl text-base leading-relaxed text-ink-muted">{v.desc}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        </Container>
+      </section>
+
+      <section className="py-16 sm:py-24">
+        <Container>
+          <div className="max-w-2xl">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">{L('Texnologiyalar', 'Оснащение')}</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl">
+              {L('Zamonaviy jihozlar va sertifikatlangan materiallar', 'Современное оборудование и сертифицированные материалы')}
+            </h2>
+          </div>
+          <div className="mt-12 grid gap-px overflow-hidden rounded-3xl border border-line bg-line sm:grid-cols-2">
+            {technologies.map((item) => (
+              <div key={item.brand} className="bg-white p-7 sm:p-9">
+                <h3 className="text-lg font-medium tracking-[-0.01em] text-ink">{item.brand}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-ink-muted">{item.desc}</p>
               </div>
-              <h3 className="text-base font-bold text-ink">{v.title}</h3>
-              <p className="text-xs sm:text-sm text-ink-muted leading-relaxed">
-                {v.desc}
-              </p>
-            </div>
-          );
-        })}
-      </div>
+            ))}
+          </div>
+        </Container>
+      </section>
 
-      {/* Facilities & Equipment Section */}
-      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-line space-y-8">
-        <div className="max-w-2xl space-y-2">
-          <span className="text-xs font-bold uppercase tracking-widest text-brand-600">
-            {isRu ? 'Оснащение' : 'Texnologiyalar'}
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-semibold text-ink">
-            {isRu ? 'Современное оснащение и сертифицированные материалы' : 'Zamonaviy jihozlar va sertifikatlangan materiallar'}
+      <section className="bg-brand-950 py-16 sm:py-20">
+        <Container className="flex flex-col items-start justify-between gap-8 sm:flex-row sm:items-center">
+          <h2 className="max-w-xl text-3xl font-semibold tracking-[-0.03em] text-white sm:text-4xl">
+            {L('Birinchi ko‘rikdan boshlang', 'Начните с первого осмотра')}
           </h2>
-          <p className="text-xs sm:text-sm text-ink-muted">
-            {isRu
-              ? 'В работе используются проверенные клинические методики и надежные сертифицированные материалы.'
-              : 'Faoliyatimizda faqat xalqaro talablarga javob beradigan sinovdan o\'tgan usullar va materiallar qo\'llaniladi.'}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-ink">
-          {technologies.map((item, idx) => (
-            <div key={idx} className="flex items-start gap-3.5 p-5 bg-canvas rounded-2xl border border-line">
-              <CheckCircle2 className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-sm font-bold text-ink block mb-1">
-                  {item.brand}
-                </strong>
-                <p className="text-xs text-ink-muted leading-relaxed">
-                  {item.desc}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Quick CTA */}
-      <div className="text-center py-6">
-        <Link
-          href="/booking"
-          className="inline-flex items-center gap-2 px-8 py-4 bg-brand-600 hover:bg-brand-700 text-white font-bold text-base rounded-2xl shadow-lg shadow-brand-600/25 transition-all"
-        >
-          <Calendar className="w-5 h-5" />
-          <span>{t.common.bookAppointment}</span>
-        </Link>
-      </div>
+          <Link
+            href="/booking"
+            className="inline-flex h-12 items-center gap-2 rounded-full bg-white px-6 text-[15px] font-medium text-ink transition-colors duration-300 hover:bg-brand-50"
+          >
+            {t.common.bookAppointment} <ArrowRight className="h-4 w-4" />
+          </Link>
+        </Container>
+      </section>
     </div>
   );
 }

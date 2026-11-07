@@ -2,23 +2,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import {
-  Calendar,
-  Search,
-  DollarSign,
-  Clock,
-  ShieldCheck,
-  Building2,
-  User,
-  ArrowUpDown,
-  Filter,
-  X,
-  Sparkles,
-} from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { serviceCategoryLabel } from '../../lib/serviceCategories';
 import { api } from '../../lib/api';
 import { CustomSelect } from '../../components/CustomSelect';
+import { Container, FilterPills, PageIntro, SearchField, SkeletonCards, formatSom } from '../../components/site/primitives';
 
 type PriceSortOption = 'default' | 'asc' | 'desc';
 
@@ -154,320 +142,155 @@ export default function PricesPage() {
     setPriceSort('default');
   };
 
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
+  const categoryOptions = [
+    { value: '', label: L('Hammasi', 'Все') },
+    ...categories.map((c) => ({ value: c, label: serviceCategoryLabel(c, language) })),
+  ];
+  const sortOptions: Array<{ value: PriceSortOption; label: string }> = [
+    { value: 'default', label: L('Tartib bo‘yicha', 'По порядку') },
+    { value: 'asc', label: L('Arzonroq', 'Дешевле') },
+    { value: 'desc', label: L('Qimmatroq', 'Дороже') },
+  ];
+  // Group the visible list by category so the price list reads like a menu
+  const groups: Array<[string, any[]]> = [];
+  for (const s of filteredAndSortedServices) {
+    const g = groups.find(([k]) => k === s.category);
+    if (g) g[1].push(s);
+    else groups.push([s.category, [s]]);
+  }
+  const grouped = priceSort === 'default';
+
+  const row = (s: any) => {
+    const name = isRu && s.nameRu ? s.nameRu : s.nameUz;
+    return (
+      <li key={s.id} className="group grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-1 border-b border-line py-5 sm:grid-cols-[1fr_8rem_11rem_auto]">
+        <div className="min-w-0">
+          <Link href={`/services/${s.slug}`} className="text-base font-medium text-ink hover:text-brand-700">
+            {name}
+          </Link>
+          {!grouped && <p className="text-xs text-ink-subtle">{serviceCategoryLabel(s.category, language)}</p>}
+        </div>
+        <span className="hidden text-sm text-ink-subtle sm:block">
+          {s.durationMinutes} {L('daqiqa', 'мин')}
+        </span>
+        <span className="text-right text-base tabular-nums text-ink sm:text-left">
+          {s.priceTo ? (
+            <>
+              {formatSom(s.priceFrom)} – {formatSom(s.priceTo)}
+            </>
+          ) : (
+            <>
+              <span className="text-sm text-ink-subtle">{L('dan', 'от')} </span>
+              {formatSom(s.priceFrom)}
+            </>
+          )}{' '}
+          <span className="text-sm text-ink-subtle">{t.common.uzs}</span>
+        </span>
+        <Link
+          href={`/booking?serviceId=${s.id}${selectedDoctorId ? `&doctorId=${selectedDoctorId}` : ''}${selectedBranchId ? `&branchId=${selectedBranchId}` : ''}`}
+          className="col-span-2 inline-flex h-9 w-max items-center rounded-full border border-line-strong px-4 text-[13px] font-medium text-ink transition-colors duration-300 hover:border-ink hover:bg-white sm:col-span-1"
+        >
+          {L('Yozilish', 'Записаться')}
+        </Link>
+      </li>
+    );
+  };
+
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-16 space-y-10">
-      {/* Header */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
-          <DollarSign className="w-3.5 h-3.5" />
-          <span>{t.nav.prices}</span>
-        </div>
-        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
-          {isRu ? 'Shaffof va qat\'iy narxlar ro\'yxati' : 'Shaffof va qat\'iy narxlar ro\'yxati'}
-        </h1>
-        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-          {isRu
-            ? 'Абсолютно прозрачные цены без скрытых платежей. Стоимость рассчитывается до начала лечения.'
-            : 'Hech qanday yashirin to\'lovlarsiz — har bir muolaja narxi va davomiyligi oldindan belgilanadi.'}
-        </p>
-      </div>
+    <div className="bg-canvas">
+      <PageIntro
+        eyebrow={t.nav.prices}
+        title={L('Narxlar', 'Цены')}
+        lead={L(
+          'Yashirin to‘lovlarsiz. Ko‘rikdan keyin davolash rejasida aniq summa yoziladi va siz rozilik bermaguningizcha o‘zgarmaydi.',
+          'Без скрытых платежей. После осмотра точная сумма фиксируется в плане лечения и не меняется без вашего согласия.',
+        )}
+        aside={<SearchField value={search} onChange={setSearch} placeholder={L('Muolajani qidirish', 'Поиск процедуры')} />}
+      />
 
-      {/* Filter Controls Card */}
-      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-line space-y-6">
-        {/* Row 1: Search & Price Sort */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-          {/* Search Bar */}
-          <div className="md:col-span-7">
-            <div className="relative">
-              <Search className="absolute left-4 top-3.5 w-4 h-4 text-ink-muted" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={isRu ? 'Поиск процедуры или услуги...' : 'Muolaja yoki xizmat nomini qidiring...'}
-                className="w-full pl-11 pr-4 py-3 rounded-2xl border border-line text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-600 bg-canvas focus:bg-white text-ink transition-all"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="absolute right-3.5 top-3.5 text-ink-muted hover:text-ink"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Price Sorting Toggle (Low to High / High to Low) */}
-          <div className="md:col-span-5 flex items-center justify-between sm:justify-end gap-2">
-            <span className="text-xs font-semibold text-ink-muted flex items-center gap-1 shrink-0">
-              <ArrowUpDown className="w-3.5 h-3.5 text-brand-600" />
-              <span>{isRu ? 'Сортировка:' : 'Narx bo\'yicha:'}</span>
-            </span>
-
-            <div className="inline-flex rounded-2xl p-1 bg-brand-50 border border-line text-xs font-bold text-ink">
-              <button
-                type="button"
-                onClick={() => setPriceSort('default')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  priceSort === 'default'
-                    ? 'bg-white text-brand-600 shadow-sm font-semibold'
-                    : 'text-ink-muted hover:text-ink'
-                }`}
-              >
-                {isRu ? 'Обычный' : 'Barchasi'}
-              </button>
-              <button
-                type="button"
-                id="filter-price-asc"
-                onClick={() => setPriceSort('asc')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  priceSort === 'asc'
-                    ? 'bg-brand-600 text-white shadow-sm font-semibold'
-                    : 'text-ink-muted hover:text-ink'
-                }`}
-                title="Low to High"
-              >
-                {isRu ? 'Сначала дешевые ↑' : 'Arzondan ↑'}
-              </button>
-              <button
-                type="button"
-                id="filter-price-desc"
-                onClick={() => setPriceSort('desc')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  priceSort === 'desc'
-                    ? 'bg-brand-600 text-white shadow-sm font-semibold'
-                    : 'text-ink-muted hover:text-ink'
-                }`}
-                title="High to Low"
-              >
-                {isRu ? 'Сначала дорогие ↓' : 'Qimmatdan ↓'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Row 2: Branch & Doctor Dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 pt-2 border-t border-line/80">
-          {/* Branch Filter */}
-          <div className="lg:col-span-5 space-y-1.5">
-            <label className="block text-xs font-bold text-ink flex items-center gap-1.5">
-              <Building2 className="w-3.5 h-3.5 text-brand-600" />
-              <span>{isRu ? 'Фильтр по филиалу:' : 'Filial bo\'yicha:'}</span>
-            </label>
+      <Container className="py-12 sm:py-16">
+        <div className="mb-10 space-y-5">
+          <FilterPills options={categoryOptions} value={selectedCategory} onChange={setSelectedCategory} label={L('Kategoriya', 'Категория')} />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
             <CustomSelect
-              id="prices-filter-branch"
+              label={L('Filial', 'Филиал')}
+              locale={language === 'ru' ? 'ru' : 'uz'}
               value={selectedBranchId}
-              onChange={(val) => {
-                setSelectedBranchId(val);
-                if (val && selectedDoctorId) {
-                  const doc = doctors.find((d) => d.id === selectedDoctorId);
-                  const stillWorks =
-                    (Array.isArray(doc?.branches) && doc.branches.some((b: any) => (b.branchId || b.id) === val)) ||
-                    (Array.isArray(doc?.schedules) && doc.schedules.some((s: any) => s.branchId === val && s.isActive !== false));
-                  if (!stillWorks) setSelectedDoctorId('');
-                }
+              onChange={(v) => {
+                setSelectedBranchId(v);
+                setSelectedDoctorId('');
               }}
-              placeholder={isRu ? 'Все филиалы клиники' : 'Barcha filiallar'}
               options={[
-                { value: '', label: isRu ? 'Все филиалы клиники' : 'Barcha filiallar' },
-                ...branches.map((b) => ({
-                  value: b.id,
-                  label: isRu && b.nameRu ? b.nameRu : b.nameUz,
-                })),
+                { value: '', label: L('Barcha filiallar', 'Все филиалы') },
+                ...branches.map((b) => ({ value: b.id, label: isRu && b.nameRu ? b.nameRu : b.nameUz })),
               ]}
-              locale={isRu ? 'ru' : 'uz'}
             />
-          </div>
-
-          {/* Doctor Filter */}
-          <div className="lg:col-span-5 space-y-1.5">
-            <label className="block text-xs font-bold text-ink flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-brand-600" />
-              <span>{isRu ? 'Фильтр по врачу:' : 'Doktor bo\'yicha:'}</span>
-            </label>
             <CustomSelect
-              id="prices-filter-doctor"
+              label={L('Shifokor', 'Врач')}
+              locale={language === 'ru' ? 'ru' : 'uz'}
               value={selectedDoctorId}
-              onChange={(val) => setSelectedDoctorId(val)}
-              placeholder={isRu ? 'Все врачи' : 'Barcha shifokorlar'}
+              onChange={setSelectedDoctorId}
               options={[
-                { value: '', label: isRu ? 'Все врачи' : 'Barcha shifokorlar' },
+                { value: '', label: L('Barcha shifokorlar', 'Все врачи') },
                 ...filteredDoctorsList.map((d) => ({
                   value: d.id,
-                  label: `${isRu ? `Д-р ${d.firstNameRu || d.firstNameUz} ${d.lastNameRu || d.lastNameUz}` : `Dr. ${d.firstNameUz} ${d.lastNameUz}`} — ${(isRu && d.titleRu ? d.titleRu : d.titleUz) || 'Stomatolog'}`,
+                  label: isRu && d.firstNameRu ? `${d.firstNameRu} ${d.lastNameRu}` : `${d.firstNameUz} ${d.lastNameUz}`,
                 })),
               ]}
-              locale={isRu ? 'ru' : 'uz'}
             />
+            <div className="flex h-11 items-center rounded-full border border-line bg-white p-1" role="group" aria-label={L('Saralash', 'Сортировка')}>
+              {sortOptions.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  aria-pressed={priceSort === o.value}
+                  onClick={() => setPriceSort(o.value)}
+                  className={`h-full rounded-full px-3.5 text-[13px] font-medium transition-colors ${priceSort === o.value ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink'}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
-
-          {/* Reset Filters Button */}
-          <div className="lg:col-span-2 flex items-end">
-            {hasActiveFilters ? (
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="w-full py-2.5 px-3 bg-brand-50 hover:bg-brand-100 text-brand-600 text-xs font-bold rounded-2xl border border-line transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>{isRu ? 'Сбросить' : 'Tozalash'}</span>
+          <div className="flex items-center justify-between text-sm text-ink-subtle">
+            <span>
+              {filteredAndSortedServices.length} {L('ta muolaja', 'процедур')}
+            </span>
+            {hasActiveFilters && (
+              <button type="button" onClick={resetFilters} className="font-medium text-ink hover:text-brand-700">
+                {L('Filtrlarni tozalash', 'Сбросить фильтры')}
               </button>
-            ) : (
-              <div className="hidden lg:block w-full py-2.5 px-3 text-center text-[11px] text-ink-muted">
-                {filteredAndSortedServices.length} {isRu ? 'услуг' : 'ta muolaja'}
-              </div>
             )}
           </div>
-        </div>
-
-        {/* Row 3: Category Pills */}
-        {categories.length > 0 && (
-          <div className="pt-2 flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('')}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                !selectedCategory
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'bg-brand-50 text-ink-muted hover:bg-brand-50 hover:text-brand-600 border border-line'
-              }`}
-            >
-              {isRu ? 'Все категории' : 'Barcha toifalar'}
-            </button>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setSelectedCategory(cat === selectedCategory ? '' : cat)}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  selectedCategory === cat
-                    ? 'bg-brand-600 text-white shadow-sm'
-                    : 'bg-brand-50 text-ink-muted hover:bg-brand-50 hover:text-brand-600 border border-line'
-                }`}
-              >
-                {serviceCategoryLabel(cat, language)}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Price Table Card */}
-      <div className="bg-white rounded-3xl border border-line overflow-hidden">
-        {/* Results summary header */}
-        <div className="px-6 py-4 bg-canvas border-b border-line flex items-center justify-between text-xs font-semibold text-ink-muted">
-          <span>
-            {isRu ? 'Найдено процедур:' : 'Topilgan muolajalar:'}{' '}
-            <strong className="text-ink font-bold">{filteredAndSortedServices.length}</strong>
-          </span>
-          {priceSort !== 'default' && (
-            <span className="text-brand-600 font-bold">
-              {priceSort === 'asc'
-                ? (isRu ? 'По возрастанию цены' : 'Narx: Arzondan qimmatga')
-                : (isRu ? 'По убыванию цены' : 'Narx: Qimmatdan arzonga')}
-            </span>
-          )}
         </div>
 
         {isLoading ? (
-          <div className="p-16 text-center text-ink-muted text-sm">
-            <div className="inline-block w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full animate-spin mb-2" />
-            <p>{t.common.loading}</p>
-          </div>
+          <SkeletonCards count={4} className="grid-cols-1" />
         ) : filteredAndSortedServices.length === 0 ? (
-          <div className="p-16 text-center text-ink-muted text-sm space-y-3">
-            <p className="font-bold text-ink text-base">
-              {isRu ? 'Процедуры по заданным фильтрам не найдены.' : 'Tanlangan filtrlar bo\'yicha xizmatlar topilmadi.'}
-            </p>
-            <p className="text-xs text-ink-muted">
-              {isRu
-                ? 'Попробуйте изменить параметры поиска или сбросить фильтры.'
-                : 'Qidiruv so\'zini o\'zgartiring yoki filtrlarni tozalang.'}
-            </p>
-            {hasActiveFilters && (
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="mt-2 px-5 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold"
-              >
-                {isRu ? 'Сбросить фильтры' : 'Filtrlarni tozalash'}
-              </button>
-            )}
+          <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+            {L('Mos muolaja topilmadi.', 'Подходящих процедур не найдено.')}
+          </p>
+        ) : grouped ? (
+          <div className="space-y-14">
+            {groups.map(([cat, list]) => (
+              <section key={cat}>
+                <h2 className="text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{serviceCategoryLabel(cat, language)}</h2>
+                <ul className="mt-3 border-t border-line">{list.map(row)}</ul>
+              </section>
+            ))}
           </div>
         ) : (
-          <div className="divide-y divide-line">
-            {filteredAndSortedServices.map((s) => {
-              const name = isRu && s.nameRu ? s.nameRu : s.nameUz;
-              const priceFromFormatted = (s.priceFrom / 100).toLocaleString('uz-UZ');
-              const priceToFormatted = s.priceTo ? (s.priceTo / 100).toLocaleString('uz-UZ') : null;
-
-              return (
-                <div
-                  key={s.id}
-                  className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-canvas transition-colors group"
-                >
-                  <div className="flex-1 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-brand-600 bg-brand-50 px-2.5 py-0.5 rounded-full inline-block border border-line">
-                        {serviceCategoryLabel(s.category, language) || (isRu ? 'Услуга' : 'Xizmat')}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
-                        <Clock className="w-3 h-3 text-brand-600" />
-                        <span>{s.durationMinutes} {isRu ? 'мин' : 'daqiqa'}</span>
-                      </span>
-                    </div>
-
-                    <Link href={`/services/${s.slug}`}>
-                      <h3 className="text-base sm:text-lg font-bold text-ink group-hover:text-brand-600 transition-colors leading-snug">
-                        {name}
-                      </h3>
-                    </Link>
-
-                    {s.descriptionUz && (
-                      <p className="text-xs text-ink-muted line-clamp-1 max-w-xl">
-                        {isRu && s.descriptionRu ? s.descriptionRu : s.descriptionUz}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between sm:justify-end gap-5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-line/60">
-                    <div className="text-left sm:text-right">
-                      <span className="text-[10px] text-ink-muted block uppercase font-bold tracking-wider">
-                        {t.common.price}
-                      </span>
-                      <span className="text-base sm:text-lg font-black text-ink">
-                        {priceToFormatted
-                          ? `${priceFromFormatted} - ${priceToFormatted} ${t.common.uzs}`
-                          : `${priceFromFormatted} ${t.common.uzs}`}
-                      </span>
-                    </div>
-
-                    <Link
-                      href={`/booking?serviceId=${s.id}${selectedBranchId ? `&branchId=${selectedBranchId}` : ''}${selectedDoctorId ? `&doctorId=${selectedDoctorId}` : ''}`}
-                      className="px-4 sm:px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-md shadow-brand-600/20 transition-all flex items-center gap-1.5 cursor-pointer transform active:scale-95"
-                    >
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{isRu ? 'Записаться' : 'Yozilish'}</span>
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <ul className="border-t border-line">{filteredAndSortedServices.map(row)}</ul>
         )}
-      </div>
 
-      {/* Guarantee note */}
-      <div className="p-5 bg-brand-50 rounded-3xl border border-line text-xs sm:text-sm text-ink-muted flex items-center gap-3.5">
-        <ShieldCheck className="w-6 h-6 text-brand-600 shrink-0" />
-        <p className="leading-relaxed">
-          {isRu
-            ? 'Все цены указаны в национальной валюте (сум) и включают консультацию, анестезию и расходные материалы.'
-            : 'Barcha narxlar milliy valyuta (so\'m)da ko\'rsatilgan va birlamchi ko\'rik, anesteziya hamda original materiallarni o\'z ichiga oladi.'}
+        <p className="mt-14 max-w-2xl text-sm leading-relaxed text-ink-subtle">
+          {L(
+            'Narxlar “dan” ko‘rinishida: yakuniy summa tishlar soni va murakkablikka bog‘liq. Birinchi ko‘rikda shifokor reja va smeta tuzib beradi.',
+            'Цены указаны «от»: итог зависит от количества зубов и сложности. На первом осмотре врач составит план и смету.',
+          )}
         </p>
-      </div>
+      </Container>
     </div>
   );
 }
