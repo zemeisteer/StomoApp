@@ -67,11 +67,11 @@ export default function FaqPage() {
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-16 space-y-12">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           <HelpCircle className="w-3.5 h-3.5" />
           <span>FAQ</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
           {isRu ? 'Часто задаваемые вопросы' : 'Ko\'p beriladigan savollar'}
         </h1>
         <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
@@ -117,7 +117,7 @@ export default function FaqPage() {
                 className={`bg-white rounded-2xl sm:rounded-3xl border transition-all duration-200 overflow-hidden ${
                   isOpen
                     ? 'border-brand-600 ring-2 ring-brand-600/10 shadow-[0_8px_30px_rgb(var(--brand-600)/0.08)] bg-gradient-to-b from-white to-canvas'
-                    : 'border-line hover:border-brand-600/40 shadow-[0_2px_10px_rgba(21,47,52,0.02)]'
+                    : 'border-line hover:border-brand-600/40'
                 }`}
               >
                 <button
@@ -128,7 +128,7 @@ export default function FaqPage() {
                 >
                   <div className="flex items-center gap-4 sm:gap-5 flex-1 min-w-0">
                     <div
-                      className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-xs sm:text-sm font-extrabold shrink-0 transition-colors ${
+                      className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-xs sm:text-sm font-semibold shrink-0 transition-colors ${
                         isOpen
                           ? 'bg-brand-600 text-white shadow-md shadow-brand-600/25'
                           : 'bg-brand-50 text-brand-600 group-hover:bg-brand-600/15'
@@ -171,7 +171,7 @@ export default function FaqPage() {
       <div className="p-8 sm:p-12 bg-gradient-to-tr from-brand-600 to-brand-500 rounded-3xl text-white text-center space-y-5 shadow-xl shadow-brand-600/15 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-white/5 rounded-full blur-2xl pointer-events-none" />
         <div className="relative z-10 max-w-xl mx-auto space-y-4">
-          <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+          <h3 className="text-2xl sm:text-3xl font-semibold tracking-tight">
             {isRu ? 'Не нашли ответ на свой вопрос?' : 'O\'zingizni qiziqtirgan savolga javob topmadingizmi?'}
           </h3>
           <p className="text-sm sm:text-base text-white/90 leading-relaxed font-normal">

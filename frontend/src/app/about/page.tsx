@@ -80,11 +80,11 @@ export default function AboutPage() {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-14">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           <Award className="w-3.5 h-3.5" />
           <span>{t.nav.about}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
           {clinicName} — {isRu ? 'стандарты современной стоматологии' : 'Ishonchli stomatologiya xizmati'}
         </h1>
         <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
@@ -101,7 +101,7 @@ export default function AboutPage() {
           return (
             <div
               key={i}
-              className="bg-white rounded-3xl p-7 border border-line shadow-[0_2px_12px_rgba(21,47,52,0.03)] space-y-3 hover:border-brand-600/40 transition-all"
+              className="bg-white rounded-3xl p-7 border border-line space-y-3 hover:border-brand-600/40 transition-all"
             >
               <div className="w-12 h-12 rounded-2xl bg-brand-50 flex items-center justify-center text-brand-600">
                 <IconComp className="w-6 h-6" />
@@ -116,12 +116,12 @@ export default function AboutPage() {
       </div>
 
       {/* Facilities & Equipment Section */}
-      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-line shadow-[0_4px_20px_rgba(21,47,52,0.04)] space-y-8">
+      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-line space-y-8">
         <div className="max-w-2xl space-y-2">
           <span className="text-xs font-bold uppercase tracking-widest text-brand-600">
             {isRu ? 'Оснащение' : 'Texnologiyalar'}
           </span>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink">
+          <h2 className="text-2xl sm:text-3xl font-semibold text-ink">
             {isRu ? 'Современное оснащение и сертифицированные материалы' : 'Zamonaviy jihozlar va sertifikatlangan materiallar'}
           </h2>
           <p className="text-xs sm:text-sm text-ink-muted">

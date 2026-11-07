@@ -2,8 +2,9 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ShieldCheck, Sparkles, Microscope, Award, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Award, Microscope, ShieldCheck, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { Section } from '../site/primitives';
 
 interface ClinicSectionProps {
   sectionData?: any;
@@ -63,61 +64,29 @@ export const ClinicSection: React.FC<ClinicSectionProps> = ({ sectionData }) => 
       ];
 
   return (
-    <section id="clinic" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      <div className="bg-white rounded-3xl p-8 sm:p-12 border border-line shadow-[0_4px_24px_rgba(21,47,52,0.04)]">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
-          
-          {/* Left Summary */}
-          <div className="lg:col-span-5 space-y-5">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{isRu ? 'О клинике' : 'Klinikamiz haqida'}</span>
-            </div>
-
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-ink leading-tight">
-              {heading}
-            </h2>
-
-            <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-              {description}
-            </p>
-
-            <div className="pt-2">
-              <Link
-                href="/about"
-                className="inline-flex items-center gap-2 text-sm font-bold text-brand-600 hover:text-brand-700 group transition-colors"
-              >
-                <span>{isRu ? 'Подробнее о стандартах клиники' : 'Klinika standartlari haqida batafsil'}</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
-            </div>
-          </div>
-
-          {/* Right Feature Grid */}
-          <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {benefits.map((item, idx) => {
-              const IconComp = item.icon;
-              return (
-                <div
-                  key={idx}
-                  className="bg-canvas rounded-2xl p-6 border border-line space-y-3 hover:border-brand-600/40 transition-all"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-white shadow-sm border border-line flex items-center justify-center text-brand-600 shrink-0">
-                    <IconComp className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-base font-bold text-ink leading-snug">
-                    {item.title}
-                  </h3>
-                  <p className="text-xs text-ink-muted leading-relaxed">
-                    {item.desc}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-
+    <Section id="clinic" className="bg-white">
+      <div className="grid gap-14 lg:grid-cols-12 lg:gap-16">
+        <div className="lg:col-span-5">
+          <p className="mb-4 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
+            <span className="tabular-nums text-brand-600">03</span>
+            <span className="h-px w-8 bg-line-strong" aria-hidden="true" />
+            {isRu ? 'О клинике' : 'Klinika haqida'}
+          </p>
+          <h2 className="text-3xl font-semibold leading-[1.12] tracking-[-0.025em] text-ink sm:text-4xl">{heading}</h2>
+          <p className="mt-6 text-lg leading-relaxed text-ink-muted">{description}</p>
         </div>
+        <ol className="lg:col-span-7 lg:pt-10">
+          {benefits.map((item, i) => (
+            <li key={item.title} className="grid grid-cols-[3rem_1fr] gap-x-4 border-t border-line py-7 last:border-b">
+              <span className="pt-0.5 text-sm tabular-nums text-ink-subtle">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <p className="text-lg font-medium tracking-[-0.01em] text-ink">{item.title}</p>
+                {item.desc && <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">{item.desc}</p>}
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
-    </section>
+    </Section>
   );
 };

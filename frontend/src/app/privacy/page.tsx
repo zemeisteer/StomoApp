@@ -16,11 +16,11 @@ export default function PrivacyPage() {
 
         <div className="bg-white rounded-3xl p-6 sm:p-12 border border-line shadow-sm space-y-6">
           <div>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-600 border border-line mb-3">
+            <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtlemb-3">
               <Lock className="w-3.5 h-3.5 text-brand-600" />
               Xavfsizlik & Maxfiylik
             </span>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-ink tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-semibold text-ink tracking-tight">
               Shaxsiy ma&apos;lumotlarni himoya qilish siyosati
             </h1>
             <p className="text-xs text-ink-muted mt-1.5">

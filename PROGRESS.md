@@ -235,6 +235,12 @@ A new CI job builds the production images and runs the stack; it found the image
 - **UI**: `TimeSelect` (15-minute grid) replaces all native time inputs; light slate classes mapped to neutral tokens across the app; branded native select / date controls; searchable service picker in plans.
 - Regression 77.
 
+### Phase 18: Calm, minimal public site (2026-11-08)
+- New public building blocks (`components/site/primitives.tsx`): container, numbered section headings, pill buttons, text links, skeletons and error states.
+- Home page rebuilt in a calm, minimal style: one-sentence hero with quiet facts and a soft line-drawing visual (the three.js tooth no longer loads on the home page), hairline service grid, portrait doctor grid, statement + numbered clinic benefits, quote cards, branch list with per-branch booking, sticky FAQ with smooth accordion and a closing call to action. Slow reveal and float motion honour `prefers-reduced-motion`.
+- Header: slimmer, quiet links, pill CTA; footer: light, hairline-separated columns with branches, contacts and policy links.
+- Inner pages (services, doctors, prices, contacts, about, reviews, FAQ, articles, booking, legal) use the same calm headings, lighter weights and no heavy shadows.
+
 ---
 
 ## 2. Test Verification Matrix

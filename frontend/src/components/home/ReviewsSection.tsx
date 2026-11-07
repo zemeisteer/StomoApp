@@ -1,10 +1,10 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
-import { Star, MessageSquare, ArrowRight, User, AlertCircle } from 'lucide-react';
+import { Star } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { formatClinicDate } from '../../lib/dateFormat';
+import { Section, SectionError, SectionHeading, SkeletonCards } from '../site/primitives';
 
 interface ReviewsSectionProps {
   reviews: any[];
@@ -13,140 +13,52 @@ interface ReviewsSectionProps {
   onRetry?: () => void;
 }
 
-export const ReviewsSection: React.FC<ReviewsSectionProps> = ({
-  reviews,
-  isLoading = false,
-  error = null,
-  onRetry,
-}) => {
+/** Patient words in plain quotes; rating is a small detail, not the headline. */
+export const ReviewsSection: React.FC<ReviewsSectionProps> = ({ reviews, isLoading = false, error = null, onRetry }) => {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
+  const list = reviews.slice(0, 6);
+  const average = list.length ? list.reduce((s, r) => s + (r.rating || 5), 0) / list.length : 0;
 
   return (
-    <section id="reviews" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10 text-center sm:text-left">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider mb-2">
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>{t.reviews.title}</span>
-          </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink">
-            {isRu ? 'Отзывы наших пациентов' : 'Bemorlarimiz bildirgan fikrlar'}
-          </h2>
-        </div>
+    <Section id="reviews" className="bg-canvas">
+      <SectionHeading
+        index="04"
+        eyebrow={t.reviews.title}
+        title={L('Bemorlarimiz nima deydi', 'Что говорят наши пациенты')}
+        lead={
+          list.length
+            ? L(`O‘rtacha baho ${average.toFixed(1)} / 5`, `Средняя оценка ${average.toFixed(1)} / 5`)
+            : undefined
+        }
+        action={{ href: '/reviews', label: L('Barcha fikrlar', 'Все отзывы') }}
+      />
 
-        <Link
-          href="/reviews"
-          className="inline-flex items-center gap-2 text-sm font-bold text-brand-600 hover:text-brand-700 group transition-colors"
-        >
-          <span>{t.reviews.writeReview}</span>
-          <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-        </Link>
-      </div>
+      {isLoading && <SkeletonCards count={3} />}
+      {!isLoading && error && <SectionError message={error} onRetry={onRetry} retryLabel={t.common.retry} />}
+      {!isLoading && !error && list.length === 0 && (
+        <p className="text-sm text-ink-muted">{L('Hozircha fikrlar yo‘q. Birinchi bo‘ling!', 'Отзывов пока нет. Будьте первым!')}</p>
+      )}
 
-      {/* Loading Skeleton */}
-      {isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3].map((n) => (
-            <div
-              key={n}
-              className="bg-white rounded-2xl p-6 sm:p-7 border border-line animate-pulse space-y-4 shadow-sm"
-            >
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <div key={s} className="w-4 h-4 bg-canvas rounded" />
+      {!isLoading && !error && list.length > 0 && (
+        <div className="columns-1 gap-6 md:columns-2 lg:columns-3 [&>*]:mb-6">
+          {list.map((r) => (
+            <figure key={r.id} className="break-inside-avoid rounded-3xl border border-line bg-white p-8">
+              <div className="flex gap-0.5 text-amber-500" aria-label={`${r.rating || 5} / 5`}>
+                {Array.from({ length: Math.min(5, Math.max(1, r.rating || 5)) }).map((_, i) => (
+                  <Star key={i} className="h-3.5 w-3.5 fill-current" strokeWidth={0} />
                 ))}
               </div>
-              <div className="space-y-2">
-                <div className="h-4 bg-canvas rounded w-full" />
-                <div className="h-4 bg-canvas rounded w-5/6" />
-                <div className="h-4 bg-canvas rounded w-2/3" />
-              </div>
-              <div className="pt-4 border-t border-line flex justify-between items-center">
-                <div className="h-4 w-28 bg-canvas rounded" />
-                <div className="h-3 w-16 bg-canvas rounded" />
-              </div>
-            </div>
+              <blockquote className="mt-5 text-[17px] leading-relaxed text-ink">&ldquo;{r.text}&rdquo;</blockquote>
+              <figcaption className="mt-6 flex items-center justify-between text-sm">
+                <span className="font-medium text-ink">{r.authorName}</span>
+                {r.createdAt && <span className="text-ink-subtle">{formatClinicDate(r.createdAt, isRu ? 'ru' : 'uz')}</span>}
+              </figcaption>
+            </figure>
           ))}
         </div>
       )}
-
-      {/* Error State */}
-      {!isLoading && error && (
-        <div className="text-center py-10 bg-white rounded-2xl border border-rose-200 p-8 shadow-sm">
-          <AlertCircle className="w-7 h-7 text-rose-500 mx-auto mb-2" />
-          <p className="text-rose-600 text-sm font-semibold mb-3">{error}</p>
-          {onRetry && (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-            >
-              {t.common.retry}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Empty State */}
-      {!isLoading && !error && reviews.length === 0 && (
-        <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-line p-8">
-          <p className="text-ink-muted text-sm mb-3">
-            {isRu ? 'Отзывы пока отсутствуют. Будьте первыми!' : 'Hozircha sharhlar mavjud emas. Birinchi bo\'lib fikringizni qoldiring!'}
-          </p>
-          <Link
-            href="/reviews"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold"
-          >
-            {t.reviews.writeReview}
-          </Link>
-        </div>
-      )}
-
-      {/* Reviews Grid */}
-      {!isLoading && !error && reviews.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {reviews.slice(0, 3).map((r) => {
-            const author = r.authorName || (isRu ? 'Пациент клиники' : 'Klinika bemori');
-            const dateStr = r.createdAt
-              ? formatClinicDate(r.createdAt, isRu ? 'ru' : 'uz')
-              : '';
-
-            return (
-              <div
-                key={r.id}
-                className="bg-white rounded-2xl p-6 sm:p-7 border border-line shadow-[0_2px_8px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-brand-600/40 transition-all flex flex-col justify-between"
-              >
-                <div>
-                  {/* Restrained Star Rating */}
-                  <div className="flex items-center gap-1 text-amber-500 mb-3" aria-label={`Baho: ${r.rating || 5} / 5`}>
-                    {[...Array(Math.min(5, Math.max(1, r.rating || 5)))].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-current" />
-                    ))}
-                  </div>
-
-                  {/* Feedback text */}
-                  <p className="text-sm text-ink leading-relaxed mb-6 italic">
-                    &ldquo;{r.text}&rdquo;
-                  </p>
-                </div>
-
-                {/* Author footer */}
-                <div className="pt-4 border-t border-line flex items-center justify-between text-xs text-ink-muted">
-                  <div className="flex items-center gap-2 font-bold text-ink">
-                    <div className="w-6 h-6 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 text-[10px]">
-                      <User className="w-3 h-3" />
-                    </div>
-                    <span>{author}</span>
-                  </div>
-                  <span>{dateStr}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
+    </Section>
   );
 };

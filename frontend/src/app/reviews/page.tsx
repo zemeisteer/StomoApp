@@ -77,11 +77,11 @@ export default function ReviewsPage() {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-12">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           <MessageSquare className="w-3.5 h-3.5" />
           <span>{t.reviews.title}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
           {isRu ? 'Отзывы наших пациентов' : 'Bemorlarimiz bildirgan fikrlar'}
         </h1>
         <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
@@ -99,7 +99,7 @@ export default function ReviewsPage() {
               {isRu ? 'Опубликованные отзывы' : 'Tasdiqlangan sharhlar'} ({totalCount})
             </h2>
             {avgRating && (
-              <div className="flex items-center gap-1 text-amber-500 font-extrabold text-sm">
+              <div className="flex items-center gap-1 text-amber-500 font-semibold text-sm">
                 <Star className="w-4 h-4 fill-current" />
                 <span>{avgRating} / 5.0</span>
               </div>
@@ -122,7 +122,7 @@ export default function ReviewsPage() {
               return (
                 <div
                   key={r.id}
-                  className="bg-white rounded-2xl p-6 border border-line shadow-[0_2px_8px_rgba(21,47,52,0.03)] space-y-3"
+                  className="bg-white rounded-2xl p-6 border border-line space-y-3"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 font-bold text-xs text-ink">
@@ -153,7 +153,7 @@ export default function ReviewsPage() {
         </div>
 
         {/* Right Column: Submit Review Form */}
-        <div className="lg:col-span-5 bg-white rounded-3xl p-7 sm:p-8 border border-line shadow-[0_4px_20px_rgba(21,47,52,0.03)] space-y-5">
+        <div className="lg:col-span-5 bg-white rounded-3xl p-7 sm:p-8 border border-line space-y-5">
           <div>
             <h3 className="text-lg font-bold text-ink">{t.reviews.writeReview}</h3>
             <p className="text-xs text-ink-muted mt-0.5">

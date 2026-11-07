@@ -82,11 +82,11 @@ export default function ContactsPage() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-12">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           <Phone className="w-3.5 h-3.5" />
           <span>{t.nav.contacts}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
           {isRu ? 'Контакты и филиалы клиники' : 'Klinikamiz bilan bog\'lanish'}
         </h1>
         <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
@@ -125,12 +125,12 @@ export default function ContactsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left: Branch Details Card */}
         {activeBranch && (
-          <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 shadow-[0_4px_20px_rgba(21,47,52,0.03)] border border-line space-y-6">
+          <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 border border-line space-y-6">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-brand-600 bg-brand-50 px-3 py-1 rounded-full border border-line">
                 {isRu ? 'Филиал и график работы' : 'Filial manzili va ish vaqti'}
               </span>
-              <h2 className="text-2xl font-extrabold text-ink mt-2.5">
+              <h2 className="text-2xl font-semibold text-ink mt-2.5">
                 {isRu && activeBranch.nameRu ? activeBranch.nameRu : activeBranch.nameUz}
               </h2>
             </div>
@@ -213,8 +213,8 @@ export default function ContactsPage() {
         )}
 
         {/* Right: Callback / Contact Form */}
-        <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 shadow-[0_4px_20px_rgba(21,47,52,0.03)] border border-line">
-          <h2 className="text-xl font-extrabold text-ink mb-1">{t.callback.title}</h2>
+        <div className="lg:col-span-6 bg-white rounded-3xl p-7 sm:p-9 border border-line">
+          <h2 className="text-xl font-semibold text-ink mb-1">{t.callback.title}</h2>
           <p className="text-xs text-ink-muted mb-6">{t.callback.subtitle}</p>
 
           {success && (

@@ -159,12 +159,12 @@ export default function HomePage() {
   );
 
   return (
-    <div className="space-y-4 pb-16 overflow-hidden">
+    <div className="overflow-hidden">
       {/* 1. Hero Section with 3D Tooth Model - Main heading immediately visible */}
       <HeroSection />
 
       {/* 2. Popular Services Section */}
-      <ScrollReveal durationMs={240} distancePx={16}>
+      <ScrollReveal durationMs={800} distancePx={24}>
         <ServicesSection
           services={servicesState.data}
           isLoading={servicesState.isLoading}
@@ -174,7 +174,7 @@ export default function HomePage() {
       </ScrollReveal>
 
       {/* 3. Doctors Section (Light, photo-led) */}
-      <ScrollReveal durationMs={240} distancePx={16}>
+      <ScrollReveal durationMs={800} distancePx={24}>
         <DoctorsSection
           doctors={doctorsState.data}
           isLoading={doctorsState.isLoading}
@@ -184,12 +184,12 @@ export default function HomePage() {
       </ScrollReveal>
 
       {/* 4. Clinic Standards & Quality Section */}
-      <ScrollReveal durationMs={240} distancePx={16}>
+      <ScrollReveal durationMs={800} distancePx={24}>
         <ClinicSection sectionData={clinicSectionData} />
       </ScrollReveal>
 
       {/* 5. Patient Reviews Section */}
-      <ScrollReveal durationMs={240} distancePx={16}>
+      <ScrollReveal durationMs={800} distancePx={24}>
         <ReviewsSection
           reviews={reviewsState.data}
           isLoading={reviewsState.isLoading}
@@ -199,7 +199,7 @@ export default function HomePage() {
       </ScrollReveal>
 
       {/* 6. Branches & Locations Section */}
-      <ScrollReveal durationMs={240} distancePx={16}>
+      <ScrollReveal durationMs={800} distancePx={24}>
         <BranchesSection
           branches={branchesState.data}
           isLoading={branchesState.isLoading}
@@ -209,7 +209,7 @@ export default function HomePage() {
       </ScrollReveal>
 
       {/* 7. FAQ Accordion & Final Booking CTA */}
-      <ScrollReveal durationMs={240} distancePx={16}>
+      <ScrollReveal durationMs={800} distancePx={24}>
         <FaqAndCtaSection
           faqs={faqsState.data}
           isLoading={faqsState.isLoading}

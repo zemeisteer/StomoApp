@@ -158,11 +158,11 @@ export default function PricesPage() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-16 space-y-10">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           <DollarSign className="w-3.5 h-3.5" />
           <span>{t.nav.prices}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
           {isRu ? 'Shaffof va qat\'iy narxlar ro\'yxati' : 'Shaffof va qat\'iy narxlar ro\'yxati'}
         </h1>
         <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
@@ -173,7 +173,7 @@ export default function PricesPage() {
       </div>
 
       {/* Filter Controls Card */}
-      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-line shadow-[0_4px_24px_rgba(21,47,52,0.04)] space-y-6">
+      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-line space-y-6">
         {/* Row 1: Search & Price Sort */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
           {/* Search Bar */}
@@ -212,7 +212,7 @@ export default function PricesPage() {
                 onClick={() => setPriceSort('default')}
                 className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
                   priceSort === 'default'
-                    ? 'bg-white text-brand-600 shadow-sm font-extrabold'
+                    ? 'bg-white text-brand-600 shadow-sm font-semibold'
                     : 'text-ink-muted hover:text-ink'
                 }`}
               >
@@ -224,7 +224,7 @@ export default function PricesPage() {
                 onClick={() => setPriceSort('asc')}
                 className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
                   priceSort === 'asc'
-                    ? 'bg-brand-600 text-white shadow-sm font-extrabold'
+                    ? 'bg-brand-600 text-white shadow-sm font-semibold'
                     : 'text-ink-muted hover:text-ink'
                 }`}
                 title="Low to High"
@@ -237,7 +237,7 @@ export default function PricesPage() {
                 onClick={() => setPriceSort('desc')}
                 className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
                   priceSort === 'desc'
-                    ? 'bg-brand-600 text-white shadow-sm font-extrabold'
+                    ? 'bg-brand-600 text-white shadow-sm font-semibold'
                     : 'text-ink-muted hover:text-ink'
                 }`}
                 title="High to Low"
@@ -355,7 +355,7 @@ export default function PricesPage() {
       </div>
 
       {/* Price Table Card */}
-      <div className="bg-white rounded-3xl shadow-[0_4px_24px_rgba(21,47,52,0.04)] border border-line overflow-hidden">
+      <div className="bg-white rounded-3xl border border-line overflow-hidden">
         {/* Results summary header */}
         <div className="px-6 py-4 bg-canvas border-b border-line flex items-center justify-between text-xs font-semibold text-ink-muted">
           <span>

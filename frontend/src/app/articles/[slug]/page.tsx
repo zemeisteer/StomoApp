@@ -113,7 +113,7 @@ export default function ArticleDetailPage() {
               )}
             </div>
 
-            <h1 className="text-2xl sm:text-4xl font-extrabold text-ink leading-tight tracking-tight">
+            <h1 className="text-2xl sm:text-4xl font-semibold text-ink leading-tight tracking-tight">
               {title}
             </h1>
           </div>

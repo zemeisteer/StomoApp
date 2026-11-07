@@ -36,11 +36,11 @@ export default function DoctorsPage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-10">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           <Stethoscope className="w-3.5 h-3.5" />
           <span>{t.nav.doctors}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
           {isRu ? 'Врачи и специалисты клиники' : 'Klinikamiz malakali shifokorlari'}
         </h1>
         <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
@@ -85,7 +85,7 @@ export default function DoctorsPage() {
             return (
               <div
                 key={doc.id}
-                className="bg-white rounded-3xl p-7 border border-line shadow-[0_2px_12px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-brand-600/40 transition-all flex flex-col justify-between group"
+                className="bg-white rounded-3xl p-7 border border-line hover:border-brand-600/40 transition-all flex flex-col justify-between group"
               >
                 <div>
                   <div className="flex items-start gap-5 mb-5">

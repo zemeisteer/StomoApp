@@ -1,124 +1,107 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
-import dynamic from 'next/dynamic';
-import { Calendar, ArrowRight, ShieldCheck, Award, HeartPulse } from 'lucide-react';
+import { ArrowRight, CalendarCheck2, ShieldCheck, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { useBrand } from '../../lib/brand';
+import { Container, PrimaryLink, SecondaryLink } from '../site/primitives';
 
-const Tooth3D = dynamic(() => import('../Tooth3D').then((mod) => mod.Tooth3D), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full flex items-center justify-center min-h-[300px]">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
-    </div>
-  ),
-});
-
+/** Calm hero: one strong sentence, two actions, three quiet facts and a soft visual. */
 export const HeroSection: React.FC = () => {
   const { t, language } = useI18n();
+  const brand = useBrand();
   const isRu = language === 'ru';
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
+
+  const facts = [
+    { icon: Sparkles, title: L('Raqamli diagnostika', 'Цифровая диагностика'), text: L('Aniq tashxis va reja', 'Точный диагноз и план') },
+    { icon: ShieldCheck, title: L('Qat’iy sterilizatsiya', 'Строгая стерилизация'), text: L('Xalqaro me’yorlar', 'Международные нормы') },
+    { icon: CalendarCheck2, title: L('Onlayn yozilish', 'Онлайн-запись'), text: L('Bir daqiqada', 'За одну минуту') },
+  ];
 
   return (
-    <section className="relative pt-6 sm:pt-12 pb-14 sm:pb-20 overflow-hidden bg-gradient-to-b from-brand-50/60 via-white to-transparent">
-      {/* Subtle ambient light glow */}
-      <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-secondary-600/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
-          
-          {/* Left Column: Clear, Welcoming Heading, Subtitle & Primary Actions */}
-          <div className="lg:col-span-7 space-y-6 text-center lg:text-left">
-            {/* Small subtle clinic badge */}
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand-50 border border-line text-brand-600 text-xs font-bold tracking-wide">
-              <HeartPulse className="w-4 h-4 text-brand-600" />
-              <span>{isRu ? 'Современная стоматологическая помощь' : 'Toshkentdagi zamonaviy stomatologiya klinikasi'}</span>
-            </div>
-
-            {/* Main Headline */}
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-ink leading-[1.14]">
+    <section className="relative overflow-hidden pb-20 pt-14 sm:pb-28 sm:pt-20">
+      <Container>
+        <div className="grid items-center gap-14 lg:grid-cols-12 lg:gap-10">
+          <div className="lg:col-span-7">
+            <p className="mb-6 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle animate-fade-in">
+              {brand.clinicName(language)} · {L('Stomatologiya klinikasi', 'Стоматологическая клиника')}
+            </p>
+            <h1 className="text-[2.6rem] font-semibold leading-[1.04] tracking-[-0.035em] text-ink sm:text-6xl lg:text-[4.25rem]">
               {isRu ? (
                 <>
-                  Здоровая улыбка —{' '}
-                  <span className="text-brand-600">надежное и комфортное</span> лечение
+                  Спокойное лечение.
+                  <br />
+                  <span className="text-ink-subtle">Уверенная улыбка.</span>
                 </>
               ) : (
                 <>
-                  Sog&apos;lom tabassum —{' '}
-                  <span className="text-brand-600">ishonchli va sifatli</span> muolaja
+                  Xotirjam davolash.
+                  <br />
+                  <span className="text-ink-subtle">Ishonchli tabassum.</span>
                 </>
               )}
             </h1>
-
-            {/* Subtitle */}
-            <p className="text-base sm:text-lg text-ink-muted max-w-2xl mx-auto lg:mx-0 leading-relaxed font-normal">
-              {isRu
-                ? 'Современная цифровая диагностика, сертифицированные специалисты и бережный индивидуальный подход к каждому пациенту.'
-                : 'Zamonaviy raqamli diagnostika, tajribali stomatologlar va har bir bemorga samimiy, individual yondashuv.'}
+            <p className="mt-7 max-w-xl text-lg leading-relaxed text-ink-muted">
+              {L(
+                'Tajribali shifokorlar, shaffof narxlar va har bir qadamni oldindan tushuntiradigan yondashuv. Qabulga onlayn yoziling — qolganini biz hal qilamiz.',
+                'Опытные врачи, прозрачные цены и подход, при котором каждый шаг объясняют заранее. Запишитесь онлайн — остальное мы возьмём на себя.',
+              )}
             </p>
-
-            {/* Primary & Secondary Action Buttons */}
-            <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3.5 pt-2">
-              <Link
-                href="/booking"
-                className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-base shadow-lg shadow-brand-600/25 hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
-              >
-                <Calendar className="w-5 h-5" />
-                <span>{t.common.bookAppointment}</span>
-              </Link>
-
-              <Link
-                href="/services"
-                className="w-full sm:w-auto px-7 py-4 rounded-2xl bg-white hover:bg-brand-50 text-ink font-semibold text-base border border-line shadow-sm hover:border-brand-600/40 transition-all flex items-center justify-center gap-2"
-              >
-                <span>{isRu ? 'Наши услуги' : 'Xizmatlarimiz'}</span>
-                <ArrowRight className="w-4 h-4 text-brand-600" />
-              </Link>
+            <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+              <PrimaryLink href="/booking">
+                {t.common.bookAppointment}
+                <ArrowRight className="h-4 w-4" />
+              </PrimaryLink>
+              <SecondaryLink href="/prices">{L('Narxlarni ko‘rish', 'Посмотреть цены')}</SecondaryLink>
             </div>
 
-            {/* Clean Key Highlights */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-6 border-t border-line/80">
-              <div className="flex items-center gap-2.5 text-left">
-                <div className="w-8 h-8 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600 shrink-0">
-                  <Award className="w-4 h-4" />
+            <dl className="mt-14 grid gap-6 border-t border-line pt-8 sm:grid-cols-3">
+              {facts.map(({ icon: Icon, title, text }) => (
+                <div key={title} className="flex items-start gap-3">
+                  <Icon className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" strokeWidth={1.6} />
+                  <div>
+                    <dt className="text-sm font-medium text-ink">{title}</dt>
+                    <dd className="text-sm text-ink-subtle">{text}</dd>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-xs font-bold text-ink block">{isRu ? 'Опытные врачи' : 'Malakali shifokorlar'}</span>
-                  <span className="text-[11px] text-ink-muted block">{isRu ? 'Сертифицированные специалисты' : 'Katta tajribaga ega jamoa'}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2.5 text-left">
-                <div className="w-8 h-8 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600 shrink-0">
-                  <ShieldCheck className="w-4 h-4" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold text-ink block">{isRu ? 'Безопасность' : 'Xavfsizlik'}</span>
-                  <span className="text-[11px] text-ink-muted block">{isRu ? 'Строгая стерилизация' : 'Qat\'iy sterilizatsiya me\'yori'}</span>
-                </div>
-              </div>
-
-              <div className="col-span-2 sm:col-span-1 flex items-center gap-2.5 text-left">
-                <div className="w-8 h-8 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600 shrink-0">
-                  <HeartPulse className="w-4 h-4" />
-                </div>
-                <div>
-                  <span className="text-xs font-bold text-ink block">{isRu ? 'Комфорт' : 'Qulaylik'}</span>
-                  <span className="text-[11px] text-ink-muted block">{isRu ? 'Бережное лечение' : 'Bemorga samimiy e\'tibor'}</span>
-                </div>
-              </div>
-            </div>
+              ))}
+            </dl>
           </div>
 
-          {/* Right Column: 3D Interactive Tooth Model */}
-          <div className="lg:col-span-5 flex justify-center">
-            <div className="w-full max-w-lg lg:max-w-xl h-[380px] sm:h-[440px] lg:h-[480px] rounded-3xl bg-white/75 backdrop-blur-md p-3 sm:p-5 border border-line shadow-[0_8px_30px_rgb(var(--brand-600)/0.06)] relative flex items-center justify-center">
-              <Tooth3D />
+          {/* Soft visual: brand-tinted panel with a quiet line drawing and two floating notes */}
+          <div className="relative hidden lg:col-span-5 lg:block" aria-hidden="true">
+            <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[2rem] bg-brand-50">
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    'radial-gradient(80% 60% at 70% 20%, rgb(var(--brand-100)), transparent 70%), radial-gradient(70% 60% at 20% 90%, rgb(var(--secondary-100)), transparent 70%)',
+                }}
+              />
+              <svg viewBox="0 0 400 500" className="absolute inset-0 h-full w-full" fill="none">
+                <path
+                  d="M120 150c0-40 30-62 80-62s80 22 80 62c0 52-18 84-26 132-8 46-10 92-26 92-18 0-14-70-28-70s-10 70-28 70c-16 0-18-46-26-92-8-48-26-80-26-132z"
+                  stroke="rgb(var(--brand-600))"
+                  strokeOpacity="0.35"
+                  strokeWidth="1.5"
+                  className="hero-draw"
+                />
+                <circle cx="200" cy="250" r="168" stroke="rgb(var(--brand-600))" strokeOpacity="0.08" />
+                <circle cx="200" cy="250" r="210" stroke="rgb(var(--brand-600))" strokeOpacity="0.05" />
+              </svg>
+            </div>
+            <div className="absolute -left-4 bottom-16 rounded-2xl border border-line bg-white/90 px-5 py-4 shadow-card backdrop-blur sm:-left-8 hero-float">
+              <p className="text-xs text-ink-subtle">{L('Qabulga yozilish', 'Запись на приём')}</p>
+              <p className="mt-0.5 text-sm font-medium text-ink">{L('Onlayn, 1 daqiqada', 'Онлайн, за 1 минуту')}</p>
+            </div>
+            <div className="absolute -right-2 top-10 rounded-2xl border border-line bg-white/90 px-5 py-4 shadow-card backdrop-blur sm:-right-6 hero-float [animation-delay:1.5s]">
+              <p className="text-xs text-ink-subtle">{L('Davolash rejasi', 'План лечения')}</p>
+              <p className="mt-0.5 text-sm font-medium text-ink">{L('Narxi oldindan aniq', 'Цена известна заранее')}</p>
             </div>
           </div>
-
         </div>
-      </div>
+      </Container>
     </section>
   );
 };

@@ -2,9 +2,10 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Calendar, ArrowRight, Clock, Sparkles } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { serviceCategoryLabel } from '../../lib/serviceCategories';
+import { Section, SectionError, SectionHeading, SkeletonCards } from '../site/primitives';
 
 interface ServicesSectionProps {
   services: any[];
@@ -13,150 +14,61 @@ interface ServicesSectionProps {
   onRetry?: () => void;
 }
 
+/** Services as a quiet grid separated by hairlines: name, short note, duration and starting price. */
 export const ServicesSection: React.FC<ServicesSectionProps> = ({ services, isLoading, error, onRetry }) => {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
+  const L = (uz: string, ru: string) => (isRu ? ru : uz);
 
   return (
-    <section id="services" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      {/* Section Header */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10 text-center sm:text-left">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider mb-2">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{t.nav.services}</span>
-          </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink">
-            {isRu ? 'Популярные стоматологические услуги' : 'Ommabop stomatologik xizmatlar'}
-          </h2>
-        </div>
+    <Section id="services" className="bg-white">
+      <SectionHeading
+        index="01"
+        eyebrow={t.nav.services}
+        title={L('Kerakli yordamning hammasi bir joyda', 'Вся необходимая помощь в одном месте')}
+        lead={L('Profilaktikadan implantatsiyagacha. Narxlar oldindan ko‘rinadi.', 'От профилактики до имплантации. Цены видны заранее.')}
+        action={{ href: '/services', label: L('Barcha xizmatlar', 'Все услуги') }}
+      />
 
-        <Link
-          href="/services"
-          className="inline-flex items-center gap-2 text-sm font-bold text-brand-600 hover:text-brand-700 group transition-colors"
-        >
-          <span>{isRu ? 'Все услуги клиники' : 'Barcha xizmatlarni ko\'rish'}</span>
-          <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-        </Link>
-      </div>
-
-      {/* Loading Skeleton */}
-      {isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3, 4, 5, 6].map((n) => (
-            <div
-              key={n}
-              className="bg-white rounded-2xl p-6 border border-line animate-pulse space-y-4"
-            >
-              <div className="flex justify-between items-center">
-                <div className="h-6 w-20 bg-brand-50 rounded-full" />
-                <div className="h-4 w-16 bg-canvas rounded" />
-              </div>
-              <div className="h-6 w-3/4 bg-canvas rounded" />
-              <div className="space-y-2">
-                <div className="h-4 bg-canvas rounded" />
-                <div className="h-4 w-5/6 bg-canvas rounded" />
-              </div>
-              <div className="pt-4 border-t border-line flex justify-between items-center">
-                <div className="h-6 w-24 bg-canvas rounded" />
-                <div className="h-9 w-9 bg-canvas rounded-xl" />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Error State */}
-      {!isLoading && error && (
-        <div className="text-center py-12 bg-white rounded-2xl border border-rose-200 p-6">
-          <p className="text-rose-600 text-sm font-medium mb-3">{error}</p>
-          {onRetry ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-            >
-              {t.common.retry}
-            </button>
-          ) : (
-            <Link
-              href="/services"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold"
-            >
-              {t.common.retry}
-            </Link>
-          )}
-        </div>
-      )}
-
-      {/* Empty State */}
+      {isLoading && <SkeletonCards count={6} />}
+      {!isLoading && error && <SectionError message={error} onRetry={onRetry} retryLabel={t.common.retry} />}
       {!isLoading && !error && services.length === 0 && (
-        <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-line p-8">
-          <p className="text-ink-muted text-sm">
-            {isRu ? 'Услуги временно недоступны.' : 'Hozircha xizmatlar ro\'yxati mavjud emas.'}
-          </p>
-        </div>
+        <p className="text-sm text-ink-muted">{L("Hozircha xizmatlar ro'yxati mavjud emas.", 'Услуги временно недоступны.')}</p>
       )}
 
-      {/* Service Cards Grid */}
       {!isLoading && !error && services.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {services.map((service) => {
+        <div className="grid gap-px overflow-hidden rounded-3xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+          {services.map((service, i) => {
             const name = isRu && service.nameRu ? service.nameRu : service.nameUz;
             const desc = isRu && service.descriptionRu ? service.descriptionRu : service.descriptionUz;
-            const priceFromFormatted = (service.priceFrom / 100).toLocaleString('uz-UZ');
-
+            const price = Math.round((service.priceFrom || 0) / 100).toLocaleString('ru-RU').replace(/ /g, ' ');
             return (
-              <div
+              <Link
                 key={service.id}
-                className="bg-white rounded-2xl p-6 sm:p-7 border border-line shadow-[0_2px_8px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-brand-600/40 transition-all flex flex-col justify-between group"
+                href={`/services/${service.slug}`}
+                className="group relative flex min-h-[240px] flex-col bg-white p-8 transition-colors duration-500 hover:bg-brand-50/50"
               >
-                <div>
-                  <div className="flex items-center justify-between mb-3.5">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>{service.durationMinutes} {isRu ? 'мин' : 'daqiqa'}</span>
-                    </span>
-                    <span className="text-[11px] font-bold text-ink-muted uppercase tracking-wider">
-                      {serviceCategoryLabel(service.category, language)}
-                    </span>
-                  </div>
-
-                  <Link href={`/services/${service.slug}`}>
-                    <h3 className="text-lg font-bold text-ink group-hover:text-brand-600 transition-colors mb-2 leading-snug">
-                      {name}
-                    </h3>
-                  </Link>
-
-                  <p className="text-sm text-ink-muted line-clamp-2 mb-6 leading-relaxed">
-                    {desc || (isRu ? 'Безопасное и безболезненное лечение от ведущих специалистов.' : 'Klinikamiz mutaxassislari tomonidan xavfsiz va og\'riqsiz muolaja.')}
-                  </p>
+                <div className="flex items-center justify-between text-xs text-ink-subtle">
+                  <span className="tabular-nums">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="uppercase tracking-[0.14em]">{serviceCategoryLabel(service.category, language)}</span>
                 </div>
-
-                <div className="pt-4 border-t border-line flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-ink-muted block uppercase font-semibold">
-                      {t.common.price}
+                <h3 className="mt-8 text-xl font-medium leading-snug tracking-[-0.01em] text-ink">{name}</h3>
+                {desc && <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-ink-muted">{desc}</p>}
+                <div className="mt-auto flex items-end justify-between pt-8">
+                  <div className="text-sm">
+                    <span className="text-ink-subtle">{L('dan', 'от')} </span>
+                    <span className="font-medium tabular-nums text-ink">
+                      {price} {t.common.uzs}
                     </span>
-                    <span className="text-base font-extrabold text-ink">
-                      {priceFromFormatted} {t.common.uzs}
-                    </span>
+                    <span className="ml-2 text-ink-subtle">· {service.durationMinutes} {L('daq', 'мин')}</span>
                   </div>
-
-                  <Link
-                    href={`/booking?serviceId=${service.id}`}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white rounded-xl transition-all font-semibold text-xs shadow-sm"
-                    title={t.common.bookAppointment}
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>{isRu ? 'Записаться' : 'Yozilish'}</span>
-                  </Link>
+                  <ArrowUpRight className="h-5 w-5 text-ink-subtle transition-all duration-500 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-brand-600" />
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
       )}
-    </section>
+    </Section>
   );
 };

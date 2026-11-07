@@ -107,7 +107,7 @@ export default function DoctorDetailPage() {
       </nav>
 
       {/* Doctor Header Profile Card */}
-      <div className="bg-white rounded-3xl border border-line p-6 sm:p-10 shadow-[0_4px_20px_rgba(21,47,52,0.03)] flex flex-col md:flex-row gap-8 items-start">
+      <div className="bg-white rounded-3xl border border-line p-6 sm:p-10 flex flex-col md:flex-row gap-8 items-start">
         {/* Photo or Initials */}
         <div className="w-44 h-52 sm:w-56 sm:h-64 rounded-2xl overflow-hidden bg-gradient-to-tr from-brand-50 to-line shrink-0 border border-line shadow-inner">
           {doctor.photoUrl ? (
@@ -120,7 +120,7 @@ export default function DoctorDetailPage() {
               className="w-full h-full object-cover object-top"
             />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center text-brand-600 text-3xl font-extrabold p-4">
+            <div className="w-full h-full flex flex-col items-center justify-center text-brand-600 text-3xl font-semibold p-4">
               <div className="w-20 h-20 rounded-2xl bg-white shadow-sm flex items-center justify-center mb-2">
                 {initials}
               </div>
@@ -144,7 +144,7 @@ export default function DoctorDetailPage() {
               ))}
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-ink">{fullName}</h1>
+            <h1 className="text-2xl sm:text-3xl font-semibold text-ink">{fullName}</h1>
             <p className="text-sm font-semibold text-brand-600 mt-1">{title}</p>
           </div>
 
@@ -248,7 +248,7 @@ export default function DoctorDetailPage() {
                   </div>
                   {sPrice && (
                     <div className="pt-2 mt-2 border-t border-line flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-brand-600">{sPrice}</span>
+                      <span className="text-xs font-semibold text-brand-600">{sPrice}</span>
                       <Link
                         href={`/booking?doctorId=${doctor.id}&serviceId=${s.id}`}
                         className="text-[11px] font-bold text-brand-600 hover:underline"

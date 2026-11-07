@@ -2,8 +2,9 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { ChevronDown, HelpCircle, Calendar, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import { Container, Section, SectionError, SkeletonCards } from '../site/primitives';
 
 interface FaqAndCtaSectionProps {
   faqs?: any[];
@@ -87,155 +88,95 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
   });
 
   return (
-    <section id="faq" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24 space-y-20">
-      {/* FAQ Accordion Section */}
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-12 sm:mb-16 space-y-3">
-          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>FAQ</span>
+    <>
+      <Section id="faq" className="bg-canvas">
+        <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
+          <div className="lg:col-span-4">
+            <div className="lg:sticky lg:top-28">
+              <p className="mb-4 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
+                <span className="tabular-nums text-brand-600">06</span>
+                <span className="h-px w-8 bg-line-strong" aria-hidden="true" />
+                FAQ
+              </p>
+              <h2 className="text-3xl font-semibold leading-[1.1] tracking-[-0.025em] text-ink sm:text-4xl">
+                {isRu ? 'Ответы на частые вопросы' : 'Ko‘p beriladigan savollar'}
+              </h2>
+              <p className="mt-5 text-base leading-relaxed text-ink-muted">
+                {isRu ? 'Не нашли ответ? Позвоните нам или напишите в Telegram.' : 'Javob topilmadimi? Qo‘ng‘iroq qiling yoki Telegram’da yozing.'}
+              </p>
+            </div>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
-            {isRu ? 'Часто задаваемые вопросы' : 'Ko\'p beriladigan savollar'}
-          </h2>
-          <p className="text-sm sm:text-base text-ink-muted max-w-xl mx-auto leading-relaxed">
-            {isRu
-              ? 'Ответы на самые важные вопросы о лечении, гарантиях, записи и ценах в нашей клинике.'
-              : 'Davolanish, xavfsizlik, narxlar va qabulga tayyorgarlik bo\'yicha eng muhim ma\'lumotlar.'}
-          </p>
-        </div>
-
-        {/* Loading skeleton */}
-        {isLoading && (
-          <div className="space-y-4">
-            {[1, 2, 3, 4].map((n) => (
-              <div key={n} className="bg-white rounded-3xl border border-line p-7 animate-pulse h-24" />
-            ))}
-          </div>
-        )}
-
-        {/* Error */}
-        {!isLoading && error && (
-          <div className="text-center py-8 bg-white rounded-3xl border border-rose-200 p-8 shadow-sm mb-6">
-            <AlertCircle className="w-7 h-7 text-rose-500 mx-auto mb-2.5" />
-            <p className="text-rose-600 text-sm font-semibold mb-3">{error}</p>
-            {onRetry && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
-              >
-                {t.common.retry}
-              </button>
+          <div className="lg:col-span-8">
+            {isLoading && <SkeletonCards count={3} className="grid-cols-1" />}
+            {!isLoading && error && <SectionError message={error} onRetry={onRetry} retryLabel={t.common.retry} />}
+            {!isLoading && !error && (
+              <ul className="border-t border-line">
+                {displayFaqs.map((faq, idx) => {
+                  const open = openIndex === idx;
+                  return (
+                    <li key={faq.id} className="border-b border-line">
+                      <button
+                        type="button"
+                        onClick={() => toggleFaq(idx)}
+                        aria-expanded={open}
+                        aria-controls={`faq-panel-${idx}`}
+                        className="flex w-full items-center justify-between gap-6 py-6 text-left"
+                      >
+                        <span className="text-lg font-medium tracking-[-0.01em] text-ink">{faq.question}</span>
+                        <span
+                          className={`relative h-5 w-5 shrink-0 text-ink-subtle transition-transform duration-500 ${open ? 'rotate-45 text-brand-600' : ''}`}
+                          aria-hidden="true"
+                        >
+                          <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-current" />
+                          <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-current" />
+                        </span>
+                      </button>
+                      <div
+                        id={`faq-panel-${idx}`}
+                        className={`grid transition-[grid-template-rows] duration-500 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+                      >
+                        <div className="overflow-hidden">
+                          <p className="max-w-2xl pb-7 text-base leading-relaxed text-ink-muted">{faq.answer}</p>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
-        )}
-
-        {/* FAQ Accordion Items */}
-        {!isLoading && (
-          <div className="space-y-4 sm:space-y-5">
-            {displayFaqs.map((faq, idx) => {
-              const isOpen = openIndex === idx;
-              const itemNum = String(idx + 1).padStart(2, '0');
-
-              return (
-                <div
-                  key={faq.id}
-                  className={`bg-white rounded-2xl sm:rounded-3xl border transition-all duration-200 overflow-hidden ${
-                    isOpen
-                      ? 'border-brand-600 ring-2 ring-brand-600/10 shadow-[0_8px_30px_rgb(var(--brand-600)/0.08)] bg-gradient-to-b from-white to-canvas'
-                      : 'border-line hover:border-brand-600/40 shadow-[0_2px_10px_rgba(21,47,52,0.02)]'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleFaq(idx)}
-                    className="w-full p-6 sm:p-7 text-left flex items-center justify-between gap-4 cursor-pointer group"
-                    aria-expanded={isOpen}
-                  >
-                    <div className="flex items-center gap-4 sm:gap-5 flex-1 min-w-0">
-                      <div
-                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center text-xs sm:text-sm font-extrabold shrink-0 transition-colors ${
-                          isOpen
-                            ? 'bg-brand-600 text-white shadow-md shadow-brand-600/25'
-                            : 'bg-brand-50 text-brand-600 group-hover:bg-brand-600/15'
-                        }`}
-                      >
-                        {itemNum}
-                      </div>
-                      <span className="font-bold text-base sm:text-lg text-ink group-hover:text-brand-600 transition-colors leading-snug">
-                        {faq.question}
-                      </span>
-                    </div>
-
-                    <div
-                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all ${
-                        isOpen
-                          ? 'bg-brand-600 text-white rotate-180 shadow-sm'
-                          : 'bg-canvas group-hover:bg-brand-50 text-brand-600'
-                      }`}
-                    >
-                      <ChevronDown className="w-5 h-5 transition-transform duration-200" />
-                    </div>
-                  </button>
-
-                  {isOpen && (
-                    <div className="px-6 sm:px-8 pb-7 pt-1 animate-fade-in">
-                      <div className="border-t border-line/80 pt-5 pl-13 sm:pl-15">
-                        <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
-                          {faq.answer}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Final Pre-Footer Booking Call To Action Banner */}
-      <div className="bg-gradient-to-tr from-brand-600 to-brand-500 rounded-3xl p-8 sm:p-14 text-white shadow-xl shadow-brand-600/15 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full blur-2xl pointer-events-none" />
-
-        <div className="relative z-10 max-w-2xl mx-auto text-center space-y-6">
-          <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-white/15 text-white backdrop-blur-sm border border-white/20">
-            <Calendar className="w-3.5 h-3.5" />
-            <span>{isRu ? 'Онлайн-запись 24/7' : '24/7 Onlayn navbat'}</span>
-          </span>
-
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight leading-tight">
-            {isRu
-              ? 'Запишитесь на прием к стоматологу прямо сейчас'
-              : 'Stomatolog qabuliga hoziroq onlayn yoziling'}
-          </h2>
-
-          <p className="text-sm sm:text-base text-white/90 leading-relaxed max-w-xl mx-auto font-normal">
-            {isRu
-              ? 'Выберите удобную дату, врача и филиал. Мы перезвоним или пришлем подтверждение визита.'
-              : 'O\'zingizga mos sana, mutaxassis va qulay filialni tanlang. Qabul vaqtingizni bir necha daqiqada tasdiqlaymiz.'}
-          </p>
-
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3.5">
-            <Link
-              href="/booking"
-              className="w-full sm:w-auto px-8 py-4 bg-white text-brand-600 hover:bg-canvas font-bold text-base rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 transform active:scale-95"
-            >
-              <Calendar className="w-5 h-5 text-brand-600" />
-              <span>{t.common.bookAppointment}</span>
-            </Link>
-
-            <Link
-              href="/contacts"
-              className="w-full sm:w-auto px-7 py-4 bg-white/10 hover:bg-white/20 text-white font-semibold text-base rounded-2xl border border-white/30 transition-all flex items-center justify-center gap-2"
-            >
-              <span>{t.nav.contacts}</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-          </div>
         </div>
-      </div>
-    </section>
+      </Section>
+
+      {/* Closing call to action */}
+      <section className="bg-canvas pb-20 sm:pb-28">
+        <Container>
+          <div className="relative overflow-hidden rounded-[2rem] bg-brand-950 px-8 py-16 text-center sm:px-16 sm:py-20">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0"
+              style={{ background: 'radial-gradient(60% 80% at 50% 0%, rgb(var(--brand-600) / 0.45), transparent 70%)' }}
+            />
+            <h2 className="relative mx-auto max-w-2xl text-3xl font-semibold leading-tight tracking-[-0.025em] text-white sm:text-5xl">
+              {isRu ? 'Запишитесь на консультацию' : 'Maslahat uchun yoziling'}
+            </h2>
+            <p className="relative mx-auto mt-5 max-w-lg text-base leading-relaxed text-white/70">
+              {isRu
+                ? 'Осмотр, понятный план лечения и честная цена — на первом же визите.'
+                : 'Ko‘rik, tushunarli davolash rejasi va halol narx — birinchi tashrifdayoq.'}
+            </p>
+            <div className="relative mt-10 flex justify-center">
+              <Link
+                href="/booking"
+                className="inline-flex h-12 items-center gap-2 rounded-full bg-white px-7 text-[15px] font-medium text-brand-950 transition-colors duration-300 hover:bg-brand-50"
+              >
+                {t.common.bookAppointment}
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+        </Container>
+      </section>
+    </>
   );
 };

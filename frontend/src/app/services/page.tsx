@@ -54,11 +54,11 @@ export default function ServicesPage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-10">
       {/* Page Header */}
       <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 text-brand-600 text-xs font-bold uppercase tracking-wider">
+        <div className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
           <Sparkles className="w-3.5 h-3.5" />
           <span>{t.nav.services}</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight">
+        <h1 className="text-4xl sm:text-5xl font-semibold tracking-[-0.03em] text-ink">
           {isRu ? 'Стоматологические услуги и цены' : 'Klinikamiz xizmatlari va narxlari'}
         </h1>
         <p className="text-sm sm:text-base text-ink-muted leading-relaxed">
@@ -135,7 +135,7 @@ export default function ServicesPage() {
             return (
               <div
                 key={service.id}
-                className="bg-white rounded-2xl p-6 sm:p-7 border border-line shadow-[0_2px_8px_rgba(21,47,52,0.03)] hover:shadow-lg hover:border-brand-600/40 transition-all flex flex-col justify-between group"
+                className="bg-white rounded-2xl p-6 sm:p-7 border border-line hover:border-brand-600/40 transition-all flex flex-col justify-between group"
               >
                 <div>
                   <div className="flex items-center justify-between mb-3.5">
@@ -164,7 +164,7 @@ export default function ServicesPage() {
                     <span className="text-[11px] text-ink-muted block uppercase font-semibold">
                       {t.common.price}
                     </span>
-                    <span className="text-base font-extrabold text-ink">
+                    <span className="text-base font-semibold text-ink">
                       {priceFromFormatted} {t.common.uzs}
                     </span>
                   </div>

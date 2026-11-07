@@ -107,13 +107,13 @@ export default function ServiceDetailPage() {
       </nav>
 
       {/* Hero Card */}
-      <div className="bg-white rounded-3xl border border-line p-6 sm:p-10 shadow-[0_4px_20px_rgba(21,47,52,0.03)] space-y-6">
+      <div className="bg-white rounded-3xl border border-line p-6 sm:p-10 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <span className="text-[11px] font-bold text-brand-600 bg-brand-50 px-3 py-1 rounded-full border border-line uppercase tracking-wider">
               {service.category}
             </span>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-ink mt-2">
+            <h1 className="text-2xl sm:text-3xl font-semibold text-ink mt-2">
               {name}
             </h1>
           </div>

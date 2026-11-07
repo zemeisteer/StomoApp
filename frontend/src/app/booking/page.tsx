@@ -1205,11 +1205,11 @@ function BookingContent() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Title Header */}
         <div className="text-center mb-10">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-600 border border-line">
+          <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtleborder border-line">
             <Sparkles className="w-3.5 h-3.5 text-brand-600" />
             DentaCare Online
           </span>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-ink mt-3 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-semibold text-ink mt-3 tracking-tight">
             {t.booking.title}
           </h1>
           <p className="text-sm text-ink-muted max-w-xl mx-auto mt-2 leading-relaxed">
@@ -1323,7 +1323,7 @@ function BookingContent() {
                       >
                         {chip.isTomorrow && (
                           <span
-                            className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.2 rounded-full mb-1 ${
+                            className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.2 rounded-full mb-1 ${
                               isSelected
                                 ? 'bg-white/20 text-white'
                                 : 'bg-brand-50 text-brand-600'
@@ -1339,7 +1339,7 @@ function BookingContent() {
                         >
                           {chip.dayName}
                         </span>
-                        <span className="text-lg font-extrabold my-0.5">{chip.dayNum}</span>
+                        <span className="text-lg font-semibold my-0.5">{chip.dayNum}</span>
                         <span
                           className={`text-[10px] ${
                             isSelected ? 'text-brand-50' : 'text-ink-muted'
@@ -1474,7 +1474,7 @@ function BookingContent() {
                         <span className="text-[11px] text-ink-muted">
                           {language === 'ru' ? 'Цена от:' : 'Boshlang\'ich narxi:'}
                         </span>
-                        <p className="text-xs font-extrabold text-brand-600">
+                        <p className="text-xs font-semibold text-brand-600">
                           {price} {t.common.uzs}
                         </p>
                       </div>
@@ -1504,7 +1504,7 @@ function BookingContent() {
                       <span className="text-ink-muted block text-[10px] uppercase font-semibold">
                         {t.booking.estimatedDuration}:
                       </span>
-                      <span className="font-extrabold text-ink text-sm">
+                      <span className="font-semibold text-ink text-sm">
                         {totalDuration} {t.booking.minutes}
                       </span>
                     </div>
@@ -1512,7 +1512,7 @@ function BookingContent() {
                       <span className="text-ink-muted block text-[10px] uppercase font-semibold">
                         {t.booking.estimatedPrice}:
                       </span>
-                      <span className="font-extrabold text-brand-600 text-sm">
+                      <span className="font-semibold text-brand-600 text-sm">
                         {(totalPrice / 100).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ')}{' '}
                         {t.common.uzs}
                       </span>
@@ -1816,7 +1816,7 @@ function BookingContent() {
                     <span className="text-ink-muted block text-[10px] uppercase font-semibold">
                       {t.booking.estimatedDuration}:
                     </span>
-                    <span className="font-extrabold text-brand-600 text-sm">
+                    <span className="font-semibold text-brand-600 text-sm">
                       {totalDuration} {t.booking.minutes}
                     </span>
                   </div>
@@ -1921,7 +1921,7 @@ function BookingContent() {
                               : 'bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white hover:scale-[1.01]'
                           }`}
                         >
-                          <span className="text-sm font-extrabold">{timeStr}</span>
+                          <span className="text-sm font-semibold">{timeStr}</span>
                           <span
                             className={`text-[10px] mt-0.5 ${
                               isSelected ? 'text-brand-50' : 'text-brand-600'
@@ -2014,11 +2014,11 @@ function BookingContent() {
                     <div className="p-6 rounded-3xl border-2 border-brand-600 bg-gradient-to-br from-canvas via-white to-brand-50 shadow-lg shadow-brand-600/10 space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-line/80">
                         <div>
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold bg-brand-600 text-white mb-2 shadow-sm">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-brand-600 text-white mb-2 shadow-sm">
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>{language === 'ru' ? 'Выбранный филиал приёма' : 'Belgilangan qabul filiali'}</span>
                           </span>
-                          <h3 className="text-lg font-extrabold text-ink">{bName}</h3>
+                          <h3 className="text-lg font-semibold text-ink">{bName}</h3>
                           <p className="text-xs text-ink-muted mt-1 flex items-start gap-1.5">
                             <MapPin className="w-4 h-4 text-brand-600 shrink-0 mt-0.5" />
                             <span>{bAddr}</span>
@@ -2030,7 +2030,7 @@ function BookingContent() {
                             <span className="text-[10px] text-ink-muted block uppercase font-bold">
                               {t.common.date} & {t.common.time}:
                             </span>
-                            <span className="text-sm font-extrabold text-brand-600">
+                            <span className="text-sm font-semibold text-brand-600">
                               {new Date(selectedSlotTime).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'uz-UZ', {
                                 hour: '2-digit',
                                 minute: '2-digit',
@@ -2192,7 +2192,7 @@ function BookingContent() {
                   <span className="text-[11px] font-bold text-ink">
                     {typeof totalPrice === 'number' ? (
                       totalPrice === 0 ? (
-                        <span className="text-emerald-700 font-extrabold">{t.booking.freePrice}</span>
+                        <span className="text-emerald-700 font-semibold">{t.booking.freePrice}</span>
                       ) : (
                         <span>
                           {(totalPrice / 100).toLocaleString(language === 'ru' ? 'ru-RU' : 'uz-UZ')}{' '}
@@ -2395,7 +2395,7 @@ function BookingContent() {
               </div>
 
               <div>
-                <h2 className="text-2xl font-extrabold text-ink mb-2">
+                <h2 className="text-2xl font-semibold text-ink mb-2">
                   {t.booking.bookingSuccess}
                 </h2>
                 <p className="text-sm text-ink-muted max-w-lg mx-auto leading-relaxed">

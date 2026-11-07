@@ -33,11 +33,11 @@ export default function ArticlesPage() {
     <div className="min-h-screen bg-gradient-to-b from-canvas via-white to-canvas py-12 sm:py-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
         <div className="text-center max-w-2xl mx-auto">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-600 border border-line">
+          <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtleborder border-line">
             <Sparkles className="w-3.5 h-3.5 text-brand-600" />
             {t.nav.articles}
           </span>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-ink mt-3 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-semibold text-ink mt-3 tracking-tight">
             {isRu ? 'Полезные статьи и советы' : 'Foydali maqolalar va maslahatlar'}
           </h1>
           <p className="text-sm text-ink-muted mt-2 leading-relaxed">
@@ -65,7 +65,7 @@ export default function ArticlesPage() {
                 <Link
                   key={article.id}
                   href={`/articles/${article.slug}`}
-                  className="bg-white rounded-3xl p-6 shadow-sm border border-line hover:border-brand-600/50 hover:shadow-lg hover:shadow-brand-600/5 transition-all flex flex-col justify-between group block"
+                  className="bg-white rounded-3xl p-6 shadow-sm border border-line hover:border-brand-600/50 hover:shadow-brand-600/5 transition-all flex flex-col justify-between group block"
                 >
                   <div>
                     <div className="flex items-center gap-2 text-[11px] text-ink-muted font-semibold mb-3">
