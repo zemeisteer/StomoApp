@@ -211,13 +211,19 @@ A new CI job builds the production images and runs the stack; it found the image
 - **Payme** (`POST /api/payments/payme`, JSON-RPC, Basic `Paycom:<key>`): CheckPerform/Create/Perform/Cancel/CheckTransaction/GetStatement, amount must equal the remaining balance, one pending transaction per invoice, 12 h expiry (reason 4, persisted), cancel after perform creates a refund. **Click** (`/api/payments/click/prepare|complete`, md5 signature): idempotent prepare/complete, cancellation on negative `error`. Both mirror transactions in `online_payments` and lock the invoice row so desk and online payments cannot overpay. Checkout links: `GET /admin/billing/invoices/:id/payment-links`.
 - Patient card **To'lovlar** tab: take payment, Payme/Click link (copy / Telegram), refund. Regression 73 covers plan invoicing, both providers, shifts and refunds.
 
+### Phase 15: Patient Cabinet (2026-11-07)
+- **Login** (`/kabinet`): phone + 6-digit one-time code, no password. Codes go to the patient's Telegram when linked (`PATIENT_BOT_TOKEN`, defaults to the bot token), otherwise by SMS. Only an HMAC of the code is stored (`portal_otps`); 5-minute expiry, single use, 5 wrong attempts lock the code, 60 s resend cooldown, 5 codes per hour, per-IP throttling. Unknown numbers get the same response and no valid code. Outside production without SMS/Telegram the code is shown on screen for testing.
+- **Session**: httpOnly `patient_session` cookie (7 days, path `/api/portal`) signed with a key derived from `JWT_SECRET` and a separate audience, so staff and patient tokens never cross. Portal POSTs require the anti-CSRF header.
+- **Cabinet**: covers every patient record on the phone (parent + children, profile switcher). Upcoming visits with reschedule/cancel through the existing self-service page, visit history, treatment plans with progress, accept/decline of presented plans (`acceptanceMethod = PORTAL`), balance with Payme/Click checkout, language preference. Header links to the cabinet.
+- Regression 74 covers code handling, isolation between phones and plan acceptance.
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 88 full integration tests (Regressions 1–73) | `dentacare_test` | **88 / 88 PASSED (100%)** |
+| **Jest E2E Regressions** | 89 full integration tests (Regressions 1–74) | `dentacare_test` | **89 / 89 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |

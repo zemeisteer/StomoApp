@@ -64,6 +64,8 @@ services:
       SMS_API_KEY: ${SMS_API_KEY:-}
       SMS_API_URL: ${SMS_API_URL:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      # Patient-facing bot (portal login codes go to Telegram-linked patients)
+      PATIENT_BOT_TOKEN: ${BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       SERVICE_TOKEN: ${SERVICE_TOKEN:?SERVICE_TOKEN must be set}
       # Uploads (X-rays, OPG, logos): "local" = prod_backend_uploads volume (backed up

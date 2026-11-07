@@ -8178,4 +8178,90 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.delete({ where: { id: patient.id } });
     }
   });
+  it('Regression 74: Patient portal login is a single-use, rate-limited code and the session only reaches that phone’s patients', async () => {
+    const http = () => request(app.getHttpServer());
+    const saved = { ...process.env };
+    for (const k of ['SMS_API_KEY', 'SMS_API_URL', 'PATIENT_BOT_TOKEN', 'TELEGRAM_BOT_TOKEN']) delete process.env[k];
+    Object.assign(process.env, { PAYME_MERCHANT_ID: 'reg74m', PAYME_KEY: 'reg74k' });
+    const phone = '+998900007474';
+    const parent = await prisma.patient.create({ data: { fullName: 'Reg74 Ota', phone } });
+    const child = await prisma.patient.create({ data: { fullName: 'Reg74 Bola', phone } });
+    const stranger = await prisma.patient.create({ data: { fullName: 'Reg74 Begona', phone: '+998900007475' } });
+    const rewindCodes = (p: string) =>
+      prisma.portalOtp.updateMany({ where: { phone: p }, data: { createdAt: new Date(Date.now() - 2 * 60 * 1000) } });
+    try {
+      await http().post('/api/portal/auth/request-code').send({ phone: '12345' }).expect(400);
+
+      // Unknown number: same response shape, no code is ever valid
+      const unknown = (await http().post('/api/portal/auth/request-code').send({ phone: '+998 90 000 00 00' }).expect(200)).body;
+      expect(unknown).toMatchObject({ sent: true });
+      expect(unknown.devCode).toBeUndefined();
+      await http().post('/api/portal/auth/verify').send({ phone: '+998900000000', code: '000000' }).expect(401);
+
+      // Known number; resend is throttled
+      const first = (await http().post('/api/portal/auth/request-code').send({ phone: '90 000 74 74' }).expect(200)).body;
+      expect(first.devCode).toMatch(/^\d{6}$/);
+      await http().post('/api/portal/auth/request-code').send({ phone }).expect(429);
+      const stored = await prisma.portalOtp.findFirst({ where: { phone }, orderBy: { createdAt: 'desc' } });
+      expect(stored!.codeHash).not.toContain(first.devCode);
+
+      // Five wrong attempts lock the code, even the right one then fails
+      const wrong = first.devCode === '111111' ? '222222' : '111111';
+      for (let i = 0; i < 5; i++) await http().post('/api/portal/auth/verify').send({ phone, code: wrong }).expect(401);
+      await http().post('/api/portal/auth/verify').send({ phone, code: first.devCode }).expect(401);
+
+      await rewindCodes(phone);
+      const second = (await http().post('/api/portal/auth/request-code').send({ phone }).expect(200)).body;
+      const login = await http().post('/api/portal/auth/verify').send({ phone, code: second.devCode }).expect(200);
+      const cookie = (login.headers['set-cookie'] as unknown as string[]).find((c) => c.startsWith('patient_session='))!;
+      expect(cookie).toMatch(/HttpOnly/i);
+      expect(cookie).toMatch(/Path=\/api\/portal/);
+      // Single use
+      await http().post('/api/portal/auth/verify').send({ phone, code: second.devCode }).expect(401);
+
+      const jar = cookie.split(';')[0];
+      const me = (await http().get('/api/portal/me').set('Cookie', jar).expect(200)).body;
+      expect(me.profiles.map((p: any) => p.id).sort()).toEqual([parent.id, child.id].sort());
+
+      // Session cannot read another phone's patient, and staff/patient credentials do not cross over
+      await http().get(`/api/portal/overview?patientId=${stranger.id}`).set('Cookie', jar).expect(404);
+      await http().get('/api/portal/me').set('Cookie', `patient_session=${adminToken}`).expect(401);
+      await http().get('/api/portal/me').expect(401);
+      await http().get('/api/admin/patients').set('Cookie', jar).expect(401);
+
+      // Plan presented to the child: accept from the cabinet (requires the anti-CSRF header)
+      const plan = (await http().post(`/api/admin/clinical/patients/${child.id}/plans`).set('Authorization', `Bearer ${adminToken}`).send({ title: 'Reg74' }).expect(201)).body;
+      await http().post(`/api/admin/clinical/plans/${plan.id}/items`).set('Authorization', `Bearer ${adminToken}`).send({ treatmentNameUz: 'Plomba', unitPriceUzs: 250000 }).expect(201);
+      await http().post(`/api/admin/clinical/plans/${plan.id}/present`).set('Authorization', `Bearer ${adminToken}`).expect(201);
+      const strangerPlan = (await http().post(`/api/admin/clinical/patients/${stranger.id}/plans`).set('Authorization', `Bearer ${adminToken}`).send({ title: 'Begona' }).expect(201)).body;
+
+      const overview = (await http().get(`/api/portal/overview?patientId=${child.id}`).set('Cookie', jar).expect(200)).body;
+      expect(overview.patient.id).toBe(child.id);
+      expect(overview.plans[0]).toMatchObject({ id: plan.id, status: 'PRESENTED' });
+      expect(JSON.stringify(overview)).not.toContain('approvalTokenHash');
+
+      await http().post(`/api/portal/plans/${plan.id}/accept`).set('Cookie', jar).expect(403);
+      await http().post(`/api/portal/plans/${strangerPlan.id}/accept`).set('Cookie', jar).set('X-Requested-With', 'XMLHttpRequest').expect(404);
+      await http().post(`/api/portal/plans/${plan.id}/accept`).set('Cookie', jar).set('X-Requested-With', 'XMLHttpRequest').expect(200);
+      const accepted = await prisma.treatmentPlan.findUnique({ where: { id: plan.id } });
+      expect(accepted).toMatchObject({ status: 'ACCEPTED', acceptanceMethod: 'PORTAL', acceptedByName: 'Reg74 Bola', acceptedTotalUzs: 250000 });
+
+      // Invoice and online payment link for the patient's own balance only
+      const inv = (await http().post(`/api/admin/clinical/plans/${plan.id}/invoice`).set('Authorization', `Bearer ${adminToken}`).send({ scope: 'ALL' }).expect(201)).body.invoice;
+      const after = (await http().get(`/api/portal/overview?patientId=${child.id}`).set('Cookie', jar).expect(200)).body;
+      expect(after.totals.debtUzs).toBe(250000);
+      expect(after.invoices[0]).toMatchObject({ id: inv.id, debtUzs: 250000, canPayOnline: true });
+      const links = (await http().get(`/api/portal/invoices/${inv.id}/payment-links`).set('Cookie', jar).expect(200)).body;
+      expect(links.payme).toContain('checkout.paycom.uz');
+      const strangerInv = await prisma.invoice.create({ data: { patientId: stranger.id, totalAmount: 1000 } });
+      await http().get(`/api/portal/invoices/${strangerInv.id}/payment-links`).set('Cookie', jar).expect(404);
+
+      await http().post('/api/portal/language').set('Cookie', jar).set('X-Requested-With', 'XMLHttpRequest').send({ lang: 'ru' }).expect(200);
+      expect((await prisma.patient.findUnique({ where: { id: parent.id } }))!.preferredLanguage).toBe('ru');
+    } finally {
+      process.env = saved;
+      await prisma.portalOtp.deleteMany({ where: { phone: { in: [phone, '+998900000000'] } } });
+      await prisma.patient.deleteMany({ where: { id: { in: [parent.id, child.id, stranger.id] } } });
+    }
+  });
 });

@@ -581,4 +581,45 @@ export class TreatmentPlansService {
     });
     return { status: 'DECLINED' };
   }
+
+  // ---------------------------------------------------------------------------
+  // Patient portal (caller already proved ownership of the patient's phone)
+  // ---------------------------------------------------------------------------
+
+  private async loadPresentedForPatient(planId: string, patientIds: string[]) {
+    const plan = await this.prisma.treatmentPlan.findUnique({
+      where: { id: planId },
+      include: { items: true, doctor: { select: doctorSelect } },
+    });
+    if (!plan || !patientIds.includes(plan.patientId)) throw new NotFoundException('Davolash rejasi topilmadi');
+    if (plan.status !== 'PRESENTED') throw new BadRequestException('Bu reja hozir rozilik kutmayapti');
+    return plan;
+  }
+
+  async acceptFromPortal(planId: string, patientIds: string[], ip: string | null) {
+    const plan = await this.loadPresentedForPatient(planId, patientIds);
+    const patient = await this.prisma.patient.findUnique({ where: { id: plan.patientId }, select: { fullName: true } });
+    await this.prisma.$transaction(async (tx) => {
+      await this.markAccepted(tx, plan, { method: 'PORTAL', name: patient?.fullName || '', signature: null, ip });
+      await this.audit.logTransactional({
+        tx,
+        userId: null,
+        ipAddress: ip ?? undefined,
+        action: 'clinical.plan_accepted',
+        entity: 'TreatmentPlan',
+        entityId: plan.id,
+        details: { method: 'PORTAL', totalUzs: planTotals(plan).totalUzs },
+      });
+    });
+    return { status: 'ACCEPTED' };
+  }
+
+  async declineFromPortal(planId: string, patientIds: string[], reason?: string) {
+    const plan = await this.loadPresentedForPatient(planId, patientIds);
+    await this.prisma.treatmentPlan.updateMany({
+      where: { id: plan.id, status: 'PRESENTED' },
+      data: { status: 'DECLINED', declinedAt: new Date(), declineReason: reason?.trim() || null, approvalTokenHash: null, approvalExpiresAt: null },
+    });
+    return { status: 'DECLINED' };
+  }
 }

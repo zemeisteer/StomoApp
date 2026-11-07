@@ -10,6 +10,6 @@ import { PaymentLinksController, PaymentProvidersController } from './payments.c
   imports: [PrismaModule, AuditModule],
   controllers: [PaymentProvidersController, PaymentLinksController],
   providers: [PaymentsConfig, PaymeService, ClickService],
-  exports: [PaymentsConfig],
+  exports: [PaymentsConfig, PaymeService, ClickService],
 })
 export class PaymentsModule {}

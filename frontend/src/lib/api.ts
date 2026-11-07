@@ -59,6 +59,8 @@ async function fetcher<T>(url: string, options: RequestInit = {}, isRetry = fals
     res.status === 401 &&
     !url.includes('/api/auth/login') &&
     !url.includes('/api/auth/refresh') &&
+    // Patient cabinet has its own session; a staff token refresh cannot help there
+    !url.includes('/api/portal/') &&
     !isRetry
   ) {
     const refreshed = await attemptTokenRefresh();
@@ -783,6 +785,24 @@ export const api = {
     fetcher<{ amountUzs: number; payme: string | null; click: string | null }>(`/api/admin/billing/invoices/${invoiceId}/payment-links`),
   invoiceTreatmentPlan: (planId: string, scope: 'COMPLETED' | 'ALL') =>
     fetcher<{ invoice: any; plan: any }>(`/api/admin/clinical/plans/${planId}/invoice`, { method: 'POST', body: JSON.stringify({ scope }) }),
+
+  // Patient cabinet (phone + one-time code)
+  portalRequestCode: (phone: string, lang: 'uz' | 'ru') =>
+    fetcher<{ sent: boolean; channel: 'SMS' | 'TELEGRAM'; expiresInSeconds: number; resendInSeconds: number; devCode?: string }>(
+      '/api/portal/auth/request-code',
+      { method: 'POST', body: JSON.stringify({ phone, lang }) },
+    ),
+  portalVerifyCode: (phone: string, code: string) =>
+    fetcher<{ ok: boolean }>('/api/portal/auth/verify', { method: 'POST', body: JSON.stringify({ phone, code }) }),
+  portalLogout: () => fetcher<{ ok: boolean }>('/api/portal/auth/logout', { method: 'POST' }),
+  portalMe: () => fetcher<{ phone: string; profiles: Array<{ id: string; fullName: string; language: string; telegramLinked: boolean }> }>('/api/portal/me'),
+  portalOverview: (patientId?: string) => fetcher<any>(`/api/portal/overview${patientId ? `?patientId=${encodeURIComponent(patientId)}` : ''}`),
+  portalAcceptPlan: (planId: string) => fetcher<any>(`/api/portal/plans/${planId}/accept`, { method: 'POST' }),
+  portalDeclinePlan: (planId: string, reason?: string) =>
+    fetcher<any>(`/api/portal/plans/${planId}/decline`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  portalPaymentLinks: (invoiceId: string) =>
+    fetcher<{ amountUzs: number; payme: string | null; click: string | null }>(`/api/portal/invoices/${invoiceId}/payment-links`),
+  portalSetLanguage: (lang: 'uz' | 'ru') => fetcher<any>('/api/portal/language', { method: 'POST', body: JSON.stringify({ lang }) }),
 
   // Billing & Invoices & Debts
   getInvoices: (params?: { patientId?: string; appointmentId?: string }) => {

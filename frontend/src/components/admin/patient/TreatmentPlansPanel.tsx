@@ -237,6 +237,8 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
                   ` · ${L('Rozilik', 'Согласие')}: ${new Date(active.acceptedAt).toLocaleDateString(isRu ? 'ru-RU' : 'uz-UZ')} (${
                     active.acceptanceMethod === 'ONLINE'
                       ? L('onlayn', 'онлайн')
+                      : active.acceptanceMethod === 'PORTAL'
+                        ? L('kabinet orqali', 'в личном кабинете')
                       : active.acceptanceMethod === 'VERBAL'
                         ? L("og'zaki", 'устно')
                         : L('imzo bilan', 'с подписью')

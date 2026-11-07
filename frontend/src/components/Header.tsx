@@ -16,6 +16,7 @@ import {
   BookOpen,
   HelpCircle,
   Stethoscope,
+  UserRound,
 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useBrand } from '../lib/brand';
@@ -315,6 +316,16 @@ export const Header: React.FC = () => {
               </button>
             </div>
 
+            {/* Patient cabinet */}
+            <Link
+              href="/kabinet"
+              className="hidden md:inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-ink hover:text-brand-700 hover:bg-brand-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+              aria-label={language === 'ru' ? 'Личный кабинет' : 'Shaxsiy kabinet'}
+            >
+              <UserRound className="w-4 h-4" />
+              <span className="hidden xl:inline">{language === 'ru' ? 'Кабинет' : 'Kabinet'}</span>
+            </Link>
+
             {/* Book Appointment CTA Button (Desktop) */}
             <Link
               href="/booking"
@@ -454,6 +465,15 @@ export const Header: React.FC = () => {
                 >
                   <Calendar className="w-4 h-4" />
                   <span>{t.common.bookAppointment}</span>
+                </Link>
+
+                <Link
+                  href="/kabinet"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full py-3 border border-line hover:border-brand-600 text-ink rounded-2xl font-semibold flex items-center justify-center gap-2 hover:bg-brand-50 transition-colors text-sm"
+                >
+                  <UserRound className="w-4 h-4 text-brand-600" />
+                  <span>{language === 'ru' ? 'Личный кабинет' : 'Shaxsiy kabinet'}</span>
                 </Link>
 
                 {clinicPhone && (

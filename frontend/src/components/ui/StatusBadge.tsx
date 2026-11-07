@@ -12,7 +12,7 @@ export function StatusBadge({ map, value, lang = 'uz', className = '' }: Props) 
   const meta = map[value] || { uz: value, ru: value, tone: 'neutral' as const };
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${TONE_CLASSES[meta.tone]} ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${TONE_CLASSES[meta.tone]} ${className}`}
     >
       {lang === 'ru' ? meta.ru : meta.uz}
     </span>

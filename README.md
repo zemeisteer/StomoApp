@@ -145,6 +145,10 @@ Services exposed:
 
 HTTPS is required in production: auth cookies are issued with the `Secure` flag, so admin login does not work over plain HTTP.
 
+### Patient cabinet
+
+Patients sign in at `https://DOMAIN/kabinet` with their phone number and a one-time code. The code is sent through the patient Telegram bot when the patient linked it, otherwise by SMS, so `SMS_API_URL` and `SMS_API_KEY` must be set in production for patients without Telegram.
+
 ### Online payments (Payme / Click, optional)
 
 Set the keys in `.env.production` and redeploy; a provider stays disabled while any of its keys is empty.

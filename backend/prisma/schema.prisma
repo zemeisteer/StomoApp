@@ -1115,3 +1115,19 @@ model DoctorCommission {
 
   @@map("doctor_commissions")
 }
+
+/// One-time login codes for the patient portal. Only a keyed hash of the code is stored.
+model PortalOtp {
+  id         String    @id @default(cuid())
+  phone      String
+  codeHash   String    @map("code_hash")
+  channel    String // SMS, TELEGRAM, DEV
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  ip         String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([phone, createdAt])
+  @@map("portal_otps")
+}
