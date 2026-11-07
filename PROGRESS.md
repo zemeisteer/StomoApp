@@ -217,13 +217,20 @@ A new CI job builds the production images and runs the stack; it found the image
 - **Cabinet**: covers every patient record on the phone (parent + children, profile switcher). Upcoming visits with reschedule/cancel through the existing self-service page, visit history, treatment plans with progress, accept/decline of presented plans (`acceptanceMethod = PORTAL`), balance with Payme/Click checkout, language preference. Header links to the cabinet.
 - Regression 74 covers code handling, isolation between phones and plan acceptance.
 
+### Phase 16: Recall, Inventory, Payroll (2026-11-08)
+- **Check-up recall** (`/admin/recall`): patients whose last completed visit is older than `recall_months` (default 6) and who have nothing booked. Staff can call ("Qo'ng'iroq qilindi") or send a reminder; automatic sending (off by default, owner toggles it) runs daily at 10:00 clinic time, once per visit gap, max 100 per day. Telegram for linked patients, else SMS, via the existing outbox with prerendered text.
+- **Birthdays**: `patients.birth_date` (editable on the patient card), list of the next 7 days, optional automatic greeting once a year. `marketing_opt_out` stops recall and birthday messages (appointment reminders unaffected).
+- **Inventory** (`/admin/inventory`): stock with low-stock highlighting and stock value, receipt/usage dialogs (no negative stock), item edit, movement history (`GET /admin/inventory/:id/movements`, `PATCH /admin/inventory/:id`). Daily 09:00 low-stock summary to the staff Telegram chat (once per day).
+- **Payroll** (`/admin/payroll`, owner): monthly collected amount per doctor × percentage + bonus, inline rate editing, per-doctor breakdown, CSV export. Fix: payments on invoices billed from a treatment plan (no appointment) are now attributed to the plan's doctor; new plans can name the treating doctor.
+- Test fix: Regression 9 used the same Monday 14:00 slot as Regression 8 when the suite runs on a Saturday. Regression 75 covers this phase.
+
 ---
 
 ## 2. Test Verification Matrix
 
 | Suite | Scope | Target | Result |
 |---|---|---|---|
-| **Jest E2E Regressions** | 89 full integration tests (Regressions 1–74) | `dentacare_test` | **89 / 89 PASSED (100%)** |
+| **Jest E2E Regressions** | 90 full integration tests (Regressions 1–75) | `dentacare_test` | **90 / 90 PASSED (100%)** |
 | **Priority Regressions (P1–P10)** | 60 concrete invariant checks | `dentacare_test` | **60 / 60 PASSED (100%)** |
 | **Backend TypeScript Build** | NestJS compiler (`nest build`) | `backend/dist` | **0 errors, PASSED** |
 | **Backend ESLint** | TypeScript linting (`npm run lint`) | `backend/src`, `backend/test` | **0 errors, PASSED** |

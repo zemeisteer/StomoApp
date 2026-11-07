@@ -24,6 +24,9 @@ import {
   IsInt,
   Min,
   Length,
+  Matches,
+  IsBoolean,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdatePatientDto {
@@ -44,6 +47,16 @@ export class UpdatePatientDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /** YYYY-MM-DD, or null to clear */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Matches(/^(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, { message: 'birthDate must be YYYY-MM-DD' })
+  birthDate?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  marketingOptOut?: boolean;
 }
 
 export class MergePatientsDto {

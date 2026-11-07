@@ -12,6 +12,7 @@ import { AuthService } from '../src/auth/auth.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { AppointmentsService } from '../src/appointments/appointments.service';
 import { ServicesService } from '../src/services/services.service';
+import { EngagementService } from '../src/engagement/engagement.service';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { parseArgs, sanitizeDatabaseUrl, runMaintenanceCli } from '../scripts/repair-reminders';
@@ -554,7 +555,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 9: Rescheduling Buffer Preservation & Rollback on Failure
   // -------------------------------------------------------------
   it('Regression 9: Failed rescheduling preserves original slot intact', async () => {
-    const slot = getNextWorkingSlot(7, 14, 0);
+    const slot = getNextWorkingSlot(7, 16, 0); // distinct hour: on weekends day 7 and day 8 land on the same Monday
 
     const bookingRes = await request(app.getHttpServer())
       .post('/api/booking')
@@ -8262,6 +8263,125 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       process.env = saved;
       await prisma.portalOtp.deleteMany({ where: { phone: { in: [phone, '+998900000000'] } } });
       await prisma.patient.deleteMany({ where: { id: { in: [parent.id, child.id, stranger.id] } } });
+    }
+  });
+  it('Regression 75: Recall and birthday messages respect settings and opt-out, run once, low stock alerts once a day, plan payments count for the doctor', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const engagement = app.get(EngagementService);
+    const tag = `reg75_${Date.now()}`;
+    const before = await prisma.clinicSettings.findFirst();
+    const savedEnv = { ...process.env };
+    process.env.OPS_TELEGRAM_CHAT_ID = '-100750075';
+
+    const sevenMonthsAgo = new Date(Date.now() - 215 * 24 * 60 * 60 * 1000);
+    const mkPatient = (name: string, phone: string, extra: any = {}) =>
+      prisma.patient.create({ data: { fullName: name, phone, ...extra } });
+    const due = await mkPatient('Reg75 Kerak', '+998900007501');
+    const optOut = await mkPatient('Reg75 Voz', '+998900007502', { marketingOptOut: true });
+    const booked = await mkPatient('Reg75 Yozilgan', '+998900007503');
+    const tz = before?.timezone || 'Asia/Tashkent';
+    const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const birthday = await mkPatient('Reg75 Tugilgan', '+998900007504', { birthDate: new Date(`1990-${todayLocal.slice(5)}T00:00:00Z`) });
+    const appt = (patientId: string, start: Date, status: AppointmentStatus, n: number) =>
+      prisma.appointment.create({
+        data: {
+          publicToken: `${tag}_${n}`, patientId, doctorId: testDoctorAId, serviceId: testServiceId, branchId: testBranchId,
+          status, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+          serviceName: 'Reg75', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+        },
+      });
+    await appt(due.id, sevenMonthsAgo, AppointmentStatus.COMPLETED, 1);
+    await appt(optOut.id, sevenMonthsAgo, AppointmentStatus.COMPLETED, 2);
+    await appt(booked.id, sevenMonthsAgo, AppointmentStatus.COMPLETED, 3);
+    await appt(booked.id, new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), AppointmentStatus.CONFIRMED, 4);
+    const item = await prisma.inventoryItem.create({ data: { name: `${tag} Anestetik`, category: 'anesthetic', quantity: 2, minThreshold: 10 } });
+    const patientIds = [due.id, optOut.id, booked.id, birthday.id];
+
+    try {
+      await http().put('/api/admin/engagement/settings').set(auth(doctorBToken)).send({ recallEnabled: true }).expect(403);
+      await http().put('/api/admin/engagement/settings').set(auth(adminToken)).send({ recallMonths: 0 }).expect(400);
+
+      // List shows due + opted-out (flagged), never patients with an upcoming booking
+      const list = (await http().get('/api/admin/engagement/recall').set(auth(adminToken)).expect(200)).body.items;
+      const ids = list.map((r: any) => r.patientId);
+      expect(ids).toEqual(expect.arrayContaining([due.id, optOut.id]));
+      expect(ids).not.toContain(booked.id);
+      expect(list.find((r: any) => r.patientId === optOut.id).optedOut).toBe(true);
+
+      // Disabled by default: the daily run queues nothing for these patients
+      await http().put('/api/admin/engagement/settings').set(auth(adminToken)).send({ recallEnabled: false, birthdayEnabled: false, recallMonths: 6 }).expect(200);
+      await engagement.runDaily();
+      const jobsFor = (templateKey: string) =>
+        prisma.notificationJob.findMany({ where: { templateKey, recipient: { in: ['+998900007501', '+998900007502', '+998900007503', '+998900007504'] } } });
+      expect(await jobsFor('patient_recall')).toHaveLength(0);
+
+      // Enabled: exactly one recall (not opted out, not booked) and one birthday; a second run adds nothing
+      await http().put('/api/admin/engagement/settings').set(auth(adminToken)).send({ recallEnabled: true, birthdayEnabled: true }).expect(200);
+      await engagement.runDaily();
+      await engagement.runDaily();
+      const recalls = await jobsFor('patient_recall');
+      expect(recalls.map((j) => j.recipient)).toEqual(['+998900007501']);
+      expect((recalls[0].payload as any).text).toContain('Reg75');
+      expect(recalls[0].channel).toBe('SMS');
+      const birthdays = await jobsFor('patient_birthday');
+      expect(birthdays.map((j) => j.recipient)).toEqual(['+998900007504']);
+      expect((await prisma.patient.findUnique({ where: { id: due.id } }))!.lastRecallAt).toBeTruthy();
+      expect((await http().get('/api/admin/engagement/recall').set(auth(adminToken)).expect(200)).body.items.find((r: any) => r.patientId === due.id).contactedAt).toBeTruthy();
+
+      // Manual send: blocked for opted-out patients and once per day
+      await http().post(`/api/admin/engagement/recall/${optOut.id}/send`).set(auth(adminToken)).expect(400);
+      await http().post(`/api/admin/engagement/recall/${booked.id}/send`).set(auth(adminToken)).expect(201);
+      await http().post(`/api/admin/engagement/recall/${booked.id}/send`).set(auth(adminToken)).expect(400);
+      await http().post(`/api/admin/engagement/recall/${optOut.id}/contacted`).set(auth(adminToken)).expect(201);
+
+      // Birthday list and patient fields
+      const bdays = (await http().get('/api/admin/engagement/birthdays').set(auth(adminToken)).expect(200)).body;
+      expect(bdays.find((b: any) => b.patientId === birthday.id)).toMatchObject({ inDays: 0 });
+      await http().put(`/api/admin/patients/${due.id}`).set(auth(adminToken)).send({ birthDate: '2026-13-01' }).expect(400);
+      await http().put(`/api/admin/patients/${due.id}`).set(auth(adminToken)).send({ birthDate: '1985-03-04', marketingOptOut: true }).expect(200);
+      const updated = await prisma.patient.findUnique({ where: { id: due.id } });
+      expect(updated!.birthDate!.toISOString().slice(0, 10)).toBe('1985-03-04');
+      expect(updated!.marketingOptOut).toBe(true);
+
+      // Low stock: one alert per day to the ops chat, never to patients
+      const r1 = await engagement.runLowStockAlert();
+      await engagement.runLowStockAlert();
+      const stockJobs = await prisma.notificationJob.findMany({ where: { templateKey: 'ops_low_stock', recipient: '-100750075' } });
+      expect(stockJobs).toHaveLength(1);
+      if (r1.sent) expect((stockJobs[0].payload as any).text).toContain(`${tag} Anestetik`);
+
+      // Inventory history and edit
+      await http().patch(`/api/admin/inventory/${item.id}/stock`).set(auth(adminToken)).send({ changeType: 'RESTOCK', quantityDelta: 20, reason: 'yetkazib berildi' }).expect(200);
+      const moves = (await http().get(`/api/admin/inventory/${item.id}/movements`).set(auth(adminToken)).expect(200)).body;
+      expect(moves[0]).toMatchObject({ changeType: 'RESTOCK', quantityDelta: 20 });
+      await http().patch(`/api/admin/inventory/${item.id}`).set(auth(doctorBToken)).send({ minThreshold: 5 }).expect(403);
+      expect((await http().patch(`/api/admin/inventory/${item.id}`).set(auth(adminToken)).send({ minThreshold: 5 }).expect(200)).body.minThreshold).toBe(5);
+
+      // Payroll: payments on a plan invoice (no appointment) count for the plan's doctor
+      const plan = await prisma.treatmentPlan.create({ data: { patientId: due.id, doctorId: testDoctorAId, title: 'Reg75', status: 'ACCEPTED' } });
+      const inv = await prisma.invoice.create({ data: { patientId: due.id, planId: plan.id, totalAmount: 750075 } });
+      const day = new Date().toISOString().slice(0, 10);
+      const beforePay = (await http().get(`/api/admin/commissions?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body.find((d: any) => d.doctorId === testDoctorAId).totalCollected;
+      await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: inv.id, amount: 750075, method: 'CARD' }).expect(201);
+      const afterPay = (await http().get(`/api/admin/commissions?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body.find((d: any) => d.doctorId === testDoctorAId).totalCollected;
+      expect(afterPay - beforePay).toBe(750075);
+      const earnings = (await http().get(`/api/admin/commissions/my-earnings?doctorId=${testDoctorAId}&from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      expect(earnings.appointments.find((a: any) => a.appointmentId === inv.id)).toMatchObject({ collected: 750075, status: 'PLAN', serviceName: 'Reg75' });
+    } finally {
+      process.env = savedEnv;
+      if (before) {
+        await prisma.clinicSettings.update({
+          where: { id: before.id },
+          data: { recallEnabled: before.recallEnabled, recallMonths: before.recallMonths, birthdayEnabled: before.birthdayEnabled },
+        });
+      }
+      await prisma.notificationJob.deleteMany({
+        where: { OR: [{ templateKey: { in: ['patient_recall', 'patient_birthday'] }, recipient: { startsWith: '+9989000075' } }, { templateKey: 'ops_low_stock' }] },
+      });
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.deleteMany({ where: { id: { in: patientIds } } });
+      await prisma.inventoryItem.delete({ where: { id: item.id } });
     }
   });
 });

@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { PRERENDERED_TEMPLATES } from '../engagement/engagement.service';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
@@ -2100,6 +2101,11 @@ export class NotificationsService {
         : `${clinicName} Eslatma: ${formattedTime} da qabuldasiz (${serviceName}).`;
     }
 
+    // Recall / birthday / ops messages carry their final text from the enqueuing service
+    if (PRERENDERED_TEMPLATES.includes(job.templateKey) && typeof payload.text === 'string') {
+      message = payload.text;
+    }
+
     if (smsApiKey && smsApiUrl) {
       try {
         const res = await fetch(smsApiUrl, {
@@ -2176,6 +2182,8 @@ export class NotificationsService {
     } else if (template === 'patient_booking_cancelled') {
       const tgHeader = this.escapeTelegramMarkdown(`❌ ${clinic.nameUz}: Qabul bekor qilindi`);
       text = `${tgHeader}\n\nSizning qabulingiz bekor qilindi. Yangi vaqtga yozilish uchun bot orqali yoki qo'ng'iroq qilib murojaat qilishingiz mumkin.`;
+    } else if (PRERENDERED_TEMPLATES.includes(template) && typeof payload.text === 'string') {
+      text = this.escapeTelegramMarkdown(payload.text);
     } else {
       const tgHeader = this.escapeTelegramMarkdown(`ℹ️ ${clinic.nameUz}`);
       const tgService = this.escapeTelegramMarkdown(payload.serviceName || '');

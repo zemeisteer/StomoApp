@@ -34,6 +34,11 @@ model ClinicSettings {
   slotIntervalMinutes   Int    @default(15) @map("slot_interval_minutes")
   bufferMinutes         Int    @default(5) @map("buffer_minutes")
 
+  // Patient engagement (automatic messages, off until the owner enables them)
+  recallEnabled   Boolean @default(false) @map("recall_enabled")
+  recallMonths    Int     @default(6) @map("recall_months")
+  birthdayEnabled Boolean @default(false) @map("birthday_enabled")
+
   // Social & messaging
   telegramLink   String? @map("telegram_link")
   instagramLink  String? @map("instagram_link")
@@ -362,6 +367,11 @@ model Patient {
   telegramUserId String? @unique @map("telegram_user_id")
   // Language for Telegram bot messages ("uz" | "ru")
   preferredLanguage String @default("uz") @map("preferred_language")
+  birthDate      DateTime? @map("birth_date") @db.Date
+  // Patient asked not to receive recall / birthday messages
+  marketingOptOut Boolean  @default(false) @map("marketing_opt_out")
+  // Last check-up recall (automatic message or staff call)
+  lastRecallAt   DateTime? @map("last_recall_at")
 
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")

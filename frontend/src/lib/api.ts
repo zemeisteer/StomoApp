@@ -853,4 +853,30 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
+  getInventoryMovements: (id: string) => fetcher<any[]>(`/api/admin/inventory/${id}/movements`),
+  updateInventoryItem: (id: string, payload: Record<string, unknown>) =>
+    fetcher<any>(`/api/admin/inventory/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  getCommissionsReport: (from?: string, to?: string) => {
+    const q = new URLSearchParams();
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    return fetcher<any[]>(`/api/admin/commissions${q.toString() ? `?${q}` : ''}`);
+  },
+  getDoctorEarningsReport: (doctorId: string, from?: string, to?: string) => {
+    const q = new URLSearchParams({ doctorId });
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    return fetcher<any>(`/api/admin/commissions/my-earnings?${q}`);
+  },
+
+  // Patient engagement: check-up recall and birthdays
+  getEngagementSettings: () => fetcher<{ recallEnabled: boolean; recallMonths: number; birthdayEnabled: boolean }>('/api/admin/engagement/settings'),
+  updateEngagementSettings: (payload: { recallEnabled?: boolean; recallMonths?: number; birthdayEnabled?: boolean }) =>
+    fetcher<any>('/api/admin/engagement/settings', { method: 'PUT', body: JSON.stringify(payload) }),
+  getRecallList: () => fetcher<{ recallMonths: number; items: any[] }>('/api/admin/engagement/recall'),
+  getUpcomingBirthdays: () => fetcher<any[]>('/api/admin/engagement/birthdays'),
+  sendRecall: (patientId: string) => fetcher<any>(`/api/admin/engagement/recall/${patientId}/send`, { method: 'POST' }),
+  markRecallContacted: (patientId: string) => fetcher<any>(`/api/admin/engagement/recall/${patientId}/contacted`, { method: 'POST' }),
+  updatePatientProfile: (id: string, payload: { birthDate?: string | null; marketingOptOut?: boolean; notes?: string }) =>
+    fetcher<any>(`/api/admin/patients/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
 };

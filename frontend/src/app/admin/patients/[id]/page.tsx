@@ -15,6 +15,7 @@ import {
   Loader2,
   AlertCircle,
   StickyNote,
+  Cake,
 } from 'lucide-react';
 import { AdminLayout } from '../../../../components/AdminLayout';
 import { InteractiveOdontogram } from '../../../../components/InteractiveOdontogram';
@@ -150,7 +151,15 @@ export default function PatientCardPage() {
               </nav>
             </section>
 
-            {tab === 'overview' && <Overview card={card} lang={lang} onOpenPlans={() => setTab('plans')} />}
+            {tab === 'overview' && (
+              <Overview
+                card={card}
+                lang={lang}
+                onOpenPlans={() => setTab('plans')}
+                canEditProfile={Boolean(user && ['OWNER', 'ADMIN'].includes(user.role))}
+                onSaved={load}
+              />
+            )}
 
             {tab === 'chart' && (
               <section className="rounded-2xl border border-line bg-white p-4 shadow-card sm:p-6">
@@ -211,7 +220,19 @@ function Card({ title, icon: Icon, children, action }: { title: string; icon: an
   );
 }
 
-function Overview({ card, lang, onOpenPlans }: { card: any; lang: 'uz' | 'ru'; onOpenPlans: () => void }) {
+function Overview({
+  card,
+  lang,
+  onOpenPlans,
+  canEditProfile,
+  onSaved,
+}: {
+  card: any;
+  lang: 'uz' | 'ru';
+  onOpenPlans: () => void;
+  canEditProfile: boolean;
+  onSaved: () => void;
+}) {
   const isRu = lang === 'ru';
   const L = (uz: string, ru: string) => (isRu ? ru : uz);
   const next = card.stats.nextAppointment;
@@ -284,6 +305,8 @@ function Overview({ card, lang, onOpenPlans }: { card: any; lang: 'uz' | 'ru'; o
             </dl>
           </Card>
         )}
+
+        <ProfileCard patient={card.patient} lang={lang} canEdit={canEditProfile} onSaved={onSaved} />
 
         {card.patient.notes && (
           <Card title={L('Izohlar', 'Заметки')} icon={StickyNote}>
@@ -437,5 +460,60 @@ function Payments({
         </div>
       )}
     </div>
+  );
+}
+
+function ProfileCard({ patient, lang, canEdit, onSaved }: { patient: any; lang: 'uz' | 'ru'; canEdit: boolean; onSaved: () => void }) {
+  const L = (uz: string, ru: string) => (lang === 'ru' ? ru : uz);
+  const initialBirth = patient.birthDate ? String(patient.birthDate).slice(0, 10) : '';
+  const [birthDate, setBirthDate] = useState(initialBirth);
+  const [optOut, setOptOut] = useState(Boolean(patient.marketingOptOut));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const dirty = birthDate !== initialBirth || optOut !== Boolean(patient.marketingOptOut);
+
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.updatePatientProfile(patient.id, { birthDate: birthDate || null, marketingOptOut: optOut });
+      setMsg(L('Saqlandi', 'Сохранено'));
+      onSaved();
+    } catch (e: any) {
+      setMsg(e?.message || L('Xatolik yuz berdi', 'Произошла ошибка'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title={L("Qo'shimcha ma'lumot", 'Дополнительно')} icon={Cake}>
+      <div className="space-y-3 text-sm">
+        <label className="block">
+          <span className="mb-1 block text-xs text-ink-muted">{L("Tug'ilgan sana", 'Дата рождения')}</span>
+          <input
+            type="date"
+            value={birthDate}
+            max={new Date().toISOString().slice(0, 10)}
+            disabled={!canEdit}
+            onChange={(e) => setBirthDate(e.target.value)}
+            className="h-9 w-full rounded-lg border border-line bg-white px-2.5 text-sm text-ink disabled:bg-canvas"
+          />
+        </label>
+        <label className="flex items-start gap-2 text-ink">
+          <input type="checkbox" checked={optOut} disabled={!canEdit} onChange={(e) => setOptOut(e.target.checked)} className="mt-0.5 h-4 w-4 accent-brand-600" />
+          <span>
+            {L('Eslatma va tabriklar yuborilmasin', 'Не отправлять напоминания и поздравления')}
+            <span className="block text-xs text-ink-subtle">{L('Qabul eslatmalari bunga kirmaydi', 'Напоминания о записи не затрагиваются')}</span>
+          </span>
+        </label>
+        {canEdit && dirty && (
+          <button type="button" disabled={busy} onClick={save} className="h-8 rounded-lg bg-brand-600 px-3 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
+            {L('Saqlash', 'Сохранить')}
+          </button>
+        )}
+        {msg && <p className="text-xs text-ink-muted">{msg}</p>}
+      </div>
+    </Card>
   );
 }

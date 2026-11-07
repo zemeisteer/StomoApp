@@ -28,6 +28,9 @@ import {
   ChevronRight,
   Send,
   Wallet,
+  BellRing,
+  Package,
+  HandCoins,
 } from 'lucide-react';
 import { useAuth, StaffRole } from '../lib/auth';
 import { TelegramLinkModal } from './admin/TelegramLinkModal';
@@ -159,6 +162,24 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
       roles: ['OWNER', 'ADMIN', 'RECEPTION'],
     },
     {
+      href: '/admin/recall',
+      label: language === 'ru' ? 'Повторные визиты' : 'Qayta chaqirish',
+      icon: BellRing,
+      roles: ['OWNER', 'ADMIN', 'RECEPTION'],
+    },
+    {
+      href: '/admin/inventory',
+      label: language === 'ru' ? 'Склад' : 'Ombor',
+      icon: Package,
+      roles: ['OWNER', 'ADMIN', 'DOCTOR', 'RECEPTION'],
+    },
+    {
+      href: '/admin/payroll',
+      label: language === 'ru' ? 'Зарплата врачей' : 'Shifokor maoshi',
+      icon: HandCoins,
+      roles: ['OWNER'],
+    },
+    {
       href: '/admin/leads',
       label: t.admin.leads,
       icon: PhoneCall,
@@ -234,9 +255,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
 
   const isRu = language === 'ru';
   const NAV_GROUPS: Array<{ key: string; label: string; hrefs: string[] }> = [
-    { key: 'work', label: isRu ? 'Работа' : 'Ish', hrefs: ['/admin', '/admin/calendar', '/admin/patients', '/admin/cashier', '/admin/leads'] },
-    { key: 'clinic', label: isRu ? 'Клиника' : 'Klinika', hrefs: ['/admin/doctors', '/admin/services', '/admin/reviews', '/admin/cms'] },
-    { key: 'manage', label: isRu ? 'Управление' : 'Boshqaruv', hrefs: ['/admin/analytics', '/admin/audit', '/admin/notifications', '/admin/staff', '/admin/settings'] },
+    { key: 'work', label: isRu ? 'Работа' : 'Ish', hrefs: ['/admin', '/admin/calendar', '/admin/patients', '/admin/cashier', '/admin/recall', '/admin/leads'] },
+    { key: 'clinic', label: isRu ? 'Клиника' : 'Klinika', hrefs: ['/admin/doctors', '/admin/services', '/admin/inventory', '/admin/reviews', '/admin/cms'] },
+    { key: 'manage', label: isRu ? 'Управление' : 'Boshqaruv', hrefs: ['/admin/analytics', '/admin/payroll', '/admin/audit', '/admin/notifications', '/admin/staff', '/admin/settings'] },
   ];
   const groupedNav = NAV_GROUPS.map((g) => ({
     ...g,

@@ -47,6 +47,8 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
 
   const [newPlanOpen, setNewPlanOpen] = useState(false);
   const [newPlanTitle, setNewPlanTitle] = useState('');
+  const [newPlanDoctor, setNewPlanDoctor] = useState('');
+  const [doctors, setDoctors] = useState<any[]>([]);
   const [linkInfo, setLinkInfo] = useState<{ url: string; expiresAt: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [acceptOpen, setAcceptOpen] = useState(false);
@@ -79,6 +81,11 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
       .getAllServicesAdmin()
       .then((list) => setServices((list || []).filter((s: any) => s.isActive !== false && !s.isArchived)))
       .catch(() => {});
+    // The plan's doctor gets the plan's payments in payroll
+    api
+      .getDoctors()
+      .then((list: any) => setDoctors(Array.isArray(list) ? list : list?.items || []))
+      .catch(() => {});
   }, [canEdit]);
 
   const active = useMemo(() => plans.find((p) => p.id === activeId) || null, [plans, activeId]);
@@ -107,12 +114,15 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
 
   const createPlan = async () => {
     if (newPlanTitle.trim().length < 2) return;
-    const plan = await run(() => api.createTreatmentPlan(patientId, { title: newPlanTitle.trim() }));
+    const plan = await run(() =>
+      api.createTreatmentPlan(patientId, { title: newPlanTitle.trim(), doctorId: newPlanDoctor || undefined }),
+    );
     if (plan) {
       setPlans((prev) => [plan, ...prev]);
       setActiveId(plan.id);
       setNewPlanOpen(false);
       setNewPlanTitle('');
+      setNewPlanDoctor('');
     }
   };
 
@@ -596,6 +606,24 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
               className="h-10 w-full rounded-xl border border-line px-3 text-sm focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/10"
             />
           </label>
+          {doctors.length > 0 && (
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-ink">{L('Davolovchi shifokor', 'Лечащий врач')}</span>
+              <select
+                value={newPlanDoctor}
+                onChange={(e) => setNewPlanDoctor(e.target.value)}
+                className="h-10 w-full rounded-xl border border-line bg-white px-3 text-sm focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/10"
+              >
+                <option value="">{L('Tanlang (shifokor o‘zi yaratsa — avtomatik)', 'Выберите (если создаёт сам врач — автоматически)')}</option>
+                {doctors.map((d: any) => (
+                  <option key={d.id} value={d.id}>
+                    {doctorName(d, lang)}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-ink-subtle">{L("Reja bo'yicha to'lovlar shu shifokor maoshiga hisoblanadi", 'Оплаты по плану идут в зарплату этого врача')}</span>
+            </label>
+          )}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setNewPlanOpen(false)} className="h-9 rounded-lg px-3 text-sm font-medium text-ink-muted hover:bg-canvas">
               {L('Bekor', 'Отмена')}

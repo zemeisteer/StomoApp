@@ -8,6 +8,8 @@ export interface UpdatePatientInput {
   phone?: string;
   email?: string;
   notes?: string;
+  birthDate?: string | null;
+  marketingOptOut?: boolean;
 }
 
 @Injectable()
@@ -141,7 +143,9 @@ export class PatientsService {
         fullName: data.fullName?.trim(),
         phone: data.phone?.trim(),
         email: data.email?.trim() || null,
-        notes: data.notes?.trim() || null,
+        notes: data.notes !== undefined ? data.notes?.trim() || null : undefined,
+        birthDate: data.birthDate === undefined ? undefined : data.birthDate ? new Date(`${data.birthDate}T00:00:00Z`) : null,
+        marketingOptOut: data.marketingOptOut,
       },
     });
   }

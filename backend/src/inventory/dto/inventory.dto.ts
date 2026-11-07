@@ -1,4 +1,4 @@
-import { IsInt, IsString, IsOptional, IsEnum, Min } from 'class-validator';
+import { IsInt, IsString, IsOptional, IsEnum, Min, MaxLength } from 'class-validator';
 import { InventoryMovementType } from '@prisma/client';
 
 export class CreateInventoryItemDto {
@@ -36,3 +36,30 @@ export class RecordMovementDto {
   reason?: string;
 }
 
+
+export class UpdateInventoryItemDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  unit?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  minThreshold?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  unitCost?: number;
+}

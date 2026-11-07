@@ -29,6 +29,8 @@ export class PatientCardService {
         notes: true,
         telegramUserId: true,
         preferredLanguage: true,
+        birthDate: true,
+        marketingOptOut: true,
         isActive: true,
         createdAt: true,
       },
