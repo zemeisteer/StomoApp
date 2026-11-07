@@ -63,6 +63,10 @@ services:
       SMS_PROVIDER: ${SMS_PROVIDER:-eskiz}
       SMS_API_KEY: ${SMS_API_KEY:-}
       SMS_API_URL: ${SMS_API_URL:-}
+      # Eskiz (notify.eskiz.uz): used when both login values are set
+      ESKIZ_EMAIL: ${ESKIZ_EMAIL:-}
+      ESKIZ_PASSWORD: ${ESKIZ_PASSWORD:-}
+      ESKIZ_FROM: ${ESKIZ_FROM:-4546}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       # Patient-facing bot (portal login codes go to Telegram-linked patients)
       PATIENT_BOT_TOKEN: ${BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}

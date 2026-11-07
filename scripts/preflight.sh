@@ -37,15 +37,43 @@ for key in POSTGRES_PASSWORD REDIS_PASSWORD JWT_SECRET JWT_REFRESH_SECRET SERVIC
 done
 [[ "$(val JWT_SECRET)" != "$(val JWT_REFRESH_SECRET)" ]] && ok "JWT secrets differ" || bad "JWT_SECRET and JWT_REFRESH_SECRET must differ"
 
-for key in TELEGRAM_BOT_TOKEN SMS_API_KEY; do
-  v="$(val "$key")"
-  if [[ -z "$v" || "$v" == your_* ]]; then
-    [[ "$key" == TELEGRAM_BOT_TOKEN ]] && bad "$key not set (required by the bot service)" || warn "$key not set: patient SMS will only be logged"
-  else ok "$key set"; fi
-done
+v="$(val TELEGRAM_BOT_TOKEN)"
+[[ -z "$v" || "$v" == your_* ]] && bad "TELEGRAM_BOT_TOKEN not set (required by the bot service)" || ok "TELEGRAM_BOT_TOKEN set"
 chat="$(val TELEGRAM_CHAT_ID)"
 [[ -z "$chat" || "$chat" == "-1001234567890" ]] && warn "TELEGRAM_CHAT_ID looks like the template value (staff group alerts)" || ok "TELEGRAM_CHAT_ID set"
 [[ -n "$(val TELEGRAM_BOT_USERNAME)" ]] && ok "TELEGRAM_BOT_USERNAME set" || warn "TELEGRAM_BOT_USERNAME empty: staff get a /start command instead of a one-click link"
+
+# SMS: Eskiz login, or a generic gateway URL + key. Without SMS, booking/reminder SMS are only
+# logged and the patient cabinet (/kabinet) works only for patients linked to the Telegram bot.
+if [[ -n "$(val ESKIZ_EMAIL)" && -n "$(val ESKIZ_PASSWORD)" && "$(val SMS_PROVIDER)" != generic ]]; then
+  ok "SMS via Eskiz (sender: $(val ESKIZ_FROM))"
+elif [[ -n "$(val ESKIZ_EMAIL)$(val ESKIZ_PASSWORD)" && "$(val SMS_PROVIDER)" != generic ]]; then
+  bad "Eskiz partly configured: set both ESKIZ_EMAIL and ESKIZ_PASSWORD"
+elif [[ -n "$(val SMS_API_URL)" && -n "$(val SMS_API_KEY)" && "$(val SMS_API_KEY)" != your_* ]]; then
+  if [[ "$(val SMS_API_URL)" == *eskiz* ]]; then
+    bad "SMS_API_URL points to Eskiz but Eskiz needs ESKIZ_EMAIL / ESKIZ_PASSWORD instead of SMS_API_KEY"
+  else ok "SMS via generic gateway"; fi
+else
+  warn "SMS not configured: messages are only logged; patient cabinet login works only for Telegram-linked patients"
+fi
+
+echo "== Online payments (optional)"
+check_provider() { # name key...
+  local name="$1"; shift
+  local set=0 total=$#
+  for k in "$@"; do [[ -n "$(val "$k")" ]] && set=$((set + 1)); done
+  if (( set == 0 )); then warn "$name disabled (no keys)"
+  elif (( set < total )); then bad "$name partly configured: set all of $* or none"
+  else ok "$name configured"; fi
+}
+check_provider Payme PAYME_MERCHANT_ID PAYME_KEY
+check_provider Click CLICK_SERVICE_ID CLICK_MERCHANT_ID CLICK_SECRET_KEY
+if [[ -n "$(val PAYME_KEY)" ]]; then
+  case "$(val PAYME_TEST_MODE)" in
+    true|1|yes) warn "PAYME_TEST_MODE=true: payments go to the Payme sandbox, switch to false for real money" ;;
+    *) ok "Payme in production mode" ;;
+  esac
+fi
 
 echo "== Domain & DNS"
 DOMAIN="$(val DOMAIN)"; EXTRA="$(val EXTRA_DOMAINS)"

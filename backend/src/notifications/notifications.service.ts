@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { PRERENDERED_TEMPLATES } from '../engagement/engagement.service';
+import { SmsSender } from './sms.sender';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
@@ -106,6 +107,7 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
+    private readonly smsSender: SmsSender,
   ) {
     this.initMailTransporter();
   }
@@ -2068,8 +2070,6 @@ export class NotificationsService {
   }
 
   private async deliverSms(job: any): Promise<boolean> {
-    const smsApiKey = this.configService.get<string>('SMS_API_KEY');
-    const smsApiUrl = this.configService.get<string>('SMS_API_URL');
     const clinic = await this.getClinicSettings();
     const payload = job.payload || {};
     const lang: 'uz' | 'ru' = payload.lang === 'ru' ? 'ru' : 'uz';
@@ -2106,25 +2106,9 @@ export class NotificationsService {
       message = payload.text;
     }
 
-    if (smsApiKey && smsApiUrl) {
+    if (this.smsSender.isConfigured()) {
       try {
-        const res = await fetch(smsApiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${smsApiKey}`,
-            'X-Idempotency-Key': job.deduplicationKey || job.id,
-          },
-          body: JSON.stringify({
-            recipient: job.recipient,
-            message,
-            idempotencyKey: job.deduplicationKey || job.id,
-          }),
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!res.ok) {
-          throw new Error(`SMS Provider error ${res.status}: ${await res.text()}`);
-        }
+        await this.smsSender.send(job.recipient, message, job.deduplicationKey || job.id);
         return true;
       } catch (e: any) {
         this.logger.warn(`SMS dispatch failed: ${this.sanitizeError(e?.message)}`);
@@ -2490,9 +2474,7 @@ export class NotificationsService {
     const smtpFrom = this.configService.get<string>('SMTP_FROM') || (clinic.email ? `${clinic.nameUz} <${clinic.email}>` : null);
     const emailConfigured = Boolean(smtpHost && smtpPort && smtpUser && smtpPass && smtpFrom);
 
-    const smsApiKey = this.configService.get<string>('SMS_API_KEY');
-    const smsApiUrl = this.configService.get<string>('SMS_API_URL');
-    const smsConfigured = Boolean(smsApiKey && smsApiUrl);
+    const smsConfigured = this.smsSender.isConfigured();
 
     const tgToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     const tgChatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
@@ -2512,7 +2494,7 @@ export class NotificationsService {
       },
       sms: {
         configured: smsConfigured,
-        provider: 'Eskiz / SMS Gateway',
+        provider: this.smsSender.describe(),
         status: smsConfigured ? 'configured' : 'missing_configuration',
         mode: smsConfigured ? 'real' : 'simulated',
       },

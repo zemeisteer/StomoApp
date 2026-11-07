@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { AuditModule } from '../src/audit/audit.module';
+import { SmsSender } from '../src/notifications/sms.sender';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -20,7 +21,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
     PrismaModule,
     AuditModule,
   ],
-  providers: [NotificationsService],
+  providers: [NotificationsService, SmsSender],
 })
 export class MaintenanceModule {}
 

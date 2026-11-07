@@ -13,6 +13,7 @@ import { NotificationsService } from '../src/notifications/notifications.service
 import { AppointmentsService } from '../src/appointments/appointments.service';
 import { ServicesService } from '../src/services/services.service';
 import { EngagementService } from '../src/engagement/engagement.service';
+import { SmsSender } from '../src/notifications/sms.sender';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { parseArgs, sanitizeDatabaseUrl, runMaintenanceCli } from '../scripts/repair-reminders';
@@ -8382,6 +8383,71 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
       await prisma.patient.deleteMany({ where: { id: { in: patientIds } } });
       await prisma.inventoryItem.delete({ where: { id: item.id } });
+    }
+  });
+  it('Regression 76: Eskiz SMS adapter logs in once, reuses the token, re-logs on 401 and keeps the generic gateway contract', async () => {
+    const sms = app.get(SmsSender);
+    const saved = { ...process.env };
+    const realFetch = global.fetch;
+    const calls: Array<{ url: string; init: any }> = [];
+    let sendStatus = 200;
+    let logins = 0;
+    global.fetch = (async (url: any, init: any) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith('/auth/login')) {
+        logins++;
+        return new Response(JSON.stringify({ data: { token: `tok${logins}` } }), { status: 200 });
+      }
+      if (String(url).endsWith('/message/sms/send')) {
+        const status = sendStatus;
+        sendStatus = 200;
+        return new Response(JSON.stringify({ id: 'x', status: 'waiting' }), { status });
+      }
+      return new Response('{}', { status: 200 });
+    }) as any;
+    try {
+      // Eskiz is chosen only when its login is configured
+      Object.assign(process.env, { SMS_PROVIDER: 'eskiz', SMS_API_URL: '', SMS_API_KEY: '' });
+      delete process.env.ESKIZ_EMAIL;
+      delete process.env.ESKIZ_PASSWORD;
+      expect(sms.isConfigured()).toBe(false);
+      Object.assign(process.env, { ESKIZ_EMAIL: 'clinic@example.uz', ESKIZ_PASSWORD: 'secret', ESKIZ_FROM: '4546' });
+      (sms as any).eskizToken = null;
+      expect(sms.isConfigured()).toBe(true);
+      expect(sms.provider).toBe('eskiz');
+
+      await sms.send('+998 90 123 45 67', 'Salom');
+      await sms.send('+998901234567', 'Ikkinchi');
+      expect(logins).toBe(1);
+      const send1 = calls.find((c) => c.url.endsWith('/message/sms/send'))!;
+      expect(send1.url).toBe('https://notify.eskiz.uz/api/message/sms/send');
+      expect(send1.init.headers.Authorization).toBe('Bearer tok1');
+      const form = new URLSearchParams(send1.init.body.toString());
+      expect(form.get('mobile_phone')).toBe('998901234567');
+      expect(form.get('message')).toBe('Salom');
+      expect(form.get('from')).toBe('4546');
+
+      // Expired token: one re-login, then success
+      sendStatus = 401;
+      await sms.send('+998901234567', 'Uchinchi');
+      expect(logins).toBe(2);
+      expect(calls.filter((c) => c.url.endsWith('/message/sms/send')).pop()!.init.headers.Authorization).toBe('Bearer tok2');
+
+      // Provider error surfaces so the outbox retries
+      sendStatus = 500;
+      await expect(sms.send('+998901234567', 'Xato')).rejects.toThrow(/Eskiz error 500/);
+
+      // Generic gateway: unchanged JSON contract
+      Object.assign(process.env, { SMS_PROVIDER: 'generic', SMS_API_URL: 'https://sms.example.uz/send', SMS_API_KEY: 'gw-key' });
+      calls.length = 0;
+      await sms.send('+998901234567', 'Generic', 'idem-1');
+      expect(calls[0].url).toBe('https://sms.example.uz/send');
+      expect(calls[0].init.headers.Authorization).toBe('Bearer gw-key');
+      expect(JSON.parse(calls[0].init.body)).toEqual({ recipient: '+998901234567', message: 'Generic', idempotencyKey: 'idem-1' });
+    } finally {
+      global.fetch = realFetch;
+      process.env = saved;
+      (sms as any).eskizToken = null;
     }
   });
 });

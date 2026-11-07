@@ -107,13 +107,15 @@ cd frontend && npm run dev
 
 ## 🐳 Production Deployment with Docker Compose
 
+> Step-by-step server guide in Uzbek (VPS, DNS, Telegram, Eskiz, Payme/Click, launch checklist, backups): **[DEPLOY.md](DEPLOY.md)**
+
 The repository includes multi-stage production Dockerfiles and an orchestration profile:
 
 Prerequisites: DNS A/AAAA records for `DOMAIN` (and every `EXTRA_DOMAINS` entry) point to the server, and ports 80/443 are open.
 
 ```bash
 # 1. Create .env.production with fresh random secrets, then fill in the provider values
-#    (SMS_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_BOT_USERNAME)
+#    (ESKIZ_EMAIL/ESKIZ_PASSWORD, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_BOT_USERNAME)
 ./scripts/generate-env.sh dentacare.uz admin@dentacare.uz
 
 # 1b. Check DNS, ports, Docker, secrets and the compose file (read-only)
@@ -147,7 +149,7 @@ HTTPS is required in production: auth cookies are issued with the `Secure` flag,
 
 ### Patient cabinet
 
-Patients sign in at `https://DOMAIN/kabinet` with their phone number and a one-time code. The code is sent through the patient Telegram bot when the patient linked it, otherwise by SMS, so `SMS_API_URL` and `SMS_API_KEY` must be set in production for patients without Telegram.
+Patients sign in at `https://DOMAIN/kabinet` with their phone number and a one-time code. The code is sent through the patient Telegram bot when the patient linked it, otherwise by SMS, so SMS (`ESKIZ_EMAIL`/`ESKIZ_PASSWORD`, or a generic gateway via `SMS_PROVIDER=generic`, `SMS_API_URL`, `SMS_API_KEY`) must be configured in production for patients without Telegram.
 
 ### Online payments (Payme / Click, optional)
 

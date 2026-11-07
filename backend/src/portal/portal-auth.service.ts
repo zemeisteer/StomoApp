@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { SmsSender } from '../notifications/sms.sender';
 
 export const PORTAL_COOKIE = 'patient_session';
 export const PORTAL_SESSION_DAYS = 7;
@@ -26,11 +27,14 @@ export function normalizeUzPhone(input: unknown): string | null {
 @Injectable()
 export class PortalAuthService {
   private readonly logger = new Logger(PortalAuthService.name);
+  // Private instance: secret and audience are passed per call. Not registered in DI, so the
+  // staff JwtService resolved elsewhere (app.get(JwtService)) is never this unkeyed one.
+  private readonly jwt = new JwtService({});
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly sms: SmsSender,
   ) {}
 
   /** Separate key from staff tokens: a staff JWT can never be replayed as a patient session. */
@@ -121,19 +125,13 @@ export class PortalAuthService {
       }
     }
 
-    const smsApiKey = this.config.get<string>('SMS_API_KEY');
-    const smsApiUrl = this.config.get<string>('SMS_API_URL');
-    if (smsApiKey && smsApiUrl) {
-      const res = await fetch(smsApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${smsApiKey}` },
-        body: JSON.stringify({ recipient: phone, message: text }),
-        signal: AbortSignal.timeout(5000),
-      }).catch((e) => {
+    if (this.sms.isConfigured()) {
+      try {
+        await this.sms.send(phone, text);
+      } catch (e) {
         this.logger.error(`Portal code SMS failed: ${(e as Error).message}`);
-        return null;
-      });
-      if (!res || !res.ok) throw new ServiceUnavailableException("Kodni yuborib bo'lmadi. Birozdan keyin urinib ko'ring");
+        throw new ServiceUnavailableException("Kodni yuborib bo'lmadi. Birozdan keyin urinib ko'ring");
+      }
       return 'SMS';
     }
 
