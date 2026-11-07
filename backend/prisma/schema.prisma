@@ -86,6 +86,8 @@ model Branch {
   schedules    DoctorSchedule[]
   exceptions   ScheduleException[]
 
+  staff StaffUser[]
+
   @@map("branches")
 }
 
@@ -111,6 +113,10 @@ model StaffUser {
   role         StaffRole @default(ADMIN)
   isActive     Boolean   @default(true) @map("is_active")
   lastLoginAt  DateTime? @map("last_login_at")
+
+  // Branch the person works in. Null = all branches (owners are never limited).
+  branchId String? @map("branch_id")
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   // Link to doctor profile if role is DOCTOR
   doctorId String? @unique @map("doctor_id")

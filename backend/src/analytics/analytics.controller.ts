@@ -6,6 +6,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { JwtPayload } from '../auth/auth.service';
+import { staffBranch } from '../common/branch-scope';
 import { StaffRole } from '@prisma/client';
 import { IsString, IsOptional, Length } from 'class-validator';
 
@@ -54,8 +57,13 @@ export class AnalyticsController {
   @Get('admin/dashboard')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(StaffRole.OWNER, StaffRole.ADMIN)
-  async getDashboard(@Query('from') from?: string, @Query('to') to?: string, @Query('branchId') branchId?: string) {
-    return this.dashboardService.summary(from, to, branchId);
+  async getDashboard(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('branchId') branchId?: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    return this.dashboardService.summary(from, to, staffBranch(user) || branchId);
   }
 
   @Get('admin/analytics/overview')

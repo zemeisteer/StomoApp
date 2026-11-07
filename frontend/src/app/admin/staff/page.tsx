@@ -30,16 +30,21 @@ export default function AdminStaffPage() {
   const [editDoctorId, setEditDoctorId] = useState('');
   const [editTelegramId, setEditTelegramId] = useState('');
   const [createPay, setCreatePay] = useState<PayTerms>(emptyStaffPay);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [createBranchId, setCreateBranchId] = useState('');
+  const [editBranchId, setEditBranchId] = useState('');
   const [editPay, setEditPay] = useState<PayTerms>(emptyStaffPay);
   const PERCENT_HINT = 'Foiz shu xodim kassada qabul qilgan puldan hisoblanadi.';
 
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [staffRes, docsRes] = await Promise.all([
+      const [staffRes, docsRes, branchRes] = await Promise.all([
         api.getStaffList(),
         api.getDoctors(),
+        api.getBranches().catch(() => []),
       ]);
+      setBranches((branchRes || []).filter((b: any) => b.isActive !== false));
       setStaffList(staffRes || []);
       setDoctors(docsRes || []);
     } catch (err: any) {
@@ -64,6 +69,7 @@ export default function AdminStaffPage() {
         fullName: createFullName.trim(),
         role: createRole,
         doctorId: createRole === 'DOCTOR' && createDoctorId ? createDoctorId : undefined,
+        branchId: createRole === 'OWNER' ? null : createBranchId || null,
       });
       const newId = created?.id || created?.data?.id;
       if (newId && createRole !== 'DOCTOR') await api.updateStaffPay(newId, payPayload(createPay));
@@ -93,6 +99,7 @@ export default function AdminStaffPage() {
         isActive: editIsActive,
         doctorId: editRole === 'DOCTOR' ? (editDoctorId || null) : null,
         telegramUserId: editTelegramId.trim() || null,
+        branchId: editRole === 'OWNER' ? null : editBranchId || null,
       });
       if (editRole !== 'DOCTOR') await api.updateStaffPay(editingStaff.id, payPayload(editPay));
       setEditingStaff(null);
@@ -244,6 +251,11 @@ export default function AdminStaffPage() {
                           >
                             {roleLabels[member.role] || member.role}
                           </span>
+                          {member.branchId && member.role !== 'OWNER' && (
+                            <span className="ml-1.5 whitespace-nowrap text-[11px] text-ink-muted">
+                              · {branches.find((b) => b.id === member.branchId)?.nameUz || 'Filial'}
+                            </span>
+                          )}
                         </td>
                         <td className="py-4 px-6 text-ink-muted">
                           {linkedDoc ? (
@@ -287,6 +299,7 @@ export default function AdminStaffPage() {
                               setEditIsActive(member.isActive);
                               setEditDoctorId(member.doctorId || '');
                               setEditTelegramId(member.telegramUserId || '');
+                              setEditBranchId(member.branchId || '');
                               setEditPay(emptyStaffPay);
                               api
                                 .getStaffPay()
@@ -400,6 +413,25 @@ export default function AdminStaffPage() {
                     />
                   )}
                 </div>
+
+
+                {createRole !== 'OWNER' && branches.length > 1 && (
+                  <div>
+                    <CustomSelect
+                      label="Filial"
+                      options={[
+                        { value: '', label: 'Barcha filiallar' },
+                        ...branches.map((b) => ({ value: b.id, label: b.nameUz })),
+                      ]}
+                      value={createBranchId}
+                      onChange={(val) => setCreateBranchId(val)}
+                    />
+                    <p className="mt-1 text-[11px] text-ink-muted">
+                      Filial tanlansa, xodim faqat shu filial qabullari, taqvimi, kassasi va statistikasini ko‘radi. Bemor kartasi umumiy:
+                      bemor boshqa filialga borsa, tarixi u yerda ham ko‘rinadi.
+                    </p>
+                  </div>
+                )}
 
                 {createRole === 'DOCTOR' ? (
                   <p className="rounded-xl bg-canvas p-3 text-[11px] text-ink-muted">Shifokor maoshi (foiz yoki oylik) Shifokorlar bo‘limida, shifokor profilida belgilanadi.</p>
@@ -516,6 +548,25 @@ export default function AdminStaffPage() {
                     o&apos;z qabullari jadvalini shu Telegram&apos;ga oladi. Bo&apos;sh qoldirilsa, bog&apos;lanish olib tashlanadi.
                   </p>
                 </div>
+
+
+                {editRole !== 'OWNER' && branches.length > 1 && (
+                  <div>
+                    <CustomSelect
+                      label="Filial"
+                      options={[
+                        { value: '', label: 'Barcha filiallar' },
+                        ...branches.map((b) => ({ value: b.id, label: b.nameUz })),
+                      ]}
+                      value={editBranchId}
+                      onChange={(val) => setEditBranchId(val)}
+                    />
+                    <p className="mt-1 text-[11px] text-ink-muted">
+                      Filial tanlansa, xodim faqat shu filial qabullari, taqvimi, kassasi va statistikasini ko‘radi. Bemor kartasi umumiy:
+                      bemor boshqa filialga borsa, tarixi u yerda ham ko‘rinadi.
+                    </p>
+                  </div>
+                )}
 
                 {editRole === 'DOCTOR' ? (
                   <p className="rounded-xl bg-canvas p-3 text-[11px] text-ink-muted">Shifokor maoshi (foiz yoki oylik) Shifokorlar bo‘limida, shifokor profilida belgilanadi.</p>

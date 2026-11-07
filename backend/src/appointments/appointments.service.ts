@@ -12,6 +12,7 @@ import { SchedulingService, resolveServiceIds } from '../scheduling/scheduling.s
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { AppointmentStatus, ExceptionType, NotificationChannel, NotificationStatus, Prisma, StaffRole } from '@prisma/client';
+import { assertSameBranch, staffBranch } from '../common/branch-scope';
 import { nanoid } from 'nanoid';
 import * as crypto from 'crypto';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
@@ -833,6 +834,7 @@ export class AppointmentsService {
     });
     if (!pre) throw new NotFoundException('Qabul topilmadi');
 
+    assertSameBranch(pre.branchId, user);
     const statusLockKeys = [
       getDoctorLockKey(pre.doctorId),
       ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
@@ -1096,6 +1098,7 @@ export class AppointmentsService {
       }
     }
 
+    assertSameBranch(pre.branchId, user);
     const startLockKeys = [
       getDoctorLockKey(pre.doctorId),
       ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
@@ -1205,6 +1208,7 @@ export class AppointmentsService {
       throw new BadRequestException('Noto\'g\'ri sana formati');
     }
 
+    assertSameBranch(pre.branchId, user);
     const rescheduleLockKeys = [
       getDoctorLockKey(pre.doctorId),
       ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
@@ -1500,6 +1504,7 @@ export class AppointmentsService {
       throw new BadRequestException('Tugallangan yoki bekor qilingan qabul davomiyligini o\'zgartirib bo\'lmaydi');
     }
 
+    assertSameBranch(pre.branchId, user);
     const durationLockKeys = [
       getDoctorLockKey(pre.doctorId),
       ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
@@ -1849,6 +1854,7 @@ export class AppointmentsService {
 
     if (status) where.status = status;
     if (branchId) where.branchId = branchId;
+    if (staffBranch(user)) where.branchId = staffBranch(user)!;
     if (serviceId) where.serviceId = serviceId;
     if (dateFrom || dateTo) {
       where.startTime = {};
@@ -1917,7 +1923,8 @@ export class AppointmentsService {
     },
     user?: { role: StaffRole; doctorId?: string | null },
   ) {
-    const { year, month, branchId, status } = params;
+    const { year, month, status } = params;
+    const branchId = staffBranch(user) || params.branchId;
     let doctorId = params.doctorId;
 
     if (user?.role === StaffRole.DOCTOR) {
@@ -2024,6 +2031,7 @@ export class AppointmentsService {
     const where: Prisma.AppointmentWhereInput = {
       startTime: { gte: startUtc, lte: endUtc },
     };
+    if (staffBranch(user)) where.branchId = staffBranch(user)!;
 
     if (user?.role === StaffRole.DOCTOR) {
       if (!user.doctorId) {
@@ -2073,6 +2081,8 @@ export class AppointmentsService {
         throw new ForbiddenException('Ushbu qabul sizga tegishli emas');
       }
     }
+
+    assertSameBranch(appointment.branchId, user);
 
     return appointment;
   }
@@ -2188,6 +2198,7 @@ export class AppointmentsService {
       }
     }
 
+    assertSameBranch(pre.branchId, user);
     const delayLockKeys = [
       getDoctorLockKey(pre.doctorId),
       ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),
@@ -2342,6 +2353,7 @@ export class AppointmentsService {
       if (pre.doctorId !== user.doctorId) throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
     }
 
+    assertSameBranch(pre.branchId, user);
     const clearLockKeys = [
       getDoctorLockKey(pre.doctorId),
       ...(pre.branchId ? [getBranchLockKey(pre.branchId)] : []),

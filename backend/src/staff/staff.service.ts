@@ -16,6 +16,7 @@ export class StaffService {
     fullName: string;
     role: StaffRole;
     doctorId?: string;
+    branchId?: string | null;
     telegramUserId?: string | null;
   }) {
     const existing = await this.prisma.staffUser.findUnique({
@@ -26,6 +27,7 @@ export class StaffService {
     }
 
     await this.assertTelegramIdFree(this.prisma, data.telegramUserId);
+    await this.assertBranch(this.prisma, data.branchId);
 
     const passwordHash = await this.authService.hashPassword(data.password);
 
@@ -36,6 +38,7 @@ export class StaffService {
         fullName: data.fullName,
         role: data.role,
         doctorId: data.doctorId,
+        branchId: data.role === StaffRole.OWNER ? null : data.branchId || null,
         telegramUserId: data.telegramUserId || null,
       },
       select: {
@@ -64,6 +67,12 @@ export class StaffService {
     }
   }
 
+  private async assertBranch(client: Prisma.TransactionClient | PrismaService, branchId: string | null | undefined) {
+    if (!branchId) return;
+    const branch = await client.branch.findUnique({ where: { id: branchId }, select: { id: true } });
+    if (!branch) throw new BadRequestException('Filial topilmadi');
+  }
+
   async findAll() {
     return this.prisma.staffUser.findMany({
       select: {
@@ -74,6 +83,7 @@ export class StaffService {
         isActive: true,
         lastLoginAt: true,
         doctorId: true,
+        branchId: true,
         telegramUserId: true,
         createdAt: true,
       },
@@ -92,6 +102,7 @@ export class StaffService {
         isActive: true,
         lastLoginAt: true,
         doctorId: true,
+        branchId: true,
         telegramUserId: true,
         createdAt: true,
       },
@@ -105,6 +116,7 @@ export class StaffService {
     role?: StaffRole;
     isActive?: boolean;
     doctorId?: string | null;
+    branchId?: string | null;
     telegramUserId?: string | null;
   }) {
     return this.prisma.$transaction(async (tx) => {
@@ -138,6 +150,9 @@ export class StaffService {
       }
 
       await this.assertTelegramIdFree(tx, data.telegramUserId, id);
+      await this.assertBranch(tx, data.branchId);
+      // Owners always see every branch
+      if ((data.role ?? user.role) === StaffRole.OWNER) data.branchId = null;
 
       // Invalidate sessions immediately if role changed or staff disabled
       const roleChanged = data.role !== undefined && data.role !== user.role;
@@ -158,6 +173,7 @@ export class StaffService {
           role: true,
           isActive: true,
           doctorId: true,
+          branchId: true,
           telegramUserId: true,
         },
       });

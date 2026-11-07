@@ -15,6 +15,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { api } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import { doctorName, formatUzs } from '../../lib/clinicFormat';
 import { getClinicTodayDateString } from '../../lib/dateFormat';
 
@@ -63,6 +64,9 @@ export function ClinicDashboard({ lang }: { lang: Lang }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
+  // A branch-bound admin always sees their own branch (the server enforces this as well)
+  const lockedBranch = user?.role !== 'OWNER' ? user?.branchId || '' : '';
   const [branchId, setBranchId] = useState('');
   const [branchList, setBranchList] = useState<any[]>([]);
 
@@ -135,7 +139,7 @@ export function ClinicDashboard({ lang }: { lang: Lang }) {
         )}
       </div>
 
-      {branchList.length > 1 && (
+      {branchList.length > 1 && !lockedBranch && (
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={L('Filial', 'Филиал')}>
           {[{ id: '', nameUz: 'Barcha filiallar', nameRu: 'Все филиалы' }, ...branchList].map((b) => (
             <button

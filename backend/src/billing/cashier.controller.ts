@@ -7,6 +7,7 @@ import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { CashierService } from './cashier.service';
+import { staffBranch } from '../common/branch-scope';
 
 const MAX_CASH = 10_000_000_000;
 
@@ -50,8 +51,8 @@ export class CashierController {
 
   @Get('summary')
   @Roles(...DESK)
-  summary(@Query('date') date?: string) {
-    return this.cashier.summary(date);
+  summary(@Query('date') date?: string, @CurrentUser() user?: JwtPayload) {
+    return this.cashier.summary(date, staffBranch(user), user?.sub);
   }
 
   @Get('shifts')

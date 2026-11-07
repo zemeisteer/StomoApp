@@ -29,6 +29,11 @@ class CreateStaffDto {
   doctorId?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.branchId !== null)
+  @IsString()
+  branchId?: string | null;
+
+  @IsOptional()
   @ValidateIf((o) => o.telegramUserId !== null)
   @IsString()
   @Matches(TELEGRAM_ID_PATTERN, { message: TELEGRAM_ID_MESSAGE })
@@ -51,6 +56,11 @@ class UpdateStaffDto {
   @IsOptional()
   @IsString()
   doctorId?: string | null;
+
+  @IsOptional()
+  @ValidateIf((o) => o.branchId !== null)
+  @IsString()
+  branchId?: string | null;
 
   @IsOptional()
   @ValidateIf((o) => o.telegramUserId !== null)

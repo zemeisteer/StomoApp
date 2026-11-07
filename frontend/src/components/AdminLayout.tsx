@@ -443,7 +443,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, allowedRoles
               <div className="hidden md:flex items-center gap-1.5 h-8 px-3 text-ink-muted rounded-lg border border-line text-xs font-medium bg-white">
                 <Building2 className="w-3.5 h-3.5 text-ink-subtle" />
                 <span>
-                  {branches.length === 1
+                  {user?.role !== 'OWNER' && user?.branchId && branches.find((b: any) => b.id === user.branchId)
+                    ? (() => {
+                        const own = branches.find((b: any) => b.id === user.branchId);
+                        return isRu && own.nameRu ? own.nameRu : own.nameUz;
+                      })()
+                    : branches.length === 1
                     ? isRu
                       ? branches[0].nameRu
                       : branches[0].nameUz

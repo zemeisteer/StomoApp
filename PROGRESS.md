@@ -261,6 +261,12 @@ A new CI job builds the production images and runs the stack; it found the image
 - Public site: rotating 3D tooth back in the hero (loaded after the page), tighter spacing and smaller headings, price list grouped in category cards with a side index, 4-column doctor grid.
 - Tests: Regression 78 added; 93/93 passing.
 
+### Phase 21: Staff tied to a branch (2026-11-10)
+- A staff account can be tied to one branch (Staff form → "Filial"); owners never are. Migration `20261110120000_staff_branch`.
+- Branch-bound staff see only their branch in the visit list, calendar, today view, month counts, dashboard and cash-desk day summary; opening or changing another branch's visit returns 403. Enforced on the server (`common/branch-scope.ts`), mirrored in the UI (locked branch filters, own branch in the header).
+- The patient card stays clinic-wide, so a patient who moves to another branch keeps their history there.
+- Tests: Regression 79; 94/94 passing.
+
 ---
 
 ## 2. Test Verification Matrix

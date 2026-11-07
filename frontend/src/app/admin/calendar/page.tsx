@@ -105,6 +105,11 @@ export default function AdminCalendarPage() {
   // Navigation & Filter states
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  // Branch-bound staff work inside their own branch only; the server enforces it too.
+  const lockedBranchId = user?.role !== 'OWNER' ? user?.branchId || '' : '';
+  useEffect(() => {
+    if (lockedBranchId) setSelectedBranchId(lockedBranchId);
+  }, [lockedBranchId]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
   const [isInboxMode, setIsInboxMode] = useState<boolean>(false);
@@ -292,7 +297,7 @@ export default function AdminCalendarPage() {
               ...prev,
               doctorId: user?.role === 'DOCTOR' && user.doctorId ? user.doctorId : docsRes[0].id,
               serviceId: servRes && servRes.length > 0 ? servRes[0].id : '',
-              branchId: branchRes && branchRes.length > 0 ? branchRes[0].id : '',
+              branchId: lockedBranchId || (branchRes && branchRes.length > 0 ? branchRes[0].id : ''),
             };
           });
         }
@@ -914,7 +919,7 @@ export default function AdminCalendarPage() {
         patientEmail: '',
         doctorId: doctors[0]?.id || '',
         serviceId: services[0]?.id || '',
-        branchId: branches[0]?.id || '',
+        branchId: lockedBranchId || branches[0]?.id || '',
         date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()),
         time: '09:00',
         note: '',
@@ -1313,7 +1318,8 @@ export default function AdminCalendarPage() {
             {/* Branch filter */}
             <CustomSelect
               options={branchOptions}
-              value={selectedBranchId}
+              disabled={Boolean(lockedBranchId)}
+              value={lockedBranchId || selectedBranchId}
               onChange={(val) => {
                 setSelectedBranchId(val);
                 setCurrentPage(1);
@@ -2440,6 +2446,7 @@ export default function AdminCalendarPage() {
                       })),
                     ]}
                     value={createForm.branchId}
+                    disabled={Boolean(lockedBranchId)}
                     onChange={(val) => setCreateForm({ ...createForm, branchId: val })}
                     placeholder="Filialni tanlang..."
                   />

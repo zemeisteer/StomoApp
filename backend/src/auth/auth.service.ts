@@ -13,6 +13,8 @@ export interface JwtPayload {
   email: string;
   role: StaffRole;
   doctorId?: string | null;
+  /** Branch the staff member is limited to; null/undefined = all branches. */
+  branchId?: string | null;
   tokenVersion?: number;
   jti?: string;
 }

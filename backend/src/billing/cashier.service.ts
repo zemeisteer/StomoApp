@@ -40,14 +40,26 @@ export class CashierService {
   }
 
   /** Day report for the cash desk, in clinic-local time. */
-  async summary(date?: string) {
+  /** Day summary; with `branchId`, only payments for visits of that branch (plus the desk user's own). */
+  async summary(date?: string, branchId?: string | null, userId?: string) {
     const tz = await this.timezone();
     const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : formatInTimeZone(new Date(), tz, 'yyyy-MM-dd');
     const from = fromZonedTime(`${day} 00:00:00`, tz);
     const to = new Date(from.getTime() + 24 * 60 * 60 * 1000);
 
     const payments = await this.prisma.payment.findMany({
-      where: { recordedAt: { gte: from, lt: to } },
+      where: {
+        recordedAt: { gte: from, lt: to },
+        ...(branchId
+          ? {
+              OR: [
+                { appointment: { branchId } },
+                { invoice: { appointment: { branchId } } },
+                ...(userId ? [{ recordedById: userId }] : []),
+              ],
+            }
+          : {}),
+      },
       include: {
         patient: { select: { id: true, fullName: true, phone: true } },
         invoice: { select: { id: true, notes: true } },

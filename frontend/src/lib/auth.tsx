@@ -12,6 +12,8 @@ export interface StaffUserProfile {
   fullName?: string | null;
   role: StaffRole;
   doctorId?: string | null;
+  /** Branch this staff member is limited to (null = all branches). */
+  branchId?: string | null;
 }
 
 interface AuthContextType {

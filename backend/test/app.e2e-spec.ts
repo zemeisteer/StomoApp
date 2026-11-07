@@ -8605,4 +8605,60 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.staffUser.delete({ where: { id: recUser.id } }).catch(() => {});
     }
   });
+
+  it('Regression 79: Staff tied to a branch only see and change that branch; patient card stays shared', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg79_${Date.now()}`;
+    const branch2 = await prisma.branch.create({ data: { nameUz: `${tag} filial`, nameRu: `${tag} филиал`, addressUz: 'Toshkent', addressRu: 'Ташкент' } });
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg79 Bemor', phone: '+998900007979' } });
+    const start = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const mk = (suffix: string, branchId: string) =>
+      prisma.appointment.create({
+        data: {
+          publicToken: `${tag}_${suffix}`, patientId: patient.id, doctorId: testDoctorAId, serviceId: testServiceId, branchId,
+          status: AppointmentStatus.PENDING, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+          serviceName: 'Reg79', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+        },
+      });
+    const inMain = await mk('main', testBranchId);
+    const inSecond = await mk('second', branch2.id);
+    const recUser = await prisma.staffUser.create({
+      data: { email: `${tag}@reception.local`, passwordHash: await bcrypt.hash('Reception2026!x', 10), fullName: 'Reg79 Qabulxona', role: StaffRole.RECEPTION },
+    });
+    try {
+      // Owner ties the receptionist to branch 2 (unknown branch is rejected)
+      await http().put(`/api/admin/staff/${recUser.id}`).set(auth(adminToken)).send({ branchId: 'no-such-branch' }).expect(400);
+      const upd = await http().put(`/api/admin/staff/${recUser.id}`).set(auth(adminToken)).send({ branchId: branch2.id }).expect(200);
+      expect(upd.body.branchId).toBe(branch2.id);
+
+      const recToken = (await http().post('/api/auth/login').send({ email: recUser.email, password: 'Reception2026!x' }).expect(200)).body.accessToken;
+      expect((await http().get('/api/auth/me').set(auth(recToken)).expect(200)).body.branchId).toBe(branch2.id);
+
+      // List is limited to branch 2 even when another branch is asked for
+      const list = (await http().get(`/api/admin/appointments?search=Reg79&branchId=${testBranchId}&limit=50`).set(auth(recToken)).expect(200)).body;
+      const ids = (list.items || list.data || list).map((a: any) => a.id);
+      expect(ids).toContain(inSecond.id);
+      expect(ids).not.toContain(inMain.id);
+
+      // Other branch's visit: cannot open or change it
+      await http().get(`/api/admin/appointments/${inMain.id}`).set(auth(recToken)).expect(403);
+      await http().patch(`/api/admin/appointments/${inMain.id}/status`).set(auth(recToken)).send({ status: 'CONFIRMED' }).expect(403);
+      await http().get(`/api/admin/appointments/${inSecond.id}`).set(auth(recToken)).expect(200);
+
+      // The patient card is shared: visible from branch 2 with its full history
+      await http().get(`/api/admin/patients/${patient.id}`).set(auth(recToken)).expect(200);
+
+      // Owner is never limited, even if a branch is sent
+      const owner = await prisma.staffUser.findFirst({ where: { role: StaffRole.OWNER, isActive: true } });
+      const ownerUpd = await http().put(`/api/admin/staff/${owner!.id}`).set(auth(adminToken)).send({ branchId: branch2.id }).expect(200);
+      expect(ownerUpd.body.branchId ?? null).toBeNull();
+      await http().get(`/api/admin/appointments/${inMain.id}`).set(auth(adminToken)).expect(200);
+    } finally {
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+      await prisma.staffUser.delete({ where: { id: recUser.id } }).catch(() => {});
+      await prisma.branch.delete({ where: { id: branch2.id } }).catch(() => {});
+    }
+  });
 });

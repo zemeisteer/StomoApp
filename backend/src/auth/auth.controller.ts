@@ -135,6 +135,7 @@ export class AuthController {
       email: user.email,
       role: user.role,
       doctorId: user.doctorId,
+      branchId: user.branchId ?? null,
     };
   }
 }
