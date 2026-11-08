@@ -23,6 +23,8 @@ import { useBrand } from '../lib/brand';
 import { CallbackModal } from './CallbackModal';
 import { api } from '../lib/api';
 
+const SHOW_CABINET = process.env.NEXT_PUBLIC_SHOW_PATIENT_CABINET === 'true';
+
 export const Header: React.FC = () => {
   const pathname = usePathname();
   const { language, setLanguage, t } = useI18n();
@@ -299,7 +301,8 @@ export const Header: React.FC = () => {
               </button>
             </div>
 
-            {/* Patient cabinet */}
+            {/* Patient cabinet: hidden by default; patients reach it from SMS payment/plan links */}
+            {SHOW_CABINET && (
             <Link
               href="/kabinet"
               className="hidden md:inline-flex items-center gap-1.5 px-2 text-[14px] font-medium text-ink-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 rounded-full"
@@ -308,6 +311,7 @@ export const Header: React.FC = () => {
               <UserRound className="w-4 h-4" />
               <span className="hidden xl:inline">{language === 'ru' ? 'Кабинет' : 'Kabinet'}</span>
             </Link>
+            )}
 
             {/* Book Appointment CTA Button (Desktop) */}
             <Link
@@ -450,6 +454,7 @@ export const Header: React.FC = () => {
                   <span>{t.common.bookAppointment}</span>
                 </Link>
 
+                {SHOW_CABINET && (
                 <Link
                   href="/kabinet"
                   onClick={() => setMobileMenuOpen(false)}
@@ -458,6 +463,7 @@ export const Header: React.FC = () => {
                   <UserRound className="w-4 h-4 text-brand-600" />
                   <span>{language === 'ru' ? 'Личный кабинет' : 'Shaxsiy kabinet'}</span>
                 </Link>
+                )}
 
                 {clinicPhone && (
                   <a

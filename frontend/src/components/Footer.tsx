@@ -42,7 +42,7 @@ export const Footer: React.FC = () => {
     { href: '/about', label: t.nav.about },
     { href: '/faq', label: 'FAQ' },
     { href: '/contacts', label: t.nav.contacts },
-    { href: '/kabinet', label: L('Shaxsiy kabinet', 'Личный кабинет') },
+    ...(process.env.NEXT_PUBLIC_SHOW_PATIENT_CABINET === 'true' ? [{ href: '/kabinet', label: L('Shaxsiy kabinet', 'Личный кабинет') }] : []),
   ];
 
   return (
