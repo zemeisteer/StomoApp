@@ -16,7 +16,14 @@ export class OpenShiftDto {
   @Min(0)
   @Max(MAX_CASH)
   openingCash!: number;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
+
+/** Branch-bound staff always work their own drawer; others may pick one (or the clinic-wide one). */
+const deskBranch = (user: JwtPayload | undefined, requested?: string) => staffBranch(user) || requested || null;
 
 export class CloseShiftDto {
   @IsInt()
@@ -51,20 +58,20 @@ export class CashierController {
 
   @Get('summary')
   @Roles(...DESK)
-  summary(@Query('date') date?: string, @CurrentUser() user?: JwtPayload) {
-    return this.cashier.summary(date, staffBranch(user), user?.sub);
+  summary(@Query('date') date?: string, @Query('branchId') branchId?: string, @CurrentUser() user?: JwtPayload) {
+    return this.cashier.summary(date, deskBranch(user, branchId));
   }
 
   @Get('shifts')
   @Roles(...DESK)
-  shifts(@Query('limit') limit?: string) {
-    return this.cashier.listShifts(limit ? parseInt(limit, 10) || 20 : 20);
+  shifts(@Query('limit') limit?: string, @Query('branchId') branchId?: string, @CurrentUser() user?: JwtPayload) {
+    return this.cashier.listShifts(limit ? parseInt(limit, 10) || 20 : 20, deskBranch(user, branchId));
   }
 
   @Post('shifts/open')
   @Roles(...DESK)
   open(@Body() dto: OpenShiftDto, @CurrentUser() user: JwtPayload) {
-    return this.cashier.openShift(dto.openingCash, user);
+    return this.cashier.openShift(dto.openingCash, user, deskBranch(user, dto.branchId));
   }
 
   @Post('shifts/:id/close')

@@ -8666,4 +8666,56 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.branch.delete({ where: { id: branch2.id } }).catch(() => {});
     }
   });
+
+  it('Regression 80: Each branch has its own cash drawer and shift; cash is counted in the drawer of the visit', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg80_${Date.now()}`;
+    await prisma.cashShift.updateMany({ where: { closedAt: null }, data: { closedAt: new Date() } });
+    const branch2 = await prisma.branch.create({ data: { nameUz: `${tag} filial`, nameRu: `${tag} филиал`, addressUz: 'Toshkent', addressRu: 'Ташкент' } });
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg80 Bemor', phone: '+998900008080' } });
+    const start = new Date(Date.now() - 60 * 60 * 1000);
+    const appt = await prisma.appointment.create({
+      data: {
+        publicToken: `${tag}_1`, patientId: patient.id, doctorId: testDoctorAId, serviceId: testServiceId, branchId: branch2.id,
+        status: AppointmentStatus.COMPLETED, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg80', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+      },
+    });
+    const invoice = await prisma.invoice.create({ data: { patientId: patient.id, appointmentId: appt.id, totalAmount: 70000 } });
+    const recUser = await prisma.staffUser.create({
+      data: { email: `${tag}@reception.local`, passwordHash: await bcrypt.hash('Reception2026!x', 10), fullName: 'Reg80 Kassir', role: StaffRole.RECEPTION, branchId: testBranchId },
+    });
+    try {
+      const recToken = (await http().post('/api/auth/login').send({ email: recUser.email, password: 'Reception2026!x' }).expect(200)).body.accessToken;
+
+      // Owner opens branch 2 drawer; the receptionist (tied to the main branch) opens theirs at the same time
+      const s2 = (await http().post('/api/admin/cashier/shifts/open').set(auth(adminToken)).send({ openingCash: 10000, branchId: branch2.id }).expect(201)).body;
+      expect(s2.branchId).toBe(branch2.id);
+      await http().post('/api/admin/cashier/shifts/open').set(auth(adminToken)).send({ openingCash: 0, branchId: branch2.id }).expect(409);
+      const s1 = (await http().post('/api/admin/cashier/shifts/open').set(auth(recToken)).send({ openingCash: 0, branchId: branch2.id }).expect(201)).body;
+      expect(s1.branchId).toBe(testBranchId); // a branch-bound user always gets their own drawer
+
+      // Cash for a branch 2 visit lands in the branch 2 drawer only
+      await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: invoice.id, amount: 70000, method: 'CASH' }).expect(201);
+      const sum2 = (await http().get(`/api/admin/cashier/summary?branchId=${branch2.id}`).set(auth(adminToken)).expect(200)).body;
+      expect(sum2.openShift.expectedCashUzs).toBe(10000 + 70000);
+      const sum1 = (await http().get('/api/admin/cashier/summary').set(auth(recToken)).expect(200)).body;
+      expect(sum1.openShift.id).toBe(s1.id);
+      expect(sum1.openShift.expectedCashUzs).toBe(0);
+
+      // The receptionist cannot close another branch's drawer
+      await http().post(`/api/admin/cashier/shifts/${s2.id}/close`).set(auth(recToken)).send({ countedCash: 80000 }).expect(403);
+      const closed = (await http().post(`/api/admin/cashier/shifts/${s2.id}/close`).set(auth(adminToken)).send({ countedCash: 80000 }).expect(201)).body;
+      expect(closed.differenceUzs).toBe(0);
+    } finally {
+      await prisma.cashShift.deleteMany({ where: { OR: [{ branchId: branch2.id }, { openedById: recUser.id }] } });
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.invoice.deleteMany({ where: { patientId: patient.id } });
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+      await prisma.staffUser.delete({ where: { id: recUser.id } }).catch(() => {});
+      await prisma.branch.delete({ where: { id: branch2.id } }).catch(() => {});
+    }
+  });
 });

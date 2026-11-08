@@ -952,26 +952,24 @@ export default function AdminOverviewPage() {
                   <label className="text-[11px] font-bold text-ink-muted block mb-1">
                     {isUz ? 'Qarzdor bemor' : 'Пациент с долгом'} <span className="text-red-500">*</span>
                   </label>
-                  <select
+                  <CustomSelect
                     value={debtPatientId}
-                    onChange={(e) => {
-                      const pId = e.target.value;
+                    searchable
+                    placeholder={isUz ? 'Bemorni tanlang' : 'Выберите пациента'}
+                    locale={isUz ? 'uz' : 'ru'}
+                    onChange={(pId) => {
                       setDebtPatientId(pId);
                       const pat = serverDebts.find((p) => p.patientId === pId);
                       if (pat) setDebtAmount(pat.totalDebt);
                     }}
-                    className="w-full px-3 py-2 bg-canvas border border-line rounded-xl text-ink focus:outline-none focus:border-brand-600 font-medium"
-                    required
-                  >
-                    <option value="">{isUz ? 'Bemorni tanlang' : 'Выберите пациента'}</option>
-                    {serverDebts
+                    options={serverDebts
                       .filter((p) => p.totalDebt > 0)
-                      .map((p) => (
-                        <option key={p.patientId} value={p.patientId}>
-                          {p.patientName} ({p.phone}) — {isUz ? 'Qarz:' : 'Долг:'} {p.totalDebt.toLocaleString()} {isUz ? "so'm" : "сум"}
-                        </option>
-                      ))}
-                  </select>
+                      .map((p) => ({
+                        value: p.patientId,
+                        label: `${p.patientName} (${p.phone})`,
+                        badge: `${p.totalDebt.toLocaleString()} ${isUz ? "so'm" : 'сум'}`,
+                      }))}
+                  />
                 </div>
 
                 {/* Repayment Amount */}

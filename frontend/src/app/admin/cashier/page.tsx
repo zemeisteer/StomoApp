@@ -33,11 +33,30 @@ export default function CashierPage() {
   const [shiftNote, setShiftNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [refund, setRefund] = useState<any>(null);
+  // Each branch has its own cash drawer. Branch-bound staff always use theirs.
+  const lockedBranch = user?.role !== 'OWNER' ? user?.branchId || '' : '';
+  const [branchList, setBranchList] = useState<any[]>([]);
+  const [deskBranch, setDeskBranch] = useState('');
+  const activeBranch = lockedBranch || deskBranch;
+  useEffect(() => {
+    api
+      .getBranches()
+      .then((rows: any[]) => {
+        const list = (rows || []).filter((b) => b.isActive !== false);
+        setBranchList(list);
+        if (list.length > 1) setDeskBranch((cur) => cur || list[0].id);
+      })
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [s, d, sh] = await Promise.all([api.getCashierSummary(date), api.getDebts(1, 8), api.getCashShifts(5)]);
+      const [s, d, sh] = await Promise.all([
+        api.getCashierSummary(date, activeBranch || undefined),
+        api.getDebts(1, 8),
+        api.getCashShifts(5, activeBranch || undefined),
+      ]);
       setSummary(s);
       setDebts(d?.items || []);
       setShifts(sh || []);
@@ -45,7 +64,7 @@ export default function CashierPage() {
       setError(e?.message || L("Ma'lumotlarni yuklab bo'lmadi", 'Не удалось загрузить данные'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date]);
+  }, [date, activeBranch]);
 
   useEffect(() => {
     if (user) load();
@@ -58,7 +77,7 @@ export default function CashierPage() {
     setBusy(true);
     setError(null);
     try {
-      if (shiftModal === 'open') await api.openCashShift(Number(cashInput) || 0);
+      if (shiftModal === 'open') await api.openCashShift(Number(cashInput) || 0, activeBranch || undefined);
       else if (shift) await api.closeCashShift(shift.id, Number(cashInput) || 0, shiftNote.trim() || undefined);
       setShiftModal(null);
       await load();
@@ -88,6 +107,29 @@ export default function CashierPage() {
             aria-label={L('Sana', 'Дата')}
           />
         </div>
+
+        {branchList.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label={L('Filial kassasi', 'Касса филиала')}>
+            {branchList
+              .filter((b) => !lockedBranch || b.id === lockedBranch)
+              .map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeBranch === b.id}
+                  disabled={Boolean(lockedBranch)}
+                  onClick={() => setDeskBranch(b.id)}
+                  className={`h-8 rounded-full px-3.5 text-[13px] font-medium transition-colors ${
+                    activeBranch === b.id ? 'bg-ink text-white' : 'border border-line bg-white text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  {lang === 'ru' && b.nameRu ? b.nameRu : b.nameUz}
+                </button>
+              ))}
+            <span className="ml-1 text-xs text-ink-subtle">{L('Har bir filialning o‘z kassasi va smenasi bor', 'У каждого филиала своя касса и смена')}</span>
+          </div>
+        )}
 
         {error && (
           <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">

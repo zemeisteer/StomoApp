@@ -781,10 +781,16 @@ export const api = {
     fetcher<any>(`/api/admin/dashboard?from=${from}&to=${to}${branchId ? `&branchId=${branchId}` : ''}`),
 
   // Cash desk, refunds, online payment links, plan invoicing
-  getCashierSummary: (date?: string) => fetcher<any>(`/api/admin/cashier/summary${date ? `?date=${date}` : ''}`),
-  getCashShifts: (limit = 10) => fetcher<any[]>(`/api/admin/cashier/shifts?limit=${limit}`),
-  openCashShift: (openingCash: number) =>
-    fetcher<any>('/api/admin/cashier/shifts/open', { method: 'POST', body: JSON.stringify({ openingCash }) }),
+  getCashierSummary: (date?: string, branchId?: string) => {
+    const q = new URLSearchParams();
+    if (date) q.set('date', date);
+    if (branchId) q.set('branchId', branchId);
+    return fetcher<any>(`/api/admin/cashier/summary${q.toString() ? `?${q}` : ''}`);
+  },
+  getCashShifts: (limit = 10, branchId?: string) =>
+    fetcher<any[]>(`/api/admin/cashier/shifts?limit=${limit}${branchId ? `&branchId=${branchId}` : ''}`),
+  openCashShift: (openingCash: number, branchId?: string) =>
+    fetcher<any>('/api/admin/cashier/shifts/open', { method: 'POST', body: JSON.stringify({ openingCash, branchId: branchId || undefined }) }),
   closeCashShift: (id: string, countedCash: number, note?: string) =>
     fetcher<any>(`/api/admin/cashier/shifts/${id}/close`, { method: 'POST', body: JSON.stringify({ countedCash, note }) }),
   refundPayment: (paymentId: string, payload: { amount?: number; reason: string }) =>

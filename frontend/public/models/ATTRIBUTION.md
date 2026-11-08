@@ -1,3 +1,16 @@
+# 3D tooth model
+
+## Replacing the model (no code changes)
+1. Download a GLB tooth model you are allowed to use (e.g. the CC-BY
+   [Mandibular Third Molar](https://sketchfab.com/3d-models/mandibular-third-molar-561bb06b3b084b84978163906de1c2b5)
+   — sign in on Sketchfab, "Download 3D Model" → glTF/GLB).
+2. Save it as `frontend/public/models/tooth.glb` (replace the current file).
+3. For CC-BY models, set the credit in the frontend env so the hero shows it:
+   `NEXT_PUBLIC_TOOTH_MODEL_CREDIT="Mandibular Third Molar by <author> (CC BY 4.0)"`
+4. Rebuild the frontend. The viewer centres and frames any model automatically.
+
+---
+
 # 3D Dental Model Verification & Attribution
 
 ## Status: REPLACEMENT BLOCKED (Manual Download Required)

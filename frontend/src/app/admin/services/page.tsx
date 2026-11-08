@@ -822,16 +822,17 @@ export default function AdminServicesPage() {
                   Shu xizmatdan keyin bemor qancha vaqtdan so&apos;ng ko&apos;rikka chaqirilsin (Qayta chaqirish bo&apos;limi va avtomatik eslatma uchun).
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={formData.recallMode}
-                    onChange={(e) => setFormData({ ...formData, recallMode: e.target.value as any })}
-                    className="h-9 rounded-lg border border-line bg-white px-2 text-xs"
-                    aria-label="Qayta chaqirish turi"
-                  >
-                    <option value="default">Klinika standarti (Sozlamalar)</option>
-                    <option value="custom">O&apos;z muddati</option>
-                    <option value="never">Chaqirilmasin</option>
-                  </select>
+                  <div className="w-60">
+                    <CustomSelect
+                      value={formData.recallMode}
+                      onChange={(v) => setFormData({ ...formData, recallMode: v as any })}
+                      options={[
+                        { value: 'default', label: 'Klinika standarti (Sozlamalar)' },
+                        { value: 'custom', label: 'O‘z muddati' },
+                        { value: 'never', label: 'Chaqirilmasin' },
+                      ]}
+                    />
+                  </div>
                   {formData.recallMode === 'custom' && (
                     <>
                       <input
@@ -843,15 +844,22 @@ export default function AdminServicesPage() {
                         className="h-9 w-20 rounded-lg border border-line bg-white px-2 text-xs"
                         aria-label="Muddat"
                       />
-                      <select
-                        value={formData.recallUnit}
-                        onChange={(e) => setFormData({ ...formData, recallUnit: e.target.value as any })}
-                        className="h-9 rounded-lg border border-line bg-white px-2 text-xs"
-                        aria-label="Birlik"
-                      >
-                        <option value="days">kundan keyin</option>
-                        <option value="months">oydan keyin</option>
-                      </select>
+                      <div className="inline-flex rounded-lg border border-line bg-canvas p-0.5">
+                        {([
+                          ['days', 'kundan keyin'],
+                          ['months', 'oydan keyin'],
+                        ] as const).map(([v, label]) => (
+                          <button
+                            key={v}
+                            type="button"
+                            aria-pressed={formData.recallUnit === v}
+                            onClick={() => setFormData({ ...formData, recallUnit: v as any })}
+                            className={`h-8 rounded-md px-2.5 text-xs font-semibold ${formData.recallUnit === v ? 'bg-white text-ink shadow-sm' : 'text-ink-muted'}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                     </>
                   )}
                 </div>

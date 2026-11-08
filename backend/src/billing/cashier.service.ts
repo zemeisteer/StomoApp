@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/auth.service';
 import { lockInvoice, refreshInvoiceStatus } from './invoice-ledger';
+import { assertSameBranch } from '../common/branch-scope';
 
 const METHODS = Object.values(PaymentMethod);
 
@@ -20,11 +21,34 @@ export class CashierService {
     return s?.timezone || 'Asia/Tashkent';
   }
 
-  /** Net cash received in [from, to): cash payments minus cash refunds. */
-  private async netCash(from: Date, to: Date) {
+  /**
+   * Payments that belong to a branch's cash desk: those for a visit in that branch, and, when a
+   * payment has no visit (plan invoices, walk-ins), those taken by staff tied to that branch.
+   */
+  async branchPaymentWhere(branchId: string): Promise<Prisma.PaymentWhereInput> {
+    const staff = await this.prisma.staffUser.findMany({ where: { branchId }, select: { id: true } });
+    return {
+      OR: [
+        { appointment: { branchId } },
+        { invoice: { appointment: { branchId } } },
+        ...(staff.length
+          ? [
+              {
+                appointmentId: null,
+                OR: [{ invoiceId: null }, { invoice: { appointmentId: null } }],
+                recordedById: { in: staff.map((s) => s.id) },
+              } as Prisma.PaymentWhereInput,
+            ]
+          : []),
+      ],
+    };
+  }
+
+  /** Net cash received in [from, to): cash payments minus cash refunds (for one branch drawer if given). */
+  private async netCash(from: Date, to: Date, branchId?: string | null) {
     const rows = await this.prisma.payment.groupBy({
       by: ['isRefund'],
-      where: { method: PaymentMethod.CASH, recordedAt: { gte: from, lt: to } },
+      where: { method: PaymentMethod.CASH, recordedAt: { gte: from, lt: to }, ...(branchId ? await this.branchPaymentWhere(branchId) : {}) },
       _sum: { amount: true },
     });
     const inSum = rows.find((r) => !r.isRefund)?._sum.amount || 0;
@@ -41,7 +65,7 @@ export class CashierService {
 
   /** Day report for the cash desk, in clinic-local time. */
   /** Day summary; with `branchId`, only payments for visits of that branch (plus the desk user's own). */
-  async summary(date?: string, branchId?: string | null, userId?: string) {
+  async summary(date?: string, branchId?: string | null) {
     const tz = await this.timezone();
     const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : formatInTimeZone(new Date(), tz, 'yyyy-MM-dd');
     const from = fromZonedTime(`${day} 00:00:00`, tz);
@@ -50,15 +74,7 @@ export class CashierService {
     const payments = await this.prisma.payment.findMany({
       where: {
         recordedAt: { gte: from, lt: to },
-        ...(branchId
-          ? {
-              OR: [
-                { appointment: { branchId } },
-                { invoice: { appointment: { branchId } } },
-                ...(userId ? [{ recordedById: userId }] : []),
-              ],
-            }
-          : {}),
+        ...(branchId ? await this.branchPaymentWhere(branchId) : {}),
       },
       include: {
         patient: { select: { id: true, fullName: true, phone: true } },
@@ -76,7 +92,7 @@ export class CashierService {
       else income += p.amount;
     }
     const names = await this.staffNames(payments.map((p) => p.recordedById));
-    const openShift = await this.currentShift();
+    const openShift = await this.currentShift(branchId);
 
     return {
       date: day,
@@ -98,16 +114,20 @@ export class CashierService {
     };
   }
 
-  async currentShift() {
-    const shift = await this.prisma.cashShift.findFirst({ where: { closedAt: null }, orderBy: { openedAt: 'desc' } });
+  async currentShift(branchId?: string | null) {
+    const shift = await this.prisma.cashShift.findFirst({ where: { closedAt: null, branchId: branchId || null }, orderBy: { openedAt: 'desc' } });
     if (!shift) return null;
-    const cashIn = await this.netCash(shift.openedAt, new Date(Date.now() + 1000));
+    const cashIn = await this.netCash(shift.openedAt, new Date(Date.now() + 1000), shift.branchId);
     const names = await this.staffNames([shift.openedById]);
     return { ...shift, openedBy: names.get(shift.openedById) || null, cashInUzs: cashIn, expectedCashUzs: shift.openingCash + cashIn };
   }
 
-  async listShifts(limit = 20) {
-    const shifts = await this.prisma.cashShift.findMany({ orderBy: { openedAt: 'desc' }, take: Math.min(100, Math.max(1, limit)) });
+  async listShifts(limit = 20, branchId?: string | null) {
+    const shifts = await this.prisma.cashShift.findMany({
+      where: branchId !== undefined ? { branchId: branchId || null } : {},
+      orderBy: { openedAt: 'desc' },
+      take: Math.min(100, Math.max(1, limit)),
+    });
     const names = await this.staffNames(shifts.flatMap((s) => [s.openedById, s.closedById]));
     return shifts.map((s) => ({
       ...s,
@@ -117,11 +137,15 @@ export class CashierService {
     }));
   }
 
-  async openShift(openingCash: number, user: JwtPayload) {
+  async openShift(openingCash: number, user: JwtPayload, branchId?: string | null) {
     try {
-      const shift = await this.prisma.cashShift.create({ data: { openedById: user.sub, openingCash } });
-      await this.audit.log({ userId: user.sub, action: 'cashier.shift_opened', entity: 'CashShift', entityId: shift.id, details: { openingCash } });
-      return this.currentShift();
+      if (branchId) {
+        const branch = await this.prisma.branch.findUnique({ where: { id: branchId }, select: { id: true } });
+        if (!branch) throw new BadRequestException('Filial topilmadi');
+      }
+      const shift = await this.prisma.cashShift.create({ data: { openedById: user.sub, openingCash, branchId: branchId || null } });
+      await this.audit.log({ userId: user.sub, action: 'cashier.shift_opened', entity: 'CashShift', entityId: shift.id, details: { openingCash, branchId: branchId || null } });
+      return this.currentShift(branchId);
     } catch (e) {
       // Partial unique index allows a single open shift
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -135,8 +159,9 @@ export class CashierService {
     const shift = await this.prisma.cashShift.findUnique({ where: { id } });
     if (!shift) throw new NotFoundException('Smena topilmadi');
     if (shift.closedAt) throw new BadRequestException('Smena allaqachon yopilgan');
+    assertSameBranch(shift.branchId, user);
     const closedAt = new Date();
-    const expected = shift.openingCash + (await this.netCash(shift.openedAt, closedAt));
+    const expected = shift.openingCash + (await this.netCash(shift.openedAt, closedAt, shift.branchId));
     const res = await this.prisma.cashShift.updateMany({
       where: { id, closedAt: null },
       data: { closedAt, closedById: user.sub, countedCash, expectedCash: expected, note: note?.trim() || null },

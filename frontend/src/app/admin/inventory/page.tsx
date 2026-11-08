@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, AlertTriangle, History, Loader2, Minus, Package, Plus, Search } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
+import { CustomSelect } from '../../../components/CustomSelect';
 import { ModalDialog } from '../../../components/ModalDialog';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
@@ -358,13 +359,12 @@ function ItemDialog({ item, lang, onClose, onDone }: { item: any | null; lang: '
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[13px] font-medium text-ink">{L('Turi', 'Категория')}</span>
-            <select value={form.category} onChange={(e) => set('category', e.target.value)} className={field}>
-              {Object.entries(CATEGORIES).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v[lang]}
-                </option>
-              ))}
-            </select>
+            <CustomSelect
+              value={form.category}
+              onChange={(v) => set('category', v)}
+              options={Object.entries(CATEGORIES).map(([k, v]) => ({ value: k, label: (v as any)[lang] }))}
+              locale={lang}
+            />
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[13px] font-medium text-ink">{L("O'lchov birligi", 'Единица')}</span>

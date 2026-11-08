@@ -84,6 +84,11 @@ export const HeroSection: React.FC = () => {
                 }}
               />
               <Tooth3D chromeless className="absolute inset-0 h-full" />
+              {process.env.NEXT_PUBLIC_TOOTH_MODEL_CREDIT && (
+                <p className="pointer-events-none absolute bottom-3 left-4 text-[10px] text-ink-subtle">
+                  3D: {process.env.NEXT_PUBLIC_TOOTH_MODEL_CREDIT}
+                </p>
+              )}
             </div>
             <div className="pointer-events-none absolute -left-4 bottom-16 hidden rounded-2xl sm:block border border-line bg-white/90 px-5 py-4 shadow-card backdrop-blur sm:-left-8 hero-float">
               <p className="text-xs text-ink-subtle">{L('Qabulga yozilish', 'Запись на приём')}</p>

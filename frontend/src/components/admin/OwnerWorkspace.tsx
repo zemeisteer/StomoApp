@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { CustomSelect } from '../CustomSelect';
 import {
   DollarSign,
   AlertTriangle,
@@ -331,28 +332,17 @@ export function OwnerWorkspace({
 
                       <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-line">
                         <span className="text-xs text-ink-muted font-semibold">{isUz ? 'Ulush:' : 'Ставка:'}</span>
-                        <select
-                          value={currentRate !== undefined && currentRate !== null ? currentRate : ''}
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              handleUpdateDoctorCommissionRate(docId, Number(e.target.value));
-                            }
-                          }}
-                          className={`text-xs font-bold bg-transparent focus:outline-none cursor-pointer ${
-                            currentRate !== undefined && currentRate !== null ? 'text-brand-600' : 'text-amber-600'
-                          }`}
-                        >
-                          {(currentRate === undefined || currentRate === null) && (
-                            <option value="" disabled>
-                              {isUz ? 'Sozlanmagan' : 'Не настроено'}
-                            </option>
-                          )}
-                          <option value={30}>30%</option>
-                          <option value={35}>35%</option>
-                          <option value={40}>40%</option>
-                          <option value={45}>45%</option>
-                          <option value={50}>50%</option>
-                        </select>
+                        <div className="w-36">
+                          <CustomSelect
+                            value={currentRate !== undefined && currentRate !== null ? String(currentRate) : ''}
+                            placeholder={isUz ? 'Sozlanmagan' : 'Не настроено'}
+                            locale={isUz ? 'uz' : 'ru'}
+                            onChange={(v) => {
+                              if (v) handleUpdateDoctorCommissionRate(docId, Number(v));
+                            }}
+                            options={[30, 35, 40, 45, 50].map((r) => ({ value: String(r), label: `${r}%` }))}
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -631,23 +621,22 @@ export function OwnerWorkspace({
                 <label className="text-xs font-bold text-ink block mb-1">
                   {isUz ? 'Qarzdor bemor:' : 'Пациент с долгом:'}
                 </label>
-                <select
+                <CustomSelect
                   value={debtPatientId}
-                  onChange={(e) => {
-                    const patId = e.target.value;
+                  searchable
+                  placeholder={isUz ? '— Bemorni tanlang —' : '— Выберите пациента —'}
+                  locale={isUz ? 'uz' : 'ru'}
+                  onChange={(patId) => {
                     setDebtPatientId(patId);
                     const selected = debts.find((d) => d.id === patId);
                     if (selected) setDebtAmount(selected.totalDebt);
                   }}
-                  className="w-full px-3 py-2 text-xs bg-canvas border border-line rounded-xl text-ink font-medium focus:outline-none focus:border-brand-600"
-                >
-                  <option value="">{isUz ? '— Bemorni tanlang —' : '— Выберите пациента —'}</option>
-                  {debts.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.fullName} ({p.phone}) — {isUz ? 'Qarz:' : 'Долг:'} {p.totalDebt.toLocaleString()} so&apos;m
-                    </option>
-                  ))}
-                </select>
+                  options={debts.map((p) => ({
+                    value: p.id,
+                    label: `${p.fullName} (${p.phone})`,
+                    badge: `${p.totalDebt.toLocaleString()} so‘m`,
+                  }))}
+                />
               </div>
 
               <div>

@@ -910,10 +910,13 @@ model CashShift {
   expectedCash Int?      @map("expected_cash")
   countedCash  Int?      @map("counted_cash")
   note         String?
+  /// Branch whose cash drawer this is; null = one drawer for the whole clinic.
+  branchId     String?   @map("branch_id")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@index([openedAt])
+  @@index([branchId])
   @@map("cash_shifts")
 }
 

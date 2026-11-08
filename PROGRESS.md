@@ -267,6 +267,12 @@ A new CI job builds the production images and runs the stack; it found the image
 - The patient card stays clinic-wide, so a patient who moves to another branch keeps their history there.
 - Tests: Regression 79; 94/94 passing.
 
+### Phase 22: Branch cash drawers, unified dropdowns (2026-11-11)
+- Each branch has its own cash drawer and shift (one open shift per branch; null branch = one clinic-wide drawer). Cash is counted in the drawer of the visit's branch; payments without a visit count for the branch of the staff who took them. Branch-bound staff always work their own drawer and cannot close another. Migration `20261111120000_cash_shift_branch`. Cash desk page has a branch switcher.
+- The last 11 native `<select>`s in the admin (inventory, notifications, debts, services recall, plans, owner workspace) replaced with the shared dropdown or segmented buttons.
+- 3D tooth: drop-in replacement documented in `public/models/ATTRIBUTION.md`; optional `NEXT_PUBLIC_TOOTH_MODEL_CREDIT` shows the model credit in the hero.
+- Tests: Regression 80; 95/95 passing.
+
 ---
 
 ## 2. Test Verification Matrix

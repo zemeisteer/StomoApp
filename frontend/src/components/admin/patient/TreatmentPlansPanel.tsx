@@ -453,19 +453,18 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
                               <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-ink whitespace-nowrap">{formatUzs(item.costUzs, lang)}</td>
                               <td className="px-3 py-2.5 print:hidden">
                                 {workable && item.status !== 'CANCELLED' ? (
-                                  <select
-                                    value={item.status}
-                                    disabled={busy}
-                                    onChange={(e) => run(() => api.updateTreatmentPlanItem(item.id, { status: e.target.value }))}
-                                    className="h-8 rounded-md border border-line bg-white px-2 text-xs"
-                                    aria-label={L('Holat', 'Статус')}
-                                  >
-                                    {['PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].map((s) => (
-                                      <option key={s} value={s}>
-                                        {isRu ? ITEM_STATUS[s].ru : ITEM_STATUS[s].uz}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <div className="w-40">
+                                    <CustomSelect
+                                      value={item.status}
+                                      disabled={busy}
+                                      locale={isRu ? 'ru' : 'uz'}
+                                      onChange={(v) => run(() => api.updateTreatmentPlanItem(item.id, { status: v }))}
+                                      options={['PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].map((st) => ({
+                                        value: st,
+                                        label: isRu ? ITEM_STATUS[st].ru : ITEM_STATUS[st].uz,
+                                      }))}
+                                    />
+                                  </div>
                                 ) : (
                                   <StatusBadge map={ITEM_STATUS} value={item.status} lang={lang} />
                                 )}
@@ -610,18 +609,16 @@ export function TreatmentPlansPanel({ patientId, patientName, lang, canEdit, cli
           {doctors.length > 0 && (
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-medium text-ink">{L('Davolovchi shifokor', 'Лечащий врач')}</span>
-              <select
+              <CustomSelect
                 value={newPlanDoctor}
-                onChange={(e) => setNewPlanDoctor(e.target.value)}
-                className="h-10 w-full rounded-xl border border-line bg-white px-3 text-sm focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/10"
-              >
-                <option value="">{L('Tanlang (shifokor o‘zi yaratsa — avtomatik)', 'Выберите (если создаёт сам врач — автоматически)')}</option>
-                {doctors.map((d: any) => (
-                  <option key={d.id} value={d.id}>
-                    {doctorName(d, lang)}
-                  </option>
-                ))}
-              </select>
+                onChange={setNewPlanDoctor}
+                locale={isRu ? 'ru' : 'uz'}
+                placeholder={L('Tanlang (shifokor o‘zi yaratsa — avtomatik)', 'Выберите (если создаёт сам врач — автоматически)')}
+                options={[
+                  { value: '', label: L('Tanlang (shifokor o‘zi yaratsa — avtomatik)', 'Выберите (если создаёт сам врач — автоматически)') },
+                  ...doctors.map((d: any) => ({ value: d.id, label: doctorName(d, lang) })),
+                ]}
+              />
               <span className="mt-1 block text-xs text-ink-subtle">{L("Reja bo'yicha to'lovlar shu shifokor maoshiga hisoblanadi", 'Оплаты по плану идут в зарплату этого врача')}</span>
             </label>
           )}
@@ -789,13 +786,13 @@ function AddItemForm({
         />
         <input value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, '').slice(0, 2))} inputMode="numeric" placeholder={L('Soni', 'Кол.')} className={`${field} sm:col-span-2`} aria-label={L('Soni', 'Количество')} />
         <input value={price} onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder={L('Narx', 'Цена')} className={`${field} sm:col-span-3`} aria-label={L("Narx (so'm)", 'Цена (сум)')} />
-        <select value={phase} onChange={(e) => setPhase(e.target.value)} className={`${field} sm:col-span-2`} aria-label={L('Bosqich', 'Этап')}>
-          {[1, 2, 3, 4, 5].map((p) => (
-            <option key={p} value={p}>
-              {L(`${p}-bosqich`, `Этап ${p}`)}
-            </option>
-          ))}
-        </select>
+        <div className="sm:col-span-2">
+          <CustomSelect
+            value={String(phase)}
+            onChange={(v) => setPhase(v as any)}
+            options={[1, 2, 3, 4, 5].map((p) => ({ value: String(p), label: L(`${p}-bosqich`, `Этап ${p}`) }))}
+          />
+        </div>
         <button type="submit" disabled={!canSubmit} className="col-span-2 sm:col-span-3 inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-ink px-3 text-[13px] font-semibold text-white hover:bg-ink/90 disabled:opacity-40">
           <Plus className="h-4 w-4" /> {L("Qo'shish", 'Добавить')}
         </button>

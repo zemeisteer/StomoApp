@@ -22,6 +22,7 @@ import {
   Info,
 } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
+import { CustomSelect } from '../../../components/CustomSelect';
 import { useAuth } from '../../../lib/auth';
 import { useI18n } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
@@ -471,21 +472,24 @@ export default function AdminNotificationsPage() {
             <span className="text-xs text-ink-muted font-medium whitespace-nowrap">
               {isUz ? 'Holat:' : 'Статус:'}
             </span>
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(1);
-              }}
-              className="text-xs font-semibold bg-canvas border border-line rounded-xl px-3 py-1.5 text-ink focus:outline-none focus:ring-2 focus:ring-brand-600"
-            >
-              <option value="">{isUz ? 'Barchasi' : 'Все'}</option>
-              <option value="PENDING">{isUz ? 'Navbatda (Pending)' : 'В очереди'}</option>
-              <option value="SENT">{isUz ? 'Yetkazildi (Sent)' : 'Отправлено'}</option>
-              <option value="SIMULATED">{isUz ? 'Simulyatsiya (Simulated)' : 'Симуляция'}</option>
-              <option value="FAILED">{isUz ? 'Xatolik (Failed)' : 'Ошибка'}</option>
-              <option value="CANCELLED">{isUz ? 'Bekor qilingan (Cancelled)' : 'Отменено'}</option>
-            </select>
+            <div className="w-56">
+              <CustomSelect
+                value={statusFilter}
+                onChange={(v) => {
+                  setStatusFilter(v);
+                  setPage(1);
+                }}
+                locale={isUz ? 'uz' : 'ru'}
+                options={[
+                  { value: '', label: isUz ? 'Barchasi' : 'Все' },
+                  { value: 'PENDING', label: isUz ? 'Navbatda' : 'В очереди' },
+                  { value: 'SENT', label: isUz ? 'Yetkazildi' : 'Отправлено' },
+                  { value: 'SIMULATED', label: isUz ? 'Simulyatsiya' : 'Симуляция' },
+                  { value: 'FAILED', label: isUz ? 'Xatolik' : 'Ошибка' },
+                  { value: 'CANCELLED', label: isUz ? 'Bekor qilingan' : 'Отменено' },
+                ]}
+              />
+            </div>
           </div>
         </div>
 
