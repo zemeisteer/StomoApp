@@ -1605,6 +1605,26 @@ export default function AdminCalendarPage() {
                               const isContinuing = aStart < slotStartMs;
                               const timeStr = `${formatClinicTime(appt.startTime)} - ${formatClinicTime(appt.endTime)}`;
                               const badge = getStatusInfo(appt.status);
+                              // A visit that started in an earlier hour is the same visit continuing:
+                              // show a slim marker, not a second full card.
+                              if (isContinuing) {
+                                return (
+                                  <button
+                                    type="button"
+                                    key={appt.id}
+                                    onClick={() => openAppointment(appt)}
+                                    className="flex w-full items-center gap-2 rounded-xl border border-dashed border-line bg-canvas/60 px-3 py-2 text-left text-[11px] text-ink-muted transition-colors hover:border-teal-500 hover:text-ink"
+                                  >
+                                    <span className="font-mono font-bold text-ink-subtle">↳</span>
+                                    <span className="truncate">
+                                      <span className="font-semibold text-ink">{appt.patient?.fullName || appt.patientName}</span>
+                                      {' · '}
+                                      {formatClinicTime(appt.startTime)} dagi qabul davom etadi — {formatClinicTime(appt.endTime)} gacha
+                                      {appt.doctor?.firstNameUz ? ` · Dr. ${appt.doctor.firstNameUz}` : ''}
+                                    </span>
+                                  </button>
+                                );
+                              }
                               return (
                                 <div
                                   key={appt.id}
@@ -1621,11 +1641,6 @@ export default function AdminCalendarPage() {
                                       <span className="text-xs font-extrabold text-teal-800 font-mono">
                                         {timeStr}
                                       </span>
-                                      {isContinuing && (
-                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                          Davom etmoqda ({formatClinicTime(appt.startTime)} dan)
-                                        </span>
-                                      )}
                                     </div>
                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.color}`}>
                                       {badge.label}
