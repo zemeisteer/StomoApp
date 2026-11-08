@@ -44,6 +44,8 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '', chromeless = f
   const prefersReducedMotionRef = useRef(false);
   const modelLoadedRef = useRef(false);
   const animationFrameIdRef = useRef<number | null>(null);
+  // The calm hero has room to spare, so it frames the tooth a little closer
+  const frameScaleRef = useRef(chromeless ? 0.78 : 1);
 
   useEffect(() => {
     isDraggingRef.current = isDragging;
@@ -299,7 +301,7 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '', chromeless = f
 
         if (engineRef.current) {
           const { camera } = engineRef.current;
-          const fitDistance = computeCameraFitDistance(modelRadius, camera.fov, camera.aspect);
+          const fitDistance = computeCameraFitDistance(modelRadius, camera.fov, camera.aspect) * frameScaleRef.current;
 
           camera.position.set(0, 0.05, fitDistance);
           camera.lookAt(0, 0, 0);
@@ -320,13 +322,28 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '', chromeless = f
         root.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             const mesh = child as THREE.Mesh;
-            // Dispose default material from GLTF file before replacing
+            const original = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial | undefined;
+            // A scanned model brings its own colour and surface detail: keep those textures and only
+            // add the wet-enamel sheen. Untextured models get the plain enamel material.
+            const scanned = original?.map
+              ? new THREE.MeshPhysicalMaterial({
+                  map: original.map,
+                  normalMap: original.normalMap || null,
+                  normalScale: original.normalScale ? original.normalScale.clone() : new THREE.Vector2(1, 1),
+                  vertexColors: Boolean(original.vertexColors),
+                  roughness: 0.38,
+                  metalness: 0.0,
+                  clearcoat: 0.55,
+                  clearcoatRoughness: 0.2,
+                  ior: 1.62,
+                })
+              : null;
             if (Array.isArray(mesh.material)) {
               mesh.material.forEach((mat) => mat.dispose());
-            } else {
+            } else if (!scanned) {
               mesh.material?.dispose();
             }
-            mesh.material = enamelMaterial;
+            mesh.material = scanned || enamelMaterial;
             mesh.castShadow = false;
             mesh.receiveShadow = false;
           }
@@ -365,11 +382,8 @@ export const Tooth3D: React.FC<Tooth3DProps> = ({ className = '', chromeless = f
           const aspect = newW / newH;
           engineRef.current.camera.aspect = aspect;
           const modelRadius = (engineRef.current as any).modelRadius || 1.0;
-          engineRef.current.camera.position.z = computeCameraFitDistance(
-            modelRadius,
-            engineRef.current.camera.fov,
-            aspect,
-          );
+          engineRef.current.camera.position.z =
+            computeCameraFitDistance(modelRadius, engineRef.current.camera.fov, aspect) * frameScaleRef.current;
           engineRef.current.camera.updateProjectionMatrix();
           engineRef.current.renderer.setSize(newW, newH);
           renderSingleFrame();

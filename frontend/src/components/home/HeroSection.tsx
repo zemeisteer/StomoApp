@@ -84,11 +84,15 @@ export const HeroSection: React.FC = () => {
                 }}
               />
               <Tooth3D chromeless className="absolute inset-0 h-full" />
-              {process.env.NEXT_PUBLIC_TOOTH_MODEL_CREDIT && (
-                <p className="pointer-events-none absolute bottom-3 left-4 text-[10px] text-ink-subtle">
-                  3D: {process.env.NEXT_PUBLIC_TOOTH_MODEL_CREDIT}
-                </p>
-              )}
+              {/* CC BY 4.0 requires crediting the scan's author */}
+              <a
+                href={process.env.NEXT_PUBLIC_TOOTH_MODEL_URL || 'https://sketchfab.com/3d-models/mandibular-third-molar-561bb06b3b084b84978163906de1c2b5'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="absolute left-4 top-3 z-10 max-w-[70%] truncate text-[10px] text-ink-subtle hover:text-ink"
+              >
+                3D: {process.env.NEXT_PUBLIC_TOOTH_MODEL_CREDIT || 'Mandibular Third Molar — University of Dundee, School of Dentistry (CC BY 4.0)'}
+              </a>
             </div>
             <div className="pointer-events-none absolute -left-4 bottom-16 hidden rounded-2xl sm:block border border-line bg-white/90 px-5 py-4 shadow-card backdrop-blur sm:-left-8 hero-float">
               <p className="text-xs text-ink-subtle">{L('Qabulga yozilish', 'Запись на приём')}</p>
