@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppointmentsService } from '../appointments/appointments.service';
@@ -199,6 +200,15 @@ export class BotService {
       });
       if (!patient || patient.phone !== normalized) {
         throw new NotFoundException('Tanlangan bemor topilmadi yoki telefon raqami mos emas');
+      }
+      // Never move a patient away from the Telegram account they are already linked to
+      if (patient.telegramUserId && patient.telegramUserId !== telegramUserId) {
+        throw new ConflictException('Bu bemor boshqa Telegram hisobiga biriktirilgan. Klinikaga murojaat qiling');
+      }
+      // One Telegram account belongs to one patient (unique column): answer clearly instead of a 500
+      const holder = await this.prisma.patient.findUnique({ where: { telegramUserId }, select: { id: true } });
+      if (holder && holder.id !== patient.id) {
+        throw new ConflictException('Bu Telegram hisobi boshqa bemorga biriktirilgan. Klinikaga murojaat qiling');
       }
 
       patient = await this.prisma.patient.update({

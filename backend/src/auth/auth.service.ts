@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { StaffRole } from '@prisma/client';
+import { requireSecret } from './jwt-secret';
 
 export interface JwtPayload {
   sub: string;
@@ -37,19 +38,10 @@ export class AuthService implements OnModuleInit {
     this.validateSecrets();
   }
 
+  /** Fail closed in every environment (not only production): both signing secrets must be real. */
   private validateSecrets() {
-    const isProd = this.configService.get('NODE_ENV') === 'production';
-    const secret = this.configService.get<string>('JWT_SECRET', '');
-    const refreshSecret = this.configService.get<string>('JWT_REFRESH_SECRET', '');
-
-    if (isProd) {
-      if (!secret || secret.includes('CHANGE_ME') || secret.length < 32) {
-        throw new Error('Xavfsizlik xatosi: Ishlab chiqarish (production) muhitida ishonchli JWT_SECRET kiritilishi shart!');
-      }
-      if (!refreshSecret || refreshSecret.includes('CHANGE_ME') || refreshSecret.length < 32) {
-        throw new Error('Xavfsizlik xatosi: Ishlab chiqarish (production) muhitida ishonchli JWT_REFRESH_SECRET kiritilishi shart!');
-      }
-    }
+    requireSecret(this.configService, 'JWT_SECRET');
+    requireSecret(this.configService, 'JWT_REFRESH_SECRET');
   }
 
   private hashToken(token: string): string {

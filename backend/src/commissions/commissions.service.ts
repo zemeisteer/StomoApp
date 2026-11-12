@@ -1,21 +1,51 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/auth.service';
 import { UpdateCommissionDto, UpdateStaffPayDto } from './dto/commission.dto';
-import { fromZonedTime } from 'date-fns-tz';
-import { PayType, Prisma } from '@prisma/client';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import { PayType, Prisma, StaffRole } from '@prisma/client';
 
-/** Pay for one period: share of collected money, fixed salary, or both, plus any bonus. */
+/**
+ * Salary owed for a period, in whole so'm: for every calendar month the period touches (clinic-local),
+ * monthlySalary × days of that month inside the period / days in that month. A full month is exactly
+ * one salary, half a month half of it, three months three salaries. No complete period, no salary.
+ */
+export function salaryForPeriod(monthlySalary: number, fromDate: Date | null, toDate: Date | null, timezone: string): number {
+  if (!monthlySalary || monthlySalary <= 0 || !fromDate || !toDate || fromDate > toDate) return 0;
+  // Calendar days, inclusive, as UTC midnights so the arithmetic has no DST or offset effects
+  const day = (d: Date) => {
+    const [y, m, dd] = formatInTimeZone(d, timezone, 'yyyy-MM-dd').split('-').map(Number);
+    return Date.UTC(y, m - 1, dd);
+  };
+  const DAY = 24 * 60 * 60 * 1000;
+  const first = day(fromDate);
+  const last = day(toDate);
+  let total = 0;
+  let cursor = first;
+  while (cursor <= last) {
+    const c = new Date(cursor);
+    const monthStart = Date.UTC(c.getUTCFullYear(), c.getUTCMonth(), 1);
+    const nextMonth = Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + 1, 1);
+    const daysInMonth = Math.round((nextMonth - monthStart) / DAY);
+    const coveredEnd = Math.min(last, nextMonth - DAY);
+    const covered = Math.round((coveredEnd - cursor) / DAY) + 1;
+    total += Math.round((monthlySalary * covered) / daysInMonth);
+    cursor = nextMonth;
+  }
+  return total;
+}
+
+/** Pay for one period: share of collected money, the salary for that period, or both, plus any bonus. */
 export function computeEarned(
   payType: PayType,
   percentage: number,
-  monthlySalary: number,
+  periodSalary: number,
   fixedBonus: number,
   collected: number,
 ): number {
   const share = Math.max(0, Math.round(collected * (percentage / 100)));
-  const salary = monthlySalary || 0;
+  const salary = periodSalary || 0;
   const base = payType === PayType.SALARY ? salary : payType === PayType.MIXED ? salary + share : share;
   return base + (fixedBonus || 0);
 }
@@ -117,14 +147,16 @@ export class CommissionsService {
       // fixedBonus is applied per requested reporting period.
       const payType = doc.commission?.payType ?? PayType.PERCENT;
       const monthlySalary = doc.commission?.monthlySalary ?? 0;
+      const salaryUzs = salaryForPeriod(monthlySalary, fromDate, toDate, timezone);
       const totalEarned = isConfigured
-        ? computeEarned(payType, percentage!, monthlySalary, fixedBonus, totalCollected)
+        ? computeEarned(payType, percentage!, salaryUzs, fixedBonus, totalCollected)
         : 0;
 
       return {
         doctorId: doc.id,
         payType,
         monthlySalary,
+        salaryUzs,
         doctorName: `${doc.lastNameUz} ${doc.firstNameUz}`,
         slug: doc.slug,
         isActive: doc.isActive,
@@ -207,14 +239,16 @@ export class CommissionsService {
 
     const payType = doc.commission?.payType ?? PayType.PERCENT;
     const monthlySalary = doc.commission?.monthlySalary ?? 0;
+    const salaryUzs = salaryForPeriod(monthlySalary, fromDate, toDate, timezone);
     const totalEarned = isConfigured
-      ? computeEarned(payType, percentage!, monthlySalary, fixedBonus, totalCollected)
+      ? computeEarned(payType, percentage!, salaryUzs, fixedBonus, totalCollected)
       : 0;
 
     return {
       doctorId: doc.id,
       payType,
       monthlySalary,
+      salaryUzs,
       doctorName: `${doc.lastNameUz} ${doc.firstNameUz}`,
       isConfigured,
       percentage,
@@ -291,8 +325,9 @@ export class CommissionsService {
     `;
     const collected = new Map(rows.map((r) => [r.staff_id, Number(r.collected)]));
 
+    // Doctor accounts are paid only through their doctor profile (listAllCommissions), never twice
     const staff = await this.prisma.staffUser.findMany({
-      where: { isActive: true },
+      where: { isActive: true, doctorId: null, role: { not: StaffRole.DOCTOR } },
       include: { compensation: true },
       orderBy: { fullName: 'asc' },
     });
@@ -300,6 +335,7 @@ export class CommissionsService {
     return staff.map((u) => {
       const c = u.compensation;
       const took = collected.get(u.id) || 0;
+      const salaryUzs = c ? salaryForPeriod(c.monthlySalary, fromDate, toDate, timezone) : 0;
       return {
         staffUserId: u.id,
         fullName: u.fullName,
@@ -312,7 +348,8 @@ export class CommissionsService {
         fixedBonus: c?.fixedBonus ?? 0,
         notes: c?.notes ?? null,
         collectedAtDesk: took,
-        totalEarned: c ? computeEarned(c.payType, c.percentage, c.monthlySalary, c.fixedBonus, took) : 0,
+        salaryUzs,
+        totalEarned: c ? computeEarned(c.payType, c.percentage, salaryUzs, c.fixedBonus, took) : 0,
       };
     });
   }
@@ -320,6 +357,9 @@ export class CommissionsService {
   async updateStaffPay(staffUserId: string, dto: UpdateStaffPayDto, user: JwtPayload) {
     const staff = await this.prisma.staffUser.findUnique({ where: { id: staffUserId } });
     if (!staff) throw new NotFoundException('Xodim topilmadi');
+    if (staff.role === StaffRole.DOCTOR || staff.doctorId) {
+      throw new BadRequestException("Shifokor maoshi shifokor profilida sozlanadi");
+    }
     return this.prisma.$transaction(async (tx) => {
       const data = {
         payType: dto.payType,

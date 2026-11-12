@@ -4,7 +4,7 @@ import { PaymentMethod, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { PaymentsConfig } from './payments.config';
-import { applyInvoicePayment, invoiceBalance, lockInvoice, refreshInvoiceStatus } from '../billing/invoice-ledger';
+import { applyInvoicePayment, invoiceBalance, lockInvoice, lockOnlinePayment, refreshInvoiceStatus } from '../billing/invoice-ledger';
 
 /**
  * Payme (Paycom) Merchant API, JSON-RPC 2.0.
@@ -216,8 +216,11 @@ export class PaymeService {
   private async perform(params: any) {
     const expired: { id?: string } = {};
     const result = await this.prisma.$transaction(async (tx) => {
-      const existing = await this.findTx(tx, params.id);
-      if (!existing) throw new PaymeRpcError(PaymeError.TX_NOT_FOUND);
+      const found = await this.findTx(tx, params.id);
+      if (!found) throw new PaymeRpcError(PaymeError.TX_NOT_FOUND);
+      // Lock first, then decide: a parallel PerformTransaction waits here and sees state 2
+      const invoice = await lockInvoice(tx, found.invoiceId);
+      const existing = await lockOnlinePayment(tx, found.id);
       if (existing.state === 2) {
         return { transaction: existing.id, perform_time: n(existing.performTime), state: 2 };
       }
@@ -229,7 +232,6 @@ export class PaymeService {
         return null;
       }
 
-      const invoice = await lockInvoice(tx, existing.invoiceId);
       const { debt } = await invoiceBalance(tx, invoice);
       // Someone paid at the desk meanwhile: refuse rather than overpay
       if (invoice.status === 'CANCELLED' || existing.amountUzs > debt) throw new PaymeRpcError(PaymeError.CANNOT_PERFORM);
@@ -259,8 +261,11 @@ export class PaymeService {
 
   private async cancel(params: any) {
     return this.prisma.$transaction(async (tx) => {
-      const existing = await this.findTx(tx, params.id);
-      if (!existing) throw new PaymeRpcError(PaymeError.TX_NOT_FOUND);
+      const found = await this.findTx(tx, params.id);
+      if (!found) throw new PaymeRpcError(PaymeError.TX_NOT_FOUND);
+      // Lock first, then decide: a parallel CancelTransaction waits here and sees the cancelled state
+      const invoice = await lockInvoice(tx, found.invoiceId);
+      const existing = await lockOnlinePayment(tx, found.id);
       if (existing.state < 0) {
         return { transaction: existing.id, cancel_time: n(existing.cancelTime), state: existing.state };
       }
@@ -273,7 +278,6 @@ export class PaymeService {
       }
 
       // Performed: reverse the money with a refund entry on the invoice
-      const invoice = await lockInvoice(tx, existing.invoiceId);
       const refund = await tx.payment.create({
         data: {
           amount: existing.amountUzs,

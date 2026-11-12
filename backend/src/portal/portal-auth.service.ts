@@ -1,9 +1,10 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsSender } from '../notifications/sms.sender';
+import { requireSecret } from '../auth/jwt-secret';
 
 export const PORTAL_COOKIE = 'patient_session';
 export const PORTAL_SESSION_DAYS = 7;
@@ -39,7 +40,7 @@ export class PortalAuthService {
 
   /** Separate key from staff tokens: a staff JWT can never be replayed as a patient session. */
   private get secret() {
-    const base = this.config.get<string>('JWT_SECRET', 'dev-secret-change-me');
+    const base = requireSecret(this.config);
     return crypto.createHmac('sha256', base).update('patient-portal-session-v1').digest('hex');
   }
 
@@ -80,27 +81,39 @@ export class PortalAuthService {
     });
 
     const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
-    let channel = 'NONE';
-    if (patient) {
-      channel = await this.deliver(phone, code, patient.telegramUserId, (patient.preferredLanguage as 'uz' | 'ru') || lang);
-    }
+    // Outside production with no delivery provider at all, the code goes to the dev log and the response
+    const devSink = !this.isProduction && !this.sms.isConfigured() && !(patient?.telegramUserId && this.botToken);
+    const channel = !patient ? 'NONE' : devSink ? 'DEV' : 'QUEUED';
+
     // Always store an attempt (also for unknown numbers) so rate limits apply uniformly
-    await this.prisma.portalOtp.create({
+    const otp = await this.prisma.portalOtp.create({
       data: { phone, codeHash: this.hashCode(phone, code), channel, expiresAt: new Date(now + CODE_TTL_MS), ip },
     });
 
-    const viaTelegram = channel === 'TELEGRAM';
+    if (channel === 'DEV') {
+      this.logger.log(`[DEV SINK: PORTAL OTP] ${phone.slice(0, 6)}***** code=${code}`);
+    } else if (channel === 'QUEUED') {
+      // Delivered after the response: a patient's number and an unknown one answer identically and
+      // equally fast, so the endpoint cannot tell who is a clinic patient or who uses Telegram
+      const deliverLang = (patient!.preferredLanguage as 'uz' | 'ru') || lang;
+      void this.deliver(phone, code, patient!.telegramUserId, deliverLang)
+        .then((used) => this.prisma.portalOtp.update({ where: { id: otp.id }, data: { channel: used } }))
+        .catch((e) => this.logger.error(`Portal code delivery failed: ${(e as Error).message}`));
+    }
+
     return {
       sent: true,
-      channel: viaTelegram ? 'TELEGRAM' : 'SMS',
       expiresInSeconds: CODE_TTL_MS / 1000,
       resendInSeconds: RESEND_COOLDOWN_MS / 1000,
-      // Without any delivery provider outside production, the code is shown to make local testing possible
       ...(channel === 'DEV' ? { devCode: code } : {}),
     };
   }
 
-  /** Telegram (free, instant) for linked patients, otherwise SMS. */
+  private get botToken() {
+    return this.config.get<string>('PATIENT_BOT_TOKEN') || this.config.get<string>('TELEGRAM_BOT_TOKEN') || '';
+  }
+
+  /** Telegram (free, instant) for linked patients, otherwise SMS. Runs in the background; throws on failure. */
   private async deliver(phone: string, code: string, telegramUserId: string | null, lang: 'uz' | 'ru') {
     const clinic = await this.prisma.clinicSettings.findFirst({ select: { name: true, nameRu: true } });
     const name = (lang === 'ru' ? clinic?.nameRu : clinic?.name) || 'Klinika';
@@ -109,7 +122,7 @@ export class PortalAuthService {
         ? `${name}: код для входа в личный кабинет ${code}. Никому не сообщайте его.`
         : `${name}: shaxsiy kabinetga kirish kodi ${code}. Uni hech kimga aytmang.`;
 
-    const botToken = this.config.get<string>('PATIENT_BOT_TOKEN') || this.config.get<string>('TELEGRAM_BOT_TOKEN');
+    const botToken = this.botToken;
     if (telegramUserId && botToken) {
       try {
         const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -126,18 +139,10 @@ export class PortalAuthService {
     }
 
     if (this.sms.isConfigured()) {
-      try {
-        await this.sms.send(phone, text);
-      } catch (e) {
-        this.logger.error(`Portal code SMS failed: ${(e as Error).message}`);
-        throw new ServiceUnavailableException("Kodni yuborib bo'lmadi. Birozdan keyin urinib ko'ring");
-      }
+      await this.sms.send(phone, text);
       return 'SMS';
     }
-
-    if (this.isProduction) throw new ServiceUnavailableException("SMS xizmati sozlanmagan. Klinikaga murojaat qiling");
-    this.logger.log(`[DEV SINK: PORTAL OTP] ${phone.slice(0, 6)}***** code=${code}`);
-    return 'DEV';
+    throw new Error('no SMS provider configured and Telegram delivery was not possible');
   }
 
   async verifyCode(rawPhone: unknown, rawCode: unknown): Promise<string> {
@@ -151,12 +156,20 @@ export class PortalAuthService {
     });
     if (!otp || otp.attempts >= MAX_ATTEMPTS) throw new UnauthorizedException("Kod eskirgan. Yangi kod so'rang");
 
+    // Count this attempt BEFORE comparing, in one conditional update: parallel guesses can never
+    // get more than MAX_ATTEMPTS comparisons against one code
+    const counted = await this.prisma.portalOtp.updateMany({
+      where: { id: otp.id, consumedAt: null, attempts: { lt: MAX_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (counted.count !== 1) throw new UnauthorizedException("Kod bloklandi. Yangi kod so'rang");
+
     const expected = Buffer.from(otp.codeHash);
     const given = Buffer.from(this.hashCode(phone, code));
     const ok = otp.channel !== 'NONE' && expected.length === given.length && crypto.timingSafeEqual(expected, given);
     if (!ok) {
-      await this.prisma.portalOtp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
-      const left = MAX_ATTEMPTS - otp.attempts - 1;
+      const now = await this.prisma.portalOtp.findUnique({ where: { id: otp.id }, select: { attempts: true } });
+      const left = MAX_ATTEMPTS - (now?.attempts ?? MAX_ATTEMPTS);
       throw new UnauthorizedException(left > 0 ? `Kod noto'g'ri. Yana ${left} ta urinish qoldi` : "Kod bloklandi. Yangi kod so'rang");
     }
 

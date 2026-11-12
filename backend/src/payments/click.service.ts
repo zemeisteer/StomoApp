@@ -4,7 +4,7 @@ import { PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { PaymentsConfig } from './payments.config';
-import { applyInvoicePayment, invoiceBalance, lockInvoice } from '../billing/invoice-ledger';
+import { applyInvoicePayment, invoiceBalance, lockInvoice, lockOnlinePayment } from '../billing/invoice-ledger';
 
 /**
  * CLICK Shop API (Prepare / Complete). Requests are form-encoded and signed with
@@ -140,12 +140,15 @@ export class ClickService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const existing = await tx.onlinePayment.findUnique({
+        const found = await tx.onlinePayment.findUnique({
           where: { provider_providerTransactionId: { provider: 'CLICK', providerTransactionId: clickTransId } },
         });
-        if (!existing || String(existing.createTime) !== String(body.merchant_prepare_id) || existing.invoiceId !== String(body.merchant_trans_id)) {
+        if (!found || String(found.createTime) !== String(body.merchant_prepare_id) || found.invoiceId !== String(body.merchant_trans_id)) {
           return this.reply(body, ClickError.TX_NOT_FOUND);
         }
+        // Lock first, then decide: a parallel Complete waits here and sees the payment as done
+        const invoice = await lockInvoice(tx, found.invoiceId);
+        const existing = await lockOnlinePayment(tx, found.id);
         if (existing.state === 2) {
           return this.reply(body, ClickError.ALREADY_PAID, { merchant_confirm_id: Number(existing.performTime) });
         }
@@ -158,7 +161,6 @@ export class ClickService {
         }
         if (amount !== existing.amountUzs) return this.reply(body, ClickError.INVALID_AMOUNT);
 
-        const invoice = await lockInvoice(tx, existing.invoiceId);
         const { debt } = await invoiceBalance(tx, invoice);
         if (invoice.status === 'CANCELLED') return this.reply(body, ClickError.TX_CANCELLED);
         if (debt <= 0) return this.reply(body, ClickError.ALREADY_PAID);

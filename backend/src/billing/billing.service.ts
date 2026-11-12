@@ -4,7 +4,8 @@ import { AuditService } from '../audit/audit.service';
 import { StaffRole, PaymentMethod, Prisma } from '@prisma/client';
 import { JwtPayload } from '../auth/auth.service';
 import { CreateInvoiceDto } from './dto/invoice.dto';
-import { RecordPaymentDto } from './dto/payment.dto';
+import { DESK_PAYMENT_METHODS, RecordPaymentDto } from './dto/payment.dto';
+import { refreshInvoiceStatus } from './invoice-ledger';
 
 @Injectable()
 export class BillingService {
@@ -38,7 +39,9 @@ export class BillingService {
     return invoices.map((inv) => {
       const paidAmount = inv.payments.reduce((acc, p) => acc + (p.isRefund ? -p.amount : p.amount), 0);
       const effectiveTotal = Math.max(0, inv.totalAmount - (inv.discount || 0));
-      const debtAmount = Math.max(0, effectiveTotal - paidAmount);
+      const cancelled = inv.status === 'CANCELLED';
+      // A cancelled invoice is never owed (same rule as every debt query)
+      const debtAmount = cancelled ? 0 : Math.max(0, effectiveTotal - paidAmount);
       return {
         id: inv.id,
         patientId: inv.patientId,
@@ -52,7 +55,7 @@ export class BillingService {
         effectiveTotal,
         paidAmount,
         debtAmount,
-        status: debtAmount === 0 ? 'PAID' : paidAmount > 0 ? 'PARTIALLY_PAID' : 'PENDING',
+        status: cancelled ? 'CANCELLED' : debtAmount === 0 ? 'PAID' : paidAmount > 0 ? 'PARTIALLY_PAID' : 'PENDING',
         notes: inv.notes,
         createdAt: inv.createdAt,
         payments: inv.payments,
@@ -83,6 +86,16 @@ export class BillingService {
       }
       if (user.role === StaffRole.DOCTOR && appt.doctorId !== user.doctorId) {
         throw new ForbiddenException('Boshqa shifokor qabuli uchun hisob-faktura yaratish taqiqlangan');
+      }
+    } else if (user.role === StaffRole.DOCTOR) {
+      // Without a visit (e.g. a tooth finished on the chart) a doctor bills only their own patient
+      if (!user.doctorId) throw new ForbiddenException('Shifokor profili biriktirilmagan');
+      const treated = await this.prisma.appointment.findFirst({
+        where: { patientId: dto.patientId, doctorId: user.doctorId },
+        select: { id: true },
+      });
+      if (!treated) {
+        throw new ForbiddenException('Faqat o\'zingiz qabul qilgan bemorga hisob-faktura yaratishingiz mumkin');
       }
     }
 
@@ -115,6 +128,10 @@ export class BillingService {
     if (dto.amount <= 0) {
       throw new BadRequestException('To\'lov summasi musbat bo\'lishi kerak');
     }
+    // Payme / Click money is recorded only by the provider callbacks, never by hand at the desk
+    if (dto.method && !DESK_PAYMENT_METHODS.includes(dto.method)) {
+      throw new BadRequestException('Payme va Click to\'lovlari faqat provayder orqali qayd etiladi');
+    }
 
     return await this.prisma.$transaction(async (tx) => {
       let targetPatientId = dto.patientId;
@@ -140,6 +157,10 @@ export class BillingService {
         }
 
         const invoice = rows[0];
+
+        if (invoice.status === 'CANCELLED') {
+          throw new BadRequestException('Bekor qilingan hisob-fakturaga to\'lov qabul qilinmaydi');
+        }
 
         // Validate patientId match if provided
         if (dto.patientId && dto.patientId !== invoice.patient_id) {
@@ -201,23 +222,8 @@ export class BillingService {
       });
 
       // Update invoice status if linked to invoice
-      if (dto.invoiceId) {
-        const updatedPayments = await tx.payment.findMany({
-          where: { invoiceId: dto.invoiceId },
-          select: { amount: true, isRefund: true },
-        });
-        const totalPaid = updatedPayments.reduce((acc, p) => acc + (p.isRefund ? -p.amount : p.amount), 0);
-        const inv = await tx.invoice.findUnique({
-          where: { id: dto.invoiceId },
-          select: { totalAmount: true, discount: true },
-        });
-        const effectiveTotal = Math.max(0, (inv?.totalAmount || 0) - (inv?.discount || 0));
-        const newStatus = totalPaid >= effectiveTotal ? 'PAID' : totalPaid > 0 ? 'PARTIALLY_PAID' : 'PENDING';
-        await tx.invoice.update({
-          where: { id: dto.invoiceId },
-          data: { status: newStatus },
-        });
-      }
+      // Shared ledger rule (never touches a CANCELLED invoice)
+      if (dto.invoiceId) await refreshInvoiceStatus(tx, dto.invoiceId);
 
       await this.auditService.logTransactional({
         tx,

@@ -802,7 +802,7 @@ export const api = {
 
   // Patient cabinet (phone + one-time code)
   portalRequestCode: (phone: string, lang: 'uz' | 'ru') =>
-    fetcher<{ sent: boolean; channel: 'SMS' | 'TELEGRAM'; expiresInSeconds: number; resendInSeconds: number; devCode?: string }>(
+    fetcher<{ sent: boolean; expiresInSeconds: number; resendInSeconds: number; devCode?: string }>(
       '/api/portal/auth/request-code',
       { method: 'POST', body: JSON.stringify({ phone, lang }) },
     ),

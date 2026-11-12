@@ -455,5 +455,130 @@ async def test_i18n_clinic_info_and_staff_linking():
     print(" [PASS] Staff deep-link linking success and failure paths", flush=True)
 
 
+# ---------------------------------------------------------------------------
+# Focused regression tests (one behaviour each)
+# ---------------------------------------------------------------------------
+from aiogram.types import Contact, User, Message  # noqa: E402
+from bot.i18n import t  # noqa: E402
+from bot.config import resolve_service_token  # noqa: E402
+from bot.handlers import booking as booking_handlers  # noqa: E402
+from bot.handlers.start import handle_contact  # noqa: E402
+
+
+def _contact_msg(from_id: int, contact_user_id):
+    msg = MagicMock(spec=Message)
+    msg.from_user = User(id=from_id, is_bot=False, first_name="Ali")
+    msg.contact = Contact(phone_number="+998901112233", first_name="Ali", user_id=contact_user_id)
+    msg.answer = AsyncMock()
+    return msg
+
+
+def _cb(data: str, user_id: int):
+    cb = MagicMock()
+    cb.data = data
+    cb.from_user.id = user_id
+    cb.message.edit_text = AsyncMock()
+    cb.answer = AsyncMock()
+    return cb
+
+
+def _doctor(branches, services):
+    return {"id": "doc-x", "name": "Dr. Test", "spec": "Terapevt", "branches": branches, "services": services}
+
+
+def test_service_token_is_required_and_long(monkeypatch):
+    monkeypatch.delenv("BOT_SERVICE_TOKEN", raising=False)
+    monkeypatch.delenv("SERVICE_TOKEN", raising=False)
+    with pytest.raises(RuntimeError):
+        resolve_service_token()
+    monkeypatch.setenv("SERVICE_TOKEN", "short")
+    with pytest.raises(RuntimeError):
+        resolve_service_token()
+    monkeypatch.setenv("SERVICE_TOKEN", "x" * 32)
+    assert resolve_service_token() == "x" * 32
+
+
+async def test_contact_card_without_owner_is_rejected():
+    # A contact card of a person who is not on Telegram has no user_id: it can never be "your own"
+    msg = _contact_msg(5001, None)
+    with patch.object(api_client, "sync_patient", new_callable=AsyncMock) as mock_sync:
+        await handle_contact(msg)
+    assert not mock_sync.called
+    assert msg.answer.await_args.args[0] == t("uz", "contact_foreign")
+
+
+async def test_ambiguous_phone_is_sent_to_reception_without_linking():
+    msg = _contact_msg(5002, 5002)
+    with patch.object(api_client, "sync_patient", new_callable=AsyncMock) as mock_sync:
+        mock_sync.return_value = {"ambiguous": True, "candidates": [{"id": "p1"}, {"id": "p2"}]}
+        await handle_contact(msg)
+    assert msg.answer.await_count == 1
+    assert msg.answer.await_args.args[0] == t("uz", "sync_ambiguous")
+    # No main menu: the account is not linked
+    assert "reply_markup" not in msg.answer.await_args.kwargs
+
+
+async def test_backend_unreachable_shows_sync_error():
+    msg = _contact_msg(5003, 5003)
+    with patch.object(api_client, "sync_patient", new_callable=AsyncMock) as mock_sync:
+        mock_sync.return_value = None
+        await handle_contact(msg)
+    assert msg.answer.await_args.args[0] == t("uz", "sync_error")
+
+
+async def test_several_branches_are_never_picked_silently():
+    uid = 5004
+    branches = [{"id": "br-1", "name": "Chilonzor"}, {"id": "br-2", "name": "Yunusobod"}]
+    booking_handlers.user_booking_sessions[uid] = {"doctors": [_doctor(branches, [{"id": "svc-1", "name": "Plomba"}])]}
+    cb = _cb("select_doc:doc-x", uid)
+    await booking_handlers.handle_select_doctor(cb)
+    session = booking_handlers.user_booking_sessions[uid]
+    assert "branch_id" not in session
+    assert cb.message.edit_text.await_args.args[0] == t("uz", "choose_branch")
+    booking_handlers.user_booking_sessions.pop(uid, None)
+
+
+async def test_single_branch_and_single_service_go_straight_to_date():
+    uid = 5005
+    booking_handlers.user_booking_sessions[uid] = {
+        "doctors": [_doctor([{"id": "br-1", "name": "Chilonzor"}], [{"id": "svc-1", "name": "Plomba"}])]
+    }
+    cb = _cb("select_doc:doc-x", uid)
+    await booking_handlers.handle_select_doctor(cb)
+    session = booking_handlers.user_booking_sessions[uid]
+    assert (session["branch_id"], session["service_id"]) == ("br-1", "svc-1")
+    assert t("uz", "choose_date") in cb.message.edit_text.await_args.args[0]
+    booking_handlers.user_booking_sessions.pop(uid, None)
+
+
+async def test_forged_branch_or_service_callback_is_refused():
+    uid = 5006
+    branches = [{"id": "br-1", "name": "Chilonzor"}, {"id": "br-2", "name": "Yunusobod"}]
+    services = [{"id": "svc-1", "name": "Plomba"}, {"id": "svc-2", "name": "Oqartirish"}]
+    booking_handlers.user_booking_sessions[uid] = {"doctors": [_doctor(branches, services)]}
+    await booking_handlers.handle_select_doctor(_cb("select_doc:doc-x", uid))
+    session = booking_handlers.user_booking_sessions[uid]
+
+    # Service before any branch was chosen
+    cb = _cb("select_service:svc-1", uid)
+    await booking_handlers.handle_select_service(cb)
+    assert "service_id" not in session
+    assert cb.message.edit_text.await_args.args[0] == t("uz", "session_expired")
+
+    # A branch this doctor does not work in
+    cb = _cb("select_branch:br-999", uid)
+    await booking_handlers.handle_select_branch(cb)
+    assert "branch_id" not in session
+    assert cb.message.edit_text.await_args.args[0] == t("uz", "session_expired")
+
+    # A real branch, then a service this doctor does not offer
+    await booking_handlers.handle_select_branch(_cb("select_branch:br-2", uid))
+    assert session["branch_id"] == "br-2"
+    cb = _cb("select_service:svc-999", uid)
+    await booking_handlers.handle_select_service(cb)
+    assert "service_id" not in session
+    booking_handlers.user_booking_sessions.pop(uid, None)
+
+
 if __name__ == "__main__":
     asyncio.run(test_bot_flows())

@@ -98,7 +98,6 @@ function LoginForm({ lang, onDone }: { lang: Lang; onDone: () => void }) {
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
-  const [channel, setChannel] = useState<'SMS' | 'TELEGRAM'>('SMS');
   const [devCode, setDevCode] = useState<string | null>(null);
   const [resendIn, setResendIn] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -120,7 +119,6 @@ function LoginForm({ lang, onDone }: { lang: Lang; onDone: () => void }) {
     setError(null);
     try {
       const res = await api.portalRequestCode(fullPhone, lang);
-      setChannel(res.channel);
       setDevCode(res.devCode || null);
       setResendIn(res.resendInSeconds);
       setStep('code');
@@ -185,9 +183,10 @@ function LoginForm({ lang, onDone }: { lang: Lang; onDone: () => void }) {
         <p className="mt-1.5 text-sm text-ink-muted">
           {step === 'phone'
             ? L('Klinikada ro‘yxatdan o‘tgan telefon raqamingizni kiriting.', 'Введите номер телефона, указанный в клинике.')
-            : channel === 'TELEGRAM'
-              ? L('Kod Telegram botimizga yuborildi.', 'Код отправлен в наш Telegram-бот.')
-              : L(`Kod +998 ${phone} raqamiga SMS orqali yuborildi.`, `Код отправлен по SMS на +998 ${phone}.`)}
+            : L(
+                `Agar +998 ${phone} klinikada ro‘yxatdan o‘tgan bo‘lsa, kod Telegram botimizga yoki SMS orqali yuboriladi.`,
+                `Если номер +998 ${phone} есть в клинике, код придёт в наш Telegram-бот или по SMS.`,
+              )}
         </p>
 
         {error && (

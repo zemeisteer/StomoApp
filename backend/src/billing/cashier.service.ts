@@ -177,14 +177,43 @@ export class CashierService {
     return { ...(await this.prisma.cashShift.findUnique({ where: { id } })), differenceUzs: countedCash - expected };
   }
 
+  /**
+   * Branch whose drawer a payment belongs to, by the same rule as branchPaymentWhere:
+   * the visit's branch, else the invoice visit's branch, else the branch of the staff who took it.
+   */
+  private async paymentBranchId(
+    tx: Prisma.TransactionClient,
+    p: { appointmentId: string | null; invoiceId: string | null; recordedById: string | null },
+  ): Promise<string | null> {
+    if (p.appointmentId) {
+      const appt = await tx.appointment.findUnique({ where: { id: p.appointmentId }, select: { branchId: true } });
+      if (appt) return appt.branchId;
+    }
+    if (p.invoiceId) {
+      const inv = await tx.invoice.findUnique({ where: { id: p.invoiceId }, select: { appointment: { select: { branchId: true } } } });
+      if (inv?.appointment) return inv.appointment.branchId;
+    }
+    if (p.recordedById) {
+      const staff = await tx.staffUser.findUnique({ where: { id: p.recordedById }, select: { branchId: true } });
+      return staff?.branchId ?? null;
+    }
+    return null;
+  }
+
   /** Refund (part of) a desk payment. Online payments are refunded through the provider. */
   async refund(paymentId: string, amount: number | undefined, reason: string, user: JwtPayload) {
     return this.prisma.$transaction(async (tx) => {
+      // Row lock on the original payment: concurrent refunds of one payment run one after another,
+      // also when the payment has no invoice to lock
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "payments" WHERE id = ${paymentId} FOR UPDATE`;
+      if (!locked.length) throw new NotFoundException("To'lov topilmadi");
       const original = await tx.payment.findUnique({ where: { id: paymentId } });
       if (!original || original.isRefund) throw new NotFoundException("To'lov topilmadi");
       if (original.method === PaymentMethod.PAYME || original.method === PaymentMethod.CLICK) {
         throw new BadRequestException(`${original.method} to'lovi provayder kabineti orqali qaytariladi`);
       }
+      // A branch-bound administrator refunds only their own branch's payments
+      assertSameBranch(await this.paymentBranchId(tx, original), user);
       if (original.invoiceId) await lockInvoice(tx, original.invoiceId);
 
       const already = await tx.payment.aggregate({ where: { refundOfId: original.id, isRefund: true }, _sum: { amount: true } });

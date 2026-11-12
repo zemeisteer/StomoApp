@@ -8,6 +8,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { CsrfGuard } from './csrf.guard';
+import { requireSecret } from './jwt-secret';
 
 import { APP_GUARD } from '@nestjs/core';
 
@@ -17,7 +18,7 @@ import { APP_GUARD } from '@nestjs/core';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        secret: configService.get('JWT_SECRET', 'dev-secret-change-me'),
+        secret: requireSecret(configService),
         signOptions: {
           expiresIn: configService.get('JWT_EXPIRATION', '8h'),
         },

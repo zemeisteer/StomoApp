@@ -750,6 +750,8 @@ export function ReceptionWorkspace({
                           ? 'bg-emerald-100 text-emerald-800'
                           : inv.status === 'PARTIALLY_PAID'
                           ? 'bg-blue-100 text-blue-800'
+                          : inv.status === 'CANCELLED'
+                          ? 'bg-line text-ink-muted'
                           : 'bg-amber-100 text-amber-800'
                       }`}
                     >
@@ -757,6 +759,8 @@ export function ReceptionWorkspace({
                         ? (isUz ? "To'langan" : 'Оплачено')
                         : inv.status === 'PARTIALLY_PAID'
                         ? (isUz ? 'Qisman' : 'Частично')
+                        : inv.status === 'CANCELLED'
+                        ? (isUz ? 'Bekor qilingan' : 'Отменён')
                         : (isUz ? 'Kutilmoqda' : 'В ожидании')}
                     </span>
                     <strong className="text-xs text-ink">

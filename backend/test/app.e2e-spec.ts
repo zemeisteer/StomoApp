@@ -8534,6 +8534,10 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const tag = `reg78_${Date.now()}`;
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date()); // clinic-local day
+    // Pay reports cover a whole clinic-local month: a monthly salary is owed in full only for a full month
+    const [py, pm] = day.split('-').map(Number);
+    const monthFrom = `${day.slice(0, 7)}-01`;
+    const monthTo = `${day.slice(0, 7)}-${String(new Date(Date.UTC(py, pm, 0)).getUTCDate()).padStart(2, '0')}`;
     const savedCommission = await prisma.doctorCommission.findUnique({ where: { doctorId: testDoctorAId } });
     const patient = await prisma.patient.create({ data: { fullName: 'Reg78 Bemor', phone: '+998900007878' } });
     const recUser = await prisma.staffUser.create({
@@ -8561,7 +8565,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         .send({ payType: 'MIXED', monthlySalary: 1_000_000, percentage: 10 })
         .expect(200);
       await http().post('/api/admin/billing/payments').set(auth(recToken)).send({ invoiceId: invoice.id, amount: 200000, method: 'CASH' }).expect(201);
-      const staff = (await http().get(`/api/admin/commissions/staff?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      const staff = (await http().get(`/api/admin/commissions/staff?from=${monthFrom}&to=${monthTo}`).set(auth(adminToken)).expect(200)).body;
       expect(staff.find((r: any) => r.staffUserId === recUser.id)).toMatchObject({
         payType: 'MIXED',
         collectedAtDesk: 200000,
@@ -8575,7 +8579,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         .set(auth(adminToken))
         .send({ percentage: 0, fixedBonus: 0, payType: 'SALARY', monthlySalary: 5_000_000 })
         .expect(200);
-      const docs = (await http().get(`/api/admin/commissions?from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      const docs = (await http().get(`/api/admin/commissions?from=${monthFrom}&to=${monthTo}`).set(auth(adminToken)).expect(200)).body;
       expect(docs.find((d: any) => d.doctorId === testDoctorAId)).toMatchObject({ payType: 'SALARY', monthlySalary: 5_000_000, totalEarned: 5_000_000 });
 
       // A callback request from someone who already booked shows the booking
@@ -8716,6 +8720,320 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.delete({ where: { id: patient.id } });
       await prisma.staffUser.delete({ where: { id: recUser.id } }).catch(() => {});
       await prisma.branch.delete({ where: { id: branch2.id } }).catch(() => {});
+    }
+  });
+
+  it('Regression 81: Desk money stays honest - no payment on a cancelled invoice, no hand-made Payme/Click, refunds stay in branch and never exceed the payment', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg81_${Date.now()}`;
+    const branch2 = await prisma.branch.create({ data: { nameUz: `${tag} filial`, nameRu: `${tag} филиал`, addressUz: 'Toshkent', addressRu: 'Ташкент' } });
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg81 Bemor', phone: '+998900008181' } });
+    const start = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const mkVisit = (suffix: string, branchId: string) =>
+      prisma.appointment.create({
+        data: {
+          publicToken: `${tag}_${suffix}`, patientId: patient.id, doctorId: testDoctorAId, serviceId: testServiceId, branchId,
+          status: AppointmentStatus.COMPLETED, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+          serviceName: 'Reg81', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+        },
+      });
+    const adminUser = await prisma.staffUser.create({
+      data: { email: `${tag}@admin.local`, passwordHash: await bcrypt.hash('Admin2026!reg81', 10), fullName: 'Reg81 Admin', role: StaffRole.ADMIN, branchId: testBranchId },
+    });
+    try {
+      const branchAdminToken = (await http().post('/api/auth/login').send({ email: adminUser.email, password: 'Admin2026!reg81' }).expect(200)).body.accessToken;
+
+      // 1. A cancelled invoice takes no money and stays cancelled
+      const cancelled = await prisma.invoice.create({ data: { patientId: patient.id, totalAmount: 50000, status: 'CANCELLED' } });
+      await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: cancelled.id, amount: 50000, method: 'CASH' }).expect(400);
+      expect(await prisma.payment.count({ where: { invoiceId: cancelled.id } })).toBe(0);
+      expect((await prisma.invoice.findUnique({ where: { id: cancelled.id } }))!.status).toBe('CANCELLED');
+
+      // 2. Payme / Click money cannot be typed in at the desk; absurd amounts are rejected
+      const open = await prisma.invoice.create({ data: { patientId: patient.id, totalAmount: 90000 } });
+      for (const method of ['PAYME', 'CLICK']) {
+        await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: open.id, amount: 10000, method }).expect(400);
+      }
+      await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ patientId: patient.id, amount: 3_000_000_000, method: 'CASH' }).expect(400);
+      expect(await prisma.payment.count({ where: { invoiceId: open.id } })).toBe(0);
+
+      // 3. A branch-bound administrator refunds only payments of their own branch
+      const visitOther = await mkVisit('other', branch2.id);
+      const visitOwn = await mkVisit('own', testBranchId);
+      const invOther = await prisma.invoice.create({ data: { patientId: patient.id, appointmentId: visitOther.id, totalAmount: 40000 } });
+      const invOwn = await prisma.invoice.create({ data: { patientId: patient.id, appointmentId: visitOwn.id, totalAmount: 30000 } });
+      const payOther = (await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: invOther.id, amount: 40000, method: 'CASH' }).expect(201)).body;
+      const payOwn = (await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: invOwn.id, amount: 30000, method: 'CASH' }).expect(201)).body;
+
+      await http().post(`/api/admin/cashier/payments/${payOther.id}/refund`).set(auth(branchAdminToken)).send({ reason: 'boshqa filial' }).expect(403);
+      expect(await prisma.payment.count({ where: { refundOfId: payOther.id } })).toBe(0);
+      await http().post(`/api/admin/cashier/payments/${payOwn.id}/refund`).set(auth(branchAdminToken)).send({ amount: 10000, reason: "o'z filiali" }).expect(201);
+      // The owner is never limited by branch
+      await http().post(`/api/admin/cashier/payments/${payOther.id}/refund`).set(auth(adminToken)).send({ amount: 5000, reason: 'egasi' }).expect(201);
+
+      // 4. Parallel refunds of a payment without an invoice never return more than was paid
+      const loose = (await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ patientId: patient.id, amount: 100000, method: 'CASH' }).expect(201)).body;
+      expect(loose.invoiceId).toBeNull();
+      const results = await Promise.all(
+        [1, 2, 3].map(() => http().post(`/api/admin/cashier/payments/${loose.id}/refund`).set(auth(adminToken)).send({ amount: 100000, reason: 'parallel' })),
+      );
+      expect(results.map((r) => r.status).sort()).toEqual([201, 400, 400]);
+      const refunded = await prisma.payment.aggregate({ where: { refundOfId: loose.id, isRefund: true }, _sum: { amount: true } });
+      expect(refunded._sum.amount).toBe(100000);
+    } finally {
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.invoice.deleteMany({ where: { patientId: patient.id } });
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+      await prisma.staffUser.delete({ where: { id: adminUser.id } }).catch(() => {});
+      await prisma.branch.delete({ where: { id: branch2.id } }).catch(() => {});
+    }
+  });
+
+  it('Regression 82: Parallel Payme/Click callbacks apply or reverse money once; portal code guesses are capped and replies do not reveal patients', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const saved = { ...process.env };
+    for (const k of ['SMS_API_KEY', 'SMS_API_URL', 'PATIENT_BOT_TOKEN', 'TELEGRAM_BOT_TOKEN']) delete process.env[k];
+    Object.assign(process.env, {
+      PAYME_MERCHANT_ID: 'reg82merchant',
+      PAYME_KEY: 'reg82-payme-key',
+      PAYME_TEST_MODE: 'true',
+      CLICK_SERVICE_ID: '8282',
+      CLICK_MERCHANT_ID: '828',
+      CLICK_SECRET_KEY: 'reg82-click-secret',
+    });
+    const payme = (method: string, params: any) =>
+      http()
+        .post('/api/payments/payme')
+        .set('Authorization', `Basic ${Buffer.from('Paycom:reg82-payme-key').toString('base64')}`)
+        .send({ jsonrpc: '2.0', id: 1, method, params });
+    const md5 = (s: string) => require('crypto').createHash('md5').update(s).digest('hex');
+    const clickBody = (o: any) => {
+      const b: any = { service_id: '8282', sign_time: '2026-11-12 10:00:00', error: '0', error_note: 'ok', click_paydoc_id: '1', ...o };
+      b.sign_string = md5(
+        `${b.click_trans_id}${b.service_id}reg82-click-secret${b.merchant_trans_id}${b.merchant_prepare_id ?? ''}${b.amount}${b.action}${b.sign_time}`,
+      );
+      return b;
+    };
+    const click = (path: string, body: any) => http().post(`/api/payments/click/${path}`).type('form').send(body);
+    const parallel = <T>(n: number, fn: () => Promise<T>) => Promise.all(Array.from({ length: n }, fn));
+
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg82 Bemor', phone: '+998900008282' } });
+    const unknownPhone = '+998900008284';
+    const sms = app.get(SmsSender);
+    const spies: jest.SpyInstance[] = [];
+    try {
+      // An invoice whose balance grows after the provider transaction was created (desk money refunded),
+      // so the balance is twice the transaction: the only thing stopping a double charge is the lock.
+      const setup = async () => {
+        const inv = await prisma.invoice.create({ data: { patientId: patient.id, totalAmount: 200000 } });
+        const cash = (await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: inv.id, amount: 100000, method: 'CASH' }).expect(201)).body;
+        return { inv, cash };
+      };
+      const refundDesk = (paymentId: string) =>
+        http().post(`/api/admin/cashier/payments/${paymentId}/refund`).set(auth(adminToken)).send({ reason: 'reg82' }).expect(201);
+
+      // --- Payme: 3 parallel PerformTransaction -> one payment; 3 parallel CancelTransaction -> one refund
+      const a = await setup();
+      const created = (await payme('CreateTransaction', { id: 'pm-reg82-1', time: Date.now(), amount: 10000000, account: { invoice_id: a.inv.id } })).body;
+      expect(created.result.state).toBe(1);
+      await refundDesk(a.cash.id);
+      const performs = await parallel(3, () => payme('PerformTransaction', { id: 'pm-reg82-1' }));
+      expect(performs.map((r) => r.body.result?.state)).toEqual([2, 2, 2]);
+      expect(new Set(performs.map((r) => r.body.result.perform_time)).size).toBe(1);
+      expect(await prisma.payment.count({ where: { invoiceId: a.inv.id, method: 'PAYME', isRefund: false } })).toBe(1);
+
+      const cancels = await parallel(3, () => payme('CancelTransaction', { id: 'pm-reg82-1', reason: 5 }));
+      expect(cancels.map((r) => r.body.result?.state)).toEqual([-2, -2, -2]);
+      expect(await prisma.payment.count({ where: { invoiceId: a.inv.id, method: 'PAYME', isRefund: true } })).toBe(1);
+
+      // --- Click: 3 parallel Complete -> one payment, the others answer "already paid"
+      const b = await setup();
+      const prep = (await click('prepare', clickBody({ click_trans_id: '8201', merchant_trans_id: b.inv.id, amount: '100000', action: '0' }))).body;
+      expect(prep.error).toBe(0);
+      await refundDesk(b.cash.id);
+      const completeBody = clickBody({
+        click_trans_id: '8201', merchant_trans_id: b.inv.id, merchant_prepare_id: String(prep.merchant_prepare_id), amount: '100000', action: '1',
+      });
+      const completes = await parallel(3, () => click('complete', completeBody));
+      expect(completes.map((r) => r.body.error).sort()).toEqual([-4, -4, 0]);
+      expect(await prisma.payment.count({ where: { invoiceId: b.inv.id, method: 'CLICK' } })).toBe(1);
+
+      // --- Portal: 20 parallel wrong guesses are counted, never more than 5 compared; then even the right code fails
+      const issued = (await http().post('/api/portal/auth/request-code').send({ phone: patient.phone }).expect(200)).body;
+      expect(issued.devCode).toMatch(/^\d{6}$/);
+      const wrong = issued.devCode === '111111' ? '222222' : '111111';
+      const guesses = await parallel(20, () => http().post('/api/portal/auth/verify').send({ phone: patient.phone, code: wrong }));
+      expect(guesses.every((r) => r.status === 401)).toBe(true);
+      const otp = await prisma.portalOtp.findFirst({ where: { phone: patient.phone }, orderBy: { createdAt: 'desc' } });
+      expect(otp!.attempts).toBe(5);
+      await http().post('/api/portal/auth/verify').send({ phone: patient.phone, code: issued.devCode }).expect(401);
+
+      // --- Portal: with a real provider, a patient's number and an unknown one get the same reply
+      spies.push(jest.spyOn(sms, 'isConfigured').mockReturnValue(true));
+      const sendSpy = jest.spyOn(sms, 'send').mockResolvedValue(undefined);
+      spies.push(sendSpy);
+      await prisma.portalOtp.updateMany({ where: { phone: patient.phone }, data: { createdAt: new Date(Date.now() - 2 * 60 * 1000) } });
+      const known = (await http().post('/api/portal/auth/request-code').send({ phone: patient.phone }).expect(200)).body;
+      const unknown = (await http().post('/api/portal/auth/request-code').send({ phone: unknownPhone }).expect(200)).body;
+      expect(known).toEqual(unknown);
+      expect(known).not.toHaveProperty('channel');
+      expect(known).not.toHaveProperty('devCode');
+      // The patient's code is still delivered (after the reply), the unknown number gets nothing
+      for (let i = 0; i < 50 && sendSpy.mock.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+      expect(sendSpy.mock.calls.map((c) => c[0])).toEqual([patient.phone]);
+    } finally {
+      spies.forEach((s) => s.mockRestore());
+      process.env = saved;
+      const invoices = await prisma.invoice.findMany({ where: { patientId: patient.id }, select: { id: true } });
+      await prisma.onlinePayment.deleteMany({ where: { invoiceId: { in: invoices.map((i) => i.id) } } });
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.invoice.deleteMany({ where: { patientId: patient.id } });
+      await prisma.portalOtp.deleteMany({ where: { phone: { in: [patient.phone, unknownPhone] } } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+    }
+  });
+
+  it('Regression 83: Doctors bill only their own patients; salary follows the period length; doctor accounts are never paid as staff', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg83_${Date.now()}`;
+    const docAStaff = await prisma.staffUser.findUniqueOrThrow({ where: { email: 'dr.rahimov@dentacare.local' } });
+    const unlinkedDoctor = await prisma.staffUser.findUniqueOrThrow({ where: { email: 'dr.unlinked@dentacare.local' } });
+    const own = await prisma.patient.create({ data: { fullName: 'Reg83 Oz bemori', phone: '+998900008383' } });
+    const stranger = await prisma.patient.create({ data: { fullName: 'Reg83 Begona', phone: '+998900008384' } });
+    const start = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.appointment.create({
+      data: {
+        publicToken: `${tag}_1`, patientId: own.id, doctorId: docAStaff.doctorId!, serviceId: testServiceId, branchId: testBranchId,
+        status: AppointmentStatus.COMPLETED, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg83', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+      },
+    });
+    const clerk = await prisma.staffUser.create({
+      data: { email: `${tag}@reception.local`, passwordHash: await bcrypt.hash('Reception2026!x', 10), fullName: 'Reg83 Kassir', role: StaffRole.RECEPTION },
+    });
+    try {
+      // 1. Invoice without a visit: only for a patient the doctor has treated
+      await http().post('/api/admin/billing/invoices').set(auth(doctorAToken)).send({ patientId: stranger.id, totalAmount: 50000 }).expect(403);
+      expect(await prisma.invoice.count({ where: { patientId: stranger.id } })).toBe(0);
+      await http().post('/api/admin/billing/invoices').set(auth(doctorAToken)).send({ patientId: own.id, totalAmount: 50000, notes: '#16 tish' }).expect(201);
+      // Desk staff are not limited this way
+      await http().post('/api/admin/billing/invoices').set(auth(adminToken)).send({ patientId: stranger.id, totalAmount: 50000 }).expect(201);
+
+      // 2. Salary for the period, by clinic-local calendar days
+      await http().put(`/api/admin/commissions/staff/${clerk.id}`).set(auth(adminToken)).send({ payType: 'SALARY', monthlySalary: 3_000_000 }).expect(200);
+      const salaryFor = async (q: string) => {
+        const rows = (await http().get(`/api/admin/commissions/staff${q}`).set(auth(adminToken)).expect(200)).body;
+        const row = rows.find((r: any) => r.staffUserId === clerk.id);
+        expect(row.totalEarned).toBe(row.salaryUzs);
+        return row.salaryUzs;
+      };
+      expect(await salaryFor('?from=2026-04-01&to=2026-04-30')).toBe(3_000_000); // full month
+      expect(await salaryFor('?from=2026-04-01&to=2026-04-15')).toBe(1_500_000); // half of a 30-day month
+      expect(await salaryFor('?from=2026-02-01&to=2026-02-14')).toBe(1_500_000); // half of a 28-day month
+      expect(await salaryFor('?from=2026-01-01&to=2026-03-31')).toBe(9_000_000); // three months
+      expect(await salaryFor('?from=2026-01-17&to=2026-02-14')).toBe(Math.round((3_000_000 * 15) / 31) + 1_500_000); // across months
+      expect(await salaryFor('?from=2026-04-10&to=2026-04-10')).toBe(100_000); // one day
+      expect(await salaryFor('')).toBe(0); // no period: no salary
+      expect(await salaryFor('?from=2026-05-01&to=2026-04-01')).toBe(0); // reversed period
+
+      // Doctor salary follows the same rule
+      const savedCommission = await prisma.doctorCommission.findUnique({ where: { doctorId: testDoctorAId } });
+      try {
+        await http().put(`/api/admin/commissions/${testDoctorAId}`).set(auth(adminToken)).send({ percentage: 0, fixedBonus: 0, payType: 'SALARY', monthlySalary: 6_000_000 }).expect(200);
+        const docs = (await http().get('/api/admin/commissions?from=2026-04-01&to=2026-04-15').set(auth(adminToken)).expect(200)).body;
+        expect(docs.find((d: any) => d.doctorId === testDoctorAId)).toMatchObject({ monthlySalary: 6_000_000, salaryUzs: 3_000_000, totalEarned: 3_000_000 });
+      } finally {
+        if (savedCommission) {
+          await prisma.doctorCommission.update({
+            where: { doctorId: testDoctorAId },
+            data: { percentage: savedCommission.percentage, fixedBonus: savedCommission.fixedBonus, payType: savedCommission.payType, monthlySalary: savedCommission.monthlySalary },
+          });
+        } else {
+          await prisma.doctorCommission.deleteMany({ where: { doctorId: testDoctorAId } });
+        }
+      }
+
+      // 3. Doctor accounts (linked or not) are paid through the doctor profile only
+      for (const doc of [docAStaff, unlinkedDoctor]) {
+        await http().put(`/api/admin/commissions/staff/${doc.id}`).set(auth(adminToken)).send({ payType: 'SALARY', monthlySalary: 1_000_000 }).expect(400);
+      }
+      const staffRows = (await http().get('/api/admin/commissions/staff?from=2026-04-01&to=2026-04-30').set(auth(adminToken)).expect(200)).body;
+      const ids = staffRows.map((r: any) => r.staffUserId);
+      expect(ids).toContain(clerk.id);
+      expect(ids).not.toContain(docAStaff.id);
+      expect(ids).not.toContain(unlinkedDoctor.id);
+      expect(staffRows.every((r: any) => r.role !== 'DOCTOR' && !r.doctorId)).toBe(true);
+    } finally {
+      await prisma.staffCompensation.deleteMany({ where: { staffUserId: clerk.id } });
+      await prisma.invoice.deleteMany({ where: { patientId: { in: [own.id, stranger.id] } } });
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.deleteMany({ where: { id: { in: [own.id, stranger.id] } } });
+      await prisma.staffUser.delete({ where: { id: clerk.id } }).catch(() => {});
+    }
+  });
+
+  it('Regression 84: Bot never re-links a patient to another Telegram, signing secrets have no default, cancelled invoices list as cancelled', async () => {
+    const http = () => request(app.getHttpServer());
+    const sync = (body: any) => http().post('/api/bot/patient/sync').set('x-service-token', testServiceToken).send(body);
+    const stamp = Date.now().toString(36);
+    const phone = '+998900008585';
+    const linked = await prisma.patient.create({ data: { fullName: 'Reg84 Ona', phone, telegramUserId: `tg84a_${stamp}` } });
+    const free = await prisma.patient.create({ data: { fullName: 'Reg84 Bola', phone } });
+    const other = await prisma.patient.create({ data: { fullName: 'Reg84 Boshqa', phone: '+998900008586', telegramUserId: `tg84c_${stamp}` } });
+    try {
+      // 1. A family member cannot take over a patient already linked to another Telegram account
+      await sync({ phone, fullName: 'Reg84 Ona', telegramUserId: `tg84b_${stamp}`, patientId: linked.id }).expect(409);
+      expect((await prisma.patient.findUnique({ where: { id: linked.id } }))!.telegramUserId).toBe(`tg84a_${stamp}`);
+
+      // 2. A Telegram account already linked to someone else gets a clear 409, not a 500
+      await sync({ phone, fullName: 'Reg84 Bola', telegramUserId: `tg84c_${stamp}`, patientId: free.id }).expect(409);
+      expect((await prisma.patient.findUnique({ where: { id: free.id } }))!.telegramUserId).toBeNull();
+
+      // 3. Picking an unlinked family member still works, and is idempotent for the same account
+      const ok = (await sync({ phone, fullName: 'Reg84 Bola', telegramUserId: `tg84b_${stamp}`, patientId: free.id }).expect(200)).body;
+      expect(ok.id).toBe(free.id);
+      await sync({ phone, fullName: 'Reg84 Bola', telegramUserId: `tg84b_${stamp}`, patientId: free.id }).expect(200);
+
+      // 4. Cancelled invoices are listed as cancelled and owe nothing
+      const inv = await prisma.invoice.create({ data: { patientId: free.id, totalAmount: 70000, status: 'CANCELLED' } });
+      const list = (await http().get(`/api/admin/billing/invoices?patientId=${free.id}`).set('Authorization', `Bearer ${adminToken}`).expect(200)).body;
+      expect(list.find((i: any) => i.id === inv.id)).toMatchObject({ status: 'CANCELLED', debtAmount: 0 });
+
+      // 5. Signing secrets: no default in the code, fail closed outside the test runner
+      const { requireSecret } = require('../src/auth/jwt-secret');
+      const cfg = (v?: string) => ({ get: () => v });
+      const env = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'production';
+        expect(() => requireSecret(cfg(undefined))).toThrow();
+        expect(() => requireSecret(cfg('short'))).toThrow();
+        expect(() => requireSecret(cfg('CHANGE_ME_please_generate_a_real_secret_value'))).toThrow();
+        expect(requireSecret(cfg('a'.repeat(40)))).toBe('a'.repeat(40));
+        process.env.NODE_ENV = 'development';
+        expect(() => requireSecret(cfg('short'))).toThrow();
+        process.env.NODE_ENV = 'test';
+        expect(() => requireSecret(cfg(''))).toThrow();
+        expect(requireSecret(cfg('short-but-ok-in-tests'))).toBe('short-but-ok-in-tests');
+      } finally {
+        process.env.NODE_ENV = env;
+      }
+      const offenders: string[] = [];
+      const walk = (dir: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (full.endsWith('.ts') && /dev-secret-change-me/.test(fs.readFileSync(full, 'utf8'))) offenders.push(full);
+        }
+      };
+      walk(path.join(__dirname, '..', 'src'));
+      expect(offenders).toEqual([]);
+    } finally {
+      await prisma.invoice.deleteMany({ where: { patientId: { in: [linked.id, free.id, other.id] } } });
+      await prisma.patient.deleteMany({ where: { id: { in: [linked.id, free.id, other.id] } } });
     }
   });
 });

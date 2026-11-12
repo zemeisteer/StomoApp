@@ -24,6 +24,18 @@ export async function lockInvoice(tx: Prisma.TransactionClient, invoiceId: strin
   return rows[0];
 }
 
+/**
+ * Row lock on a Payme/Click transaction, then a fresh read of it. Always take it AFTER lockInvoice
+ * (lock order: invoice, then its online payment) and decide on `state` only from this read, so a
+ * repeated or parallel provider callback can never apply or reverse the money twice.
+ */
+export async function lockOnlinePayment(tx: Prisma.TransactionClient, id: string) {
+  await tx.$queryRaw`SELECT id FROM "online_payments" WHERE id = ${id} FOR UPDATE`;
+  const row = await tx.onlinePayment.findUnique({ where: { id } });
+  if (!row) throw new NotFoundException('Tranzaksiya topilmadi');
+  return row;
+}
+
 export async function invoiceBalance(tx: Prisma.TransactionClient, invoice: { id: string; total_amount: number; discount: number }) {
   const payments = await tx.payment.findMany({ where: { invoiceId: invoice.id }, select: { amount: true, isRefund: true } });
   const paid = payments.reduce((acc, p) => acc + (p.isRefund ? -p.amount : p.amount), 0);
