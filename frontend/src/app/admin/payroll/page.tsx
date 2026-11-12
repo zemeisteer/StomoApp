@@ -228,6 +228,7 @@ export default function PayrollPage() {
                                     <span className="text-ink-muted">
                                       {formatClinicDate(a.startTime, lang)} · {a.patientName} · {a.serviceName || '—'}
                                       {a.status === 'PLAN' ? ` · ${L('davolash rejasi', 'план лечения')}` : ''}
+                                      {a.status === 'INVOICE' ? ` · ${L('tish kartasidan hisob', 'счёт из зубной карты')}` : ''}
                                     </span>
                                     <span className="tabular-nums text-ink">{formatUzs(a.collected, lang)}</span>
                                   </li>

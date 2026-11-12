@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,11 +13,15 @@ def resolve_bot_token() -> str:
     return token or "mock_bot_token_for_tests"
 
 
+_PLACEHOLDER = re.compile(r"change[_-]?me|^generate_|^replace_with|^your_", re.IGNORECASE)
+
+
 def resolve_service_token() -> str:
     token = os.getenv("SERVICE_TOKEN") or os.getenv("BOT_SERVICE_TOKEN")
-    if not token or len(token) < 32:
+    if not token or len(token) < 32 or _PLACEHOLDER.search(token.strip()):
         raise RuntimeError(
-            "FAIL-CLOSED: SERVICE_TOKEN environment variable is missing or shorter than 32 characters"
+            "FAIL-CLOSED: SERVICE_TOKEN environment variable is missing, a template placeholder "
+            "or shorter than 32 characters"
         )
     return token
 

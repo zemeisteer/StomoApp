@@ -196,6 +196,7 @@ model Doctor {
   treatmentPlanItems TreatmentPlanItem[]
   treatmentPlans     TreatmentPlan[]
   commission         DoctorCommission?
+  invoices           Invoice[]
 
   @@map("doctors")
 }
@@ -945,9 +946,15 @@ model Invoice {
   planItems      TreatmentPlanItem[]
   onlinePayments OnlinePayment[]
 
+  // Doctor who billed it without a visit or plan (e.g. a tooth finished on the chart), so the
+  // money still counts for that doctor's pay
+  doctorId String?  @map("doctor_id")
+  doctor   Doctor?  @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+
   @@index([patientId])
   @@index([appointmentId])
   @@index([planId])
+  @@index([doctorId])
   @@map("invoices")
 }
 

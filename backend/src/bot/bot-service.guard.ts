@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { isPlaceholderSecret } from '../auth/jwt-secret';
 
 @Injectable()
 export class BotServiceGuard implements CanActivate {
@@ -13,7 +14,7 @@ export class BotServiceGuard implements CanActivate {
       this.config.get<string>('BOT_SERVICE_TOKEN');
 
     // Fail-closed: Never fallback to default/hardcoded strings. Token must be >= 32 characters.
-    if (!serviceToken || typeof serviceToken !== 'string' || serviceToken.length < 32) {
+    if (!serviceToken || typeof serviceToken !== 'string' || serviceToken.length < 32 || isPlaceholderSecret(serviceToken)) {
       throw new UnauthorizedException(
         'Xizmat autentifikatsiyasi sozlanmagan: SERVICE_TOKEN kamida 32 belgidan iborat bo\'lishi shart',
       );

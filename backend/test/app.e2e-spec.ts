@@ -9036,4 +9036,71 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.deleteMany({ where: { id: { in: [linked.id, free.id, other.id] } } });
     }
   });
+
+  it('Regression 85: Tooth-chart invoices count for the doctor, debts ignore cancelled invoices, cash limits fit the column, placeholders and provider echoes never pass', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg85_${Date.now()}`;
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent' }).format(new Date());
+    const docAStaff = await prisma.staffUser.findUniqueOrThrow({ where: { email: 'dr.rahimov@dentacare.local' } });
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg85 Bemor', phone: '+998900008587' } });
+    const start = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.appointment.create({
+      data: {
+        publicToken: `${tag}_1`, patientId: patient.id, doctorId: docAStaff.doctorId!, serviceId: testServiceId, branchId: testBranchId,
+        status: AppointmentStatus.COMPLETED, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg85', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+      },
+    });
+    try {
+      // 1. A tooth finished on the chart: the invoice carries the doctor, and its money counts for that doctor
+      const inv = (await http().post('/api/admin/billing/invoices').set(auth(doctorAToken)).send({ patientId: patient.id, totalAmount: 120000, notes: 'Plomba (#16 tish)' }).expect(201)).body;
+      expect(inv.appointmentId).toBeNull();
+      expect(inv.doctorId).toBe(docAStaff.doctorId);
+      await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: inv.id, amount: 120000, method: 'CASH' }).expect(201);
+      const earnings = (await http().get(`/api/admin/commissions/my-earnings?doctorId=${docAStaff.doctorId}&from=${day}&to=${day}`).set(auth(adminToken)).expect(200)).body;
+      expect(earnings.appointments.find((a: any) => a.appointmentId === inv.id)).toMatchObject({ collected: 120000, status: 'INVOICE', serviceName: 'Plomba (#16 tish)' });
+      const own = (await http().get(`/api/admin/billing/invoices?patientId=${patient.id}`).set(auth(doctorAToken)).expect(200)).body;
+      expect(own.map((i: any) => i.id)).toContain(inv.id);
+      const others = (await http().get(`/api/admin/billing/invoices?patientId=${patient.id}`).set(auth(doctorBToken)).expect(200)).body;
+      expect(others.map((i: any) => i.id)).not.toContain(inv.id);
+      // Desk-made invoices without a visit carry no doctor
+      const desk = (await http().post('/api/admin/billing/invoices').set(auth(adminToken)).send({ patientId: patient.id, totalAmount: 30000 }).expect(201)).body;
+      expect(desk.doctorId).toBeNull();
+
+      // 2. Debts: a cancelled invoice is never owed (open 30 000 + cancelled 50 000 -> 30 000)
+      await prisma.invoice.create({ data: { patientId: patient.id, totalAmount: 50000, status: 'CANCELLED' } });
+      const debts = (await http().get('/api/admin/billing/debts').set(auth(adminToken)).expect(200)).body;
+      expect(debts.items.find((d: any) => d.id === patient.id)).toMatchObject({ totalBilled: 150000, totalPaid: 120000, totalDebt: 30000 });
+
+      // 3. Cash desk limits fit the 32-bit money columns
+      await http().post('/api/admin/cashier/shifts/open').set(auth(adminToken)).send({ openingCash: 3_000_000_000 }).expect(400);
+      await http().post('/api/admin/cashier/shifts/x/close').set(auth(adminToken)).send({ countedCash: 3_000_000_000 }).expect(400);
+      await http().post('/api/admin/cashier/payments/x/refund').set(auth(adminToken)).send({ amount: 3_000_000_000, reason: 'limit' }).expect(400);
+
+      // 4. Template placeholders are never accepted as secrets; provider echoes lose numbers and codes
+      const { requireSecret, isPlaceholderSecret } = require('../src/auth/jwt-secret');
+      for (const v of ['generate_strong_jwt_secret_min_32_chars', 'replace_with_at_least_32_char_secure_random_token', 'CHANGE_ME_openssl_rand_hex_32_padding_xx', 'your_production_secret_value_here_0123']) {
+        expect(isPlaceholderSecret(v)).toBe(true);
+      }
+      expect(isPlaceholderSecret('a1b2c3d4e5f60718293a4b5c6d7e8f9001122334')).toBe(false);
+      const env = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'production';
+        expect(() => requireSecret({ get: () => 'generate_strong_jwt_secret_min_32_chars' })).toThrow();
+      } finally {
+        process.env.NODE_ENV = env;
+      }
+      const { redactProviderText } = require('../src/notifications/sms.sender');
+      const echoed = redactProviderText('{"mobile_phone":"998901234567","message":"kirish kodi 123456","to":"+998 90 123 45 67"}');
+      expect(echoed).not.toMatch(/\d{5,}/);
+      expect(echoed).not.toContain('123 45 67');
+      expect(redactProviderText('error 500 template 42')).toBe('error 500 template 42');
+    } finally {
+      await prisma.payment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.invoice.deleteMany({ where: { patientId: patient.id } });
+      await prisma.appointment.deleteMany({ where: { publicToken: { startsWith: tag } } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+    }
+  });
 });

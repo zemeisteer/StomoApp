@@ -494,6 +494,12 @@ def test_service_token_is_required_and_long(monkeypatch):
     monkeypatch.setenv("SERVICE_TOKEN", "short")
     with pytest.raises(RuntimeError):
         resolve_service_token()
+    # Template values from the .env example files are never accepted, however long
+    for placeholder in ("replace_with_at_least_32_char_secure_random_token", "CHANGE_ME_openssl_rand_hex_32_padding_xx",
+                        "generate_strong_service_token_min_32_chars"):
+        monkeypatch.setenv("SERVICE_TOKEN", placeholder)
+        with pytest.raises(RuntimeError):
+            resolve_service_token()
     monkeypatch.setenv("SERVICE_TOKEN", "x" * 32)
     assert resolve_service_token() == "x" * 32
 

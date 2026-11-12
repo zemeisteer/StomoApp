@@ -8,8 +8,10 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
 import { CashierService } from './cashier.service';
 import { staffBranch } from '../common/branch-scope';
+import { MAX_PAYMENT_UZS } from './dto/payment.dto';
 
-const MAX_CASH = 10_000_000_000;
+// cash_shifts amounts are 32-bit integer columns (whole so'm): larger values would fail in the database
+const MAX_CASH = MAX_PAYMENT_UZS;
 
 export class OpenShiftDto {
   @IsInt()
@@ -41,6 +43,7 @@ export class RefundDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(MAX_CASH)
   amount?: number;
 
   @IsString()

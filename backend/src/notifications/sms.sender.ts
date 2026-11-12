@@ -11,6 +11,15 @@ import { ConfigService } from '@nestjs/config';
  * Otherwise (generic): POST {recipient, message, idempotencyKey} as JSON to SMS_API_URL with
  *   "Authorization: Bearer SMS_API_KEY" (for a self-hosted or other gateway).
  */
+
+/**
+ * Provider error bodies may echo the recipient number or the message (one-time codes). These
+ * errors end up in logs and the outbox, so every run of 5+ digits is masked before they leave here.
+ */
+export function redactProviderText(text: string): string {
+  return text.replace(/\+?\d[\d\s-]{3,}\d/g, (m) => (m.replace(/\D/g, '').length >= 5 ? '***' : m)).slice(0, 200);
+}
+
 @Injectable()
 export class SmsSender {
   private readonly logger = new Logger(SmsSender.name);
@@ -57,7 +66,7 @@ export class SmsSender {
       body: JSON.stringify({ recipient: phone, message, ...(idempotencyKey ? { idempotencyKey } : {}) }),
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) throw new Error(`SMS provider error ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) throw new Error(`SMS provider error ${res.status}: ${redactProviderText(await res.text())}`);
   }
 
   private async eskizLogin(): Promise<string> {
@@ -89,7 +98,7 @@ export class SmsSender {
       return this.sendEskiz(phone, message, true);
     }
     if (!res.ok) {
-      const text = (await res.text()).slice(0, 200);
+      const text = redactProviderText(await res.text());
       this.logger.warn(`Eskiz rejected SMS (${res.status})`);
       throw new Error(`Eskiz error ${res.status}: ${text}`);
     }

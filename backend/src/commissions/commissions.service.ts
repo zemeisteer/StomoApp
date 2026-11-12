@@ -113,15 +113,16 @@ export class CommissionsService {
     // 4. Zero double-counting: Each payment row is evaluated exactly once
     const paymentSums = await this.prisma.$queryRaw<Array<{ doctor_id: string; total_collected: bigint }>>`
       SELECT
-        COALESCE(a.doctor_id, tp.doctor_id) AS doctor_id,
+        COALESCE(a.doctor_id, tp.doctor_id, inv.doctor_id) AS doctor_id,
         COALESCE(SUM(CASE WHEN p.is_refund = true THEN -p.amount ELSE p.amount END), 0)::bigint AS total_collected
       FROM payments p
       LEFT JOIN invoices inv ON inv.id = p.invoice_id
       LEFT JOIN appointments a ON a.id = COALESCE(p.appointment_id, inv.appointment_id)
-      -- Invoices billed from a treatment plan have no appointment: attribute them to the plan's doctor
+      -- Invoices billed from a treatment plan have no appointment: attribute them to the plan's doctor;
+      -- invoices a doctor billed directly (tooth chart) carry that doctor on the invoice
       LEFT JOIN treatment_plans tp ON tp.id = inv.plan_id
-      WHERE ${whereSql} AND COALESCE(a.doctor_id, tp.doctor_id) IS NOT NULL
-      GROUP BY COALESCE(a.doctor_id, tp.doctor_id)
+      WHERE ${whereSql} AND COALESCE(a.doctor_id, tp.doctor_id, inv.doctor_id) IS NOT NULL
+      GROUP BY COALESCE(a.doctor_id, tp.doctor_id, inv.doctor_id)
     `;
 
     const collectedMap = new Map<string, number>();
@@ -183,7 +184,7 @@ export class CommissionsService {
 
     if (!doc) throw new NotFoundException('Shifokor topilmadi');
 
-    const conditions: Prisma.Sql[] = [Prisma.sql`COALESCE(a.doctor_id, tp.doctor_id) = ${doctorId}`];
+    const conditions: Prisma.Sql[] = [Prisma.sql`COALESCE(a.doctor_id, tp.doctor_id, inv.doctor_id) = ${doctorId}`];
     if (fromDate) {
       conditions.push(Prisma.sql`p.recorded_at >= ${fromDate}`);
     }
@@ -205,8 +206,8 @@ export class CommissionsService {
         COALESCE(a.id, inv.id) AS appointment_id,
         COALESCE(a.start_time, inv.created_at) AS start_time,
         p_patient.full_name AS patient_name,
-        COALESCE(a.service_name, tp.title) AS service_name,
-        COALESCE(a.status::text, 'PLAN') AS status,
+        COALESCE(a.service_name, tp.title, inv.notes) AS service_name,
+        CASE WHEN a.id IS NOT NULL THEN a.status::text WHEN tp.id IS NOT NULL THEN 'PLAN' ELSE 'INVOICE' END AS status,
         COALESCE(SUM(CASE WHEN p.is_refund = true THEN -p.amount ELSE p.amount END), 0)::bigint AS collected
       FROM payments p
       LEFT JOIN invoices inv ON inv.id = p.invoice_id
@@ -215,7 +216,8 @@ export class CommissionsService {
       JOIN patients p_patient ON p_patient.id = COALESCE(a.patient_id, inv.patient_id)
       WHERE ${whereSql}
       GROUP BY COALESCE(a.id, inv.id), COALESCE(a.start_time, inv.created_at), p_patient.full_name,
-               COALESCE(a.service_name, tp.title), COALESCE(a.status::text, 'PLAN')
+               COALESCE(a.service_name, tp.title, inv.notes),
+               CASE WHEN a.id IS NOT NULL THEN a.status::text WHEN tp.id IS NOT NULL THEN 'PLAN' ELSE 'INVOICE' END
       ORDER BY 2 DESC
     `;
 

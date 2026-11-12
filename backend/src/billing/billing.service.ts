@@ -21,9 +21,8 @@ export class BillingService {
 
     if (user.role === StaffRole.DOCTOR) {
       if (!user.doctorId) throw new ForbiddenException('Shifokor profili biriktirilmagan');
-      where.appointment = {
-        doctorId: user.doctorId,
-      };
+      // Own visits' invoices and invoices the doctor billed directly (tooth chart)
+      where.OR = [{ appointment: { doctorId: user.doctorId } }, { doctorId: user.doctorId }];
     }
 
     const invoices = await this.prisma.invoice.findMany({
@@ -104,6 +103,8 @@ export class BillingService {
         data: {
           patientId: dto.patientId,
           appointmentId: dto.appointmentId || null,
+          // Billed by a doctor without a visit: the money still counts for that doctor's pay
+          doctorId: !dto.appointmentId && user.role === StaffRole.DOCTOR ? user.doctorId : null,
           totalAmount: dto.totalAmount,
           discount,
           status: 'PENDING',
@@ -246,16 +247,38 @@ export class BillingService {
     const limit = Math.max(1, Math.min(100, query?.limit ? Number(query.limit) : 20));
     const offset = (page - 1) * limit;
 
-    let invoiceJoinSql = Prisma.empty;
-    let paymentJoinSql = Prisma.empty;
+    let invoiceDoctorSql = Prisma.empty;
+    let paymentDoctorSql = Prisma.empty;
     let doctorWhereSql = Prisma.empty;
 
     if (user.role === StaffRole.DOCTOR) {
       if (!user.doctorId) throw new ForbiddenException('Shifokor profili biriktirilmagan');
-      invoiceJoinSql = Prisma.sql`JOIN appointments a_inv ON a_inv.id = i.appointment_id AND a_inv.doctor_id = ${user.doctorId}`;
-      paymentJoinSql = Prisma.sql`JOIN invoices i_pay ON i_pay.id = p.invoice_id JOIN appointments a_pay ON a_pay.id = i_pay.appointment_id AND a_pay.doctor_id = ${user.doctorId}`;
+      // A doctor sees money of their own visits and of invoices they billed directly
+      invoiceDoctorSql = Prisma.sql`AND (a_inv.doctor_id = ${user.doctorId} OR i.doctor_id = ${user.doctorId})`;
+      paymentDoctorSql = Prisma.sql`AND (a_pay.doctor_id = ${user.doctorId} OR i_pay.doctor_id = ${user.doctorId})`;
       doctorWhereSql = Prisma.sql`AND EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id AND a.doctor_id = ${user.doctorId})`;
     }
+
+    // Cancelled invoices are never owed, and money booked on them does not offset other debt
+    // (same rule as the patient card and the patients list)
+    const ctes = Prisma.sql`
+      WITH patient_payments AS (
+        SELECT p.patient_id, SUM(CASE WHEN p.is_refund THEN -p.amount ELSE p.amount END) as total_paid
+        FROM payments p
+        LEFT JOIN invoices i_pay ON i_pay.id = p.invoice_id
+        LEFT JOIN appointments a_pay ON a_pay.id = i_pay.appointment_id
+        WHERE p.patient_id IS NOT NULL AND (i_pay.id IS NULL OR i_pay.status <> 'CANCELLED')
+        ${paymentDoctorSql}
+        GROUP BY p.patient_id
+      ),
+      patient_invoices AS (
+        SELECT i.patient_id, SUM(GREATEST(0, i.total_amount - COALESCE(i.discount, 0))) as total_billed
+        FROM invoices i
+        LEFT JOIN appointments a_inv ON a_inv.id = i.appointment_id
+        WHERE i.status <> 'CANCELLED'
+        ${invoiceDoctorSql}
+        GROUP BY i.patient_id
+      )`;
 
     // Database-level dynamic aggregation: computes net billed vs net paid directly in PostgreSQL
     const rows = await this.prisma.$queryRaw<Array<{
@@ -266,19 +289,7 @@ export class BillingService {
       totalPaid: number;
       totalDebt: number;
     }>>`
-      WITH patient_payments AS (
-        SELECT p.patient_id, SUM(CASE WHEN p.is_refund THEN -p.amount ELSE p.amount END) as total_paid
-        FROM payments p
-        ${paymentJoinSql}
-        WHERE p.patient_id IS NOT NULL
-        GROUP BY p.patient_id
-      ),
-      patient_invoices AS (
-        SELECT i.patient_id, SUM(GREATEST(0, i.total_amount - COALESCE(i.discount, 0))) as total_billed
-        FROM invoices i
-        ${invoiceJoinSql}
-        GROUP BY i.patient_id
-      )
+      ${ctes}
       SELECT
         p.id,
         p.full_name as "fullName",
@@ -296,19 +307,7 @@ export class BillingService {
     `;
 
     const countRows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
-      WITH patient_payments AS (
-        SELECT p.patient_id, SUM(CASE WHEN p.is_refund THEN -p.amount ELSE p.amount END) as total_paid
-        FROM payments p
-        ${paymentJoinSql}
-        WHERE p.patient_id IS NOT NULL
-        GROUP BY p.patient_id
-      ),
-      patient_invoices AS (
-        SELECT i.patient_id, SUM(GREATEST(0, i.total_amount - COALESCE(discount, 0))) as total_billed
-        FROM invoices i
-        ${invoiceJoinSql}
-        GROUP BY i.patient_id
-      )
+      ${ctes}
       SELECT COUNT(*)::bigint as count
       FROM patients p
       LEFT JOIN patient_invoices pi ON pi.patient_id = p.id
