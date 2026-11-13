@@ -1,0 +1,57 @@
+# StomoApp (DentaCare) Roadmap
+
+_Last updated: 2026-11-06_
+
+> The earlier version of this document described a planned Python FastAPI /
+> SQLAlchemy / Celery service layer. That plan was dropped: the FastAPI backend
+> was removed in commit `515cf05`, and everything now runs through a single
+> NestJS API. This file reflects the architecture that actually exists.
+
+## Architecture
+
+| Layer | Technology | Notes |
+|---|---|---|
+| API | NestJS 10 + Prisma 5 | Single source of truth; all clients (web, admin, bot) go through it |
+| Database | PostgreSQL 16 | Migrations in `backend/prisma/migrations` |
+| Cache / locks | Redis 7 | Throttling, coordination |
+| Web | Next.js 14 (App Router) | Public site + admin panel (OWNER, ADMIN, DOCTOR, RECEPTION) |
+| Telegram bot | aiogram v3 (Python 3.12) | Long polling; calls `/api/bot/*` with `SERVICE_TOKEN` |
+| Notifications | Transactional outbox (`notification_jobs`) | SMS (Eskiz/PlayMobile), email, Telegram; bot claims its own jobs once |
+| Gateway | nginx 1.25 + Let's Encrypt (certbot) | HTTPS, HSTS, rate limits; see `scripts/init-letsencrypt.sh` |
+| CI | GitHub Actions | Backend (lint, build, migrate, seed, e2e, priority checks), frontend, bot, gateway |
+
+## Reminder & notification flow
+
+| Message | Channel | Sent by | Dedup |
+|---|---|---|---|
+| Booking confirmation, 2h reminder | SMS / email | Backend outbox worker | `deduplication_key`, `scheduleRevision` |
+| New booking alert | Staff Telegram group (no patient details) | Backend outbox | per appointment |
+| 24h reminder | Patient Telegram chat | Bot (claims via `/bot/reminders/claim`) | per appointment + revision |
+| Daily overview 08:00 | Staff Telegram group (no patient names) | Bot | per clinic day |
+| Personal daily schedule 08:00 | Doctor's Telegram chat (`StaffUser.telegramUserId`) | Bot | per doctor per day |
+| Patient cancellation alert | Staff Telegram group (no patient name) | Bot | n/a |
+
+## Done
+
+Phases 0–8 and the 2026-11-06 production pass are summarised in
+[PROGRESS.md](PROGRESS.md).
+
+## Next
+
+### Blocking for launch
+1. **First production deploy.** DNS for `DOMAIN`, fill `.env.production`, then:
+   `STAGING=1 ./scripts/init-letsencrypt.sh` → `FORCE=1 ./scripts/init-letsencrypt.sh`
+   → `create-owner.js` (see README) → configure clinic settings, branches,
+   services and doctors in the admin panel. Then check with real providers:
+   Eskiz SMS, Telegram bot (`TELEGRAM_BOT_USERNAME` for staff deep links),
+   a booking from the bot and the website, and the next-day reminder.
+   CI's full-stack smoke test already covers the same images, migrations,
+   HTTPS gateway, owner login and backups with dummy credentials.
+2. **First release.** Merge `dev` into `main` once the deploy is verified.
+
+### After launch
+- Offsite copy of `./backups` (host cron with rclone/rsync; the backup
+  service only writes locally).
+- External uptime monitoring of `https://DOMAIN/api/health` and alerting on
+  failed `notification_jobs`.
+- Doctor schedule messages are Uzbek-only (staff UI language is not stored).

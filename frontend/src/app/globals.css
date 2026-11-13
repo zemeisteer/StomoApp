@@ -1,0 +1,496 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --font-sans: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+    /* Brand palettes (default clinic theme). The root layout overrides these per clinic
+       with values generated from ClinicSettings colors - see src/lib/brandTheme.ts. */
+    --brand-50:241 247 247;
+    --brand-100:225 238 237;
+    --brand-200:194 221 220;
+    --brand-300:152 197 196;
+    --brand-400:97 165 163;
+    --brand-500:50 139 136;
+    --brand-600:22 123 120;
+    --brand-700:18 103 101;
+    --brand-800:15 84 82;
+    --brand-900:11 64 62;
+    --brand-950:17 53 58;
+    --secondary-50:242 251 249;
+    --secondary-100:227 245 242;
+    --secondary-200:200 236 229;
+    --secondary-300:162 222 211;
+    --secondary-400:111 204 188;
+    --secondary-500:68 189 168;
+    --secondary-600:43 180 156;
+    --secondary-700:36 151 131;
+    --secondary-800:29 122 106;
+    --secondary-900:22 94 81;
+    --secondary-950:23 70 69;
+    --accent-50:251 249 245;
+    --accent-100:247 242 233;
+    --accent-200:239 230 212;
+    --accent-300:228 212 182;
+    --accent-400:214 188 142;
+    --accent-500:201 169 109;
+    --accent-600:194 157 89;
+    --accent-700:163 132 75;
+    --accent-800:132 107 61;
+    --accent-900:101 82 46;
+    --accent-950:69 63 49;
+
+    /* Brand-neutral base tokens (RGB channels) */
+    --ink: 22 31 41;
+    --ink-muted: 84 96 109;
+    --ink-subtle: 132 143 155;
+    --line: 226 230 235;
+    --line-strong: 205 211 219;
+    --canvas: 246 247 249;
+
+    --background: rgb(var(--canvas));
+    --foreground: rgb(var(--ink));
+
+    --app-bg: rgb(var(--canvas));
+    --surface: #ffffff;
+    --surface-soft: rgb(var(--brand-50));
+    --surface-hover: rgb(var(--brand-50));
+
+    --text: rgb(var(--ink));
+    --text-muted: rgb(var(--ink-muted));
+
+    --primary: rgb(var(--brand-600));
+    --primary-hover: rgb(var(--brand-700));
+    --primary-soft: rgb(var(--brand-100));
+    --on-primary: #ffffff;
+
+    --sidebar-bg: rgb(var(--brand-950));
+    --sidebar-text: #f1f5f5;
+    --sidebar-muted: rgb(var(--brand-200));
+    --sidebar-active: rgb(var(--brand-800));
+
+    --border: rgb(var(--line));
+    --focus: rgb(var(--brand-600));
+    --danger: #b42338;
+
+    --radius-control: 12px;
+    --radius-card: 18px;
+    --radius-panel: 24px;
+
+    --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px rgb(16 24 40 / 0.05);
+    --shadow-popover: 0 12px 36px rgb(16 24 40 / 0.14);
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+
+    --motion-fast: 140ms;
+    --motion-normal: 220ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--app-bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :where(button, a, input, select, textarea):focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--primary);
+    color: #ffffff;
+  }
+
+  /* Native form controls follow the brand: checkboxes, radios, range sliders */
+  :root {
+    accent-color: rgb(var(--brand-600));
+  }
+
+  /* One look for every native <select>: custom chevron, no OS bevel */
+  select:not([multiple]):not([size]) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: #fff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23848f9b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    background-size: 1rem;
+    padding-right: 2rem;
+    cursor: pointer;
+  }
+  select:disabled {
+    cursor: not-allowed;
+    background-color: rgb(var(--canvas));
+  }
+
+  /* Date / month / time inputs: brand-tinted picker icon, consistent text */
+  input[type='date'],
+  input[type='month'],
+  input[type='datetime-local'] {
+    color-scheme: light;
+    font-variant-numeric: tabular-nums;
+  }
+  input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 120ms;
+  }
+  input::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+}
+
+/* StomoApp Component Utilities */
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 100dvh;
+}
+
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-4);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+}
+
+.app-main,
+.dashboard-grid > * {
+  min-width: 0;
+}
+
+.app-main {
+  padding: clamp(16px, 2.5vw, 36px);
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.ui-card {
+  min-width: 0;
+  padding: clamp(16px, 2vw, 24px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
+}
+
+.ui-button--primary {
+  color: var(--on-primary);
+  background: var(--primary);
+}
+
+.ui-button--secondary {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.ui-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ui-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+}
+
+.ui-input::placeholder {
+  color: var(--text-muted);
+}
+
+.ui-input:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px rgba(20, 125, 136, 0.15);
+}
+
+.ui-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.ui-field-error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ui-badge[data-status="waiting"] {
+  background: #fff2d5;
+  color: #79520a;
+}
+
+.ui-badge[data-status="arrived"] {
+  background: #e2f3eb;
+  color: #246346;
+}
+
+.ui-badge[data-status="in-treatment"] {
+  background: #e4efff;
+  color: #28569a;
+}
+
+.ui-badge[data-status="completed"] {
+  background: #e0f2ed;
+  color: #17634e;
+}
+
+.ui-badge[data-status="cancelled"],
+.ui-badge[data-status="no-show"] {
+  background: #fbe8eb;
+  color: #a1273b;
+}
+
+.clinic-logo {
+  display: block;
+  width: auto;
+  max-width: 160px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.tooth-viewer {
+  position: relative;
+  width: 100%;
+  height: clamp(280px, 38vw, 480px);
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: radial-gradient(circle at 50% 40%, #ffffff, #e2f2ed);
+}
+
+.tooth-viewer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes spinSlow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spinSlow 12s linear infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Glassmorphism helpers */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+}
+
+/* Modern Form Dropdowns */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23167b78' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  background-size: 1.15em 1.15em;
+  padding-right: 2.75rem !important;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+select:hover {
+  border-color: var(--primary);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px rgba(20, 125, 136, 0.15);
+}
+
+select option {
+  background-color: #ffffff;
+  color: var(--text);
+  padding: 8px 12px;
+}
+
+@media (hover: hover) {
+  .ui-button--primary:not(:disabled):hover {
+    background: var(--primary-hover);
+  }
+
+  .ui-button--secondary:not(:disabled):hover {
+    background: var(--surface-hover);
+  }
+}
+
+@media (max-width: 1100px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-sidebar--desktop {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-main {
+    padding: 16px;
+  }
+
+  .metric-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tooth-viewer {
+    height: 300px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button {
+    transition: none;
+  }
+
+  .scroll-reveal {
+    animation: none;
+    transition: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- Public site motion (calm, slow, respects reduced motion) ---------- */
+@keyframes hero-draw {
+  from { stroke-dashoffset: 1200; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes hero-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.hero-draw {
+  stroke-dasharray: 1200;
+  animation: hero-draw 2.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.hero-float {
+  animation: hero-float 6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-draw, .hero-float { animation: none; }
+}

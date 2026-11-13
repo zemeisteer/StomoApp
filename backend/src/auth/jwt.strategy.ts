@@ -1,13 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { JwtPayload } from './auth.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { requireSecret } from './jwt-secret';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         // First try cookie
@@ -16,16 +21,35 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ExtractJwt.fromAuthHeaderAsBearerToken(),
       ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get('JWT_SECRET', 'dev-secret-change-me'),
+      secretOrKey: requireSecret(configService),
     });
   }
 
-  validate(payload: JwtPayload): JwtPayload {
+  async validate(payload: JwtPayload): Promise<JwtPayload> {
+    const user = await this.prisma.staffUser.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, email: true, role: true, doctorId: true, branchId: true, isActive: true, tokenVersion: true },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Foydalanuvchi faol emas yoki o\'chirilgan');
+    }
+
+    if (payload.tokenVersion !== undefined && user.tokenVersion !== payload.tokenVersion) {
+      throw new UnauthorizedException('Sessiya muddati o\'tgan (parol yoki rol o\'zgargan)');
+    }
+
+    if (user.role !== payload.role) {
+      throw new UnauthorizedException('Foydalanuvchi roli yangilangan, qaytadan kiring');
+    }
+
     return {
-      sub: payload.sub,
-      email: payload.email,
-      role: payload.role,
-      doctorId: payload.doctorId,
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      doctorId: user.doctorId,
+      branchId: user.role === 'OWNER' ? null : user.branchId,
+      tokenVersion: user.tokenVersion,
     };
   }
 }

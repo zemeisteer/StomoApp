@@ -1,28 +1,65 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, StaffRole } from '@prisma/client';
+import { JwtPayload } from '../auth/auth.service';
+
+export interface UpdatePatientInput {
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  birthDate?: string | null;
+  marketingOptOut?: boolean;
+}
 
 @Injectable()
 export class PatientsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(params: { search?: string; page?: number; limit?: number }) {
+  async findAll(
+    params: { search?: string; page?: number; limit?: number },
+    user?: JwtPayload,
+  ) {
     const { search, page = 1, limit = 20 } = params;
     const where: Prisma.PatientWhereInput = {};
 
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profili biriktirilmagan');
+      }
+      where.appointments = {
+        some: { doctorId: user.doctorId },
+      };
+    }
+
     if (search) {
-      where.OR = [
+      const searchConditions: Prisma.PatientWhereInput[] = [
         { fullName: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
+      if (where.appointments) {
+        where.AND = [
+          { appointments: where.appointments },
+          { OR: searchConditions },
+        ];
+        delete where.appointments;
+      } else {
+        where.OR = searchConditions;
+      }
     }
 
     const [items, total] = await Promise.all([
       this.prisma.patient.findMany({
         where,
         include: {
-          _count: { select: { appointments: true } },
+          _count: {
+            select: {
+              appointments: user?.role === StaffRole.DOCTOR
+                ? { where: { doctorId: user.doctorId! } }
+                : true,
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -31,32 +68,139 @@ export class PatientsService {
       this.prisma.patient.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    // Per-row activity: last finished visit, completed visits and (for non-doctors) open balance
+    const ids = items.map((p) => p.id);
+    const visitWhere: Prisma.AppointmentWhereInput = {
+      patientId: { in: ids },
+      status: 'COMPLETED',
+      ...(user?.role === StaffRole.DOCTOR ? { doctorId: user.doctorId! } : {}),
+    };
+    const [visits, debts] = ids.length
+      ? await Promise.all([
+          this.prisma.appointment.groupBy({
+            by: ['patientId'],
+            where: visitWhere,
+            _count: { _all: true },
+            _max: { startTime: true, actualEndTime: true },
+          }),
+          user?.role === StaffRole.DOCTOR
+            ? Promise.resolve([] as Array<{ patient_id: string; debt: bigint }>)
+            : this.prisma.$queryRaw<Array<{ patient_id: string; debt: bigint }>>`
+                SELECT i.patient_id,
+                       SUM(GREATEST(0, i.total_amount - COALESCE(i.discount, 0) - COALESCE(p.paid, 0)))::bigint AS debt
+                FROM invoices i
+                LEFT JOIN (
+                  SELECT invoice_id, SUM(CASE WHEN is_refund THEN -amount ELSE amount END) AS paid
+                  FROM payments WHERE invoice_id IS NOT NULL GROUP BY invoice_id
+                ) p ON p.invoice_id = i.id
+                WHERE i.status <> 'CANCELLED' AND i.patient_id IN (${Prisma.join(ids)})
+                GROUP BY i.patient_id`,
+        ])
+      : [[], []];
+    const visitMap = new Map(visits.map((v) => [v.patientId, v]));
+    const debtMap = new Map(debts.map((d) => [d.patient_id, Number(d.debt)]));
+
+    return {
+      items: items.map((p) => {
+        const v = visitMap.get(p.id);
+        const last = [v?._max.actualEndTime, v?._max.startTime].filter(Boolean).sort((a, b) => +b! - +a!)[0] || null;
+        return {
+          ...p,
+          completedVisits: v?._count._all || 0,
+          lastVisitAt: last,
+          debtUzs: user?.role === StaffRole.DOCTOR ? null : debtMap.get(p.id) || 0,
+        };
+      }),
+      total,
+      page,
+      limit,
+    };
   }
 
-  async findById(id: string) {
+  async findById(id: string, user?: JwtPayload) {
     const patient = await this.prisma.patient.findUnique({
       where: { id },
       include: {
         appointments: {
-          include: { doctor: true, service: true },
+          include: {
+            doctor: {
+              select: {
+                id: true,
+                firstNameUz: true,
+                lastNameUz: true,
+                firstNameRu: true,
+                lastNameRu: true,
+              },
+            },
+            service: {
+              select: { id: true, nameUz: true, nameRu: true },
+            },
+            branch: {
+              select: { id: true, nameUz: true, nameRu: true },
+            },
+          },
           orderBy: { startTime: 'desc' },
-          take: 20,
         },
         _count: { select: { appointments: true } },
       },
     });
+
     if (!patient) throw new NotFoundException('Bemor topilmadi');
+
+    // Doctor ownership & relationship restriction
+    if (user?.role === StaffRole.DOCTOR) {
+      if (!user.doctorId) {
+        throw new ForbiddenException('Shifokor profili biriktirilmagan');
+      }
+
+      // Filter appointments to only those with this doctor
+      const authorizedAppointments = patient.appointments.filter(
+        a => a.doctorId === user.doctorId,
+      );
+
+      // Fail closed if doctor has never treated this patient
+      if (authorizedAppointments.length === 0) {
+        throw new ForbiddenException('Ushbu bemor sizning qabulingizda bo\'lmagan');
+      }
+
+      // Return minimal scoped profile
+      return {
+        id: patient.id,
+        fullName: patient.fullName,
+        phone: patient.phone,
+        email: patient.email,
+        createdAt: patient.createdAt,
+        appointments: authorizedAppointments,
+        _count: { appointments: authorizedAppointments.length },
+      };
+    }
+
+    // OWNER / ADMIN gets complete profile
     return patient;
   }
 
-  async update(id: string, data: { fullName?: string; phone?: string; email?: string; notes?: string }) {
-    return this.prisma.patient.update({ where: { id }, data });
+  async update(id: string, data: UpdatePatientInput) {
+    const patient = await this.prisma.patient.findUnique({ where: { id } });
+    if (!patient) throw new NotFoundException('Bemor topilmadi');
+
+    return this.prisma.patient.update({
+      where: { id },
+      data: {
+        fullName: data.fullName?.trim(),
+        phone: data.phone?.trim(),
+        email: data.email?.trim() || null,
+        notes: data.notes !== undefined ? data.notes?.trim() || null : undefined,
+        birthDate: data.birthDate === undefined ? undefined : data.birthDate ? new Date(`${data.birthDate}T00:00:00Z`) : null,
+        marketingOptOut: data.marketingOptOut,
+      },
+    });
   }
 
+  /**
+   * Find duplicate phone numbers and group family members for review
+   */
   async findDuplicates() {
-    // Find patients with same phone number
-    const duplicates = await this.prisma.$queryRaw<Array<{ phone: string; count: bigint }>>`
+    const duplicatePhones = await this.prisma.$queryRaw<Array<{ phone: string; count: bigint }>>`
       SELECT phone, COUNT(*) as count
       FROM patients
       WHERE phone IS NOT NULL AND phone != ''
@@ -66,12 +210,62 @@ export class PatientsService {
       LIMIT 50
     `;
 
-    return duplicates.map(d => ({
-      phone: d.phone,
-      count: Number(d.count),
-    }));
+    const results = [];
+    for (const d of duplicatePhones) {
+      const records = await this.prisma.patient.findMany({
+        where: { phone: d.phone },
+        include: {
+          _count: { select: { appointments: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      results.push({
+        phone: d.phone,
+        count: Number(d.count),
+        patients: records,
+      });
+    }
+
+    return results;
   }
 
+  /**
+   * Safe merge of duplicate patient records (moves appointments to target)
+   */
+  async mergePatients(sourceId: string, targetId: string) {
+    if (sourceId === targetId) {
+      throw new Error('Bir xil bemorlarni birlashtirib bo\'lmaydi');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Reassign appointments
+      await tx.appointment.updateMany({
+        where: { patientId: sourceId },
+        data: { patientId: targetId },
+      });
+
+      // Reassign reviews
+      await tx.review.updateMany({
+        where: { patientId: sourceId },
+        data: { patientId: targetId },
+      });
+
+      // Remove source patient
+      await tx.patient.delete({
+        where: { id: sourceId },
+      });
+
+      return tx.patient.findUnique({
+        where: { id: targetId },
+        include: { _count: { select: { appointments: true } } },
+      });
+    });
+  }
+
+  /**
+   * RFC 4180 compliant CSV export with formula injection neutralization
+   */
   async exportCsv(search?: string) {
     const where: Prisma.PatientWhereInput = {};
     if (search) {
@@ -87,24 +281,36 @@ export class PatientsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // CSV injection protection: prefix cells that start with special chars
-    const sanitize = (val: string | null | undefined) => {
-      if (!val) return '';
-      if (/^[=+\-@\t\r]/.test(val)) return "'" + val;
-      return val;
+    // Neutralize spreadsheet formula injection and format RFC 4180 cell
+    const formatCell = (val: string | number | null | undefined): string => {
+      if (val === null || val === undefined) return '""';
+      let str = String(val);
+
+      // Formula injection neutralization: prefix leading special chars
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
+
+      // Escape quotes and wrap in quotes
+      const escaped = str.replace(/"/g, '""');
+      return `"${escaped}"`;
     };
 
-    const header = 'Ism,Telefon,Email,Qabullar soni,Ro\'yxatga olingan';
+    const header = ['ID', 'F.I.SH.', 'Telefon', 'Email', 'Qabullar soni', 'Ro\'yxatdan o\'tgan sana']
+      .map(h => formatCell(h))
+      .join(',');
+
     const rows = patients.map(p =>
       [
-        sanitize(p.fullName),
-        sanitize(p.phone),
-        sanitize(p.email),
-        p._count.appointments,
-        p.createdAt.toISOString(),
+        formatCell(p.id),
+        formatCell(p.fullName),
+        formatCell(p.phone),
+        formatCell(p.email || ''),
+        formatCell(p._count.appointments),
+        formatCell(p.createdAt.toISOString()),
       ].join(',')
     );
 
-    return [header, ...rows].join('\n');
+    return [header, ...rows].join('\r\n');
   }
 }

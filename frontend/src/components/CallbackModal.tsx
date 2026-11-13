@@ -1,0 +1,179 @@
+'use client';
+
+import React, { useState } from 'react';
+import { X, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
+import { api } from '../lib/api';
+import { PhoneInput } from './PhoneInput';
+import { normalizeUzPhone } from '../lib/phone';
+import { CustomSelect } from './CustomSelect';
+
+interface CallbackModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose }) => {
+  const { t, language } = useI18n();
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('+998 ');
+  const [preferredBranch, setPreferredBranch] = useState('');
+  const [preferredTime, setPreferredTime] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullName.trim()) {
+      setError(language === 'ru' ? 'Введите ваше имя' : 'Iltimos, ismingizni kiriting');
+      return;
+    }
+
+    const phoneVal = normalizeUzPhone(phone, true);
+    if (!phoneVal.isValid) {
+      setError((language === 'ru' ? phoneVal.errorMessageRu : phoneVal.errorMessageUz) || 'Telefon raqami noto\'g\'ri');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      await api.submitLead({
+        fullName: fullName.trim(),
+        phone: phoneVal.normalized,
+        preferredBranch: preferredBranch || undefined,
+        preferredTime: preferredTime || undefined,
+      });
+      setIsSuccess(true);
+    } catch (err: any) {
+      setError(err?.message || t.common.error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResetAndClose = () => {
+    setIsSuccess(false);
+    setError(null);
+    setFullName('');
+    setPhone('+998 ');
+    setPreferredBranch('');
+    setPreferredTime('');
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+      <div className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-teal-50">
+        <button
+          onClick={handleResetAndClose}
+          className="absolute top-5 right-5 p-1 text-ink-subtle hover:text-ink-muted rounded-full hover:bg-canvas transition-colors"
+          aria-label={t.common.cancel}
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        {isSuccess ? (
+          <div className="py-6 text-center">
+            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 className="w-10 h-10" />
+            </div>
+            <h3 className="text-xl font-bold text-ink mb-2">{t.callback.success}</h3>
+            <p className="text-sm text-ink-muted mb-6">{t.callback.subtitle}</p>
+            <button
+              onClick={handleResetAndClose}
+              className="w-full py-3 bg-teal-700 hover:bg-teal-800 text-white font-medium rounded-xl shadow-md transition-all"
+            >
+              {language === 'ru' ? 'Понятно' : 'Tushunarli'}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div className="mb-6">
+              <h3 className="text-xl font-bold text-ink mb-1">{t.callback.title}</h3>
+              <p className="text-sm text-ink-muted">{t.callback.subtitle}</p>
+            </div>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-sm text-red-700">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-ink mb-1">
+                  {t.common.name} *
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-3 w-4 h-4 text-ink-subtle" />
+                  <input
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder={t.callback.namePlaceholder}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-line text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <PhoneInput
+                  label={t.common.phone}
+                  required
+                  value={phone}
+                  locale={language}
+                  onChange={(canonical) => setPhone(canonical)}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CustomSelect
+                  label={t.callback.branchOptional}
+                  options={[
+                    { value: '', label: language === 'ru' ? 'Любой филиал' : 'Ixtiyoriy filial' },
+                    { value: 'Chilonzor filiali', label: 'Chilonzor' },
+                    { value: 'Yunusobod filiali', label: 'Yunusobod' },
+                  ]}
+                  value={preferredBranch}
+                  onChange={(val) => setPreferredBranch(val)}
+                  locale={language}
+                />
+
+                <CustomSelect
+                  label={t.callback.preferredTime}
+                  options={[
+                    { value: '', label: language === 'ru' ? 'В ближайшее время' : 'Tez orada' },
+                    { value: 'Ertalab (09:00 - 12:00)', label: language === 'ru' ? 'Утром (09:00 - 12:00)' : 'Ertalab (09:00 - 12:00)' },
+                    { value: 'Tushdan keyin (12:00 - 18:00)', label: language === 'ru' ? 'Днём (12:00 - 18:00)' : 'Kunduzi (12:00 - 18:00)' },
+                    { value: 'Kechqurun (18:00 - 20:00)', label: language === 'ru' ? 'Вечером (18:00 - 20:00)' : 'Kechqurun (18:00 - 20:00)' },
+                  ]}
+                  value={preferredTime}
+                  onChange={(val) => setPreferredTime(val)}
+                  locale={language}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full mt-2 py-3 bg-teal-700 hover:bg-teal-800 text-white font-semibold rounded-xl shadow-lg shadow-teal-700/20 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+              >
+                {isSubmitting ? (
+                  <span>{t.common.loading}</span>
+                ) : (
+                  <span>{t.callback.submit}</span>
+                )}
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
