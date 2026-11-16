@@ -6,6 +6,16 @@ import { Public } from '../auth/public.decorator';
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Liveness only: never touches the database. Hosts that probe often (Render, uptime monitors)
+   * should use this, otherwise a serverless database (Neon) never gets to sleep.
+   */
+  @Get('live')
+  @Public()
+  live() {
+    return { status: 'ok', service: 'dentacare-backend', uptimeSeconds: Math.floor(process.uptime()) };
+  }
+
   @Get()
   @Public()
   async check() {

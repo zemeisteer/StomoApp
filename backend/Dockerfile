@@ -60,7 +60,8 @@ USER nestjs
 
 EXPOSE 4000
 
-# Apply pending migrations, then start. Safe to run on every start (idempotent).
+# Apply pending migrations, create the first OWNER when OWNER_EMAIL/OWNER_PASSWORD are set and
+# none exists yet (no-op otherwise), then start. Safe to run on every start (idempotent).
 ENV PRISMA_HIDE_UPDATE_MESSAGE=1
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/main.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node scripts/ensure-owner.js && exec node dist/main.js"]
 
