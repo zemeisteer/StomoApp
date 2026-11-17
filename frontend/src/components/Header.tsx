@@ -15,12 +15,12 @@ import {
   MessageSquare,
   BookOpen,
   HelpCircle,
-  Stethoscope,
   UserRound,
 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useBrand } from '../lib/brand';
 import { CallbackModal } from './CallbackModal';
+import { ArcMark } from './site/primitives';
 import { api } from '../lib/api';
 
 const SHOW_CABINET = process.env.NEXT_PUBLIC_SHOW_PATIENT_CABINET === 'true';
@@ -134,8 +134,8 @@ export const Header: React.FC = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-line/70 bg-canvas/80 backdrop-blur-xl transition-colors">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+      <header className="sticky top-0 z-40 border-b border-line bg-white">
+        <div className="mx-auto flex h-16 max-w-[1344px] items-center justify-between px-5 sm:px-8">
           
           {/* 1. Clinic Brand Logo on the Left */}
           <Link
@@ -155,9 +155,7 @@ export const Header: React.FC = () => {
               />
             ) : (
               <>
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
-                  <Stethoscope className="h-4 w-4" strokeWidth={2} />
-                </div>
+                <ArcMark />
                 <span className="truncate text-[17px] font-semibold tracking-[-0.01em] text-ink">{clinicName}</span>
               </>
             )}
@@ -271,7 +269,7 @@ export const Header: React.FC = () => {
 
             {/* Language Switcher Pill (Fits comfortably at 360px) */}
             <div
-              className="flex h-9 items-center rounded-full border border-line p-0.5"
+              className="flex h-11 items-center rounded-full border border-line p-1"
               role="group"
               aria-label={t.common.selectLanguage}
             >
@@ -281,7 +279,7 @@ export const Header: React.FC = () => {
                 onClick={() => setLanguage('uz')}
                 aria-label="O'zbekcha"
                 aria-pressed={language === 'uz'}
-                className={`h-full rounded-full px-2.5 text-[12px] font-medium transition-colors ${
+                className={`h-full min-w-[36px] rounded-full px-2.5 text-[12px] font-medium transition-colors ${
                   language === 'uz' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink'
                 }`}
               >
@@ -293,7 +291,7 @@ export const Header: React.FC = () => {
                 onClick={() => setLanguage('ru')}
                 aria-label="Русский"
                 aria-pressed={language === 'ru'}
-                className={`h-full rounded-full px-2.5 text-[12px] font-medium transition-colors ${
+                className={`h-full min-w-[36px] rounded-full px-2.5 text-[12px] font-medium transition-colors ${
                   language === 'ru' ? 'bg-ink text-white' : 'text-ink-muted hover:text-ink'
                 }`}
               >
@@ -316,9 +314,8 @@ export const Header: React.FC = () => {
             {/* Book Appointment CTA Button (Desktop) */}
             <Link
               href="/booking"
-              className="hidden sm:inline-flex h-10 items-center gap-2 rounded-full bg-brand-600 px-5 text-[14px] font-medium text-white transition-colors duration-300 hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/25"
+              className="btn-step hidden sm:inline-flex h-10 items-center gap-2 rounded-full bg-brand-600 px-5 text-[14px] font-medium text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/25"
             >
-              <Calendar className="w-4 h-4" />
               <span>{t.common.bookAppointment}</span>
             </Link>
 

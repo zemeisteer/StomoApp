@@ -18,3 +18,6 @@ __pycache__
 .pytest_cache
 backups/
 *.dump
+
+# design skill working files
+frontend/.taste-skill/

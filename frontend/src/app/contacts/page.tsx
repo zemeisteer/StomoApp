@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ArrowRight, ArrowUpRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ArrowUpRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { PhoneInput } from '../../components/PhoneInput';
@@ -158,7 +158,7 @@ export default function ContactsPage() {
                 </dl>
                 <div className="mt-8">
                   <PrimaryLink href={`/booking?branchId=${activeBranch.id}`}>
-                    {L('Shu filialga yozilish', 'Записаться в этот филиал')} <ArrowRight className="h-4 w-4" />
+                    {L('Shu filialga yozilish', 'Записаться в этот филиал')}
                   </PrimaryLink>
                 </div>
               </>

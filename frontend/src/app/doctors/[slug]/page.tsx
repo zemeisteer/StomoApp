@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { useI18n } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
 import { Container, PrimaryLink, SecondaryLink, formatSom } from '../../../components/site/primitives';
@@ -130,7 +130,7 @@ export default function DoctorDetailPage() {
 
             <div className="mt-10">
               <PrimaryLink href={`/booking?doctorId=${doctor.id}`}>
-                {L('Shu shifokorga yozilish', 'Записаться к этому врачу')} <ArrowRight className="h-4 w-4" />
+                {L('Shu shifokorga yozilish', 'Записаться к этому врачу')}
               </PrimaryLink>
             </div>
 

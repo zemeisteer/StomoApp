@@ -20,20 +20,18 @@ export const BranchesSection: React.FC<BranchesSectionProps> = ({ branches, isLo
   const isRu = language === 'ru';
   const L = (uz: string, ru: string) => (isRu ? ru : uz);
 
+  if (!isLoading && !error && branches.length === 0) return null;
+
   return (
     <Section id="branches" className="bg-white">
       <SectionHeading
-        index="05"
         eyebrow={L('Filiallar', 'Филиалы')}
-        title={L('Sizga yaqin manzilda', 'Рядом с вами')}
+        title={L('Filiallar, manzil va ish vaqti', 'Филиалы, адреса и часы работы')}
         lead={L('Qulay filialni tanlang va shu yerning o‘zida yoziling.', 'Выберите удобный филиал и запишитесь прямо здесь.')}
       />
 
       {isLoading && <SkeletonCards count={2} className="sm:grid-cols-2" />}
       {!isLoading && error && <SectionError message={error} onRetry={onRetry} retryLabel={t.common.retry} />}
-      {!isLoading && !error && branches.length === 0 && (
-        <p className="text-sm text-ink-muted">{L('Filiallar tez orada qo‘shiladi.', 'Филиалы скоро появятся.')}</p>
-      )}
 
       {!isLoading && !error && branches.length > 0 && (
         <ul className="border-t border-line">
