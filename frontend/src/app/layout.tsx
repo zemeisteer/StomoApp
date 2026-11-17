@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
+import { Onest } from 'next/font/google';
 import '@fontsource-variable/inter';
 import './globals.css';
+
+// Public-site face: Onest covers Latin and Cyrillic (Uzbek and Russian) in one variable file.
+const onest = Onest({ subsets: ['latin', 'latin-ext', 'cyrillic'], display: 'swap', variable: '--font-onest' });
 import { ClientLayout } from './ClientLayout';
 import { brandCssText } from '../lib/brandTheme';
 import { BRAND_REVALIDATE_SECONDS, getClinicBrandServer } from '../lib/clinicServer';
@@ -28,9 +32,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const clinic = await getClinicBrandServer();
 
   return (
-    <html lang="uz" className="scroll-smooth" suppressHydrationWarning>
+    <html lang="uz" className={`scroll-smooth ${onest.variable}`} suppressHydrationWarning>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+        <meta name="page-type" content="service" />
+        <meta name="site-kind" content="other" />
         {/* Per-clinic palette; values are generated from validated #RRGGBB colors only. */}
         <style id="brand-theme" dangerouslySetInnerHTML={{ __html: brandCssText(clinic || {}) }} />
       </head>

@@ -66,7 +66,7 @@ export default function FaqPage() {
   const L = (uz: string, ru: string) => (isRu ? ru : uz);
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
         eyebrow="FAQ"
         title={L('Ko‘p beriladigan savollar', 'Частые вопросы')}
@@ -82,7 +82,7 @@ export default function FaqPage() {
           {isLoading ? (
             <SkeletonCards count={4} className="grid-cols-1" />
           ) : filteredFaqs.length === 0 ? (
-            <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">{L('Savol topilmadi.', 'Вопросы не найдены.')}</p>
+            <p className="rounded-3xl bg-canvas p-10 text-center text-sm text-ink-muted">{L('Savol topilmadi.', 'Вопросы не найдены.')}</p>
           ) : (
             <ul className="border-t border-line">
               {filteredFaqs.map((faq, idx) => {
@@ -109,9 +109,9 @@ export default function FaqPage() {
             </ul>
           )}
 
-          <div className="mt-16 flex flex-col items-start justify-between gap-6 rounded-[2rem] border border-line bg-white p-8 sm:flex-row sm:items-center sm:p-10">
+          <div className="mt-16 flex flex-col items-start justify-between gap-6 rounded-3xl bg-canvas p-8 sm:flex-row sm:items-center sm:p-10">
             <div>
-              <h2 className="text-xl font-semibold tracking-[-0.01em] text-ink">{L('Javob topmadingizmi?', 'Не нашли ответ?')}</h2>
+              <h2 className="text-xl font-normal tracking-[-0.03em] text-ink">{L('Javob topmadingizmi?', 'Не нашли ответ?')}</h2>
               <p className="mt-1 text-sm text-ink-muted">{L('Administrator barcha savollarga javob beradi.', 'Администратор ответит на любой вопрос.')}</p>
             </div>
             <div className="flex flex-wrap gap-3">

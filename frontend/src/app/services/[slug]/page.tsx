@@ -9,6 +9,7 @@ import { useI18n } from '../../../lib/i18n';
 import { serviceCategoryLabel } from '../../../lib/serviceCategories';
 import { Container, PageIntro, PrimaryLink, SecondaryLink, formatSom } from '../../../components/site/primitives';
 import { api } from '../../../lib/api';
+import { SITE_PHOTOS } from '../../../lib/sitePhotos';
 
 export default function ServiceDetailPage() {
   const { t, language } = useI18n();
@@ -54,7 +55,7 @@ export default function ServiceDetailPage() {
   if (notFound || !service) {
     return (
       <Container className="py-32 text-center">
-        <h1 className="text-3xl font-semibold tracking-[-0.02em] text-ink">{L('Xizmat topilmadi', 'Услуга не найдена')}</h1>
+        <h1 className="text-3xl font-normal tracking-[-0.03em] text-ink">{L('Xizmat topilmadi', 'Услуга не найдена')}</h1>
         <p className="mt-3 text-ink-muted">{L('Bu xizmat mavjud emas yoki arxivlangan.', 'Эта услуга недоступна или в архиве.')}</p>
         <div className="mt-8 flex justify-center">
           <SecondaryLink href="/services">
@@ -73,14 +74,16 @@ export default function ServiceDetailPage() {
   const doctors = (service.doctors || []).map((ds: any) => ds.doctor).filter(Boolean);
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
+        photo={SITE_PHOTOS.tools}
+        photoPosition="50% 55%"
         eyebrow={serviceCategoryLabel(service.category, language)}
         title={name}
         lead={undefined}
         aside={
-          <div className="rounded-3xl border border-line bg-white p-6">
-            <p className="text-sm text-ink-subtle">{L('Boshlang‘ich narx', 'Цена от')}</p>
+          <div className="rounded-3xl bg-white p-6 text-ink">
+            <p className="text-sm text-ink-muted">{L('Boshlang‘ich narx', 'Цена от')}</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums tracking-[-0.02em] text-ink">
               {service.priceFrom ? `${formatSom(service.priceFrom)} ${t.common.uzs}` : L('Ko‘rikdan keyin', 'После осмотра')}
             </p>
@@ -107,12 +110,12 @@ export default function ServiceDetailPage() {
           <div className="space-y-12 lg:col-span-7">
             {description && (
               <section>
-                <h2 className="text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{L('Muolaja haqida', 'О процедуре')}</h2>
+                <h2 className="text-sm font-medium text-brand-700">{L('Muolaja haqida', 'О процедуре')}</h2>
                 <p className="mt-4 whitespace-pre-line text-lg leading-relaxed text-ink">{description}</p>
               </section>
             )}
             <section>
-              <h2 className="text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{L('Qabulga tayyorgarlik', 'Подготовка к приёму')}</h2>
+              <h2 className="text-sm font-medium text-brand-700">{L('Qabulga tayyorgarlik', 'Подготовка к приёму')}</h2>
               <p className="mt-4 whitespace-pre-line text-base leading-relaxed text-ink-muted">{prep}</p>
             </section>
           </div>
@@ -120,14 +123,14 @@ export default function ServiceDetailPage() {
           <aside className="lg:col-span-5">
             {doctors.length > 0 && (
               <section>
-                <h2 className="text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{L('Shifokorlar', 'Врачи')}</h2>
+                <h2 className="text-sm font-medium text-brand-700">{L('Shifokorlar', 'Врачи')}</h2>
                 <ul className="mt-4 border-t border-line">
                   {doctors.map((doc: any) => {
                     const docName = isRu && doc.firstNameRu ? `${doc.firstNameRu} ${doc.lastNameRu}` : `${doc.firstNameUz} ${doc.lastNameUz}`;
                     return (
                       <li key={doc.id} className="border-b border-line">
                         <Link href={`/doctors/${doc.slug}`} className="group flex items-center gap-4 py-4">
-                          <span className="relative h-14 w-12 shrink-0 overflow-hidden rounded-xl bg-brand-50">
+                          <span className="relative h-16 w-14 shrink-0 overflow-hidden rounded-2xl bg-brand-50">
                             {doc.photoUrl ? (
                               <Image src={doc.photoUrl} alt={docName} fill unoptimized sizes="48px" className="object-cover" />
                             ) : (

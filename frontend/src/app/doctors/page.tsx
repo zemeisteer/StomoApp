@@ -5,7 +5,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
-import { Container, FilterPills, PageIntro } from '../../components/site/primitives';
+import { SITE_PHOTOS } from '../../lib/sitePhotos';
+import { BookingClose, Container, FilterPills, PageIntro } from '../../components/site/primitives';
 
 export default function DoctorsPage() {
   const { t, language } = useI18n();
@@ -37,8 +38,10 @@ export default function DoctorsPage() {
   const visible = doctors.filter((d) => title === 'ALL' || titleOf(d) === title);
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
+        photo={SITE_PHOTOS.checkup}
+        photoPosition="40% 50%"
         eyebrow={t.nav.doctors}
         title={L('Bizning shifokorlar', 'Наши врачи')}
         lead={L(
@@ -57,11 +60,11 @@ export default function DoctorsPage() {
         {isLoading ? (
           <div className="grid grid-cols-2 gap-5 lg:grid-cols-4" aria-busy="true">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="aspect-[4/5] animate-pulse rounded-3xl bg-white" />
+              <div key={i} className="aspect-[4/5] animate-pulse rounded-3xl bg-canvas" />
             ))}
           </div>
         ) : visible.length === 0 ? (
-          <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+          <p className="rounded-3xl bg-canvas p-10 text-center text-sm text-ink-muted">
             {L('Shifokorlar ro‘yxati hozircha bo‘sh.', 'Список врачей пока пуст.')}
           </p>
         ) : (
@@ -73,7 +76,7 @@ export default function DoctorsPage() {
               return (
                 <article key={doc.id} className="group">
                   <Link href={`/doctors/${doc.slug}`} className="block">
-                    <div className="relative aspect-[4/5] overflow-hidden rounded-3xl bg-white">
+                    <div className="card-lift photo-zoom relative aspect-[4/5] overflow-hidden rounded-3xl bg-canvas">
                       {doc.photoUrl && !failed[doc.id] ? (
                         <Image
                           src={doc.photoUrl}
@@ -82,10 +85,10 @@ export default function DoctorsPage() {
                           unoptimized
                           sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                           onError={() => setFailed((f) => ({ ...f, [doc.id]: true }))}
-                          className="object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]"
+                          className="object-cover"
                         />
                       ) : (
-                        <div className="flex h-full items-center justify-center bg-gradient-to-b from-brand-50 to-white">
+                        <div className="flex h-full items-center justify-center bg-brand-50">
                           <span className="text-5xl font-light tracking-tight text-brand-700/70">
                             {`${first?.[0] || ''}${last?.[0] || ''}`.toUpperCase()}
                           </span>
@@ -109,7 +112,7 @@ export default function DoctorsPage() {
                     </div>
                     <Link
                       href={`/booking?doctorId=${doc.id}`}
-                      className="inline-flex h-9 shrink-0 items-center rounded-full border border-line-strong px-4 text-[13px] font-medium text-ink transition-colors duration-300 hover:border-ink hover:bg-white"
+                      className="btn-step inline-flex h-11 shrink-0 items-center rounded-full bg-canvas px-5 text-[14px] font-medium text-ink hover:bg-brand-50"
                     >
                       {L('Yozilish', 'Записаться')}
                     </Link>
@@ -121,6 +124,10 @@ export default function DoctorsPage() {
           </div>
         )}
       </Container>
+      <BookingClose
+        title={L('Shifokorni tanladingizmi?', 'Выбрали врача?')}
+        lead={L('Qulay filial va vaqtni onlayn belgilang.', 'Выберите филиал и время онлайн.')}
+      />
     </div>
   );
 }

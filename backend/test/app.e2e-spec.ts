@@ -9103,4 +9103,29 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.delete({ where: { id: patient.id } });
     }
   });
+
+  it('Regression 86: Liveness endpoint answers without the database; the owner helper creates one owner only', async () => {
+    const http = () => request(app.getHttpServer());
+    // /health/live never queries the database (so a serverless database can sleep), /health still does
+    const live = (await http().get('/api/health/live').expect(200)).body;
+    expect(live).toMatchObject({ status: 'ok', service: 'dentacare-backend' });
+    expect(live).not.toHaveProperty('database');
+    expect((await http().get('/api/health').expect(200)).body).toHaveProperty('database.status', 'ok');
+
+    // First-start owner helper (used by hosts without a shell): no-op without env, validates, never resets
+    const script = path.join(__dirname, '..', 'scripts', 'ensure-owner.js');
+    const { spawnSync } = require('child_process');
+    const run = (env: Record<string, string>) =>
+      spawnSync(process.execPath, [script], { env: { ...process.env, OWNER_EMAIL: '', OWNER_PASSWORD: '', ...env }, encoding: 'utf8' });
+    const owners = await prisma.staffUser.count({ where: { role: StaffRole.OWNER } });
+    expect(owners).toBeGreaterThan(0); // this suite always has an owner, so the helper must leave everything alone
+    const skipped = run({ OWNER_EMAIL: 'helper-check@example.test', OWNER_PASSWORD: 'a-long-enough-password-1' });
+    expect(skipped.status).toBe(0);
+    expect(skipped.stdout).toMatch(/already exists/);
+    expect(await prisma.staffUser.count({ where: { email: 'helper-check@example.test' } })).toBe(0);
+    const short = run({ OWNER_EMAIL: 'helper-check@example.test', OWNER_PASSWORD: 'short' });
+    expect(short.status).toBe(1);
+    expect(short.stderr).toMatch(/at least 12 characters/);
+    expect(await prisma.staffUser.count({ where: { role: StaffRole.OWNER } })).toBe(owners);
+  });
 });

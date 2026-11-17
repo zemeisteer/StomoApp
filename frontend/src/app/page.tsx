@@ -8,7 +8,7 @@ import { ClinicSection } from '../components/home/ClinicSection';
 import { ReviewsSection } from '../components/home/ReviewsSection';
 import { BranchesSection } from '../components/home/BranchesSection';
 import { FaqAndCtaSection } from '../components/home/FaqAndCtaSection';
-import { ScrollReveal } from '../components/ScrollReveal';
+import { VisitStepsSection } from '../components/home/VisitStepsSection';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 
@@ -158,65 +158,44 @@ export default function HomePage() {
     (s: any) => s.sectionKey === 'clinic' || s.sectionKey === 'about' || s.sectionKey === 'standards'
   );
 
+  // Service plan (tasteskill): hero, services list, how a visit goes (pinned chapters),
+  // the clinic (picture develops), people and proof on one surface band, branches, FAQ, close.
+  // No section fades in on scroll; only the two dealt moments move.
   return (
-    <div className="overflow-hidden">
-      {/* 1. Hero Section with 3D Tooth Model - Main heading immediately visible */}
+    <>
       <HeroSection />
-
-      {/* 2. Popular Services Section */}
-      <ScrollReveal durationMs={800} distancePx={24}>
-        <ServicesSection
-          services={servicesState.data}
-          isLoading={servicesState.isLoading}
-          error={servicesState.error}
-          onRetry={fetchServices}
-        />
-      </ScrollReveal>
-
-      {/* 3. Doctors Section (Light, photo-led) */}
-      <ScrollReveal durationMs={800} distancePx={24}>
-        <DoctorsSection
-          doctors={doctorsState.data}
-          isLoading={doctorsState.isLoading}
-          error={doctorsState.error}
-          onRetry={fetchDoctors}
-        />
-      </ScrollReveal>
-
-      {/* 4. Clinic Standards & Quality Section */}
-      <ScrollReveal durationMs={800} distancePx={24}>
-        <ClinicSection sectionData={clinicSectionData} />
-      </ScrollReveal>
-
-      {/* 5. Patient Reviews Section */}
-      <ScrollReveal durationMs={800} distancePx={24}>
-        <ReviewsSection
-          reviews={reviewsState.data}
-          isLoading={reviewsState.isLoading}
-          error={reviewsState.error}
-          onRetry={fetchReviews}
-        />
-      </ScrollReveal>
-
-      {/* 6. Branches & Locations Section */}
-      <ScrollReveal durationMs={800} distancePx={24}>
-        <BranchesSection
-          branches={branchesState.data}
-          isLoading={branchesState.isLoading}
-          error={branchesState.error}
-          onRetry={fetchBranches}
-        />
-      </ScrollReveal>
-
-      {/* 7. FAQ Accordion & Final Booking CTA */}
-      <ScrollReveal durationMs={800} distancePx={24}>
-        <FaqAndCtaSection
-          faqs={faqsState.data}
-          isLoading={faqsState.isLoading}
-          error={faqsState.error}
-          onRetry={fetchFaqs}
-        />
-      </ScrollReveal>
-    </div>
+      <ServicesSection
+        services={servicesState.data}
+        isLoading={servicesState.isLoading}
+        error={servicesState.error}
+        onRetry={fetchServices}
+      />
+      <VisitStepsSection />
+      <ClinicSection sectionData={clinicSectionData} />
+      <DoctorsSection
+        doctors={doctorsState.data}
+        isLoading={doctorsState.isLoading}
+        error={doctorsState.error}
+        onRetry={fetchDoctors}
+      />
+      <ReviewsSection
+        reviews={reviewsState.data}
+        isLoading={reviewsState.isLoading}
+        error={reviewsState.error}
+        onRetry={fetchReviews}
+      />
+      <BranchesSection
+        branches={branchesState.data}
+        isLoading={branchesState.isLoading}
+        error={branchesState.error}
+        onRetry={fetchBranches}
+      />
+      <FaqAndCtaSection
+        faqs={faqsState.data}
+        isLoading={faqsState.isLoading}
+        error={faqsState.error}
+        onRetry={fetchFaqs}
+      />
+    </>
   );
 }

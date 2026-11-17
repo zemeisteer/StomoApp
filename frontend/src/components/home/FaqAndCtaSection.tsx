@@ -89,16 +89,12 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
 
   return (
     <>
-      <Section id="faq" className="bg-canvas">
+      <Section id="faq" className="bg-white">
         <div className="grid gap-10 lg:grid-cols-12 lg:gap-12">
           <div className="lg:col-span-4">
             <div className="lg:sticky lg:top-28">
-              <p className="mb-4 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">
-                <span className="tabular-nums text-brand-600">06</span>
-                <span className="h-px w-8 bg-line-strong" aria-hidden="true" />
-                FAQ
-              </p>
-              <h2 className="text-2xl font-semibold leading-[1.15] tracking-[-0.02em] text-ink sm:text-3xl">
+              <p className="mb-4 text-sm font-medium text-brand-700">FAQ</p>
+              <h2 className="text-3xl font-normal leading-[1.08] tracking-[-0.03em] text-ink sm:text-[2.75rem]">
                 {isRu ? 'Ответы на частые вопросы' : 'Ko‘p beriladigan savollar'}
               </h2>
               <p className="mt-5 text-base leading-relaxed text-ink-muted">
@@ -149,32 +145,26 @@ export const FaqAndCtaSection: React.FC<FaqAndCtaSectionProps> = ({
       </Section>
 
       {/* Closing call to action */}
-      <section className="bg-canvas pb-20 sm:pb-28">
+      {/* close-type: the heading, one line, and the big button across the container */}
+      <section id="book" className="border-t border-line bg-canvas py-20 sm:py-28">
         <Container>
-          <div className="relative overflow-hidden rounded-[2rem] bg-brand-950 px-8 py-12 text-center sm:px-14 sm:py-14">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0"
-              style={{ background: 'radial-gradient(60% 80% at 50% 0%, rgb(var(--brand-600) / 0.45), transparent 70%)' }}
-            />
-            <h2 className="relative mx-auto max-w-2xl text-2xl font-semibold leading-tight tracking-[-0.025em] text-white sm:text-4xl">
-              {isRu ? 'Запишитесь на консультацию' : 'Maslahat uchun yoziling'}
+          <div className="grid gap-6 lg:grid-cols-12 lg:items-end">
+            <h2 className="text-3xl font-normal leading-[1.08] tracking-[-0.03em] text-ink sm:text-[2.75rem] lg:col-span-7">
+              {isRu ? 'Первый осмотр и план лечения' : 'Birinchi ko‘rik va davolash rejasi'}
             </h2>
-            <p className="relative mx-auto mt-5 max-w-lg text-base leading-relaxed text-white/70">
+            <p className="max-w-md text-base leading-relaxed text-ink-muted sm:text-lg lg:col-span-5 lg:justify-self-end">
               {isRu
-                ? 'Осмотр, понятный план лечения и честная цена — на первом же визите.'
-                : 'Ko‘rik, tushunarli davolash rejasi va halol narx — birinchi tashrifdayoq.'}
+                ? 'Выберите услугу, врача, филиал и удобное время онлайн.'
+                : 'Xizmat, shifokor, filial va qulay vaqtni onlayn tanlang.'}
             </p>
-            <div className="relative mt-10 flex justify-center">
-              <Link
-                href="/booking"
-                className="inline-flex h-12 items-center gap-2 rounded-full bg-white px-7 text-[15px] font-medium text-brand-950 transition-colors duration-300 hover:bg-brand-50"
-              >
-                {t.common.bookAppointment}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
           </div>
+          <Link
+            href="/booking"
+            className="btn-step group mt-12 flex h-20 w-full items-center justify-between rounded-full bg-brand-600 px-8 text-xl font-medium text-white hover:bg-brand-700 sm:h-24 sm:px-12 sm:text-2xl"
+          >
+            {t.common.bookAppointment}
+            <ArrowRight className="btn-arrow h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+          </Link>
         </Container>
       </section>
     </>

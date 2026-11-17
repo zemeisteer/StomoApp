@@ -19,9 +19,20 @@ export const ClientLayout: React.FC<{ children: React.ReactNode; initialClinic: 
     <BrandProvider initialClinic={initialClinic}>
     <I18nProvider>
       <AuthProvider>
-        {!isAdminRoute && <Header />}
-        <main className="min-h-screen">{children}</main>
-        {!isAdminRoute && <Footer />}
+        {isAdminRoute ? (
+          <main className="min-h-screen">{children}</main>
+        ) : (
+          <div className="site-public">
+            <a href="#main" className="skip-link">
+              Asosiy qismga o‘tish
+            </a>
+            <Header />
+            <main id="main" className="min-h-screen bg-white">
+              {children}
+            </main>
+            <Footer />
+          </div>
+        )}
       </AuthProvider>
     </I18nProvider>
     </BrandProvider>

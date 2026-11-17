@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { useI18n } from '../../lib/i18n';
 import { serviceCategoryLabel } from '../../lib/serviceCategories';
 import { api } from '../../lib/api';
+import { SITE_PHOTOS } from '../../lib/sitePhotos';
 import { CustomSelect } from '../../components/CustomSelect';
-import { Container, FilterPills, PageIntro, SearchField, SkeletonCards, formatSom } from '../../components/site/primitives';
+import { BookingClose, Container, FilterPills, PageIntro, SearchField, SkeletonCards, formatSom } from '../../components/site/primitives';
 
 type PriceSortOption = 'default' | 'asc' | 'desc';
 
@@ -198,8 +199,10 @@ export default function PricesPage() {
   };
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
+        photo={SITE_PHOTOS.procedure}
+        photoPosition="55% 40%"
         eyebrow={t.nav.prices}
         title={L('Narxlar', 'Цены')}
         lead={L(
@@ -268,7 +271,7 @@ export default function PricesPage() {
         {isLoading ? (
           <SkeletonCards count={4} className="grid-cols-1" />
         ) : filteredAndSortedServices.length === 0 ? (
-          <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+          <p className="rounded-3xl bg-canvas p-10 text-center text-sm text-ink-muted">
             {L('Mos muolaja topilmadi.', 'Подходящих процедур не найдено.')}
           </p>
         ) : grouped ? (
@@ -291,9 +294,9 @@ export default function PricesPage() {
             </nav>
             <div className="space-y-6">
               {groups.map(([cat, list]) => (
-                <section key={cat} id={`cat-${cat}`} className="scroll-mt-24 overflow-hidden rounded-3xl border border-line bg-white">
-                  <div className="flex items-baseline justify-between border-b border-line bg-canvas/60 px-5 py-4 sm:px-6">
-                    <h2 className="text-lg font-semibold tracking-[-0.01em] text-ink">{serviceCategoryLabel(cat, language)}</h2>
+                <section key={cat} id={`cat-${cat}`} className="scroll-mt-24 overflow-hidden rounded-3xl bg-canvas">
+                  <div className="flex items-baseline justify-between border-b border-line/70 bg-white/50 px-5 py-4 sm:px-6">
+                    <h2 className="text-lg font-normal tracking-[-0.03em] text-ink">{serviceCategoryLabel(cat, language)}</h2>
                     <span className="text-xs text-ink-subtle">
                       {list.length} {L('ta', 'шт.')}
                     </span>
@@ -304,7 +307,7 @@ export default function PricesPage() {
             </div>
           </div>
         ) : (
-          <ul className="rounded-3xl border border-line bg-white px-5 sm:px-6 [&>li:last-child]:border-b-0">{filteredAndSortedServices.map(row)}</ul>
+          <ul className="rounded-3xl bg-canvas px-5 sm:px-6 [&>li:last-child]:border-b-0">{filteredAndSortedServices.map(row)}</ul>
         )}
 
         <p className="mt-10 max-w-2xl text-sm leading-relaxed text-ink-subtle">
@@ -314,6 +317,10 @@ export default function PricesPage() {
           )}
         </p>
       </Container>
+      <BookingClose
+        title={L('Narxni ko‘rikdan keyin bilasiz', 'Точную цену вы узнаете после осмотра')}
+        lead={L('Reja yozma beriladi va rozilik bermaguningizcha o‘zgarmaydi.', 'План выдаётся письменно и не меняется без вашего согласия.')}
+      />
     </div>
   );
 }

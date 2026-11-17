@@ -33,7 +33,7 @@ export default function ArticlesPage() {
   const L = (uz: string, ru: string) => (isRu ? ru : uz);
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
         eyebrow={t.nav.articles}
         title={L('Maqolalar', 'Статьи')}
@@ -47,7 +47,7 @@ export default function ArticlesPage() {
         {isLoading ? (
           <SkeletonCards count={3} />
         ) : articles.length === 0 ? (
-          <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+          <p className="rounded-3xl bg-canvas p-10 text-center text-sm text-ink-muted">
             {L('Maqolalar tez orada chiqadi.', 'Статьи скоро появятся.')}
           </p>
         ) : (

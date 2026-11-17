@@ -3,11 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Stethoscope } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { useBrand } from '../lib/brand';
 import { api } from '../lib/api';
 import { formatWorkingHours } from '../lib/dateFormat';
+import { PHOTO_CREDITS } from '../lib/sitePhotos';
+import { ArcMark } from './site/primitives';
 
 /** Light, quiet footer: brand, navigation, branches and contacts separated by hairlines. */
 export const Footer: React.FC = () => {
@@ -46,8 +47,8 @@ export const Footer: React.FC = () => {
   ];
 
   return (
-    <footer className="border-t border-line bg-canvas">
-      <div className="mx-auto max-w-6xl px-5 pb-10 pt-16 sm:px-8">
+    <footer className="border-t border-line bg-white">
+      <div className="mx-auto max-w-[1344px] px-5 pb-10 pt-16 sm:px-8">
         <div className="grid gap-12 md:grid-cols-12">
           <div className="md:col-span-4">
             <Link href="/" className="inline-flex items-center gap-2.5" aria-label={clinicName}>
@@ -55,9 +56,7 @@ export const Footer: React.FC = () => {
                 <Image src={brand.logo} alt={clinicName} width={160} height={36} unoptimized onError={() => setLogoError(true)} className="h-9 w-auto max-w-[160px] object-contain" />
               ) : (
                 <>
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
-                    <Stethoscope className="h-4 w-4" />
-                  </span>
+                  <ArcMark />
                   <span className="text-[17px] font-semibold tracking-[-0.01em] text-ink">{clinicName}</span>
                 </>
               )}
@@ -81,7 +80,7 @@ export const Footer: React.FC = () => {
           </nav>
 
           <div className="md:col-span-3">
-            <p className="mb-4 text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{L('Filiallar', 'Филиалы')}</p>
+            {branches.length > 0 && <p className="mb-4 text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{L('Filiallar', 'Филиалы')}</p>}
             <ul className="space-y-4 text-sm">
               {branches.map((b) => (
                 <li key={b.id}>
@@ -130,9 +129,22 @@ export const Footer: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-14 flex flex-col gap-3 border-t border-line pt-6 text-xs text-ink-subtle sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-14 flex flex-col gap-3 border-t border-line pt-6 text-xs text-ink-subtle sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <p>
             © {new Date().getFullYear()} {clinicName}. {L('Barcha huquqlar himoyalangan.', 'Все права защищены.')}
+          </p>
+          <p className="sm:order-last sm:basis-full">
+            {L('Fotosuratlar', 'Фотографии')}:{' '}
+            {PHOTO_CREDITS.map((c, i) => (
+              <React.Fragment key={c.by}>
+                {i > 0 && ', '}
+                <a href={c.url} target="_blank" rel="noopener noreferrer" className="link-draw hover:text-ink">
+                  {c.by}
+                </a>{' '}
+                ({c.licence})
+              </React.Fragment>
+            ))}
+            , Wikimedia Commons
           </p>
           <div className="flex gap-5">
             <Link href="/privacy" className="transition-colors hover:text-ink">

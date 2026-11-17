@@ -82,8 +82,8 @@ export default function ArticleDetailPage() {
     : '';
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-canvas via-white to-canvas py-10 sm:py-16">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 w-full space-y-8">
+    <div className="min-h-screen bg-white py-12 sm:py-20">
+      <div className="max-w-3xl mx-auto px-5 sm:px-8 w-full space-y-8">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-xs text-ink-muted">
           <Link href="/" className="hover:text-brand-600 transition-colors">
@@ -98,7 +98,7 @@ export default function ArticleDetailPage() {
         </nav>
 
         {/* Article Body */}
-        <article className="bg-white rounded-3xl border border-line p-6 sm:p-12 shadow-sm space-y-6">
+        <article className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-xs text-ink-muted">
               <span className="flex items-center gap-1.5 font-medium text-brand-600 bg-brand-50 px-2.5 py-0.5 rounded-full border border-line">
@@ -113,7 +113,7 @@ export default function ArticleDetailPage() {
               )}
             </div>
 
-            <h1 className="text-2xl sm:text-4xl font-semibold text-ink leading-tight tracking-tight">
+            <h1 className="text-3xl sm:text-5xl font-normal text-ink leading-[1.06] tracking-[-0.035em]">
               {title}
             </h1>
           </div>
@@ -137,7 +137,7 @@ export default function ArticleDetailPage() {
           </div>
 
           {/* CTA Box */}
-          <div className="p-6 bg-brand-50 border border-line rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-8">
+          <div className="p-8 bg-canvas rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-8">
             <div>
               <h3 className="text-sm font-bold text-ink">
                 {language === 'uz' ? 'Tish salomatligingiz haqida qayg\'uryapsizmi?' : 'Беспокоит здоровье зубов?'}

@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { ShieldCheck, Sparkles, Heart, ArrowRight } from 'lucide-react';
+import { ShieldCheck, Sparkles, Heart } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
-import { Container, PageIntro } from '../../components/site/primitives';
+import { SITE_PHOTOS } from '../../lib/sitePhotos';
+import { BookingClose, Container, PageIntro } from '../../components/site/primitives';
+import { Photo } from '../../components/site/moments';
 
 export default function AboutPage() {
   const { t, language } = useI18n();
@@ -80,8 +81,10 @@ export default function AboutPage() {
   const L = (uz: string, ru: string) => (isRu ? ru : uz);
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
+        photo={SITE_PHOTOS.room}
+        photoPosition="50% 60%"
         eyebrow={t.nav.about}
         title={`${clinicName} — ${L('ishonchli stomatologiya', 'стоматология, которой доверяют')}`}
         lead={L(
@@ -90,64 +93,56 @@ export default function AboutPage() {
         )}
       />
 
-      <section className="bg-white py-12 sm:py-16">
+      <section className="screen py-20 sm:py-28">
         <Container>
-          <div className="grid gap-12 lg:grid-cols-12">
-            <h2 className="text-2xl font-semibold tracking-[-0.025em] text-ink sm:text-3xl lg:col-span-4">
-              {L('Biz nimaga tayanamiz', 'На чём мы стоим')}
-            </h2>
-            <ol className="border-t border-line lg:col-span-8">
-              {values.map((v, i) => {
-                const Icon = v.icon;
-                return (
-                  <li key={v.title} className="grid gap-4 border-b border-line py-8 sm:grid-cols-[4rem_1fr]">
-                    <span className="text-sm tabular-nums text-ink-subtle">{String(i + 1).padStart(2, '0')}</span>
-                    <div>
-                      <h3 className="flex items-center gap-2.5 text-xl font-medium tracking-[-0.01em] text-ink">
+          <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-16">
+            <div className="lg:col-span-7">
+              <p className="mb-4 text-sm font-medium text-brand-700">{L('Qadriyatlar', 'Принципы')}</p>
+              <h2 className="text-3xl font-normal leading-[1.08] tracking-[-0.03em] text-ink sm:text-[2.75rem]">{L('Biz nimaga tayanamiz', 'На чём мы стоим')}</h2>
+              <ol className="mt-10 border-t border-line">
+                {values.map((v) => {
+                  const Icon = v.icon;
+                  return (
+                    <li key={v.title} className="border-b border-line py-7">
+                      <h3 className="flex items-center gap-3 text-xl font-medium tracking-[-0.01em] text-ink">
                         <Icon className="h-5 w-5 text-brand-700" strokeWidth={1.75} /> {v.title}
                       </h3>
                       <p className="mt-2 max-w-xl text-base leading-relaxed text-ink-muted">{v.desc}</p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+            <div className="photo-zoom relative aspect-[4/5] overflow-hidden rounded-3xl bg-canvas lg:col-span-5">
+              <Photo photo={SITE_PHOTOS.child} lang={language} sizes="(min-width: 1024px) 40vw, 100vw" position="35% 50%" className="absolute inset-0" />
+            </div>
           </div>
         </Container>
       </section>
 
-      <section className="py-12 sm:py-16">
+      <section className="screen bg-canvas py-20 sm:py-28">
         <Container>
           <div className="max-w-2xl">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">{L('Texnologiyalar', 'Оснащение')}</p>
-            <h2 className="mt-4 text-2xl font-semibold tracking-[-0.025em] text-ink sm:text-3xl">
+            <p className="mb-4 text-sm font-medium text-brand-700">{L('Texnologiyalar', 'Оснащение')}</p>
+            <h2 className="text-3xl font-normal leading-[1.08] tracking-[-0.03em] text-ink sm:text-[2.75rem]">
               {L('Zamonaviy jihozlar va sertifikatlangan materiallar', 'Современное оборудование и сертифицированные материалы')}
             </h2>
           </div>
-          <div className="mt-12 grid gap-px overflow-hidden rounded-3xl border border-line bg-line sm:grid-cols-2">
+          <div className="mt-12 grid gap-5 sm:grid-cols-2">
             {technologies.map((item) => (
-              <div key={item.brand} className="bg-white p-7 sm:p-9">
-                <h3 className="text-lg font-medium tracking-[-0.01em] text-ink">{item.brand}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-ink-muted">{item.desc}</p>
+              <div key={item.brand} className="rounded-3xl bg-white p-8 sm:p-10">
+                <h3 className="text-xl font-medium tracking-[-0.01em] text-ink">{item.brand}</h3>
+                <p className="mt-3 text-base leading-relaxed text-ink-muted">{item.desc}</p>
               </div>
             ))}
           </div>
         </Container>
       </section>
 
-      <section className="bg-brand-950 py-12 sm:py-14">
-        <Container className="flex flex-col items-start justify-between gap-8 sm:flex-row sm:items-center">
-          <h2 className="max-w-xl text-3xl font-semibold tracking-[-0.03em] text-white sm:text-4xl">
-            {L('Birinchi ko‘rikdan boshlang', 'Начните с первого осмотра')}
-          </h2>
-          <Link
-            href="/booking"
-            className="inline-flex h-12 items-center gap-2 rounded-full bg-white px-6 text-[15px] font-medium text-ink transition-colors duration-300 hover:bg-brand-50"
-          >
-            {t.common.bookAppointment} <ArrowRight className="h-4 w-4" />
-          </Link>
-        </Container>
-      </section>
+      <BookingClose
+        title={L('Birinchi ko‘rikdan boshlang', 'Начните с первого осмотра')}
+        lead={L('Xizmat, shifokor va qulay vaqtni onlayn tanlang.', 'Выберите услугу, врача и удобное время онлайн.')}
+      />
     </div>
   );
 }

@@ -475,6 +475,238 @@ select option {
   }
 }
 
+/* ---------- Public site: type, motion layer and the two dealt moments ----------
+   Design notes (tasteskill deal): kind service (dental clinic), hero "film", type Onest
+   (Latin + Cyrillic), nav-centre, footer-columns, close-type, rhythm surface-pairs,
+   buttons arrow, mark arc, moments pinned-chapters + picture-develops (film look). */
+.site-public {
+  /* small grey text meets 4.5:1 on white on the public site */
+  --ink-subtle: 104 115 127;
+  font-family: var(--font-onest), var(--font-sans);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+.site-public h1,
+.site-public h2,
+.site-public h3 {
+  text-wrap: balance;
+}
+
+/* One section per screen on a desktop: at least the screen under the header, content centred.
+   On a phone a section simply grows with what it holds. */
+@media (min-width: 1024px) and (min-height: 640px) {
+  .site-public .screen {
+    min-height: calc(100svh - 64px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+}
+
+/* Focus shows at once on every control, never only a faint ring. */
+.site-public :is(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid rgb(var(--brand-600));
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 16px;
+  top: -64px;
+  z-index: 60;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgb(var(--ink));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+}
+.skip-link:focus-visible {
+  top: 12px;
+}
+
+/* Buttons step on hover and press on click; the arrow moves on. */
+.btn-step {
+  transition:
+    transform 150ms var(--ease-out),
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.btn-step .btn-arrow {
+  transition: transform 150ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn-step:hover {
+    transform: translateY(-1px);
+  }
+  .btn-step:hover .btn-arrow {
+    transform: translateX(3px);
+  }
+}
+.btn-step:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 80ms;
+}
+
+/* A linked card lifts 2px; its photograph zooms inside the frame. */
+.card-lift {
+  transition: transform 200ms var(--ease-out), box-shadow 200ms ease, border-color 200ms ease;
+}
+.photo-zoom img {
+  transition: transform 700ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .card-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgb(16 24 40 / 0.08);
+  }
+  .card-lift:hover .photo-zoom img,
+  .photo-zoom:hover img {
+    transform: scale(1.03);
+  }
+}
+
+/* Underlines draw on hover. */
+.link-draw {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 0% 1px;
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  transition: background-size 250ms var(--ease-out), color 150ms ease;
+}
+.link-draw:hover,
+.link-draw:focus-visible {
+  background-size: 100% 1px;
+}
+
+/* Hero enters once on load: the words rise in turn, the picture settles from 1.05. */
+@keyframes hero-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes hero-settle {
+  from { transform: scale(1.05); }
+  to { transform: none; }
+}
+.hero-enter [data-enter-item] {
+  animation: hero-rise 700ms var(--ease-out) both;
+}
+.hero-enter [data-enter-item='2'] { animation-delay: 90ms; }
+.hero-enter [data-enter-item='3'] { animation-delay: 180ms; }
+.hero-enter [data-enter-item='4'] { animation-delay: 270ms; }
+.hero-enter [data-enter-media] {
+  animation: hero-settle 1200ms var(--ease-out) both;
+}
+
+/* picture-develops, film look: the photograph comes up from a pale print once it is on screen. */
+.develop > img {
+  transition: none;
+}
+.develop.is-armed > img {
+  filter: grayscale(1) contrast(0.55) brightness(1.32);
+  transform: scale(1.06);
+}
+.develop.is-live > img {
+  animation: develop-film 1600ms cubic-bezier(0.3, 0.2, 0.3, 1) both;
+}
+@keyframes develop-film {
+  0% { filter: grayscale(1) contrast(0.55) brightness(1.32); transform: scale(1.06); }
+  30% { filter: grayscale(0.8) contrast(0.82) brightness(1.14); }
+  62% { filter: grayscale(0.35) contrast(0.95) brightness(1.04); }
+  100% { filter: none; transform: none; }
+}
+
+/* pinned-chapters: live from 1024px on a screen 640px or taller; static rows otherwise. */
+.pc-step p {
+  max-width: 46ch;
+}
+.pc.is-live {
+  height: 200svh;
+}
+.pc.is-live .pc-stage {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  padding-top: 64px;
+  display: grid;
+  align-content: center;
+}
+.pc.is-live .pc-step {
+  border-left: 2px solid rgb(var(--line));
+  padding-left: 20px;
+  transition: border-color 300ms ease;
+}
+.pc.is-live .pc-step h3 {
+  color: rgb(var(--ink-muted));
+  transition: color 300ms ease;
+}
+.pc.is-live .pc-step .pc-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 420ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 300ms ease;
+}
+.pc.is-live .pc-step .pc-body > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.pc.is-live .pc-step.is-on {
+  border-left-color: rgb(var(--brand-600));
+}
+.pc.is-live .pc-step.is-on h3 {
+  color: rgb(var(--ink));
+}
+.pc.is-live .pc-step.is-on .pc-body {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.pc.is-live .pc-step .pc-inline {
+  display: none;
+}
+.pc:not(.is-live) .pc-frame {
+  display: none;
+}
+.pc-frame figure {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  transform: scale(1.03);
+  transition: opacity 480ms ease, transform 900ms var(--ease-out);
+}
+.pc-frame figure.is-on {
+  opacity: 1;
+  transform: none;
+  z-index: 1;
+}
+.pc-frame figure.is-past {
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-step,
+  .card-lift,
+  .photo-zoom img,
+  .link-draw {
+    transition: none !important;
+  }
+  .hero-enter [data-enter-item],
+  .hero-enter [data-enter-media],
+  .develop > img {
+    animation: none !important;
+    filter: none !important;
+    transform: none !important;
+  }
+}
+@media print {
+  .develop > img {
+    filter: none !important;
+    transform: none !important;
+    animation: none !important;
+  }
+}
+
 /* ---------- Public site motion (calm, slow, respects reduced motion) ---------- */
 @keyframes hero-draw {
   from { stroke-dashoffset: 1200; }
