@@ -6,7 +6,8 @@ import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { SERVICE_CATEGORIES, serviceCategoryLabel } from '../../lib/serviceCategories';
 import { api } from '../../lib/api';
-import { Container, FilterPills, PageIntro, SearchField, SkeletonCards, formatSom } from '../../components/site/primitives';
+import { SITE_PHOTOS } from '../../lib/sitePhotos';
+import { BookingClose, Container, FilterPills, PageIntro, SearchField, SkeletonCards, formatSom } from '../../components/site/primitives';
 
 export default function ServicesPage() {
   const { t, language } = useI18n();
@@ -45,8 +46,10 @@ export default function ServicesPage() {
   });
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
+        photo={SITE_PHOTOS.tools}
+        photoPosition="50% 55%"
         eyebrow={t.nav.services}
         title={L('Xizmatlar va narxlar', 'Услуги и цены')}
         lead={L(
@@ -64,17 +67,17 @@ export default function ServicesPage() {
         {isLoading ? (
           <SkeletonCards count={6} />
         ) : filtered.length === 0 ? (
-          <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+          <p className="rounded-3xl bg-canvas p-10 text-center text-sm text-ink-muted">
             {L('Qidiruv bo‘yicha xizmat topilmadi.', 'По запросу ничего не найдено.')}
           </p>
         ) : (
-          <div className="grid gap-px overflow-hidden rounded-3xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((service) => {
               const name = isRu && service.nameRu ? service.nameRu : service.nameUz;
               const desc = isRu && service.descriptionRu ? service.descriptionRu : service.descriptionUz;
               return (
-                <article key={service.id} className="group flex min-h-[260px] flex-col bg-white p-8 transition-colors duration-500 hover:bg-brand-50/40">
-                  <p className="text-xs uppercase tracking-[0.14em] text-ink-subtle">{serviceCategoryLabel(service.category, language)}</p>
+                <article key={service.id} className="card-lift group relative flex min-h-[260px] flex-col rounded-3xl bg-canvas p-8">
+                  <p className="text-sm text-ink-muted">{serviceCategoryLabel(service.category, language)}</p>
                   <h2 className="mt-6 text-xl font-medium leading-snug tracking-[-0.01em] text-ink">
                     <Link href={`/services/${service.slug}`} className="after:absolute after:inset-0 relative">
                       {name}
@@ -94,7 +97,7 @@ export default function ServicesPage() {
                     <div className="relative z-10 flex items-center gap-3">
                       <Link
                         href={`/booking?serviceId=${service.id}`}
-                        className="inline-flex h-10 items-center rounded-full bg-brand-600 px-4 text-[13px] font-medium text-white transition-colors duration-300 hover:bg-brand-700"
+                        className="btn-step inline-flex h-11 items-center rounded-full bg-brand-600 px-5 text-[14px] font-medium text-white hover:bg-brand-700"
                       >
                         {L('Yozilish', 'Записаться')}
                       </Link>
@@ -107,6 +110,10 @@ export default function ServicesPage() {
           </div>
         )}
       </Container>
+      <BookingClose
+        title={L('Xizmatni tanladingizmi?', 'Выбрали услугу?')}
+        lead={L('Shifokor va qulay vaqtni onlayn tanlang.', 'Выберите врача и удобное время онлайн.')}
+      />
     </div>
   );
 }

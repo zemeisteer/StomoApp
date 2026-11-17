@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowUpRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { SITE_PHOTOS } from '../../lib/sitePhotos';
 import { PhoneInput } from '../../components/PhoneInput';
 import { normalizeUzPhone } from '../../lib/phone';
 import { formatWorkingHours } from '../../lib/dateFormat';
@@ -91,8 +92,10 @@ export default function ContactsPage() {
     'w-full rounded-2xl border border-line bg-white px-4 py-3 text-[15px] text-ink placeholder:text-ink-subtle transition-colors focus:border-ink focus:outline-none';
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
+        photo={SITE_PHOTOS.room}
+        photoPosition="50% 60%"
         eyebrow={t.nav.contacts}
         title={L('Bog‘lanish', 'Контакты')}
         lead={L(
@@ -112,7 +115,7 @@ export default function ContactsPage() {
           <div className="lg:col-span-6">
             {activeBranch ? (
               <>
-                <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-3xl">
+                <h2 className="text-2xl font-normal tracking-[-0.03em] text-ink sm:text-3xl">
                   {isRu && activeBranch.nameRu ? activeBranch.nameRu : activeBranch.nameUz}
                 </h2>
                 <dl className="mt-8 border-t border-line">
@@ -164,15 +167,15 @@ export default function ContactsPage() {
               </>
             ) : (
               <div className="space-y-4" aria-busy="true">
-                <div className="h-8 w-1/2 animate-pulse rounded bg-white" />
-                <div className="h-40 animate-pulse rounded-3xl bg-white" />
+                <div className="h-8 w-1/2 animate-pulse rounded bg-canvas" />
+                <div className="h-40 animate-pulse rounded-3xl bg-canvas" />
               </div>
             )}
           </div>
 
           <div className="lg:col-span-6">
-            <div className="rounded-[2rem] border border-line bg-white p-7 sm:p-10">
-              <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t.callback.title}</h2>
+            <div className="rounded-3xl bg-canvas p-7 sm:p-10">
+              <h2 className="text-2xl font-normal tracking-[-0.03em] text-ink">{t.callback.title}</h2>
               <p className="mt-2 text-sm leading-relaxed text-ink-muted">{t.callback.subtitle}</p>
 
               {success ? (

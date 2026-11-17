@@ -4,8 +4,8 @@ import { ArrowLeft, ShieldCheck } from 'lucide-react';
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-canvas via-white to-canvas py-8 sm:py-12">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+    <div className="min-h-screen bg-white py-12 sm:py-20">
+      <div className="max-w-3xl mx-auto px-5 sm:px-8 space-y-8">
         <Link
           href="/"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-brand-600 transition-colors"
@@ -14,13 +14,13 @@ export default function TermsPage() {
           <span>Bosh sahifa</span>
         </Link>
 
-        <div className="bg-white rounded-3xl p-6 sm:p-12 border border-line shadow-sm space-y-6">
+        <div className="space-y-6">
           <div>
-            <span className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-subtlemb-3">
+            <span className="inline-flex items-center gap-2 text-sm font-medium text-brand-700 mb-3">
               <ShieldCheck className="w-3.5 h-3.5 text-brand-600" />
               DentaCare Qoidalari
             </span>
-            <h1 className="text-2xl sm:text-3xl font-semibold text-ink tracking-tight">
+            <h1 className="text-3xl sm:text-5xl font-normal text-ink leading-[1.06] tracking-[-0.035em]">
               Qabulga yozilish va xizmat ko&apos;rsatish qoidalari
             </h1>
             <p className="text-xs text-ink-muted mt-1.5">
@@ -29,22 +29,22 @@ export default function TermsPage() {
           </div>
 
           <div className="text-sm text-ink space-y-6 leading-relaxed">
-            <div className="p-4 rounded-2xl bg-canvas border border-line">
-              <h2 className="text-base font-bold text-ink mb-1">1. Online qabul va tasdiqlash</h2>
+            <div className="p-6 rounded-3xl bg-canvas">
+              <h2 className="text-lg font-medium text-ink mb-1">1. Online qabul va tasdiqlash</h2>
               <p className="text-xs text-ink-muted leading-relaxed">
                 Online qabulga yozilish so&apos;rov shaklida qabul qilinadi. Klinika administratori 2 soat ichida (ish vaqtida) telefon orqali siz bilan bog&apos;lanib, qabulni tasdiqlaydi.
               </p>
             </div>
 
-            <div className="p-4 rounded-2xl bg-canvas border border-line">
-              <h2 className="text-base font-bold text-ink mb-1">2. Qabul vaqtiga yetib kelish</h2>
+            <div className="p-6 rounded-3xl bg-canvas">
+              <h2 className="text-lg font-medium text-ink mb-1">2. Qabul vaqtiga yetib kelish</h2>
               <p className="text-xs text-ink-muted leading-relaxed">
                 Tibbiy karta rasmiylashtirish va dastlabki ko&apos;rikka tayyorgarlik uchun qabul boshlanishidan 10 daqiqa oldin klinikaga yetib kelishingizni so&apos;raymiz.
               </p>
             </div>
 
-            <div className="p-4 rounded-2xl bg-canvas border border-line">
-              <h2 className="text-base font-bold text-ink mb-1">3. Qabulni bekor qilish yoki ko&apos;chirish</h2>
+            <div className="p-6 rounded-3xl bg-canvas">
+              <h2 className="text-lg font-medium text-ink mb-1">3. Qabulni bekor qilish yoki ko&apos;chirish</h2>
               <p className="text-xs text-ink-muted leading-relaxed">
                 Agar rejalaringiz o&apos;zgarsa, qabulni bekor qilish yoki boshqa vaqtga ko&apos;chirishni kamida 2 soat oldin online havola orqali yoki telefon orqali amalga oshirishingizni iltimos qilamiz.
               </p>

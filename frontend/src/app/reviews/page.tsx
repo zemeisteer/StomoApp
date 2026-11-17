@@ -79,7 +79,7 @@ export default function ReviewsPage() {
     'w-full rounded-2xl border border-line bg-white px-4 py-3 text-[15px] text-ink placeholder:text-ink-subtle transition-colors focus:border-ink focus:outline-none';
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <PageIntro
         eyebrow={t.reviews.title}
         title={L('Bemorlar fikri', 'Отзывы пациентов')}
@@ -112,7 +112,7 @@ export default function ReviewsPage() {
             {isLoading ? (
               <SkeletonCards count={3} className="grid-cols-1" />
             ) : reviews.length === 0 ? (
-              <p className="rounded-3xl border border-line bg-white p-10 text-center text-sm text-ink-muted">
+              <p className="rounded-3xl bg-canvas p-10 text-center text-sm text-ink-muted">
                 {L('Hozircha sharhlar yo‘q. Birinchi bo‘lib fikr qoldiring.', 'Пока нет отзывов. Оставьте первый.')}
               </p>
             ) : (
@@ -140,8 +140,8 @@ export default function ReviewsPage() {
           </div>
 
           <div className="lg:col-span-5">
-            <div className="rounded-[2rem] border border-line bg-white p-7 sm:p-9 lg:sticky lg:top-24">
-              <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink">{t.reviews.writeReview}</h2>
+            <div className="rounded-3xl bg-canvas p-7 sm:p-9 lg:sticky lg:top-24">
+              <h2 className="text-2xl font-normal tracking-[-0.03em] text-ink">{t.reviews.writeReview}</h2>
               <p className="mt-2 text-sm text-ink-muted">
                 {L('Sharh moderator tekshiruvidan so‘ng chiqadi.', 'Отзыв появится после проверки модератором.')}
               </p>

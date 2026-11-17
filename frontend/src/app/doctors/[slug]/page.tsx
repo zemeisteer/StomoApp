@@ -58,7 +58,7 @@ export default function DoctorDetailPage() {
   if (notFound || !doctor) {
     return (
       <Container className="py-32 text-center">
-        <h1 className="text-3xl font-semibold tracking-[-0.02em] text-ink">{L('Shifokor topilmadi', 'Врач не найден')}</h1>
+        <h1 className="text-3xl font-normal tracking-[-0.03em] text-ink">{L('Shifokor topilmadi', 'Врач не найден')}</h1>
         <p className="mt-3 text-ink-muted">{L('Bu profil mavjud emas yoki faol emas.', 'Профиль недоступен или неактивен.')}</p>
         <div className="mt-8 flex justify-center">
           <SecondaryLink href="/doctors">
@@ -84,7 +84,7 @@ export default function DoctorDetailPage() {
   if (branches.length) facts.push([L('Filial', 'Филиал'), branches.join(', ')]);
 
   return (
-    <div className="bg-canvas">
+    <div className="bg-white">
       <Container className="pb-16 pt-10 sm:pt-14">
         <nav className="mb-10 flex items-center gap-2 text-sm text-ink-subtle" aria-label="breadcrumb">
           <Link href="/" className="hover:text-ink">
@@ -102,11 +102,11 @@ export default function DoctorDetailPage() {
 
         <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-5">
-            <div className="relative aspect-[4/5] overflow-hidden rounded-[2rem] bg-white">
+            <div className="relative aspect-[4/5] overflow-hidden rounded-3xl bg-canvas">
               {doctor.photoUrl ? (
                 <Image src={doctor.photoUrl} alt={`${first} ${last}`} fill unoptimized sizes="(min-width: 1024px) 40vw, 100vw" className="object-cover" />
               ) : (
-                <div className="flex h-full items-center justify-center bg-gradient-to-b from-brand-50 to-white">
+                <div className="flex h-full items-center justify-center bg-brand-50">
                   <span className="text-7xl font-light tracking-tight text-brand-700/70">{`${first?.[0] || ''}${last?.[0] || ''}`.toUpperCase()}</span>
                 </div>
               )}
@@ -114,7 +114,7 @@ export default function DoctorDetailPage() {
           </div>
 
           <div className="lg:col-span-7">
-            {title && <p className="text-xs font-medium uppercase tracking-[0.18em] text-ink-subtle">{title}</p>}
+            {title && <p className="text-sm font-medium text-brand-700">{title}</p>}
             <h1 className="mt-4 text-4xl font-semibold leading-[1.05] tracking-[-0.035em] text-ink sm:text-5xl">
               {first} {last}
             </h1>
@@ -122,7 +122,7 @@ export default function DoctorDetailPage() {
             <dl className="mt-10 grid gap-6 border-t border-line pt-8 sm:grid-cols-3">
               {facts.map(([k, v]) => (
                 <div key={k}>
-                  <dt className="text-xs uppercase tracking-[0.14em] text-ink-subtle">{k}</dt>
+                  <dt className="text-sm text-ink-muted">{k}</dt>
                   <dd className="mt-1.5 text-base text-ink">{v}</dd>
                 </div>
               ))}
@@ -136,13 +136,13 @@ export default function DoctorDetailPage() {
 
             {bio && (
               <section className="mt-14">
-                <h2 className="text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{L('Shifokor haqida', 'О враче')}</h2>
+                <h2 className="text-sm font-medium text-brand-700">{L('Shifokor haqida', 'О враче')}</h2>
                 <p className="mt-4 whitespace-pre-line text-lg leading-relaxed text-ink">{bio}</p>
               </section>
             )}
             {education && (
               <section className="mt-10">
-                <h2 className="text-xs font-medium uppercase tracking-[0.16em] text-ink-subtle">{L('Ta’lim', 'Образование')}</h2>
+                <h2 className="text-sm font-medium text-brand-700">{L('Ta’lim', 'Образование')}</h2>
                 <p className="mt-4 whitespace-pre-line text-base leading-relaxed text-ink-muted">{education}</p>
               </section>
             )}
@@ -151,9 +151,9 @@ export default function DoctorDetailPage() {
       </Container>
 
       {services.length > 0 && (
-        <section className="border-t border-line bg-white py-12 sm:py-14">
+        <section className="bg-canvas py-20 sm:py-24">
           <Container>
-            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-3xl">{L('Ko‘rsatadigan xizmatlari', 'Услуги врача')}</h2>
+            <h2 className="text-3xl font-normal tracking-[-0.03em] text-ink sm:text-[2.75rem]">{L('Ko‘rsatadigan xizmatlari', 'Услуги врача')}</h2>
             <ul className="mt-8 border-t border-line">
               {services.map((s: any) => (
                 <li key={s.id} className="flex flex-col gap-3 border-b border-line py-5 sm:flex-row sm:items-center sm:justify-between">
@@ -174,7 +174,7 @@ export default function DoctorDetailPage() {
                     )}
                     <Link
                       href={`/booking?doctorId=${doctor.id}&serviceId=${s.id}`}
-                      className="inline-flex h-9 items-center rounded-full border border-line-strong px-4 text-[13px] font-medium text-ink transition-colors duration-300 hover:border-ink"
+                      className="btn-step inline-flex h-11 items-center rounded-full bg-white px-5 text-[14px] font-medium text-ink hover:bg-brand-50"
                     >
                       {L('Yozilish', 'Записаться')}
                     </Link>

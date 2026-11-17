@@ -1,6 +1,11 @@
+'use client';
+
 import React from 'react';
 import Link from 'next/link';
 import { ArrowRight, RotateCcw } from 'lucide-react';
+import { useI18n } from '../../lib/i18n';
+import type { SitePhoto } from '../../lib/sitePhotos';
+import { Photo } from './moments';
 
 /**
  * Public-site building blocks for the calm, minimal design:
@@ -104,13 +109,13 @@ export function TextLink({ href, children }: { href: string; children: React.Rea
 
 export function SkeletonCards({ count = 3, className = 'sm:grid-cols-2 lg:grid-cols-3' }: { count?: number; className?: string }) {
   return (
-    <div className={`grid gap-px overflow-hidden rounded-3xl border border-line bg-line ${className}`} aria-busy="true">
+    <div className={`grid gap-5 ${className}`} aria-busy="true">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="space-y-4 bg-white p-8">
-          <div className="h-3 w-16 animate-pulse rounded bg-canvas" />
-          <div className="h-5 w-3/4 animate-pulse rounded bg-canvas" />
-          <div className="h-3 w-full animate-pulse rounded bg-canvas" />
-          <div className="h-3 w-2/3 animate-pulse rounded bg-canvas" />
+        <div key={i} className="space-y-4 rounded-3xl bg-canvas p-8">
+          <div className="h-3 w-16 animate-pulse rounded bg-white" />
+          <div className="h-5 w-3/4 animate-pulse rounded bg-white" />
+          <div className="h-3 w-full animate-pulse rounded bg-white" />
+          <div className="h-3 w-2/3 animate-pulse rounded bg-white" />
         </div>
       ))}
     </div>
@@ -119,7 +124,7 @@ export function SkeletonCards({ count = 3, className = 'sm:grid-cols-2 lg:grid-c
 
 export function SectionError({ message, onRetry, retryLabel }: { message: string; onRetry?: () => void; retryLabel: string }) {
   return (
-    <div className="flex flex-col items-start gap-3 rounded-3xl border border-line bg-white p-8 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col items-start gap-3 rounded-3xl bg-canvas p-8 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-sm text-ink-muted">{message}</p>
       {onRetry && (
         <button type="button" onClick={onRetry} className="inline-flex items-center gap-2 text-sm font-medium text-ink hover:text-brand-700">
@@ -130,20 +135,67 @@ export function SectionError({ message, onRetry, retryLabel }: { message: string
   );
 }
 
-/** Top of an inner page: eyebrow, large heading, lead; optional right-side slot (e.g. search). */
+/**
+ * Top of an inner page. With a photograph it is the hero's smaller sibling: the picture fills a
+ * rounded frame on the container lines, darkened on the left, the words in white on top and an
+ * optional slot (search, a price card) on the right. Without one it is plain type on white.
+ * Enters once on load.
+ */
 export function PageIntro({
   eyebrow,
   title,
   lead,
   aside,
+  photo,
+  photoPosition,
 }: {
   eyebrow: string;
   title: React.ReactNode;
   lead?: React.ReactNode;
   aside?: React.ReactNode;
+  photo?: SitePhoto;
+  photoPosition?: string;
 }) {
+  const { language } = useI18n();
+
+  if (photo) {
+    return (
+      <header className="hero-enter mx-auto max-w-[1344px] px-3 pt-3 sm:px-8 sm:pt-4">
+        <div className="relative flex min-h-[380px] items-end overflow-hidden rounded-[28px] bg-brand-950 sm:min-h-[440px]">
+          <div data-enter-media className="absolute inset-0">
+            <Photo photo={photo} lang={language} sizes="100vw" eager position={photoPosition} />
+          </div>
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-gradient-to-b from-brand-950/90 via-brand-950/80 to-brand-950/60 lg:bg-gradient-to-r lg:from-brand-950/95 lg:via-brand-950/75 lg:to-brand-950/30"
+          />
+          <div className="relative grid w-full gap-8 p-6 text-white sm:p-10 lg:grid-cols-12 lg:items-end lg:p-14">
+            <div className={aside ? 'lg:col-span-8' : 'lg:col-span-9'}>
+              <p data-enter-item="1" className="text-sm font-medium text-brand-200">
+                {eyebrow}
+              </p>
+              <h1 data-enter-item="2" className="mt-3 max-w-3xl text-4xl font-normal leading-[1.04] tracking-[-0.035em] sm:text-5xl lg:text-[3.5rem]">
+                {title}
+              </h1>
+              {lead && (
+                <p data-enter-item="3" className="mt-5 max-w-2xl text-base leading-relaxed text-white/80 sm:text-lg">
+                  {lead}
+                </p>
+              )}
+            </div>
+            {aside && (
+              <div data-enter-item="3" className="lg:col-span-4">
+                {aside}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
-    <header className="hero-enter border-b border-line pb-10 pt-14 sm:pb-14 sm:pt-20">
+    <header className="hero-enter pb-10 pt-14 sm:pb-14 sm:pt-20">
       <Container>
         <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
@@ -163,6 +215,28 @@ export function PageIntro({
         </div>
       </Container>
     </header>
+  );
+}
+
+/** close-type for inner pages: a heading, one line and the big booking button across the container. */
+export function BookingClose({ title, lead }: { title: string; lead?: string }) {
+  const { t } = useI18n();
+  return (
+    <section className="border-t border-line bg-canvas py-20 sm:py-28">
+      <Container>
+        <div className="grid gap-6 lg:grid-cols-12 lg:items-end">
+          <h2 className="text-3xl font-normal leading-[1.08] tracking-[-0.03em] text-ink sm:text-[2.75rem] lg:col-span-7">{title}</h2>
+          {lead && <p className="max-w-md text-base leading-relaxed text-ink-muted sm:text-lg lg:col-span-5 lg:justify-self-end">{lead}</p>}
+        </div>
+        <Link
+          href="/booking"
+          className="btn-step group mt-12 flex h-20 w-full items-center justify-between rounded-full bg-brand-600 px-8 text-xl font-medium text-white hover:bg-brand-700 sm:h-24 sm:px-12 sm:text-2xl"
+        >
+          {t.common.bookAppointment}
+          <ArrowRight className="btn-arrow h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+        </Link>
+      </Container>
+    </section>
   );
 }
 
@@ -188,8 +262,8 @@ export function FilterPills<T extends string>({
             role="tab"
             aria-selected={value === o.value}
             onClick={() => onChange(o.value)}
-            className={`h-9 shrink-0 rounded-full px-4 text-[13px] font-medium transition-colors duration-300 ${
-              value === o.value ? 'bg-ink text-white' : 'border border-line text-ink-muted hover:border-line-strong hover:text-ink'
+            className={`h-11 shrink-0 rounded-full px-5 text-[14px] font-medium transition-colors duration-300 ${
+              value === o.value ? 'bg-ink text-white' : 'bg-canvas text-ink-muted hover:text-ink'
             }`}
           >
             {o.label}
@@ -214,7 +288,7 @@ export function SearchField({ value, onChange, placeholder }: { value: string; o
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-12 w-full rounded-full border border-line bg-white pl-11 pr-4 text-sm text-ink placeholder:text-ink-subtle focus:border-ink focus:outline-none"
+        className="h-12 w-full rounded-full border border-line bg-white pl-11 pr-4 text-sm text-ink placeholder:text-ink-muted focus:border-ink focus:outline-none"
       />
     </label>
   );
