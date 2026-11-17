@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowUpRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { useBrand } from '../../lib/brand';
 import { SITE_PHOTOS } from '../../lib/sitePhotos';
 import { PhoneInput } from '../../components/PhoneInput';
 import { normalizeUzPhone } from '../../lib/phone';
@@ -13,7 +14,9 @@ import { Container, FilterPills, PageIntro, PrimaryLink } from '../../components
 export default function ContactsPage() {
   const { t, language } = useI18n();
   const isRu = language === 'ru';
+  const brand = useBrand();
   const [branches, setBranches] = useState<any[]>([]);
+  const [branchesLoaded, setBranchesLoaded] = useState(false);
   const [activeBranchId, setActiveBranchId] = useState<string>('');
 
   // Form state
@@ -37,6 +40,8 @@ export default function ContactsPage() {
         }
       } catch (e) {
         console.error('Failed to load branches', e);
+      } finally {
+        if (isMounted) setBranchesLoaded(true);
       }
     }
     loadBranches();
@@ -78,6 +83,9 @@ export default function ContactsPage() {
     }
   };
 
+  const clinicPhone = (brand.clinic?.phone as string) || '';
+  const clinicEmail = (brand.clinic?.email as string) || '';
+  const clinicTelegram = (brand.clinic?.telegramLink as string) || '';
   const activeBranch = branches.find((b) => b.id === activeBranchId) || branches[0];
 
   const L = (uz: string, ru: string) => (isRu ? ru : uz);
@@ -165,11 +173,51 @@ export default function ContactsPage() {
                   </PrimaryLink>
                 </div>
               </>
-            ) : (
+            ) : !branchesLoaded ? (
               <div className="space-y-4" aria-busy="true">
                 <div className="h-8 w-1/2 animate-pulse rounded bg-canvas" />
                 <div className="h-40 animate-pulse rounded-3xl bg-canvas" />
               </div>
+            ) : (
+              // No branch added yet: show the clinic's own contacts instead of an empty column.
+              <>
+                <h2 className="text-2xl font-normal tracking-[-0.03em] text-ink sm:text-3xl">{brand.clinicName(language)}</h2>
+                <dl className="mt-8 border-t border-line">
+                  {clinicPhone && (
+                    <div className="grid gap-1 border-b border-line py-5 sm:grid-cols-[10rem_1fr]">
+                      <dt className="text-sm text-ink-muted">{L('Telefon', 'Телефон')}</dt>
+                      <dd className="text-base text-ink">
+                        <a href={`tel:${clinicPhone.replace(/\s+/g, '')}`} className="tabular-nums hover:text-brand-700">
+                          {clinicPhone}
+                        </a>
+                      </dd>
+                    </div>
+                  )}
+                  {clinicEmail && (
+                    <div className="grid gap-1 border-b border-line py-5 sm:grid-cols-[10rem_1fr]">
+                      <dt className="text-sm text-ink-muted">Email</dt>
+                      <dd className="text-base text-ink">
+                        <a href={`mailto:${clinicEmail}`} className="hover:text-brand-700">
+                          {clinicEmail}
+                        </a>
+                      </dd>
+                    </div>
+                  )}
+                  {clinicTelegram && (
+                    <div className="grid gap-1 border-b border-line py-5 sm:grid-cols-[10rem_1fr]">
+                      <dt className="text-sm text-ink-muted">Telegram</dt>
+                      <dd className="text-base text-ink">
+                        <a href={clinicTelegram} target="_blank" rel="noopener noreferrer" className="hover:text-brand-700">
+                          {clinicTelegram.replace(/^https?:\/\//, '')}
+                        </a>
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <div className="mt-8">
+                  <PrimaryLink href="/booking">{t.common.bookAppointment}</PrimaryLink>
+                </div>
+              </>
             )}
           </div>
 
