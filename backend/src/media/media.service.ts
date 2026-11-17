@@ -38,7 +38,8 @@ export class MediaService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    this.uploadDir = path.resolve(process.cwd(), 'uploads');
+    // UPLOAD_DIR lets read-only hosts (Vercel: only /tmp is writable) move local storage.
+    this.uploadDir = path.resolve(process.cwd(), this.configService.get<string>('UPLOAD_DIR') || 'uploads');
     if (!fs.existsSync(this.uploadDir)) {
       fs.mkdirSync(this.uploadDir, { recursive: true });
     }

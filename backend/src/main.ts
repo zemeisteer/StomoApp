@@ -33,7 +33,7 @@ async function bootstrap() {
   }
 
   // Static files for uploads (fallback storage)
-  const uploadsDir = path.resolve(process.cwd(), 'uploads');
+  const uploadsDir = path.resolve(process.cwd(), configService.get<string>('UPLOAD_DIR') || 'uploads');
   app.use('/uploads', express.static(uploadsDir));
 
   // CORS
