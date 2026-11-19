@@ -5,3 +5,12 @@ coverage
 .env.*
 !.env.example
 *.log
+
+# Local databases, virtualenvs and dependencies never go into an image
+*.db
+*.sqlite
+*.sqlite3
+.venv/
+venv/
+node_modules
+.git

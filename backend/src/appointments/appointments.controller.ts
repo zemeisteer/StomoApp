@@ -3,6 +3,7 @@ import {
   UseGuards, HttpCode, HttpStatus, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { BOOKING_FORM_LIMIT } from '../common/form-limits';
 import { AppointmentsService } from './appointments.service';
 import { SchedulingService, IsStrictCalendarDate, IsValidTimezone } from '../scheduling/scheduling.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -11,6 +12,7 @@ import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Public } from '../auth/public.decorator';
 import { JwtPayload } from '../auth/auth.service';
+import { staffBranch } from '../common/branch-scope';
 import { AppointmentStatus, StaffRole } from '@prisma/client';
 import {
   IsString, IsOptional, IsBoolean, IsEnum, IsDateString, IsInt, Min, Max, IsArray, Matches, IsEmail, ValidateIf,
@@ -202,7 +204,7 @@ export class PublicBookingController {
 
   @Post()
   @Public()
-  @Throttle({ default: { limit: process.env.NODE_ENV === 'test' ? 1000 : 20, ttl: 60000 } })
+  @Throttle(BOOKING_FORM_LIMIT)
   @HttpCode(HttpStatus.CREATED)
   async createBooking(@Body() dto: PublicBookingDto) {
     const result = await this.service.createBooking({
@@ -380,6 +382,11 @@ export class AppointmentsController {
   async createFromAdmin(@Body() dto: PublicBookingDto, @CurrentUser() user: JwtPayload) {
     if (user.role === StaffRole.DOCTOR && dto.doctorId !== user.doctorId) {
       throw new ForbiddenException('Shifokor faqat o\'ziga qabul yarata oladi');
+    }
+    // Branch-bound staff book only into their own branch
+    const ownBranch = staffBranch(user);
+    if (ownBranch && dto.branchId !== ownBranch) {
+      throw new ForbiddenException('Faqat o\'z filialingizga qabul yarata olasiz');
     }
     return this.service.createBooking({
       ...dto,

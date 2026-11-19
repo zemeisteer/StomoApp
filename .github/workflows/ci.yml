@@ -80,6 +80,10 @@ jobs:
         working-directory: ./backend
         run: npm run build
 
+      - name: Backend Unit Tests
+        working-directory: ./backend
+        run: npx jest
+
       - name: Apply Database Migrations (dentacare_test)
         working-directory: ./backend
         run: npx prisma migrate deploy
@@ -130,11 +134,16 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:4000
         run: npm run build
 
+      - name: Frontend Unit Tests
+        working-directory: ./frontend
+        run: npm test
+
       - name: Production Bundle Has No Seed Credentials
         working-directory: ./frontend
         run: |
-          if grep -rlE "DentacareAdmin2026|Doctor2026" .next/static .next/server; then
-            echo "Seed/demo passwords found in the production build"; exit 1
+          # Whole build output except the compiler cache: client chunks, server bundles and HTML
+          if grep -rlE "DentacareAdmin2026|Doctor2026|Reception2026|fillDemoCreds" --exclude-dir=cache .next; then
+            echo "Seed/demo passwords or the demo quick-fill found in the production build"; exit 1
           fi
 
   bot-verification:
@@ -191,6 +200,7 @@ jobs:
         run: |
           docker build -t stomo-bot:ci ./bot
           docker run --rm \
+            -e ENVIRONMENT=test \
             -e SERVICE_TOKEN=ci_service_token_random_secure_32_chars_minimum_length_abcdef \
             stomo-bot:ci python -c "import bot.main; print('bot image OK')"
 

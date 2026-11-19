@@ -4,10 +4,10 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
-  if (process.env.NODE_ENV === 'production') {
-    // The demo seed creates accounts with publicly known passwords. Production
-    // owners are created with scripts/create-owner.js instead.
-    throw new Error('Refusing to run the demo seed with NODE_ENV=production. Use scripts/create-owner.js.');
+  if (process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'test') {
+    // The demo seed creates accounts with publicly known passwords. It runs only when NODE_ENV is
+    // explicitly development or test; production owners are created with scripts/create-owner.js.
+    throw new Error(`Refusing to run the demo seed with NODE_ENV=${process.env.NODE_ENV ?? '(unset)'}. Set NODE_ENV=development or use scripts/create-owner.js.`);
   }
   console.log('🌱 Starting database seed...');
 

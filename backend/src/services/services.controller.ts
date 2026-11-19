@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { PartialType } from '@nestjs/swagger';
+import { MAX_MONEY } from '../common/money';
 import { ServicesService } from './services.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -63,11 +64,13 @@ export class CreateServiceDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   priceFrom?: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   priceTo?: number;
 
   @IsOptional()

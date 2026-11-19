@@ -80,8 +80,8 @@ cp frontend/.env.example frontend/.env.local
 Configure your database connection in `backend/.env`:
 ```env
 DATABASE_URL="postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare?schema=public"
-JWT_SECRET="generate-a-secure-random-base64-string-in-production"
-JWT_REFRESH_SECRET="generate-a-secure-random-refresh-base64-string"
+JWT_SECRET="CHANGE_ME_openssl_rand_hex_32"
+JWT_REFRESH_SECRET="CHANGE_ME_openssl_rand_hex_32_refresh"
 APP_PORT=4000
 FRONTEND_URL="http://localhost:3000"
 ```
@@ -172,7 +172,7 @@ Staff then open a patient's **To'lovlar** tab and use **Payme / Click havola** t
 | **Appointment Booking** | `http://localhost:3000/booking` | Online booking wizard |
 | **Admin Dashboard** | `http://localhost:3000/admin` | Management panel (Login required) |
 | **Backend API** | `http://localhost:4000/api` | NestJS REST API |
-| **Health Check** | `http://localhost:4000/api/health` | Database latency & status check |
+| **Health Check** | `http://localhost:4000/api/health` | Public: status and time only (`/api/health/live` for uptime probes, owner-only `/api/health/details` for database info) |
 | **Swagger Docs** | `http://localhost:4000/api/docs` | Interactive OpenAPI documentation |
 
 ---

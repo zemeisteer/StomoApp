@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, OnModuleInit } from '@nestjs/common';
+import { Injectable, UnauthorizedException, OnModuleInit, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { StaffRole } from '@prisma/client';
-import { requireSecret } from './jwt-secret';
+import { validateAllSecrets } from './jwt-secret';
 
 export interface JwtPayload {
   sub: string;
@@ -18,6 +18,8 @@ export interface JwtPayload {
   branchId?: string | null;
   tokenVersion?: number;
   jti?: string;
+  /** Filled from the database on every request (never trusted from the token itself). */
+  mustChangePassword?: boolean;
 }
 
 export interface TokenPair {
@@ -38,10 +40,9 @@ export class AuthService implements OnModuleInit {
     this.validateSecrets();
   }
 
-  /** Fail closed in every environment (not only production): both signing secrets must be real. */
+  /** Fail closed in every environment (not only production): every secret must be real. */
   private validateSecrets() {
-    requireSecret(this.configService, 'JWT_SECRET');
-    requireSecret(this.configService, 'JWT_REFRESH_SECRET');
+    validateAllSecrets(this.configService);
   }
 
   private hashToken(token: string): string {
@@ -208,6 +209,32 @@ export class AuthService implements OnModuleInit {
       entity: 'StaffUser',
       entityId: userId,
     });
+  }
+
+  /**
+   * The signed-in user changes their own password. Every other session of this user ends
+   * (tokenVersion bump + refresh token revoked); the caller gets a fresh token pair.
+   */
+  async changeOwnPassword(userId: string, currentPassword: string, newPassword: string, ipAddress?: string): Promise<TokenPair> {
+    const user = await this.prisma.staffUser.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive) throw new UnauthorizedException('Foydalanuvchi faol emas');
+    if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      throw new BadRequestException("Joriy parol noto'g'ri");
+    }
+    if (currentPassword === newPassword) {
+      throw new BadRequestException("Yangi parol eskisidan farq qilishi kerak");
+    }
+    const updated = await this.prisma.staffUser.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await this.hashPassword(newPassword),
+        mustChangePassword: false,
+        refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
+      },
+    });
+    await this.auditService.log({ userId, action: 'staff.password_changed', entity: 'StaffUser', entityId: userId, ipAddress });
+    return this.issueTokens(updated);
   }
 
   async hashPassword(password: string): Promise<string> {

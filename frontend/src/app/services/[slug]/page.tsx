@@ -10,6 +10,7 @@ import { serviceCategoryLabel } from '../../../lib/serviceCategories';
 import { Container, PageIntro, PrimaryLink, SecondaryLink, formatSom } from '../../../components/site/primitives';
 import { api } from '../../../lib/api';
 import { SITE_PHOTOS } from '../../../lib/sitePhotos';
+import { safeUrl } from '../../../lib/safeUrl';
 
 export default function ServiceDetailPage() {
   const { t, language } = useI18n();
@@ -131,8 +132,8 @@ export default function ServiceDetailPage() {
                       <li key={doc.id} className="border-b border-line">
                         <Link href={`/doctors/${doc.slug}`} className="group flex items-center gap-4 py-4">
                           <span className="relative h-16 w-14 shrink-0 overflow-hidden rounded-2xl bg-brand-50">
-                            {doc.photoUrl ? (
-                              <Image src={doc.photoUrl} alt={docName} fill unoptimized sizes="48px" className="object-cover" />
+                            {safeUrl(doc.photoUrl) ? (
+                              <Image src={safeUrl(doc.photoUrl)!} alt={docName} fill unoptimized sizes="48px" className="object-cover" />
                             ) : (
                               <span className="flex h-full items-center justify-center text-sm text-brand-700">
                                 {doc.firstNameUz?.[0]}

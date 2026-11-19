@@ -1,10 +1,12 @@
-import { Controller, Get, Post, Put, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
 import { StaffService } from './staff.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { StaffRole } from '@prisma/client';
-import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsBoolean, Matches, ValidateIf } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, IsEnum, IsOptional, IsBoolean, Matches, ValidateIf } from 'class-validator';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { JwtPayload } from '../auth/auth.service';
 
 // Telegram user ids are positive integers; null clears the link
 const TELEGRAM_ID_PATTERN = /^\d{5,15}$/;
@@ -38,6 +40,13 @@ class CreateStaffDto {
   @IsString()
   @Matches(TELEGRAM_ID_PATTERN, { message: TELEGRAM_ID_MESSAGE })
   telegramUserId?: string | null;
+}
+
+class ResetPasswordDto {
+  @IsString()
+  @MinLength(8)
+  @MaxLength(200)
+  password!: string;
 }
 
 class UpdateStaffDto {
@@ -88,6 +97,16 @@ export class StaffController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.staffService.findById(id);
+  }
+
+  /**
+   * Owner sets a temporary password. All of that person's sessions end, and they must choose
+   * their own password at the next sign-in.
+   */
+  @Put(':id/password')
+  @HttpCode(200)
+  resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto, @CurrentUser() actor: JwtPayload) {
+    return this.staffService.resetPassword(id, dto.password, actor.sub);
   }
 
   @Put(':id')

@@ -1,0 +1,12 @@
+# CLI deploys run from the repo root (the Vercel projects use Root Directory frontend / backend).
+# Never upload secrets or local artefacts.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/.next
+**/dist
+uploads
+backups
+*.db
+.neon

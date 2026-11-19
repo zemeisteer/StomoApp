@@ -3,7 +3,7 @@ import type { PublicClinicBrand } from './brand';
 /** Seconds a rendered page may show stale branding after the owner changes it. */
 export const BRAND_REVALIDATE_SECONDS = 60;
 
-function backendBaseUrl() {
+export function backendBaseUrl() {
   const explicit = process.env.INTERNAL_API_URL;
   if (explicit) return explicit.replace(/\/+$/, '');
   const pub = process.env.NEXT_PUBLIC_API_URL;

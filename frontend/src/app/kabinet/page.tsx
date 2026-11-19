@@ -24,6 +24,7 @@ import { useBrand } from '../../lib/brand';
 import { formatClinicDate, formatClinicTime } from '../../lib/dateFormat';
 import { APPOINTMENT_STATUS, ITEM_STATUS, PLAN_STATUS, doctorName, formatUzs } from '../../lib/clinicFormat';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { safeUrl } from '../../lib/safeUrl';
 
 type Lang = 'uz' | 'ru';
 
@@ -507,8 +508,8 @@ function Dashboard({
                           </div>
                           <StatusBadge map={APPOINTMENT_STATUS} value={a.status} lang={lang} />
                         </div>
-                        {a.manageUrl && (
-                          <Link href={a.manageUrl} className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">
+                        {safeUrl(a.manageUrl) && (
+                          <Link href={safeUrl(a.manageUrl)!} className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">
                             {L("Ko'chirish yoki bekor qilish", 'Перенести или отменить')} <ArrowRight className="h-3.5 w-3.5" />
                           </Link>
                         )}

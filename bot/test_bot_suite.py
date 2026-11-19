@@ -7,6 +7,9 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
+# Test fixture value; the real default is "no staff group" (0)
+os.environ.setdefault("STAFF_GROUP_CHAT_ID", "-1001234567890")
+
 import pytest
 from aiogram import Bot
 from bot.config import config
@@ -588,3 +591,42 @@ async def test_forged_branch_or_service_callback_is_refused():
 
 if __name__ == "__main__":
     asyncio.run(test_bot_flows())
+
+
+def test_production_is_the_default_environment(monkeypatch):
+    """Without an explicit development/test environment a missing BOT_TOKEN stops the bot."""
+    from bot import config as cfg
+
+    for key in ("ENVIRONMENT", "NODE_ENV", "BOT_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    assert cfg.is_dev_environment() is False
+    with pytest.raises(RuntimeError):
+        cfg.resolve_bot_token()
+
+    monkeypatch.setenv("NODE_ENV", "staging")
+    with pytest.raises(RuntimeError):
+        cfg.resolve_bot_token()
+
+    monkeypatch.setenv("BOT_TOKEN", "CHANGE_ME_from_BotFather")
+    monkeypatch.setenv("NODE_ENV", "production")
+    with pytest.raises(RuntimeError):
+        cfg.resolve_bot_token()
+
+    monkeypatch.delenv("BOT_TOKEN")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    assert cfg.resolve_bot_token() == "mock_bot_token_for_tests"
+
+
+def test_no_invented_clinic_contacts(monkeypatch):
+    """Fallback contacts are empty unless the owner configured them."""
+    import importlib
+    from bot import config as cfg
+
+    for key in ("CLINIC_PHONE", "CLINIC_LOCATION_URL", "STAFF_GROUP_CHAT_ID"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    fresh = importlib.reload(cfg).BotConfig
+    assert fresh.CLINIC_PHONE == ""
+    assert fresh.CLINIC_LOCATION_URL == ""
+    assert fresh.STAFF_GROUP_CHAT_ID == 0
+    importlib.reload(cfg)

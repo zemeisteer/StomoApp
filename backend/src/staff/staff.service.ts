@@ -1,6 +1,7 @@
 import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { AuditService } from '../audit/audit.service';
 import { StaffRole, Prisma } from '@prisma/client';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class StaffService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
+    private readonly audit: AuditService,
   ) {}
 
   async createStaff(data: {
@@ -40,6 +42,8 @@ export class StaffService {
         doctorId: data.doctorId,
         branchId: data.role === StaffRole.OWNER ? null : data.branchId || null,
         telegramUserId: data.telegramUserId || null,
+        // The owner chose this password: the person replaces it at first sign-in
+        mustChangePassword: true,
       },
       select: {
         id: true,
@@ -183,15 +187,21 @@ export class StaffService {
     });
   }
 
-  async changePassword(id: string, newPassword: string) {
+  async resetPassword(id: string, newPassword: string, actorId: string) {
+    const user = await this.prisma.staffUser.findUnique({ where: { id }, select: { id: true } });
+    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
     const passwordHash = await this.authService.hashPassword(newPassword);
     await this.prisma.staffUser.update({
       where: { id },
       data: {
         passwordHash,
+        // A password someone else knows is temporary; every open session of this user ends now
+        mustChangePassword: id !== actorId,
         refreshTokenHash: null,
         tokenVersion: { increment: 1 },
       },
     });
+    await this.audit.log({ userId: actorId, action: 'staff.password_reset', entity: 'StaffUser', entityId: id });
+    return { ok: true };
   }
 }

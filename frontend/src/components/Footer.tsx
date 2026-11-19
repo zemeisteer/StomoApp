@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import { formatWorkingHours } from '../lib/dateFormat';
 import { PHOTO_CREDITS } from '../lib/sitePhotos';
 import { ArcMark } from './site/primitives';
+import { safeUrl } from '../lib/safeUrl';
 
 /** Light, quiet footer: brand, navigation, branches and contacts separated by hairlines. */
 export const Footer: React.FC = () => {
@@ -19,8 +20,8 @@ export const Footer: React.FC = () => {
   const clinicName = brand.clinicName(language);
   const phone = (brand.clinic?.phone as string) || '';
   const email = (brand.clinic?.email as string) || '';
-  const telegram = (brand.clinic?.telegramLink as string) || '';
-  const instagram = (brand.clinic?.instagramLink as string) || '';
+  const telegram = safeUrl(brand.clinic?.telegramLink);
+  const instagram = safeUrl(brand.clinic?.instagramLink);
   const [logoError, setLogoError] = useState(false);
   const [branches, setBranches] = useState<any[]>([]);
 

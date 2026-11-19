@@ -8,11 +8,13 @@ const onest = Onest({ subsets: ['latin', 'latin-ext', 'cyrillic'], display: 'swa
 import { ClientLayout } from './ClientLayout';
 import { brandCssText } from '../lib/brandTheme';
 import { BRAND_REVALIDATE_SECONDS, getClinicBrandServer } from '../lib/clinicServer';
+import { SITE_URL } from '../lib/siteUrl';
 
 // Branding (colors, logo, clinic name) is rendered on the server and refreshed periodically.
 export const revalidate = BRAND_REVALIDATE_SECONDS;
 
-const DEFAULT_TITLE = 'Zamonaviy stomatologiya klinikasi';
+
+const DEFAULT_TITLE ='Zamonaviy stomatologiya klinikasi';
 const DEFAULT_DESCRIPTION =
   "Og'riqsiz tish davolash, dental implantatsiya, breketlar va professional gigiyena. Onlayn qabulga yozilish.";
 
@@ -20,10 +22,15 @@ export async function generateMetadata(): Promise<Metadata> {
   const clinic = await getClinicBrandServer();
   const name = clinic?.name || 'DentaCare';
   const title = (clinic?.metaTitleUz as string) || `${name} — ${DEFAULT_TITLE}`;
+  const description = (clinic?.metaDescriptionUz as string) || DEFAULT_DESCRIPTION;
   return {
+    // Absolute base for link previews (og:image must be a full URL for Telegram/WhatsApp).
+    metadataBase: new URL(SITE_URL),
     title: { default: title, template: `%s | ${name}` },
-    description: (clinic?.metaDescriptionUz as string) || DEFAULT_DESCRIPTION,
+    description,
     applicationName: name,
+    openGraph: { type: 'website', siteName: name, locale: 'uz_UZ', url: '/', title, description },
+    twitter: { card: 'summary_large_image', title, description },
     icons: clinic?.logo ? { icon: clinic.logo, apple: clinic.logo } : { icon: '/favicon.ico' },
   };
 }

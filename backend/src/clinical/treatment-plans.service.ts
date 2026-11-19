@@ -65,7 +65,7 @@ export class TreatmentPlansService {
         where: { patientId, doctorId: user.doctorId },
         select: { id: true },
       });
-      if (!appt) throw new ForbiddenException("Ushbu bemor ma'lumotlariga ruxsat yo'q");
+      if (!appt) throw new NotFoundException('Bemor topilmadi');
     }
     return patient;
   }
@@ -138,6 +138,10 @@ export class TreatmentPlansService {
 
   async createPlan(patientId: string, dto: CreatePlanDto, user: JwtPayload) {
     await this.assertPatientAccess(patientId, user);
+    // The acting doctor comes from the token; naming another doctor is refused, not silently replaced
+    if (user.role === StaffRole.DOCTOR && dto.doctorId && dto.doctorId !== user.doctorId) {
+      throw new ForbiddenException('Shifokor faqat o\'z nomidan reja tuza oladi');
+    }
     let doctorId = user.role === StaffRole.DOCTOR ? user.doctorId! : dto.doctorId || null;
     if (doctorId) {
       const doctor = await this.prisma.doctor.findUnique({ where: { id: doctorId }, select: { id: true } });

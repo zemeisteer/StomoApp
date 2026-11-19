@@ -863,7 +863,7 @@ export class AppointmentsService {
 
       if (user && user.role === StaffRole.DOCTOR) {
         if (!user.doctorId || locked.doctorId !== user.doctorId) {
-          throw new ForbiddenException('Faqat o\'zingizning qabullaringiz holatini o\'zgartira olasiz');
+          throw new NotFoundException('Qabul topilmadi');
         }
       }
 
@@ -1094,7 +1094,7 @@ export class AppointmentsService {
 
     if (user && user.role === StaffRole.DOCTOR) {
       if (!user.doctorId || pre.doctorId !== user.doctorId) {
-        throw new ForbiddenException('Faqat o\'zingizning qabullaringizda muolajani boshlay olasiz');
+        throw new NotFoundException('Qabul topilmadi');
       }
     }
 
@@ -1118,7 +1118,7 @@ export class AppointmentsService {
       if (!locked) throw new NotFoundException('Qabul topilmadi');
 
       if (user && user.role === StaffRole.DOCTOR && locked.doctorId !== user.doctorId) {
-        throw new ForbiddenException('Faqat o\'zingizning qabullaringizda muolajani boshlay olasiz');
+        throw new NotFoundException('Qabul topilmadi');
       }
 
       const terminalStatuses: AppointmentStatus[] = [
@@ -1195,7 +1195,7 @@ export class AppointmentsService {
 
     if (user && user.role === StaffRole.DOCTOR) {
       if (!user.doctorId || pre.doctorId !== user.doctorId) {
-        throw new ForbiddenException('Faqat o\'zingizning qabullaringizni qayta rejalashtira olasiz');
+        throw new NotFoundException('Qabul topilmadi');
       }
     }
 
@@ -2078,7 +2078,7 @@ export class AppointmentsService {
     // DOCTOR ownership check
     if (user?.role === StaffRole.DOCTOR) {
       if (!user.doctorId || appointment.doctorId !== user.doctorId) {
-        throw new ForbiddenException('Ushbu qabul sizga tegishli emas');
+        throw new NotFoundException('Qabul topilmadi');
       }
     }
 
@@ -2194,7 +2194,7 @@ export class AppointmentsService {
         throw new ForbiddenException('Shifokor profiliga biriktirilmagan foydalanuvchi');
       }
       if (pre.doctorId !== user.doctorId) {
-        throw new ForbiddenException('Shifokor faqat o‘z qabulidagi kechikishni qayd eta oladi');
+        throw new NotFoundException('Qabul topilmadi');
       }
     }
 
@@ -2234,7 +2234,7 @@ export class AppointmentsService {
 
       // 3. Ownership re-validation on locked state
       if (user.role === StaffRole.DOCTOR && locked.doctorId !== user.doctorId) {
-        throw new ForbiddenException('Shifokor faqat o‘z qabulidagi kechikishni qayd eta oladi');
+        throw new NotFoundException('Qabul topilmadi');
       }
 
       // 4. Status re-validation on locked state (reject terminal appointments immediately)
@@ -2350,7 +2350,7 @@ export class AppointmentsService {
 
     if (user.role === StaffRole.DOCTOR) {
       if (!user.doctorId) throw new ForbiddenException('Shifokor profiliga biriktirilmagan');
-      if (pre.doctorId !== user.doctorId) throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
+      if (pre.doctorId !== user.doctorId) throw new NotFoundException('Qabul topilmadi');
     }
 
     assertSameBranch(pre.branchId, user);
@@ -2373,7 +2373,7 @@ export class AppointmentsService {
       if (!locked) throw new NotFoundException('Qabul topilmadi');
 
       if (user.role === StaffRole.DOCTOR && locked.doctorId !== user.doctorId) {
-        throw new ForbiddenException('Faqat o‘z qabulingizdagi kechikishni boshqara olasiz');
+        throw new NotFoundException('Qabul topilmadi');
       }
 
       const saved = await tx.appointment.update({

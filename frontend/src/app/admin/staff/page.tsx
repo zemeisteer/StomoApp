@@ -29,6 +29,7 @@ export default function AdminStaffPage() {
   const [editIsActive, setEditIsActive] = useState(true);
   const [editDoctorId, setEditDoctorId] = useState('');
   const [editTelegramId, setEditTelegramId] = useState('');
+  const [editTempPassword, setEditTempPassword] = useState('');
   const [createPay, setCreatePay] = useState<PayTerms>(emptyStaffPay);
   const [branches, setBranches] = useState<any[]>([]);
   const [createBranchId, setCreateBranchId] = useState('');
@@ -102,6 +103,8 @@ export default function AdminStaffPage() {
         branchId: editRole === 'OWNER' ? null : editBranchId || null,
       });
       if (editRole !== 'DOCTOR') await api.updateStaffPay(editingStaff.id, payPayload(editPay));
+      if (editTempPassword) await api.resetStaffPassword(editingStaff.id, editTempPassword);
+      setEditTempPassword('');
       setEditingStaff(null);
       await loadData();
     } catch (err: any) {
@@ -370,12 +373,12 @@ export default function AdminStaffPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-ink mb-1">
-                    Boshlang&apos;ich parol (kamida 6 ta belgi)
+                    Vaqtinchalik parol (kamida 8 ta belgi). Xodim birinchi kirishda o&apos;z parolini tanlaydi
                   </label>
                   <input
                     type="password"
                     required
-                    minLength={6}
+                    minLength={8}
                     value={createPassword}
                     onChange={(e) => setCreatePassword(e.target.value)}
                     placeholder="••••••••"
@@ -476,6 +479,20 @@ export default function AdminStaffPage() {
               )}
 
               <form onSubmit={handleUpdate} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-ink mb-1">
+                    Yangi vaqtinchalik parol (ixtiyoriy). Xodimning barcha sessiyalari yopiladi
+                  </label>
+                  <input
+                    type="password"
+                    minLength={8}
+                    autoComplete="new-password"
+                    value={editTempPassword}
+                    onChange={(e) => setEditTempPassword(e.target.value)}
+                    placeholder="O'zgartirmaslik uchun bo'sh qoldiring"
+                    className="w-full px-3 py-2 rounded-xl border border-line text-xs focus:ring-2 focus:ring-teal-600"
+                  />
+                </div>
                 <div>
                   <label className="block text-xs font-semibold text-ink mb-1">
                     To&apos;liq ism (F.I.SH)

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtPayload } from '../auth/auth.service';
+import { StaffRole } from '@prisma/client';
 import { CreateInventoryItemDto, RecordMovementDto, UpdateInventoryItemDto } from './dto/inventory.dto';
 
 @Injectable()
@@ -11,10 +12,13 @@ export class InventoryService {
     private readonly auditService: AuditService,
   ) {}
 
-  async listItems() {
-    return await this.prisma.inventoryItem.findMany({
+  /** Purchase cost is owner/admin information; doctors and reception see stock only. */
+  async listItems(user?: JwtPayload) {
+    const items = await this.prisma.inventoryItem.findMany({
       orderBy: { name: 'asc' },
     });
+    const seesCost = user?.role === StaffRole.OWNER || user?.role === StaffRole.ADMIN;
+    return seesCost ? items : items.map(({ unitCost: _unitCost, ...rest }) => rest);
   }
 
   async listMovements(id: string) {

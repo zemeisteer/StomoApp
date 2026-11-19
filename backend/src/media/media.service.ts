@@ -12,10 +12,13 @@ import * as path from 'path';
 import { nanoid } from 'nanoid';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import sharp, { Sharp, Metadata } from 'sharp';
+import { isProductionLike } from '../common/runtime-env';
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_DIMENSION = 4096; // 4096 px width/height
 const MAX_PIXELS = 16_000_000; // 16 Megapixels
+const MAX_OUTPUT_DIMENSION = 2560; // stored images are never larger than this
+const MAX_OUTPUT_BYTES = 3 * 1024 * 1024;
 
 export interface ProcessedImageResult {
   buffer: Buffer;
@@ -38,7 +41,8 @@ export class MediaService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    this.uploadDir = path.resolve(process.cwd(), 'uploads');
+    // UPLOAD_DIR lets read-only hosts (Vercel: only /tmp is writable) move local storage.
+    this.uploadDir = path.resolve(process.cwd(), this.configService.get<string>('UPLOAD_DIR') || 'uploads');
     if (!fs.existsSync(this.uploadDir)) {
       fs.mkdirSync(this.uploadDir, { recursive: true });
     }
@@ -50,7 +54,6 @@ export class MediaService {
     this.s3PublicUrl = this.configService.get<string>('S3_PUBLIC_URL', 'http://localhost:9000/dentacare');
 
     const configuredDriver = (this.configService.get<string>('STORAGE_DRIVER') || '').toLowerCase();
-    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
 
     if (configuredDriver === 's3') {
       if (!endpoint || !accessKey || !secretKey) {
@@ -71,7 +74,7 @@ export class MediaService {
     } else if (configuredDriver === 'local') {
       this.storageDriver = 'local';
     } else {
-      if (nodeEnv === 'production') {
+      if (isProductionLike()) {
         throw new Error(
           'STORAGE_DRIVER must be explicitly set to "s3" or "local" in production. Ephemeral fallback is prohibited.',
         );
@@ -163,27 +166,22 @@ export class MediaService {
       );
     }
 
-    // 4. Re-encode raster image to strip dangerous metadata/payloads
+    // 4. Re-encode every image to WebP, scaled down to MAX_OUTPUT_DIMENSION: strips metadata and
+    //    any embedded payload, and keeps stored files small
     let processedBuffer: Buffer;
-    let mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
-    let extension: 'jpg' | 'png' | 'webp';
-
+    const mimeType = 'image/webp' as const;
+    const extension = 'webp' as const;
     try {
-      if (detectedFormat === 'jpeg') {
-        processedBuffer = await sharpInstance.rotate().jpeg({ quality: 85, progressive: true }).toBuffer();
-        mimeType = 'image/jpeg';
-        extension = 'jpg';
-      } else if (detectedFormat === 'png') {
-        processedBuffer = await sharpInstance.rotate().png({ compressionLevel: 8 }).toBuffer();
-        mimeType = 'image/png';
-        extension = 'png';
-      } else {
-        processedBuffer = await sharpInstance.rotate().webp({ quality: 85 }).toBuffer();
-        mimeType = 'image/webp';
-        extension = 'webp';
-      }
+      processedBuffer = await sharpInstance
+        .rotate()
+        .resize({ width: MAX_OUTPUT_DIMENSION, height: MAX_OUTPUT_DIMENSION, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 82 })
+        .toBuffer();
     } catch (err: any) {
       throw new BadRequestException('Rasmni qayta ishlashda xatolik yuz berdi');
+    }
+    if (processedBuffer.length > MAX_OUTPUT_BYTES) {
+      throw new BadRequestException('Rasm siqilgandan keyin ham juda katta');
     }
 
     return {
@@ -201,7 +199,7 @@ export class MediaService {
     // Derived extension strictly from validated format, not user original name
     const safeFileName = `${Date.now()}-${nanoid(12)}.${processed.extension}`;
     let fileUrl = '';
-    const isProd = process.env.NODE_ENV === 'production';
+    const isProd = isProductionLike();
 
     let localWrittenPath: string | null = null;
     let s3UploadedKey: string | null = null;

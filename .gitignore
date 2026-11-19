@@ -1,9 +1,9 @@
 node_modules
 dist
 .next
-.env
-.env.*
+.env*
 !.env.example
+!**/.env.example
 !.env.production.example
 *.log
 .DS_Store
@@ -21,3 +21,4 @@ backups/
 
 # design skill working files
 frontend/.taste-skill/
+.neon

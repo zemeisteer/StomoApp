@@ -25,6 +25,7 @@ import { api } from '../../../../lib/api';
 import { formatClinicDate, formatClinicTime } from '../../../../lib/dateFormat';
 import { CustomDatePicker } from '../../../../components/CustomDatePicker';
 import { CustomSelect } from '../../../../components/CustomSelect';
+import { safeUrl } from '../../../../lib/safeUrl';
 
 function getTashkentDateString(d: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -348,9 +349,9 @@ export default function BookingStatusPage() {
               </div>
             </div>
 
-            {appointment.branch?.mapUrl && (
+            {safeUrl(appointment.branch?.mapUrl) && (
               <a
-                href={appointment.branch.mapUrl}
+                href={safeUrl(appointment.branch?.mapUrl)!}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-brand-600 hover:bg-brand-50 rounded-lg border border-line font-semibold text-xs transition-colors shrink-0"

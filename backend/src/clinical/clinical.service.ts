@@ -23,7 +23,7 @@ export class ClinicalService {
     if (user.role === StaffRole.DOCTOR) {
       if (!user.doctorId) throw new ForbiddenException('Shifokor profili biriktirilmagan');
       const hasAppt = patient.appointments.some((a) => a.doctorId === user.doctorId);
-      if (!hasAppt) throw new ForbiddenException('Ushbu bemor ma\'lumotlariga ruxsat yo\'q');
+      if (!hasAppt) throw new NotFoundException('Bemor topilmadi');
     }
     return patient;
   }

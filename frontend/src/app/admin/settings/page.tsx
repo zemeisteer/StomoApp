@@ -36,6 +36,7 @@ import { CustomSelect } from '../../../components/CustomSelect';
 import { ModalDialog } from '../../../components/ModalDialog';
 import { useI18n } from '../../../lib/i18n';
 import { translateBranchOrAddress } from '../../../lib/transliterate';
+import { safeUrl } from '../../../lib/safeUrl';
 
 interface ContactPhoneItem {
   id: string;
@@ -1173,10 +1174,10 @@ export default function AdminSettingsPage() {
                   <p className="text-[11px] text-ink-subtle mt-0.5">Ish vaqti: {b.workHours}</p>
 
                   {/* Branch Location URL */}
-                  {b.mapUrl ? (
+                  {safeUrl(/^https?:\/\//.test(b.mapUrl || '') ? b.mapUrl : `https://${b.mapUrl}`) ? (
                     <div className="mt-2.5 pt-2 border-t border-line/50 flex items-center justify-between">
                       <a
-                        href={b.mapUrl.startsWith('http://') || b.mapUrl.startsWith('https://') ? b.mapUrl : `https://${b.mapUrl}`}
+                        href={safeUrl(/^https?:\/\//.test(b.mapUrl) ? b.mapUrl : `https://${b.mapUrl}`)!}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-800 underline underline-offset-2"
