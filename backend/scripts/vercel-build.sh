@@ -11,6 +11,11 @@ if [ -n "$DATABASE_URL_UNPOOLED" ]; then
   DATABASE_URL="$DATABASE_URL_UNPOOLED" npx prisma migrate deploy
 
   if [ "$DEMO_SEED" = "true" ]; then
+    # Without OWNER_PASSWORD the seed would fall back to the demo password that is in the repo.
+    if [ "${#OWNER_PASSWORD}" -lt 12 ]; then
+      echo "DEMO_SEED=true needs OWNER_PASSWORD (at least 12 characters)" >&2
+      exit 1
+    fi
     # Demo content (clinic, branches, services, doctors, articles). Idempotent upserts.
     # The OWNER account comes from OWNER_EMAIL / OWNER_PASSWORD.
     DATABASE_URL="$DATABASE_URL_UNPOOLED" NODE_ENV=development node -r ts-node/register prisma/seed.ts

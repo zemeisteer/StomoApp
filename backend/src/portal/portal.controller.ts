@@ -6,6 +6,7 @@ import { Public } from '../auth/public.decorator';
 import { PORTAL_COOKIE, PORTAL_SESSION_DAYS, PortalAuthService, PortalSession } from './portal-auth.service';
 import { PortalSessionGuard, PortalUser } from './portal.guard';
 import { PortalService } from './portal.service';
+import { isProductionLike } from '../common/runtime-env';
 
 export class RequestCodeDto {
   @IsString()
@@ -64,7 +65,7 @@ export class PortalController {
     const token = await this.auth.verifyCode(dto.phone, dto.code);
     res.cookie(PORTAL_COOKIE, token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProductionLike(),
       sameSite: 'lax',
       maxAge: PORTAL_SESSION_DAYS * 24 * 60 * 60 * 1000,
       path: '/api/portal',

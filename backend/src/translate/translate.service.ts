@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isDevelopment } from '../common/runtime-env';
 
 export type Lang = 'uz' | 'ru';
 
@@ -32,7 +33,7 @@ export class TranslateService {
   private get freeFallback() {
     const flag = this.config.get<string>('TRANSLATE_FREE_FALLBACK');
     if (flag !== undefined) return flag === 'true';
-    return process.env.NODE_ENV !== 'production';
+    return isDevelopment();
   }
 
   async translate(text: string, from: Lang, to: Lang): Promise<string> {

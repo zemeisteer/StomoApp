@@ -12,6 +12,7 @@ import * as path from 'path';
 import { nanoid } from 'nanoid';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import sharp, { Sharp, Metadata } from 'sharp';
+import { isProductionLike } from '../common/runtime-env';
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_DIMENSION = 4096; // 4096 px width/height
@@ -51,7 +52,6 @@ export class MediaService {
     this.s3PublicUrl = this.configService.get<string>('S3_PUBLIC_URL', 'http://localhost:9000/dentacare');
 
     const configuredDriver = (this.configService.get<string>('STORAGE_DRIVER') || '').toLowerCase();
-    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
 
     if (configuredDriver === 's3') {
       if (!endpoint || !accessKey || !secretKey) {
@@ -72,7 +72,7 @@ export class MediaService {
     } else if (configuredDriver === 'local') {
       this.storageDriver = 'local';
     } else {
-      if (nodeEnv === 'production') {
+      if (isProductionLike()) {
         throw new Error(
           'STORAGE_DRIVER must be explicitly set to "s3" or "local" in production. Ephemeral fallback is prohibited.',
         );
@@ -202,7 +202,7 @@ export class MediaService {
     // Derived extension strictly from validated format, not user original name
     const safeFileName = `${Date.now()}-${nanoid(12)}.${processed.extension}`;
     let fileUrl = '';
-    const isProd = process.env.NODE_ENV === 'production';
+    const isProd = isProductionLike();
 
     let localWrittenPath: string | null = null;
     let s3UploadedKey: string | null = null;

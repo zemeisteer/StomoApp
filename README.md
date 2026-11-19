@@ -80,8 +80,8 @@ cp frontend/.env.example frontend/.env.local
 Configure your database connection in `backend/.env`:
 ```env
 DATABASE_URL="postgresql://dentacare:dentacare_dev_password@localhost:5432/dentacare?schema=public"
-JWT_SECRET="generate-a-secure-random-base64-string-in-production"
-JWT_REFRESH_SECRET="generate-a-secure-random-refresh-base64-string"
+JWT_SECRET="CHANGE_ME_openssl_rand_hex_32"
+JWT_REFRESH_SECRET="CHANGE_ME_openssl_rand_hex_32_refresh"
 APP_PORT=4000
 FRONTEND_URL="http://localhost:3000"
 ```

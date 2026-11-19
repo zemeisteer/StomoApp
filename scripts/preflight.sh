@@ -30,7 +30,7 @@ perm=$(stat -c '%a' "$ENV_FILE" 2>/dev/null || echo "?")
 for key in POSTGRES_PASSWORD REDIS_PASSWORD JWT_SECRET JWT_REFRESH_SECRET SERVICE_TOKEN; do
   v="$(val "$key")"
   if [[ -z "$v" ]]; then bad "$key is empty"
-  elif [[ "$v" == generate_* || "$v" == *change* || "$v" == *ChangeMe* ]]; then bad "$key still has the template placeholder"
+  elif [[ "$v" == generate_* || "$v" == *change* || "$v" == *CHANGE_ME* || "$v" == *ChangeMe* ]]; then bad "$key still has the template placeholder"
   elif (( ${#v} < 32 )); then bad "$key is shorter than 32 characters"
   elif [[ "$key" == *PASSWORD && ! "$v" =~ ^[A-Za-z0-9_-]+$ ]]; then bad "$key has URL-unsafe characters (use: openssl rand -hex 32)"
   else ok "$key set"; fi

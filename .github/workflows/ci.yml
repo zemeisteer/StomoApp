@@ -80,6 +80,10 @@ jobs:
         working-directory: ./backend
         run: npm run build
 
+      - name: Backend Unit Tests
+        working-directory: ./backend
+        run: npx jest
+
       - name: Apply Database Migrations (dentacare_test)
         working-directory: ./backend
         run: npx prisma migrate deploy
@@ -191,6 +195,7 @@ jobs:
         run: |
           docker build -t stomo-bot:ci ./bot
           docker run --rm \
+            -e ENVIRONMENT=test \
             -e SERVICE_TOKEN=ci_service_token_random_secure_32_chars_minimum_length_abcdef \
             stomo-bot:ci python -c "import bot.main; print('bot image OK')"
 

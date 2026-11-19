@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { StaffRole } from '@prisma/client';
-import { requireSecret } from './jwt-secret';
+import { validateAllSecrets } from './jwt-secret';
 
 export interface JwtPayload {
   sub: string;
@@ -38,10 +38,9 @@ export class AuthService implements OnModuleInit {
     this.validateSecrets();
   }
 
-  /** Fail closed in every environment (not only production): both signing secrets must be real. */
+  /** Fail closed in every environment (not only production): every secret must be real. */
   private validateSecrets() {
-    requireSecret(this.configService, 'JWT_SECRET');
-    requireSecret(this.configService, 'JWT_REFRESH_SECRET');
+    validateAllSecrets(this.configService);
   }
 
   private hashToken(token: string): string {

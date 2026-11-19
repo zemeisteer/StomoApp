@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsSender } from '../notifications/sms.sender';
 import { requireSecret } from '../auth/jwt-secret';
+import { isProductionLike } from '../common/runtime-env';
 
 export const PORTAL_COOKIE = 'patient_session';
 export const PORTAL_SESSION_DAYS = 7;
@@ -48,8 +49,9 @@ export class PortalAuthService {
     return crypto.createHmac('sha256', this.secret).update(`${phone}:${code}`).digest('hex');
   }
 
-  private get isProduction() {
-    return process.env.NODE_ENV === 'production';
+  /** Codes may be shown on screen only on an explicit development machine or in the test runner. */
+  private get allowsDevSink() {
+    return !isProductionLike();
   }
 
   /**
@@ -82,7 +84,7 @@ export class PortalAuthService {
 
     const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
     // Outside production with no delivery provider at all, the code goes to the dev log and the response
-    const devSink = !this.isProduction && !this.sms.isConfigured() && !(patient?.telegramUserId && this.botToken);
+    const devSink = this.allowsDevSink && !this.sms.isConfigured() && !(patient?.telegramUserId && this.botToken);
     const channel = !patient ? 'NONE' : devSink ? 'DEV' : 'QUEUED';
 
     // Always store an attempt (also for unknown numbers) so rate limits apply uniformly

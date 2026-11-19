@@ -6,6 +6,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
 import { Public } from './public.decorator';
 import { IsEmail, IsString, MinLength } from 'class-validator';
+import { isProductionLike } from '../common/runtime-env';
 
 class LoginDto {
   @IsEmail()
@@ -40,7 +41,7 @@ export class AuthController {
   ) {
     const tokens = await this.authService.login(dto.email, dto.password, req.ip);
 
-    const isProd = process.env.NODE_ENV === 'production';
+    const isProd = isProductionLike();
 
     // Access token cookie
     res.cookie('access_token', tokens.accessToken, {
@@ -80,7 +81,7 @@ export class AuthController {
 
     try {
       const tokens = await this.authService.refreshTokens(refreshToken, req.ip);
-      const isProd = process.env.NODE_ENV === 'production';
+      const isProd = isProductionLike();
 
       res.cookie('access_token', tokens.accessToken, {
         httpOnly: true,

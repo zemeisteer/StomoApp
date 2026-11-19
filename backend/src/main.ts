@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import * as express from 'express';
 import * as path from 'path';
 import { AppModule } from './app.module';
+import { isProductionLike } from './common/runtime-env';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,13 +21,12 @@ async function bootstrap() {
 
   // Reverse proxy configuration (restricted to real deployment topology)
   const trustProxyEnv = configService.get<string>('TRUST_PROXY');
-  const nodeEnv = configService.get<string>('NODE_ENV', 'development');
   const expressApp = app.getHttpAdapter().getInstance();
 
   if (trustProxyEnv) {
     const parsedProxy = /^\d+$/.test(trustProxyEnv) ? parseInt(trustProxyEnv, 10) : trustProxyEnv;
     expressApp.set('trust proxy', parsedProxy);
-  } else if (nodeEnv === 'production') {
+  } else if (isProductionLike()) {
     expressApp.set('trust proxy', 'loopback');
   } else {
     expressApp.set('trust proxy', false);
