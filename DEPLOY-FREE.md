@@ -10,6 +10,9 @@
 >   `UPLOAD_DIR=/tmp/uploads` (Vercel'da faqat `/tmp` yoziladi), JWT/SERVICE_TOKEN sirlari, `OWNER_*`.
 >   Neon qatoridagi `channel_binding` parametrini olib tashlang, Prisma 5 uni qo'llamaydi.
 > - Saytda `NEXT_PUBLIC_API_URL=https://stomoapp-api.vercel.app`.
+> - 2026-11-19 xavfsizlik yangilanishidan keyin API quyidagilarsiz ishga tushmaydi: `JWT_SECRET` va
+>   `JWT_REFRESH_SECRET` (har xil, kamida 32 belgi), `SERVICE_TOKEN` (kamida 32 belgi), `STORAGE_DRIVER`.
+>   `DEMO_SEED=true` bo'lsa `OWNER_PASSWORD` (kamida 12 belgi) ham shart.
 > - Vercel'da cron ishlamaydi: eslatmalar va SMS yuborilmaydi, yuklangan rasmlar saqlanmaydi.
 >
 > Quyidagi Render yo'li ham hali ishlaydi, lekin hozir ishlatilmayapti.

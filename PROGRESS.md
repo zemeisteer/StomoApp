@@ -273,6 +273,15 @@ A new CI job builds the production images and runs the stack; it found the image
 - 3D tooth: drop-in replacement documented in `public/models/ATTRIBUTION.md`; optional `NEXT_PUBLIC_TOOTH_MODEL_CREDIT` shows the model credit in the hero.
 - Tests: Regression 80; 95/95 passing.
 
+### Phase 23: Security pass (2026-11-19)
+- Secrets fail closed at start-up (JWT pair, `SERVICE_TOKEN`, template payment keys); dev shortcuts need `NODE_ENV=development`; bot defaults to production and has no invented contacts.
+- Login limited per IP+email / IP / email (15 min); forced password change for staff created or reset by the owner (`must_change_password`, migration `20261119120000_staff_must_change_password`); password change/reset ends other sessions.
+- Out-of-scope records answer 404; doctors cannot act in another doctor's name; branch staff cannot book into another branch; inventory cost hidden from doctors/reception; all client amounts capped.
+- Public `/api/health` shows status and time only (`/api/health/details` for the owner). Uploads re-encoded to WebP. Explicit CORS list with a test.
+- Public forms 5 per 15 min, reviews 3 per hour; portal code cooldown under a per-phone lock.
+- Web: security headers + baseline CSP, image optimizer limited to the API host, `/admin` noindex, robots.txt, sitemap.xml, `safeUrl()` for database links, change-password page, real branches in the callback form, Next 14.2.35.
+- Tests: Regressions 87-91 plus unit tests (secrets, CORS, safeUrl, bot config); 106/106 e2e passing.
+
 ---
 
 ## 2. Test Verification Matrix
