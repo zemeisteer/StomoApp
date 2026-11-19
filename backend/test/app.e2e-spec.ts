@@ -3771,7 +3771,11 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       });
 
       // Target future Wednesday
-      const targetDate = '2026-11-18'; // Known Wednesday
+      // A Wednesday at least a week ahead, so the test never runs against a past date
+      const wed = new Date();
+      wed.setUTCDate(wed.getUTCDate() + 7);
+      while (wed.getUTCDay() !== 3) wed.setUTCDate(wed.getUTCDate() + 1);
+      const targetDate = wed.toISOString().slice(0, 10);
 
       // 3. Query slots without display timezone:
       // Authoritative clinic timezone Europe/Samara must produce first slot at 09:00 Samara = 05:00 UTC!
@@ -3786,7 +3790,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         .expect(200);
 
       expect(slotRes.body.slots.length).toBeGreaterThan(0);
-      expect(slotRes.body.slots[0].startTime).toBe('2026-11-18T05:00:00.000Z');
+      expect(slotRes.body.slots[0].startTime).toBe(`${targetDate}T05:00:00.000Z`);
 
       // 4. Query slots WITH display timezone parameter (e.g. timezone: 'Asia/Tashkent'):
       // Display timezone must NOT shift physical clinic working hours!
@@ -3803,7 +3807,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
 
       expect(slotResDisplay.body.slots.length).toBeGreaterThan(0);
       // Working slot is STILL 05:00 UTC (which corresponds to 09:00 Samara clinic physical time)
-      expect(slotResDisplay.body.slots[0].startTime).toBe('2026-11-18T05:00:00.000Z');
+      expect(slotResDisplay.body.slots[0].startTime).toBe(`${targetDate}T05:00:00.000Z`);
 
       // 5. Test reschedule slots also honors authoritative clinic timezone
       const patientTz = await prisma.patient.create({
@@ -3818,8 +3822,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
           serviceId: srvTz.id,
           branchId: testBranchId,
           status: AppointmentStatus.CONFIRMED,
-          startTime: new Date('2026-11-18T05:00:00.000Z'),
-          endTime: new Date('2026-11-18T05:35:00.000Z'),
+          startTime: new Date(`${targetDate}T05:00:00.000Z`),
+          endTime: new Date(`${targetDate}T05:35:00.000Z`),
           durationMinutes: 30,
           bufferMinutes: 5,
           serviceName: srvTz.nameUz,
@@ -3836,7 +3840,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
         .expect(200);
 
       expect(reschedSlotRes.body.slots.length).toBeGreaterThan(0);
-      expect(reschedSlotRes.body.slots[0].startTime).toBe('2026-11-18T05:00:00.000Z');
+      expect(reschedSlotRes.body.slots[0].startTime).toBe(`${targetDate}T05:00:00.000Z`);
 
       // Cleanup fixtures
       await prisma.appointmentServiceItem.deleteMany({ where: { appointmentId: apptTz.id } });
