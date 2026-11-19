@@ -9,6 +9,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { CsrfGuard } from './csrf.guard';
 import { requireSecret } from './jwt-secret';
+import { LoginRateLimiter } from './login-rate-limiter';
 
 import { APP_GUARD } from '@nestjs/core';
 
@@ -29,6 +30,7 @@ import { APP_GUARD } from '@nestjs/core';
   controllers: [AuthController],
   providers: [
     AuthService,
+    LoginRateLimiter,
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,
@@ -38,6 +40,6 @@ import { APP_GUARD } from '@nestjs/core';
       useClass: CsrfGuard,
     },
   ],
-  exports: [AuthService, JwtAuthGuard, RolesGuard, CsrfGuard],
+  exports: [AuthService, LoginRateLimiter, JwtAuthGuard, RolesGuard, CsrfGuard],
 })
 export class AuthModule {}

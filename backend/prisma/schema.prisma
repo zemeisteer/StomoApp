@@ -129,6 +129,10 @@ model StaffUser {
   tokenVersion     Int     @default(1) @map("token_version")
   refreshTokenHash String? @map("refresh_token_hash")
 
+  // Set when an owner creates the account or resets its password: the person must choose their
+  // own password before anything else works.
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

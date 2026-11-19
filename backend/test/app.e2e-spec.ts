@@ -9,6 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { AppointmentStatus, StaffRole, ExceptionType, LeadStatus, DayOfWeek, NotificationStatus, NotificationChannel, PaymentMethod } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/auth/auth.service';
+import { LoginRateLimiter } from '../src/auth/login-rate-limiter';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { AppointmentsService } from '../src/appointments/appointments.service';
 import { ServicesService } from '../src/services/services.service';
@@ -250,6 +251,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   });
 
   beforeEach(() => {
+    app.get(LoginRateLimiter).reset();
     // Reset throttler storage between tests to isolate rate-limiting without weakening production defaults
     if (throttlerStorage) {
       if (typeof throttlerStorage.storage?.clear === 'function') {
@@ -291,10 +293,21 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
   // REGRESSION 1: Health Check
   // -------------------------------------------------------------
   it('Regression 1: Health endpoint returns ok and database connection status', async () => {
+    // Public: status and time only, nothing about the database
     const res = await request(app.getHttpServer()).get('/api/health').expect(200);
     expect(res.body.status).toBe('ok');
-    expect(res.body.database.status).toBe('ok');
-    expect(res.body.clinicTimezone).toBe('Asia/Tashkent');
+    expect(Object.keys(res.body).sort()).toEqual(['status', 'timestamp']);
+    expect(JSON.stringify(res.body)).not.toMatch(/database|dentacare_test|serverAddress/);
+
+    // Details are for the owner only
+    await request(app.getHttpServer()).get('/api/health/details').expect(401);
+    await request(app.getHttpServer()).get('/api/health/details').set('Authorization', `Bearer ${doctorAToken}`).expect(403);
+    const details = await request(app.getHttpServer())
+      .get('/api/health/details')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(details.body.database.status).toBe('ok');
+    expect(details.body.clinicTimezone).toBe('Asia/Tashkent');
   });
 
   // -------------------------------------------------------------
@@ -375,11 +388,11 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     const appointmentId = bookingRes.body.appointmentId;
     expect(appointmentId).toBeDefined();
 
-    // Doctor A attempts to view Doctor B's appointment detail
+    // Doctor A attempts to view Doctor B's appointment detail: 404, existence is not revealed
     await request(app.getHttpServer())
       .get(`/api/admin/appointments/${appointmentId}`)
       .set('Authorization', `Bearer ${doctorAToken}`)
-      .expect(403);
+      .expect(404);
 
     // Doctor B can view their own appointment
     await request(app.getHttpServer())
@@ -778,8 +791,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       .expect(201);
 
     expect(uploadRes.body.id).toBeDefined();
-    expect(uploadRes.body.mimeType).toBe('image/png');
-    expect(uploadRes.body.fileName).toMatch(/\.png$/);
+    expect(uploadRes.body.mimeType).toBe('image/webp');
+    expect(uploadRes.body.fileName).toMatch(/\.webp$/);
     const mediaId = uploadRes.body.id;
     const fileName = uploadRes.body.fileName;
 
@@ -5974,11 +5987,11 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       expect(saveRes.body.success).toBe(true);
       expect(saveRes.body.updatedTeethCount).toBe(2);
 
-      // 2. Doctor B (unauthorized, no appointment with patient) gets 403 Forbidden
+      // 2. Doctor B (unauthorized, no appointment with patient) gets 404 (record outside scope)
       await request(app.getHttpServer())
         .get(`/api/admin/clinical/odontogram/${pat.id}`)
         .set('Authorization', `Bearer ${doctorBToken}`)
-        .expect(403);
+        .expect(404);
 
       // 3. Doctor A gets 200 OK and sees verified persisted records with surfaces
       const getRes = await request(app.getHttpServer())
@@ -7965,8 +7978,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(service).toBeTruthy();
     try {
       // Doctor without an appointment with this patient is denied (plans and card)
-      await http().get(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(doctorBToken)).expect(403);
-      await http().get(`/api/admin/clinical/patient-card/${patient.id}`).set(auth(doctorBToken)).expect(403);
+      await http().get(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(doctorBToken)).expect(404);
+      await http().get(`/api/admin/clinical/patient-card/${patient.id}`).set(auth(doctorBToken)).expect(404);
 
       const created = await http().post(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(adminToken))
         .send({ title: 'Kompleks davolash' }).expect(201);
@@ -8655,8 +8668,8 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       expect(ids).not.toContain(inMain.id);
 
       // Other branch's visit: cannot open or change it
-      await http().get(`/api/admin/appointments/${inMain.id}`).set(auth(recToken)).expect(403);
-      await http().patch(`/api/admin/appointments/${inMain.id}/status`).set(auth(recToken)).send({ status: 'CONFIRMED' }).expect(403);
+      await http().get(`/api/admin/appointments/${inMain.id}`).set(auth(recToken)).expect(404);
+      await http().patch(`/api/admin/appointments/${inMain.id}/status`).set(auth(recToken)).send({ status: 'CONFIRMED' }).expect(404);
       await http().get(`/api/admin/appointments/${inSecond.id}`).set(auth(recToken)).expect(200);
 
       // The patient card is shared: visible from branch 2 with its full history
@@ -8713,7 +8726,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       expect(sum1.openShift.expectedCashUzs).toBe(0);
 
       // The receptionist cannot close another branch's drawer
-      await http().post(`/api/admin/cashier/shifts/${s2.id}/close`).set(auth(recToken)).send({ countedCash: 80000 }).expect(403);
+      await http().post(`/api/admin/cashier/shifts/${s2.id}/close`).set(auth(recToken)).send({ countedCash: 80000 }).expect(404);
       const closed = (await http().post(`/api/admin/cashier/shifts/${s2.id}/close`).set(auth(adminToken)).send({ countedCash: 80000 }).expect(201)).body;
       expect(closed.differenceUzs).toBe(0);
     } finally {
@@ -8770,7 +8783,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       const payOther = (await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: invOther.id, amount: 40000, method: 'CASH' }).expect(201)).body;
       const payOwn = (await http().post('/api/admin/billing/payments').set(auth(adminToken)).send({ invoiceId: invOwn.id, amount: 30000, method: 'CASH' }).expect(201)).body;
 
-      await http().post(`/api/admin/cashier/payments/${payOther.id}/refund`).set(auth(branchAdminToken)).send({ reason: 'boshqa filial' }).expect(403);
+      await http().post(`/api/admin/cashier/payments/${payOther.id}/refund`).set(auth(branchAdminToken)).send({ reason: 'boshqa filial' }).expect(404);
       expect(await prisma.payment.count({ where: { refundOfId: payOther.id } })).toBe(0);
       await http().post(`/api/admin/cashier/payments/${payOwn.id}/refund`).set(auth(branchAdminToken)).send({ amount: 10000, reason: "o'z filiali" }).expect(201);
       // The owner is never limited by branch
@@ -9114,7 +9127,7 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     const live = (await http().get('/api/health/live').expect(200)).body;
     expect(live).toMatchObject({ status: 'ok', service: 'dentacare-backend' });
     expect(live).not.toHaveProperty('database');
-    expect((await http().get('/api/health').expect(200)).body).toHaveProperty('database.status', 'ok');
+    expect((await http().get('/api/health').expect(200)).body).toHaveProperty('status', 'ok');
 
     // First-start owner helper (used by hosts without a shell): no-op without env, validates, never resets
     const script = path.join(__dirname, '..', 'scripts', 'ensure-owner.js');
@@ -9131,5 +9144,178 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     expect(short.status).toBe(1);
     expect(short.stderr).toMatch(/at least 12 characters/);
     expect(await prisma.staffUser.count({ where: { role: StaffRole.OWNER } })).toBe(owners);
+  });
+
+  // -------------------------------------------------------------
+  // Security pass (2026-11-19): login limits, forced password change, scope, money caps
+  // -------------------------------------------------------------
+  const clearRouteThrottler = () => {
+    if (!throttlerStorage) return;
+    throttlerStorage.storage?.clear?.();
+    throttlerStorage._storage?.clear?.();
+    throttlerStorage.hitExpirations?.clear?.();
+  };
+
+  it('Regression 87: Staff login is limited per IP, per email and per IP+email; success does not reset the IP layer', async () => {
+    const http = () => request(app.getHttpServer());
+    const tag = `r87${runId}`;
+    const login = (ip: string, email: string, password = 'WrongPassword123!') =>
+      http().post('/api/auth/login').set('X-Forwarded-For', ip).send({ email, password });
+
+    // IP + email: 5 attempts, the 6th is refused even after the per-minute route limit is cleared
+    for (let i = 0; i < 5; i++) expect((await login('203.0.113.10', `${tag}a@x.test`)).status).toBe(401);
+    clearRouteThrottler();
+    expect((await login('203.0.113.10', `${tag}a@x.test`)).status).toBe(429);
+
+    // IP: 20 attempts over different emails; a successful login in between does not reset it
+    app.get(LoginRateLimiter).reset();
+    const pw = 'Reg87-Valid-Password!';
+    const user = await prisma.staffUser.create({
+      data: { email: `${tag}ok@x.test`, passwordHash: await bcrypt.hash(pw, 10), fullName: 'Reg87', role: StaffRole.EDITOR },
+    });
+    try {
+      for (let i = 0; i < 19; i++) {
+        if (i % 4 === 0) clearRouteThrottler();
+        expect((await login('203.0.113.20', `${tag}${i}@x.test`)).status).toBe(401);
+      }
+      clearRouteThrottler();
+      expect((await login('203.0.113.20', user.email, pw)).status).toBe(200); // 20th attempt
+      clearRouteThrottler();
+      expect((await login('203.0.113.20', user.email, pw)).status).toBe(429); // 21st: IP layer still counts
+
+      // Email: 10 attempts from 10 different IPs lock that account for everyone, also with the right password
+      app.get(LoginRateLimiter).reset();
+      for (let i = 0; i < 10; i++) expect((await login(`198.18.0.${i + 1}`, user.email)).status).toBe(401);
+      expect((await login('198.18.1.1', user.email, pw)).status).toBe(429);
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { userId: user.id } });
+      await prisma.staffUser.delete({ where: { id: user.id } });
+    }
+  });
+
+  it('Regression 88: Staff created by the owner must change the password first; password changes and resets end other sessions; logout revokes the refresh token', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const email = `r88${runId}@staff.test`;
+    const temp = 'Temporary-Pass-88';
+    const created = (await http().post('/api/admin/staff').set(auth(adminToken))
+      .send({ email, password: temp, fullName: 'Reg88 Xodim', role: 'RECEPTION' }).expect(201)).body;
+    try {
+      const first = await http().post('/api/auth/login').send({ email, password: temp }).expect(200);
+      const tempToken = first.body.accessToken;
+
+      // Everything except me / change-password / logout is closed until the password is changed
+      const blocked = await http().get('/api/admin/patients').set(auth(tempToken)).expect(403);
+      expect(blocked.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+      expect((await http().get('/api/auth/me').set(auth(tempToken)).expect(200)).body.mustChangePassword).toBe(true);
+
+      await http().post('/api/auth/change-password').set(auth(tempToken))
+        .send({ currentPassword: 'wrong-current-password', newPassword: 'My-Own-Password-88' }).expect(400);
+      await http().post('/api/auth/change-password').set(auth(tempToken))
+        .send({ currentPassword: temp, newPassword: 'short' }).expect(400);
+      const changed = await http().post('/api/auth/change-password').set(auth(tempToken))
+        .send({ currentPassword: temp, newPassword: 'My-Own-Password-88' }).expect(200);
+      const ownToken = changed.body.accessToken;
+
+      // The old session is over, the new one works everywhere
+      await http().get('/api/auth/me').set(auth(tempToken)).expect(401);
+      await http().get('/api/admin/patients').set(auth(ownToken)).expect(200);
+      expect((await http().get('/api/auth/me').set(auth(ownToken)).expect(200)).body.mustChangePassword).toBe(false);
+
+      // Owner reset: every session of that person ends and a change is required again
+      await http().put(`/api/admin/staff/${created.id}/password`).set(auth(doctorAToken)).send({ password: 'Reset-Pass-88' }).expect(403);
+      await http().put(`/api/admin/staff/${created.id}/password`).set(auth(adminToken)).send({ password: 'Reset-Pass-88' }).expect(200);
+      await http().get('/api/auth/me').set(auth(ownToken)).expect(401);
+      const again = await http().post('/api/auth/login').send({ email, password: 'Reset-Pass-88' }).expect(200);
+      await http().get('/api/admin/patients').set(auth(again.body.accessToken)).expect(403);
+      const fresh = await http().post('/api/auth/change-password').set(auth(again.body.accessToken))
+        .send({ currentPassword: 'Reset-Pass-88', newPassword: 'Second-Own-Password-88' }).expect(200);
+
+      // Logout invalidates the refresh token on the server
+      const cookies = fresh.headers['set-cookie'] as unknown as string[];
+      const refreshCookie = cookies.find((c) => c.startsWith('refresh_token='))!.split(';')[0];
+      await http().post('/api/auth/logout').set(auth(fresh.body.accessToken)).expect(200);
+      await http().post('/api/auth/refresh').set('Cookie', refreshCookie).set('X-Requested-With', 'XMLHttpRequest').expect(401);
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { OR: [{ userId: created.id }, { entityId: created.id }] } });
+      await prisma.staffUser.delete({ where: { id: created.id } });
+    }
+  });
+
+  it('Regression 89: Acting user and scope come from the token; cost price is hidden from doctors; amounts are capped', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const tag = `reg89_${Date.now()}`;
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg89 Bemor', phone: `${testPhonePrefix}89` } });
+    const start = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+    await prisma.appointment.create({
+      data: {
+        publicToken: `${tag}_a`, patientId: patient.id, doctorId: testDoctorAId, serviceId: testServiceId, branchId: testBranchId,
+        status: AppointmentStatus.CONFIRMED, startTime: start, endTime: new Date(start.getTime() + 30 * 60 * 1000),
+        serviceName: 'Reg89', durationMinutes: 30, bufferMinutes: 0, consentGiven: true,
+      },
+    });
+    const branch2 = await prisma.branch.create({ data: { nameUz: `${tag} filial`, nameRu: `${tag} филиал`, addressUz: 'Toshkent', addressRu: 'Ташкент' } });
+    const rec = await prisma.staffUser.create({
+      data: { email: `${tag}@reception.test`, passwordHash: await bcrypt.hash('Reception-Reg89!', 10), fullName: 'Reg89', role: StaffRole.RECEPTION, branchId: branch2.id },
+    });
+    const item = (await http().post('/api/admin/inventory').set(auth(adminToken))
+      .send({ name: `${tag} plomba`, category: 'material', unit: 'dona', quantity: 10, minThreshold: 1, unitCost: 12345 }).expect(201)).body;
+    try {
+      // A doctor cannot act in another doctor's name
+      await http().post(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(doctorAToken))
+        .send({ title: 'Reja', doctorId: testDoctorBId }).expect(403);
+      const own = await http().post(`/api/admin/clinical/patients/${patient.id}/plans`).set(auth(doctorAToken))
+        .send({ title: 'Reja', doctorId: testDoctorAId }).expect(201);
+      expect(own.body.doctor?.id ?? own.body.doctorId).toBe(testDoctorAId);
+
+      // Branch-bound staff cannot book into another branch
+      const recToken = (await http().post('/api/auth/login').send({ email: rec.email, password: 'Reception-Reg89!' }).expect(200)).body.accessToken;
+      await http().post('/api/admin/appointments').set(auth(recToken)).send({
+        doctorId: testDoctorAId, serviceId: testServiceId, branchId: testBranchId, startTime: start.toISOString(),
+        patientName: 'Reg89 Boshqa', patientPhone: `${testPhonePrefix}90`, consentGiven: true,
+      }).expect(403);
+
+      // Purchase cost: owner sees it, doctor does not
+      const ownerList = (await http().get('/api/admin/inventory').set(auth(adminToken)).expect(200)).body;
+      expect(ownerList.find((i: any) => i.id === item.id).unitCost).toBe(12345);
+      const doctorList = (await http().get('/api/admin/inventory').set(auth(doctorAToken)).expect(200)).body;
+      expect(doctorList.find((i: any) => i.id === item.id)).not.toHaveProperty('unitCost');
+
+      // Amounts above the 32-bit money columns are a clean 400
+      const huge = 2_100_000_000;
+      await http().post('/api/admin/billing/invoices').set(auth(adminToken)).send({ patientId: patient.id, totalAmount: huge }).expect(400);
+      await http().post('/api/admin/billing/invoices').set(auth(adminToken)).send({ patientId: patient.id, totalAmount: 1000, discount: huge }).expect(400);
+      await http().patch(`/api/admin/inventory/${item.id}`).set(auth(adminToken)).send({ unitCost: huge }).expect(400);
+      await http().patch(`/api/admin/inventory/${item.id}/stock`).set(auth(adminToken)).send({ changeType: 'RESTOCK', quantityDelta: huge }).expect(400);
+      await http().put(`/api/admin/commissions/${testDoctorAId}`).set(auth(adminToken)).send({ percentage: 10, fixedBonus: huge }).expect(400);
+    } finally {
+      await prisma.inventoryMovement.deleteMany({ where: { inventoryItemId: item.id } });
+      await prisma.inventoryItem.delete({ where: { id: item.id } });
+      await prisma.treatmentPlan.deleteMany({ where: { patientId: patient.id } });
+      await prisma.appointment.deleteMany({ where: { patientId: patient.id } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+      await prisma.auditLog.deleteMany({ where: { userId: rec.id } });
+      await prisma.staffUser.delete({ where: { id: rec.id } });
+      await prisma.branch.delete({ where: { id: branch2.id } });
+    }
+  });
+
+  it('Regression 90: Production is the default - no on-screen portal code unless NODE_ENV is development or test', async () => {
+    const http = () => request(app.getHttpServer());
+    const phone = `+99890${runId.padStart(7, '0').slice(-7)}`;
+    const patient = await prisma.patient.create({ data: { fullName: 'Reg90 Bemor', phone } });
+    const prev = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'staging';
+      const res = await http().post('/api/portal/auth/request-code').send({ phone }).expect(200);
+      expect(res.body.sent).toBe(true);
+      expect(res.body).not.toHaveProperty('devCode');
+    } finally {
+      process.env.NODE_ENV = prev;
+      await new Promise((r) => setTimeout(r, 50)); // background delivery attempt finishes
+      await prisma.portalOtp.deleteMany({ where: { phone } });
+      await prisma.patient.delete({ where: { id: patient.id } });
+    }
   });
 });
