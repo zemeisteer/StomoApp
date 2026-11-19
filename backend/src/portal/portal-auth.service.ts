@@ -62,20 +62,6 @@ export class PortalAuthService {
     const phone = normalizeUzPhone(rawPhone);
     if (!phone) throw new BadRequestException("Telefon raqami noto'g'ri. Masalan: +998 90 123 45 67");
 
-    const now = Date.now();
-    const recent = await this.prisma.portalOtp.findMany({
-      where: { phone, createdAt: { gte: new Date(now - 60 * 60 * 1000) } },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
-    if (recent[0] && now - recent[0].createdAt.getTime() < RESEND_COOLDOWN_MS) {
-      const wait = Math.ceil((RESEND_COOLDOWN_MS - (now - recent[0].createdAt.getTime())) / 1000);
-      throw new HttpException({ message: `Kodni qayta so'rash uchun ${wait} soniya kuting`, retryAfter: wait }, HttpStatus.TOO_MANY_REQUESTS);
-    }
-    if (recent.length >= MAX_CODES_PER_HOUR) {
-      throw new HttpException("Juda ko'p urinish. Bir soatdan keyin qayta urinib ko'ring", HttpStatus.TOO_MANY_REQUESTS);
-    }
-
     const patient = await this.prisma.patient.findFirst({
       where: { phone, isActive: true },
       select: { id: true, telegramUserId: true, preferredLanguage: true },
@@ -87,9 +73,27 @@ export class PortalAuthService {
     const devSink = this.allowsDevSink && !this.sms.isConfigured() && !(patient?.telegramUserId && this.botToken);
     const channel = !patient ? 'NONE' : devSink ? 'DEV' : 'QUEUED';
 
-    // Always store an attempt (also for unknown numbers) so rate limits apply uniformly
-    const otp = await this.prisma.portalOtp.create({
-      data: { phone, codeHash: this.hashCode(phone, code), channel, expiresAt: new Date(now + CODE_TTL_MS), ip },
+    // Cooldown and hourly cap are checked and the new code stored under a per-phone lock, so
+    // parallel requests cannot get past the limits
+    const now = Date.now();
+    const otp = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`portal-otp:${phone}`}))`;
+      const recent = await tx.portalOtp.findMany({
+        where: { phone, createdAt: { gte: new Date(now - 60 * 60 * 1000) } },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      if (recent[0] && now - recent[0].createdAt.getTime() < RESEND_COOLDOWN_MS) {
+        const wait = Math.ceil((RESEND_COOLDOWN_MS - (now - recent[0].createdAt.getTime())) / 1000);
+        throw new HttpException({ message: `Kodni qayta so'rash uchun ${wait} soniya kuting`, retryAfter: wait }, HttpStatus.TOO_MANY_REQUESTS);
+      }
+      if (recent.length >= MAX_CODES_PER_HOUR) {
+        throw new HttpException("Juda ko'p urinish. Bir soatdan keyin qayta urinib ko'ring", HttpStatus.TOO_MANY_REQUESTS);
+      }
+      // Always store an attempt (also for unknown numbers) so rate limits apply uniformly
+      return tx.portalOtp.create({
+        data: { phone, codeHash: this.hashCode(phone, code), channel, expiresAt: new Date(now + CODE_TTL_MS), ip },
+      });
     });
 
     if (channel === 'DEV') {

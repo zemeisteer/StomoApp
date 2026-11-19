@@ -11,6 +11,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { PUBLIC_FORM_LIMIT } from '../common/form-limits';
 import { LeadsService } from './leads.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -120,7 +121,7 @@ export class LeadsController {
 
   @Post('leads')
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle(PUBLIC_FORM_LIMIT)
   @HttpCode(HttpStatus.CREATED)
   async createPublicLead(@Body() dto: CreatePublicLeadDto) {
     const lead = await this.leadsService.create({

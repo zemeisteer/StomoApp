@@ -3,6 +3,7 @@ import {
   UseGuards, HttpCode, HttpStatus, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { BOOKING_FORM_LIMIT } from '../common/form-limits';
 import { AppointmentsService } from './appointments.service';
 import { SchedulingService, IsStrictCalendarDate, IsValidTimezone } from '../scheduling/scheduling.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -203,7 +204,7 @@ export class PublicBookingController {
 
   @Post()
   @Public()
-  @Throttle({ default: { limit: process.env.NODE_ENV === 'test' ? 1000 : 20, ttl: 60000 } })
+  @Throttle(BOOKING_FORM_LIMIT)
   @HttpCode(HttpStatus.CREATED)
   async createBooking(@Body() dto: PublicBookingDto) {
     const result = await this.service.createBooking({

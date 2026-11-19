@@ -13,6 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { REVIEW_FORM_LIMIT } from '../common/form-limits';
 import { ReviewsService, AuthenticatedStaffUser } from './reviews.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -111,7 +112,7 @@ export class ReviewsController {
 
   @Post('reviews')
   @Public()
-  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Throttle(REVIEW_FORM_LIMIT)
   @HttpCode(HttpStatus.CREATED)
   async createReview(@Body() dto: CreateReviewInputDto) {
     await this.reviewsService.create(dto);

@@ -9318,4 +9318,38 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
       await prisma.patient.delete({ where: { id: patient.id } });
     }
   });
+
+  it('Regression 91: Public forms are limited per IP; portal codes cannot be sent past the cooldown by parallel requests', async () => {
+    const http = () => request(app.getHttpServer());
+    const ip = `192.0.2.${Number(runId.slice(-2)) % 200 + 20}`;
+
+    // Callback form: 5 per 15 minutes
+    for (let i = 0; i < 5; i++) {
+      await http().post('/api/leads').set('X-Forwarded-For', ip)
+        .send({ fullName: `Reg91 Lead ${i}`, phone: `${testPhonePrefix}9${i}` }).expect(201);
+    }
+    await http().post('/api/leads').set('X-Forwarded-For', ip).send({ fullName: 'Reg91 Lead 6', phone: `${testPhonePrefix}96` }).expect(429);
+
+    // Reviews: 3 per hour
+    const tag = `reg91_${Date.now()}`;
+    for (let i = 0; i < 3; i++) {
+      await http().post('/api/reviews').set('X-Forwarded-For', ip)
+        .send({ authorName: 'Reg91', rating: 5, text: `${tag} sharh matni ${i} yaxshi klinika`, consentDisplayName: true }).expect(201);
+    }
+    await http().post('/api/reviews').set('X-Forwarded-For', ip)
+      .send({ authorName: 'Reg91', rating: 5, text: `${tag} sharh matni 4 yaxshi klinika`, consentDisplayName: true }).expect(429);
+
+    // Portal codes: 8 parallel requests for one phone store exactly one code (cooldown under a lock)
+    const phone = `+99891${runId.padStart(7, '0').slice(-7)}`;
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => http().post('/api/portal/auth/request-code').set('X-Forwarded-For', `192.0.2.${100 + i}`).send({ phone })),
+    );
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+    expect(results.filter((r) => r.status === 429)).toHaveLength(7);
+    expect(await prisma.portalOtp.count({ where: { phone } })).toBe(1);
+
+    await prisma.portalOtp.deleteMany({ where: { phone } });
+    await prisma.review.deleteMany({ where: { text: { startsWith: tag } } });
+    await prisma.lead.deleteMany({ where: { fullName: { startsWith: 'Reg91 Lead' } } });
+  });
 });
