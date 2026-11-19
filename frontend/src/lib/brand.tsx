@@ -3,6 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { applyBrandToDocument, type BrandColors } from './brandTheme';
+import { safeUrl } from './safeUrl';
 
 export type PublicClinicBrand = BrandColors & {
   name?: string | null;
@@ -69,7 +70,7 @@ export function BrandProvider({
       clinic,
       clinicName: (lang) =>
         (lang === 'ru' ? clinic?.nameRu || clinic?.name : clinic?.name) || FALLBACK_NAME,
-      logo: clinic?.logo || null,
+      logo: safeUrl(clinic?.logo),
       updateBrand,
     }),
     [clinic, updateBrand],

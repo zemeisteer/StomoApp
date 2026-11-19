@@ -9,7 +9,8 @@ import { useAuth } from '../../../lib/auth';
 import { useI18n } from '../../../lib/i18n';
 import { useBrand } from '../../../lib/brand';
 
-const SHOW_DEMO_CREDENTIALS = process.env.NODE_ENV !== 'production';
+// Development builds only (NODE_ENV is inlined at build time; anything else counts as production)
+const SHOW_DEMO_CREDENTIALS = process.env.NODE_ENV === 'development';
 
 export default function AdminLoginPage() {
   const { login } = useAuth();

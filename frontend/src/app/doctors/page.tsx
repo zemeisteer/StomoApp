@@ -7,6 +7,7 @@ import { useI18n } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { SITE_PHOTOS } from '../../lib/sitePhotos';
 import { BookingClose, Container, FilterPills, PageIntro } from '../../components/site/primitives';
+import { safeUrl } from '../../lib/safeUrl';
 
 export default function DoctorsPage() {
   const { t, language } = useI18n();
@@ -77,9 +78,9 @@ export default function DoctorsPage() {
                 <article key={doc.id} className="group">
                   <Link href={`/doctors/${doc.slug}`} className="block">
                     <div className="card-lift photo-zoom relative aspect-[4/5] overflow-hidden rounded-3xl bg-canvas">
-                      {doc.photoUrl && !failed[doc.id] ? (
+                      {safeUrl(doc.photoUrl) && !failed[doc.id] ? (
                         <Image
-                          src={doc.photoUrl}
+                          src={safeUrl(doc.photoUrl)!}
                           alt={`${first} ${last}`}
                           fill
                           unoptimized

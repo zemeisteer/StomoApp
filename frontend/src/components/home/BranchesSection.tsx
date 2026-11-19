@@ -6,6 +6,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { formatWorkingHours } from '../../lib/dateFormat';
 import { Section, SectionError, SectionHeading, SkeletonCards } from '../site/primitives';
+import { safeUrl } from '../../lib/safeUrl';
 
 interface BranchesSectionProps {
   branches: any[];
@@ -54,8 +55,8 @@ export const BranchesSection: React.FC<BranchesSectionProps> = ({ branches, isLo
                   )}
                 </div>
                 <div className="flex items-center gap-5 text-sm md:col-span-3 md:justify-end">
-                  {b.mapUrl && (
-                    <a href={b.mapUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-ink-muted hover:text-ink">
+                  {safeUrl(b.mapUrl) && (
+                    <a href={safeUrl(b.mapUrl)!} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-ink-muted hover:text-ink">
                       {L('Xarita', 'Карта')} <ArrowUpRight className="h-3.5 w-3.5" />
                     </a>
                   )}

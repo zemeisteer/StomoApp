@@ -8,6 +8,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useI18n } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
 import { Container, PrimaryLink, SecondaryLink, formatSom } from '../../../components/site/primitives';
+import { safeUrl } from '../../../lib/safeUrl';
 
 export default function DoctorDetailPage() {
   const { t, language } = useI18n();
@@ -103,8 +104,8 @@ export default function DoctorDetailPage() {
         <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-5">
             <div className="relative aspect-[4/5] overflow-hidden rounded-3xl bg-canvas">
-              {doctor.photoUrl ? (
-                <Image src={doctor.photoUrl} alt={`${first} ${last}`} fill unoptimized sizes="(min-width: 1024px) 40vw, 100vw" className="object-cover" />
+              {safeUrl(doctor.photoUrl) ? (
+                <Image src={safeUrl(doctor.photoUrl)!} alt={`${first} ${last}`} fill unoptimized sizes="(min-width: 1024px) 40vw, 100vw" className="object-cover" />
               ) : (
                 <div className="flex h-full items-center justify-center bg-brand-50">
                   <span className="text-7xl font-light tracking-tight text-brand-700/70">{`${first?.[0] || ''}${last?.[0] || ''}`.toUpperCase()}</span>

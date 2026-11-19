@@ -8,13 +8,11 @@ const onest = Onest({ subsets: ['latin', 'latin-ext', 'cyrillic'], display: 'swa
 import { ClientLayout } from './ClientLayout';
 import { brandCssText } from '../lib/brandTheme';
 import { BRAND_REVALIDATE_SECONDS, getClinicBrandServer } from '../lib/clinicServer';
+import { SITE_URL } from '../lib/siteUrl';
 
 // Branding (colors, logo, clinic name) is rendered on the server and refreshed periodically.
 export const revalidate = BRAND_REVALIDATE_SECONDS;
 
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : 'http://localhost:3000');
 
 const DEFAULT_TITLE ='Zamonaviy stomatologiya klinikasi';
 const DEFAULT_DESCRIPTION =

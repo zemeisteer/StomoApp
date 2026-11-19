@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ExternalLink, Copy, Check, Unlink } from 'lucide-react';
 import { ModalDialog } from '../ModalDialog';
 import { api } from '../../lib/api';
+import { safeUrl } from '../../lib/safeUrl';
 
 interface Props {
   isOpen: boolean;
@@ -132,9 +133,9 @@ export const TelegramLinkModal: React.FC<Props> = ({ isOpen, onClose, language }
 
         {link && (
           <div className="space-y-3">
-            {link.deepLink && (
+            {safeUrl(link.deepLink) && (
               <a
-                href={link.deepLink}
+                href={safeUrl(link.deepLink)!}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl"

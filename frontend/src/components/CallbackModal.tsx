@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, User, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { api } from '../lib/api';
@@ -18,6 +18,11 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('+998 ');
   const [preferredBranch, setPreferredBranch] = useState('');
+  // Only branches the clinic entered in the admin panel; never invented names
+  const [branches, setBranches] = useState<Array<{ id: string; nameUz?: string; nameRu?: string; name?: string }>>([]);
+  useEffect(() => {
+    api.getBranches().then((rows) => setBranches(Array.isArray(rows) ? rows : [])).catch(() => setBranches([]));
+  }, []);
   const [preferredTime, setPreferredTime] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -137,8 +142,10 @@ export const CallbackModal: React.FC<CallbackModalProps> = ({ isOpen, onClose })
                   label={t.callback.branchOptional}
                   options={[
                     { value: '', label: language === 'ru' ? 'Любой филиал' : 'Ixtiyoriy filial' },
-                    { value: 'Chilonzor filiali', label: 'Chilonzor' },
-                    { value: 'Yunusobod filiali', label: 'Yunusobod' },
+                    ...branches.map((b) => {
+                      const name = (language === 'ru' ? b.nameRu || b.nameUz : b.nameUz) || b.name || '';
+                      return { value: name, label: name };
+                    }).filter((o) => o.value),
                   ]}
                   value={preferredBranch}
                   onChange={(val) => setPreferredBranch(val)}

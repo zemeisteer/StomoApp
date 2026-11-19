@@ -14,7 +14,11 @@ export interface StaffUserProfile {
   doctorId?: string | null;
   /** Branch this staff member is limited to (null = all branches). */
   branchId?: string | null;
+  /** Temporary password set by the owner: the person must choose their own first. */
+  mustChangePassword?: boolean;
 }
+
+export const CHANGE_PASSWORD_PATH = '/admin/change-password';
 
 interface AuthContextType {
   user: StaffUserProfile | null;
@@ -58,6 +62,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(false);
     }
   }, [pathname]);
+
+  // A temporary password opens nothing but the change-password page (the API enforces the same)
+  useEffect(() => {
+    if (user?.mustChangePassword && pathname !== CHANGE_PASSWORD_PATH) {
+      router.replace(CHANGE_PASSWORD_PATH);
+    }
+  }, [user, pathname, router]);
 
   const login = async (email: string, pass: string) => {
     await api.login(email, pass);

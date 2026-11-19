@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useI18n } from '../../lib/i18n';
 import { Section, SectionError, SectionHeading } from '../site/primitives';
+import { safeUrl } from '../../lib/safeUrl';
 
 interface DoctorsSectionProps {
   doctors: any[];
@@ -59,9 +60,9 @@ export const DoctorsSection: React.FC<DoctorsSectionProps> = ({ doctors, isLoadi
             return (
               <Link key={doc.id} href={`/doctors/${doc.slug}`} className="group block">
                 <div className="card-lift photo-zoom relative aspect-[4/5] overflow-hidden rounded-3xl bg-white">
-                  {doc.photoUrl && !failed[doc.id] ? (
+                  {safeUrl(doc.photoUrl) && !failed[doc.id] ? (
                     <Image
-                      src={doc.photoUrl}
+                      src={safeUrl(doc.photoUrl)!}
                       alt={`${first} ${last}`}
                       fill
                       unoptimized

@@ -5,6 +5,7 @@ import { AlertCircle, Check, Copy, ExternalLink, Loader2, Send } from 'lucide-re
 import { ModalDialog } from '../../ModalDialog';
 import { api } from '../../../lib/api';
 import { formatUzs } from '../../../lib/clinicFormat';
+import { safeUrl } from '../../../lib/safeUrl';
 
 type Lang = 'uz' | 'ru';
 const t = (lang: Lang) => (uz: string, ru: string) => (lang === 'ru' ? ru : uz);
@@ -193,7 +194,7 @@ export function OnlinePayDialog({ invoiceId, lang, clinicName, onClose }: { invo
               >
                 <Send className="h-4 w-4" /> Telegram
               </a>
-              <a href={url!} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center rounded-lg px-2 text-ink-muted hover:text-ink" aria-label={L('Ochish', 'Открыть')}>
+              <a href={safeUrl(url) ?? undefined} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center rounded-lg px-2 text-ink-muted hover:text-ink" aria-label={L('Ochish', 'Открыть')}>
                 <ExternalLink className="h-4 w-4" />
               </a>
             </div>

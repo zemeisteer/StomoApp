@@ -16,6 +16,7 @@ import {
 import { useI18n } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
 import { formatClinicDate } from '../../../lib/dateFormat';
+import { safeUrl } from '../../../lib/safeUrl';
 
 export default function ArticleDetailPage() {
   const { t, language } = useI18n();
@@ -118,10 +119,10 @@ export default function ArticleDetailPage() {
             </h1>
           </div>
 
-          {article.coverImageUrl && (
+          {safeUrl(article.coverImageUrl) && (
             <div className="w-full h-64 sm:h-96 rounded-2xl overflow-hidden bg-canvas border border-line">
               <Image
-                src={article.coverImageUrl}
+                src={safeUrl(article.coverImageUrl)!}
                 alt={title}
                 width={800}
                 height={400}

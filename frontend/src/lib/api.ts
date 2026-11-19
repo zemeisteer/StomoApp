@@ -280,6 +280,11 @@ export const api = {
     }),
   logout: () => fetcher<any>('/api/auth/logout', { method: 'POST' }),
   getProfile: () => fetcher<any>('/api/auth/me'),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    fetcher<any>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
 
   // Admin Appointment Management
   getAdminAppointments: (params: Record<string, any> = {}) => {
@@ -611,6 +616,12 @@ export const api = {
     fetcher<any>(`/api/admin/staff/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    }),
+  /** Owner sets a temporary password; the person must replace it at the next sign-in. */
+  resetStaffPassword: (id: string, password: string) =>
+    fetcher<any>(`/api/admin/staff/${id}/password`, {
+      method: 'PUT',
+      body: JSON.stringify({ password }),
     }),
 
   // Own Telegram link (any signed-in staff member)
