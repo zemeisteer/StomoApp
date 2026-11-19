@@ -15,8 +15,8 @@ export class InventoryController {
 
   @Get()
   @Roles(StaffRole.OWNER, StaffRole.ADMIN, StaffRole.DOCTOR, StaffRole.RECEPTION)
-  async listItems() {
-    return this.service.listItems();
+  async listItems(@CurrentUser() user: JwtPayload) {
+    return this.service.listItems(user);
   }
 
   @Post()

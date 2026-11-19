@@ -1,4 +1,5 @@
-import { IsInt, IsString, IsOptional, Min } from 'class-validator';
+import { IsInt, IsString, IsOptional, Min, Max } from 'class-validator';
+import { MAX_MONEY } from '../../common/money';
 
 export class CreateTreatmentPlanItemDto {
   @IsOptional()
@@ -14,6 +15,7 @@ export class CreateTreatmentPlanItemDto {
 
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   costUzs!: number;
 
   @IsOptional()

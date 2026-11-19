@@ -7,6 +7,7 @@ import * as express from 'express';
 import * as path from 'path';
 import { AppModule } from './app.module';
 import { isProductionLike } from './common/runtime-env';
+import { allowedOrigins, buildCorsOptions } from './common/cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -36,14 +37,13 @@ async function bootstrap() {
   const uploadsDir = path.resolve(process.cwd(), configService.get<string>('UPLOAD_DIR') || 'uploads');
   app.use('/uploads', express.static(uploadsDir));
 
-  // CORS
-  const frontendUrl = configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
-  app.enableCors({
-    origin: [frontendUrl, 'http://localhost:3000', 'http://127.0.0.1:3000'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key', 'X-Requested-With', 'X-CSRF-Token'],
-  });
+  // CORS: explicit origin list only (FRONTEND_URL, optional CORS_EXTRA_ORIGINS, localhost in development)
+  const origins = allowedOrigins(
+    configService.get<string>('FRONTEND_URL'),
+    configService.get<string>('CORS_EXTRA_ORIGINS'),
+    !isProductionLike(),
+  );
+  app.enableCors(buildCorsOptions(origins));
 
   // Global validation pipe
   app.useGlobalPipes(

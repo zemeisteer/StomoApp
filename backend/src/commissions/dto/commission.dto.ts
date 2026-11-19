@@ -1,5 +1,6 @@
 import { IsInt, Min, Max, IsOptional, IsString, IsEnum } from 'class-validator';
 import { PayType } from '@prisma/client';
+import { MAX_MONEY } from '../../common/money';
 
 export class UpdateCommissionDto {
   @IsInt()
@@ -10,6 +11,7 @@ export class UpdateCommissionDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   fixedBonus?: number;
 
   @IsOptional()
@@ -19,6 +21,7 @@ export class UpdateCommissionDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   monthlySalary?: number;
 
   @IsOptional()
@@ -33,6 +36,7 @@ export class UpdateStaffPayDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   monthlySalary?: number;
 
   @IsOptional()
@@ -44,6 +48,7 @@ export class UpdateStaffPayDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   fixedBonus?: number;
 
   @IsOptional()

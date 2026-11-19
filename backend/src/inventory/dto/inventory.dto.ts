@@ -1,5 +1,6 @@
-import { IsInt, IsString, IsOptional, IsEnum, Min, MaxLength } from 'class-validator';
+import { IsInt, IsString, IsOptional, IsEnum, Min, MaxLength, Max } from 'class-validator';
 import { InventoryMovementType } from '@prisma/client';
+import { MAX_MONEY, MAX_QUANTITY } from '../../common/money';
 
 export class CreateInventoryItemDto {
   @IsString()
@@ -10,6 +11,7 @@ export class CreateInventoryItemDto {
 
   @IsInt()
   @Min(0)
+  @Max(MAX_QUANTITY)
   quantity!: number;
 
   @IsString()
@@ -17,10 +19,12 @@ export class CreateInventoryItemDto {
 
   @IsInt()
   @Min(0)
+  @Max(MAX_QUANTITY)
   minThreshold!: number;
 
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   unitCost!: number;
 }
 
@@ -29,6 +33,8 @@ export class RecordMovementDto {
   changeType!: InventoryMovementType;
 
   @IsInt()
+  @Min(-MAX_QUANTITY)
+  @Max(MAX_QUANTITY)
   quantityDelta!: number;
 
   @IsOptional()
@@ -56,10 +62,12 @@ export class UpdateInventoryItemDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_QUANTITY)
   minThreshold?: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_MONEY)
   unitCost?: number;
 }

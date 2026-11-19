@@ -160,7 +160,7 @@ export class PatientsService {
 
       // Fail closed if doctor has never treated this patient
       if (authorizedAppointments.length === 0) {
-        throw new ForbiddenException('Ushbu bemor sizning qabulingizda bo\'lmagan');
+        throw new NotFoundException('Bemor topilmadi');
       }
 
       // Return minimal scoped profile
