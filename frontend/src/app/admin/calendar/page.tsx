@@ -693,7 +693,12 @@ export default function AdminCalendarPage() {
         setViewMode('day');
       }
 
-      closeAppointment();
+      if (newStatus === 'COMPLETED') {
+        // Stay on the visit: its invoice loads and "To'ladi" takes the payment right here
+        setSelectedAppt({ ...selectedAppt, status: 'COMPLETED' });
+      } else {
+        closeAppointment();
+      }
       if (appointments.length === 1 && currentPage > 1) {
         setCurrentPage((prev) => Math.max(1, prev - 1));
       } else {
