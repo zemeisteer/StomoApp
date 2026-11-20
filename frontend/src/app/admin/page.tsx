@@ -26,7 +26,7 @@ import { ReceptionWorkspace } from '../../components/admin/ReceptionWorkspace';
 import { api } from '../../lib/api';
 import { useAuth, StaffRole } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
-import { formatClinicDate, formatClinicTime, getClinicTodayDateString } from '../../lib/dateFormat';
+import { formatClinicDate, formatClinicTime, getClinicDayBoundaries, getClinicTodayDateString } from '../../lib/dateFormat';
 import { normalizeUzPhone } from '../../lib/phone';
 
 export default function AdminOverviewPage() {
@@ -161,9 +161,11 @@ export default function AdminOverviewPage() {
         limit: 10,
       }).catch(() => ({ data: [], total: 0 }));
 
+      // The API takes dateFrom/dateTo (clinic-day bounds); startDate/endDate were rejected with 400
+      const todayBounds = getClinicDayBoundaries(todayDateStr);
       const todayPromise = api.getAdminAppointments({
-        startDate: todayDateStr,
-        endDate: todayDateStr,
+        dateFrom: todayBounds.dateFrom,
+        dateTo: todayBounds.dateTo,
         limit: 100,
       }).catch(() => ({ data: [], total: 0 }));
 
