@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useId } from 'react';
+import React, { useEffect, useRef, useId, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 interface ModalDialogProps {
@@ -15,6 +16,14 @@ interface ModalDialogProps {
   initialFocusRef?: React.RefObject<HTMLElement>;
   className?: string;
 }
+
+/**
+ * Open dialogs, oldest first. Only the newest one reacts to Escape and Tab, so a dialog opened
+ * from inside another (e.g. payment from the visit card) is the one the keyboard talks to.
+ */
+const openStack: string[] = [];
+let scrollLocks = 0;
+let savedOverflow = '';
 
 export const ModalDialog: React.FC<ModalDialogProps> = ({
   isOpen,
@@ -34,6 +43,12 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  // Parents often pass a new onClose on every render; reading it from a ref keeps the effect
+  // (and this dialog's place in the stack) stable while the dialog stays open
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => setMounted(true), []);
 
   // Focus management: capture previous focus, set initial focus, and trap focus
   useEffect(() => {
@@ -44,9 +59,14 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
       previouslyFocusedElementRef.current = document.activeElement as HTMLElement;
     }
 
-    // Block background scrolling
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    openStack.push(generatedId);
+    const isTop = () => openStack[openStack.length - 1] === generatedId;
+
+    // Block background scrolling (counted, so closing an inner dialog keeps the outer one locked)
+    if (scrollLocks++ === 0) {
+      savedOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
 
     // Set initial focus
     const focusTimer = setTimeout(() => {
@@ -66,9 +86,10 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
 
     // Escape key listener & Focus Trap
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isTop()) return;
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -116,7 +137,9 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
 
     return () => {
       clearTimeout(focusTimer);
-      document.body.style.overflow = originalOverflow;
+      const idx = openStack.lastIndexOf(generatedId);
+      if (idx !== -1) openStack.splice(idx, 1);
+      if (--scrollLocks === 0) document.body.style.overflow = savedOverflow;
       document.removeEventListener('keydown', handleKeyDown);
 
       // Restore focus to previously focused element
@@ -124,9 +147,10 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
         previouslyFocusedElementRef.current.focus();
       }
     };
-  }, [isOpen, onClose, initialFocusRef]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, generatedId]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
   const sizeClasses = {
     sm: 'max-w-sm',
@@ -135,7 +159,8 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
     xl: 'max-w-2xl',
   }[size];
 
-  return (
+  // Rendered at the end of <body>: a dialog opened later always sits above the earlier ones
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in"
       onClick={(e) => {
@@ -181,6 +206,7 @@ export const ModalDialog: React.FC<ModalDialogProps> = ({
         {/* Content Body */}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
