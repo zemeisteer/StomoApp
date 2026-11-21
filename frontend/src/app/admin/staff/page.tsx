@@ -4,10 +4,12 @@ import React, { useState, useEffect } from 'react';
 import { UserCheck, Plus, Shield, User, RefreshCw, AlertCircle, CheckCircle2, Lock } from 'lucide-react';
 import { AdminLayout } from '../../../components/AdminLayout';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../lib/auth';
 import { CustomSelect, SelectOption } from '../../../components/CustomSelect';
 import { PayTermsFields, PayTerms, emptyStaffPay, payPayload } from '../../../components/admin/PayTermsFields';
 
 export default function AdminStaffPage() {
+  const { user: me } = useAuth();
   const [staffList, setStaffList] = useState<any[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -83,6 +85,26 @@ export default function AdminStaffPage() {
       await loadData();
     } catch (err: any) {
       setErrorMessage(err?.message || 'Xodimni qo\'shishda xatolik yuz berdi');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!editingStaff) return;
+    const ok = window.confirm(
+      `${editingStaff.fullName} o'chirilsinmi?\n\nXodim tizimga kira olmaydi va ro'yxatdan yo'qoladi. ` +
+        "U olgan to'lovlar va hisobotlardagi ismi saqlanib qoladi. Bu amalni qaytarib bo'lmaydi.",
+    );
+    if (!ok) return;
+    try {
+      setIsSubmitting(true);
+      setErrorMessage(null);
+      await api.deleteStaff(editingStaff.id);
+      setEditingStaff(null);
+      await loadData();
+    } catch (err: any) {
+      setErrorMessage(err?.message || "Xodimni o'chirib bo'lmadi");
     } finally {
       setIsSubmitting(false);
     }
@@ -611,6 +633,18 @@ export default function AdminStaffPage() {
                     {isSubmitting ? 'Saqlanmoqda...' : 'O\'zgarishlarni saqlash'}
                   </button>
                 </div>
+                {editingStaff.id !== me?.id && (
+                  <div className="border-t border-line pt-3">
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      disabled={isSubmitting}
+                      className="px-4 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-xl disabled:opacity-50"
+                    >
+                      Xodimni o&apos;chirish
+                    </button>
+                  </div>
+                )}
               </form>
             </div>
           </div>

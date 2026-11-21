@@ -79,6 +79,7 @@ export class StaffService {
 
   async findAll() {
     return this.prisma.staffUser.findMany({
+      where: { deletedAt: null },
       select: {
         id: true,
         email: true,
@@ -96,8 +97,8 @@ export class StaffService {
   }
 
   async findById(id: string) {
-    const user = await this.prisma.staffUser.findUnique({
-      where: { id },
+    const user = await this.prisma.staffUser.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         email: true,
@@ -128,7 +129,7 @@ export class StaffService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('staff_owner_mutex'))`;
 
       const user = await tx.staffUser.findUnique({ where: { id } });
-      if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+      if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
 
       // Prevent removing or disabling the last active owner
       const isTargetActiveOwner = user.role === StaffRole.OWNER && user.isActive === true;
@@ -188,7 +189,7 @@ export class StaffService {
   }
 
   async resetPassword(id: string, newPassword: string, actorId: string) {
-    const user = await this.prisma.staffUser.findUnique({ where: { id }, select: { id: true } });
+    const user = await this.prisma.staffUser.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
     if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
     const passwordHash = await this.authService.hashPassword(newPassword);
     await this.prisma.staffUser.update({
@@ -203,5 +204,54 @@ export class StaffService {
     });
     await this.audit.log({ userId: actorId, action: 'staff.password_reset', entity: 'StaffUser', entityId: id });
     return { ok: true };
+  }
+
+  /**
+   * Owner deletes a staff account. The row is kept (payments, cash shifts, plans and the audit log
+   * keep pointing at it and still show the name), but the account is switched off for good:
+   * every session ends, the email, Telegram link and doctor profile are freed for a new account,
+   * and the person disappears from staff lists. Nobody deletes themselves or the last active owner.
+   */
+  async deleteStaff(id: string, actorId: string) {
+    if (id === actorId) {
+      throw new BadRequestException("O'zingizni o'chira olmaysiz");
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('staff_owner_mutex'))`;
+      const user = await tx.staffUser.findUnique({ where: { id } });
+      if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+      if (user.role === StaffRole.OWNER && user.isActive) {
+        const activeOwners = await tx.staffUser.count({ where: { role: StaffRole.OWNER, isActive: true, deletedAt: null } });
+        if (activeOwners <= 1) {
+          throw new BadRequestException("Klinikada kamida bitta faol Egasi (OWNER) qolishi shart. Oxirgi egasini o'chirib bo'lmaydi");
+        }
+      }
+
+      await tx.staffUser.update({
+        where: { id },
+        data: {
+          deletedAt: new Date(),
+          isActive: false,
+          // The address can be used for a new account; the old one is kept in the audit log
+          email: `deleted-${id}@deleted.invalid`,
+          telegramUserId: null,
+          doctorId: null,
+          refreshTokenHash: null,
+          tokenVersion: { increment: 1 },
+        },
+      });
+      await tx.lead.updateMany({ where: { assignedToId: id }, data: { assignedToId: null } });
+      await tx.auditLog.create({
+        data: {
+          userId: actorId,
+          action: 'staff.deleted',
+          entity: 'StaffUser',
+          entityId: id,
+          details: { email: user.email, fullName: user.fullName, role: user.role },
+        },
+      });
+      return { ok: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 10000 });
   }
 }
