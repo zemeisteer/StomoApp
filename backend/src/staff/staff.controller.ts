@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
 import { StaffService } from './staff.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -107,6 +107,11 @@ export class StaffController {
   @HttpCode(200)
   resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto, @CurrentUser() actor: JwtPayload) {
     return this.staffService.resetPassword(id, dto.password, actor.sub);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string, @CurrentUser() actor: JwtPayload) {
+    return this.staffService.deleteStaff(id, actor.sub);
   }
 
   @Put(':id')

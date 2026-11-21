@@ -9352,4 +9352,69 @@ describe('DentaCare Backend Regression & Integration Suite (e2e)', () => {
     await prisma.review.deleteMany({ where: { text: { startsWith: tag } } });
     await prisma.lead.deleteMany({ where: { fullName: { startsWith: 'Reg91 Lead' } } });
   });
+
+  it('Regression 92: The owner deletes a staff account; history keeps the row, the login and email are freed, self and last owner are protected', async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const email = `r92${runId}@staff.test`;
+    const pw = 'Reg92-Password!';
+    const user = await prisma.staffUser.create({
+      data: { email, passwordHash: await bcrypt.hash(pw, 10), fullName: 'Reg92 Xodim', role: StaffRole.RECEPTION, telegramUserId: `92${runId}` },
+    });
+    const lead = await prisma.lead.create({ data: { fullName: 'Reg92 Lead', phone: `${testPhonePrefix}92`, assignedToId: user.id } });
+    let recreatedId: string | null = null;
+    try {
+      const token = (await http().post('/api/auth/login').send({ email, password: pw }).expect(200)).body.accessToken;
+
+      // Only the owner; nobody deletes themselves
+      await http().delete(`/api/admin/staff/${user.id}`).set(auth(doctorAToken)).expect(403);
+      await http().delete(`/api/admin/staff/${ownerUserId}`).set(auth(adminToken)).expect(400);
+
+      await http().delete(`/api/admin/staff/${user.id}`).set(auth(adminToken)).expect(200);
+
+      // Session over, cannot sign in, hidden from the list and from lookups
+      await http().get('/api/auth/me').set(auth(token)).expect(401);
+      await http().post('/api/auth/login').send({ email, password: pw }).expect(401);
+      const list = (await http().get('/api/admin/staff').set(auth(adminToken)).expect(200)).body;
+      expect(list.some((u: any) => u.id === user.id)).toBe(false);
+      await http().get(`/api/admin/staff/${user.id}`).set(auth(adminToken)).expect(404);
+      await http().put(`/api/admin/staff/${user.id}`).set(auth(adminToken)).send({ isActive: true }).expect(404);
+      await http().delete(`/api/admin/staff/${user.id}`).set(auth(adminToken)).expect(404);
+
+      // The row stays for history, with the name; links are freed
+      const row = await prisma.staffUser.findUnique({ where: { id: user.id } });
+      expect(row).toMatchObject({ fullName: 'Reg92 Xodim', isActive: false, telegramUserId: null });
+      expect(row!.deletedAt).not.toBeNull();
+      expect((await prisma.lead.findUnique({ where: { id: lead.id } }))!.assignedToId).toBeNull();
+      expect(await prisma.auditLog.count({ where: { action: 'staff.deleted', entityId: user.id } })).toBe(1);
+
+      // The same email can be used for a new account
+      recreatedId = (await http().post('/api/admin/staff').set(auth(adminToken))
+        .send({ email, password: 'Temporary-92', fullName: 'Reg92 Yangi', role: 'RECEPTION' }).expect(201)).body.id;
+
+      // The last active owner cannot be deleted
+      const otherOwners = await prisma.staffUser.findMany({ where: { role: StaffRole.OWNER, isActive: true, id: { not: ownerUserId } }, select: { id: true } });
+      const owner2 = await prisma.staffUser.create({
+        data: { email: `r92owner${runId}@staff.test`, passwordHash: await bcrypt.hash(pw, 10), fullName: 'Reg92 Owner', role: StaffRole.OWNER },
+      });
+      try {
+        const owner2Token = (await http().post('/api/auth/login').send({ email: owner2.email, password: pw }).expect(200)).body.accessToken;
+        await prisma.staffUser.updateMany({ where: { id: { in: otherOwners.map((o) => o.id) } }, data: { isActive: false } });
+        await prisma.staffUser.update({ where: { id: owner2.id }, data: { isActive: false } });
+        // ownerUserId is now the only active owner; owner2 token is inactive, so use a direct service call
+        const staffService = app.get(require('../src/staff/staff.service').StaffService);
+        await expect(staffService.deleteStaff(ownerUserId, owner2.id)).rejects.toThrow(/kamida bitta faol/);
+        expect(owner2Token).toBeTruthy();
+      } finally {
+        await prisma.staffUser.updateMany({ where: { id: { in: otherOwners.map((o) => o.id) } }, data: { isActive: true } });
+        await prisma.auditLog.deleteMany({ where: { userId: owner2.id } });
+        await prisma.staffUser.delete({ where: { id: owner2.id } });
+      }
+    } finally {
+      await prisma.lead.delete({ where: { id: lead.id } });
+      await prisma.auditLog.deleteMany({ where: { OR: [{ userId: user.id }, { entityId: user.id }, ...(recreatedId ? [{ userId: recreatedId }, { entityId: recreatedId }] : [])] } });
+      if (recreatedId) await prisma.staffUser.delete({ where: { id: recreatedId } });
+      await prisma.staffUser.delete({ where: { id: user.id } });
+    }
+  });
 });

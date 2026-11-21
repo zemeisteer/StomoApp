@@ -617,6 +617,8 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  /** Owner deletes a staff account (history keeps the name; the login is gone). */
+  deleteStaff: (id: string) => fetcher<any>(`/api/admin/staff/${id}`, { method: 'DELETE' }),
   /** Owner sets a temporary password; the person must replace it at the next sign-in. */
   resetStaffPassword: (id: string, password: string) =>
     fetcher<any>(`/api/admin/staff/${id}/password`, {
